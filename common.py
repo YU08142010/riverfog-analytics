@@ -69,3 +69,37 @@ def set_measure(ws, row, col_value, col_qi, col_hn, value):
         ws.cell(row=row, column=col_value).value = value
         ws.cell(row=row, column=col_qi).value = QUALITY_INFO_VALUE
         ws.cell(row=row, column=col_hn).value = HOMOGENEITY_NUMBER_VALUE
+
+
+def set_weather_measures(ws, row, weather):
+    """気象値一式（気温・降水・風・日射・日照・露点・湿度・視程）を1行分書き込む。
+    weatherがNone、または個々のキーが無い/Noneの場合、該当項目は空にする。
+    collect.py（毎時収集）とbackfill_weather.py（欠測の後埋め）の両方から呼ばれる。
+    """
+    weather = weather or {}
+    set_measure(ws, row, COL_TEMP, COL_TEMP_QI, COL_TEMP_HN, weather.get("temperature"))
+    set_measure(ws, row, COL_PRECIP, COL_PRECIP_QI, COL_PRECIP_HN, weather.get("precipitation"))
+
+    wind_speed = weather.get("wind_speed")
+    if wind_speed is None:
+        ws.cell(row=row, column=COL_WIND_SPEED).value = None
+        ws.cell(row=row, column=COL_WIND_SPEED_QI).value = None
+        ws.cell(row=row, column=COL_WIND_SPEED_HN).value = None
+    else:
+        ws.cell(row=row, column=COL_WIND_SPEED).value = wind_speed
+        ws.cell(row=row, column=COL_WIND_SPEED_QI).value = QUALITY_INFO_VALUE
+        ws.cell(row=row, column=COL_WIND_SPEED_HN).value = HOMOGENEITY_NUMBER_VALUE
+
+    wind_dir_ja = wind_degrees_to_direction_ja(weather.get("wind_direction_deg"))
+    if wind_dir_ja is None:
+        ws.cell(row=row, column=COL_WIND_DIR).value = None
+        ws.cell(row=row, column=COL_WIND_DIR_QI).value = None
+    else:
+        ws.cell(row=row, column=COL_WIND_DIR).value = wind_dir_ja
+        ws.cell(row=row, column=COL_WIND_DIR_QI).value = QUALITY_INFO_VALUE
+
+    set_measure(ws, row, COL_SOLAR, COL_SOLAR_QI, COL_SOLAR_HN, weather.get("solar_radiation_mj"))
+    set_measure(ws, row, COL_SUNSHINE, COL_SUNSHINE_QI, COL_SUNSHINE_HN, weather.get("sunshine_hours"))
+    set_measure(ws, row, COL_DEWPOINT, COL_DEWPOINT_QI, COL_DEWPOINT_HN, weather.get("dew_point"))
+    set_measure(ws, row, COL_HUMIDITY, COL_HUMIDITY_QI, COL_HUMIDITY_HN, weather.get("humidity"))
+    set_measure(ws, row, COL_VISIBILITY, COL_VISIBILITY_QI, COL_VISIBILITY_HN, weather.get("visibility_km"))
