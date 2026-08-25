@@ -158,11 +158,12 @@ def resize_image(raw_bytes):
 
 def save_images(cameras, images_by_name, invalid_stations, run_time):
     """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。
-    date/HHMM/地点名.jpg という時刻ごとのフォルダに分けて保存する（1フォルダに全時刻の画像が
-    混在すると見づらいため）。Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと
+    date/HH時/地点名.jpg という時刻ごとのフォルダに分けて保存する（1フォルダに全時刻の画像が
+    混在すると見づらいため）。フォルダ名はコロン(15:00等)だとSamba経由のWindows側で扱えないため
+    「15時」のような表記にしている。Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと
     判定した地点はファイル名に _unavailable を付けて区別する。
     """
-    hour_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d") / run_time.strftime("%H%M")
+    hour_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d") / run_time.strftime("%H時")
     hour_dir.mkdir(parents=True, exist_ok=True)
     for name, _cam_id in cameras:
         raw_bytes = images_by_name.get(name)
