@@ -1,6 +1,6 @@
 """只見川流域32地点の川霧観測・自動収集（毎時実行）。
 
-画像取得 -> Gemini分類 -> Open-Meteo気象取得 -> xlsx追記 を1回分行う。
+画像取得 -> Gemini分類（現象コード + 画像自体の有効性判定） -> Open-Meteo気象取得 -> xlsx追記 を1回分行う。
 サーバー1単独運用。データは /opt/river-fog/data にローカル保存し、Samba共有で公開する。
 """
 import csv
@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -21,11 +21,45 @@ from dotenv import load_dotenv
 from PIL import Image
 from pydantic import BaseModel
 
-BASE_DIR = Path(__file__).resolve().parent
-CAMERAS_CSV = BASE_DIR / "cameras.csv"
-TEMPLATE_XLSX = BASE_DIR / "template" / "header_template.xlsx"
-DATA_XLSX = BASE_DIR / "data" / "只見川.xlsx"
-LOG_FILE = BASE_DIR / "logs" / "collect.log"
+from common import (
+    BASE_DIR,
+    CAMERAS_CSV,
+    COL_DATETIME,
+    COL_DEWPOINT,
+    COL_DEWPOINT_HN,
+    COL_DEWPOINT_QI,
+    COL_HUMIDITY,
+    COL_HUMIDITY_HN,
+    COL_HUMIDITY_QI,
+    COL_PHENOM_START,
+    COL_PRECIP,
+    COL_PRECIP_HN,
+    COL_PRECIP_QI,
+    COL_SOLAR,
+    COL_SOLAR_HN,
+    COL_SOLAR_QI,
+    COL_SUNSHINE,
+    COL_SUNSHINE_HN,
+    COL_SUNSHINE_QI,
+    COL_TEMP,
+    COL_TEMP_HN,
+    COL_TEMP_QI,
+    COL_VISIBILITY,
+    COL_VISIBILITY_HN,
+    COL_VISIBILITY_QI,
+    COL_WIND_DIR,
+    COL_WIND_DIR_QI,
+    COL_WIND_SPEED,
+    COL_WIND_SPEED_HN,
+    COL_WIND_SPEED_QI,
+    DATA_XLSX,
+    HOMOGENEITY_NUMBER_VALUE,
+    JST,
+    QUALITY_INFO_VALUE,
+    TEMPLATE_XLSX,
+    set_measure,
+    wind_degrees_to_direction_ja,
+)
 
 CAM_IMAGE_URL = "https://cam.river.go.jp/cam/now/{cam_id}.jpg"
 CAM_HEADERS = {
@@ -47,6 +81,7 @@ WEATHER_RETRY_DELAY_SEC = 2
 IMAGE_ARCHIVE_DIR = BASE_DIR / "data" / "images"
 IMAGE_RETENTION_DAYS = 7
 
+LOG_FILE = BASE_DIR / "logs" / "collect.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 
@@ -59,8 +94,9 @@ JPEG_QUALITY = 80
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
-QUALITY_INFO_VALUE = 8
-HOMOGENEITY_NUMBER_VALUE = 1
+# カメラ画像が現象分類の対象にならない（＝「取得できませんでした」等のプレースホルダー、
+# 真っ黒/真っ白、テキストのみ等の非写真）とGeminiが判定したことを表すコード。
+CODE_INVALID_IMAGE = -1
 
 PHENOM_LABELS = {
     1: "薄い川霧",
@@ -74,47 +110,6 @@ PHENOM_LABELS = {
     9: "霧雨",
     10: "雨",
 }
-
-WIND_DIR_DEGREES = {
-    "北": 0.0, "北北東": 22.5, "北東": 45.0, "東北東": 67.5,
-    "東": 90.0, "東南東": 112.5, "南東": 135.0, "南南東": 157.5,
-    "南": 180.0, "南南西": 202.5, "南西": 225.0, "西南西": 247.5,
-    "西": 270.0, "西北西": 292.5, "北西": 315.0, "北北西": 337.5,
-}
-DEGREES_TO_WIND_DIR = {v: k for k, v in WIND_DIR_DEGREES.items()}
-
-# xlsx列レイアウト（1始まり）。test.xlsxの本番形式に合わせている。
-COL_DATETIME = 1
-COL_TEMP = 2
-COL_TEMP_QI = 3
-COL_TEMP_HN = 4
-COL_PRECIP = 5
-COL_PRECIP_QI = 6
-COL_PRECIP_HN = 7
-COL_WIND_SPEED = 8
-COL_WIND_SPEED_QI = 9
-COL_WIND_DIR = 10
-COL_WIND_DIR_QI = 11
-COL_WIND_SPEED_HN = 12
-COL_SOLAR = 13
-COL_SOLAR_QI = 14
-COL_SOLAR_HN = 15
-COL_SUNSHINE = 16
-COL_SUNSHINE_QI = 17
-COL_SUNSHINE_HN = 18
-COL_DEWPOINT = 19
-COL_DEWPOINT_QI = 20
-COL_DEWPOINT_HN = 21
-COL_HUMIDITY = 22
-COL_HUMIDITY_QI = 23
-COL_HUMIDITY_HN = 24
-COL_VISIBILITY = 25
-COL_VISIBILITY_QI = 26
-COL_VISIBILITY_HN = 27
-# 28列目はスペーサー（空列）
-COL_PHENOM_START = 29
-
-JST = timezone(timedelta(hours=9))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,17 +138,17 @@ def load_cameras():
 
 
 def fetch_one_image(name, cam_id):
+    """画像を取得する。中身が本物の写真かプレースホルダーかはここでは判定しない（Gemini側で行う）。"""
     url = CAM_IMAGE_URL.format(cam_id=cam_id)
     attempts = FETCH_RETRIES + 1
     for attempt in range(1, attempts + 1):
         try:
             resp = requests.get(url, headers=CAM_HEADERS, timeout=FETCH_TIMEOUT)
-            content_type = resp.headers.get("Content-Type", "")
-            if resp.status_code == 200 and resp.content and content_type.startswith("image/jpeg"):
+            if resp.status_code == 200 and resp.content:
                 return name, cam_id, resp.content
             log.warning(
-                "Image fetch failed (HTTP %s, Content-Type %s, attempt %d/%d): %s (%s)",
-                resp.status_code, content_type, attempt, attempts, name, cam_id,
+                "Image fetch failed (HTTP %s, attempt %d/%d): %s (%s)",
+                resp.status_code, attempt, attempts, name, cam_id,
             )
         except requests.RequestException as e:
             log.warning(
@@ -190,8 +185,11 @@ def resize_image(raw_bytes):
     return buf.getvalue()
 
 
-def save_images(cameras, images_by_name, run_time):
-    """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。"""
+def save_images(cameras, images_by_name, invalid_stations, run_time):
+    """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。
+    Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと判定した地点はファイル名に
+    _unavailable を付けて区別する。
+    """
     day_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
     stamp = run_time.strftime("%H%M")
@@ -204,7 +202,8 @@ def save_images(cameras, images_by_name, run_time):
         except Exception as e:
             log.warning("Image archive resize failed: %s: %s", name, e)
             continue
-        (day_dir / f"{stamp}_{name}.jpg").write_bytes(resized)
+        suffix = "_unavailable" if name in invalid_stations else ""
+        (day_dir / f"{stamp}_{name}{suffix}.jpg").write_bytes(resized)
 
 
 def prune_old_images():
@@ -235,18 +234,20 @@ def get_api_keys():
 
 
 def classify_images(cameras, images_by_name):
-    """Gemini APIで一括分類。地点名 -> code(0-10) の辞書を返す（欠測は含めない）。"""
+    """Gemini APIで一括分類する。
+    戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset)。
+    """
     from google import genai
     from google.genai import types
 
     valid = [(name, images_by_name[name]) for name, _ in cameras if images_by_name.get(name)]
     if not valid:
-        return {}
+        return {}, set()
 
     api_keys = get_api_keys()
     if not api_keys:
         log.warning("GEMINI_API_KEY is not set, skipping Gemini classification (all stations missing)")
-        return {}
+        return {}, set()
 
     contents = []
     index_to_name = {}
@@ -261,12 +262,15 @@ def classify_images(cameras, images_by_name):
         index_to_name[i] = name
 
     if not contents:
-        return {}
+        return {}, set()
 
     system_instruction = (
         "あなたは河川監視カメラの画像から気象現象を分類する専門家です。\n"
-        "各画像を、以下の現象コード表に従って0〜10の整数のいずれか1つに分類してください。\n"
-        "0: 該当する現象なし（霧・層雲・霧雨・雨のいずれも見られない）\n"
+        "各画像を、以下の現象コード表に従って-1〜10の整数のいずれか1つに分類してください。\n"
+        "-1: この画像は実際のカメラ写真ではない（例：「カメラ画像が取得できませんでした」等の"
+        "エラーメッセージ画面、単色の塗りつぶし、システムのロゴやUI画面など、河川や周辺の風景が"
+        "写っていないもの）\n"
+        "0: 実際のカメラ写真だが、該当する現象なし（霧・層雲・霧雨・雨のいずれも見られない）\n"
         "1: 薄い川霧\n2: 川霧\n3: 濃い川霧\n"
         "4: 薄い全体霧\n5: 全体霧\n6: 全体濃い霧\n"
         "7: 薄い層雲\n8: 濃い層雲\n9: 霧雨\n10: 雨\n"
@@ -315,7 +319,7 @@ def classify_images(cameras, images_by_name):
 
     if response is None:
         log.error("Gemini API call failed with all configured keys")
-        return {}
+        return {}, set()
 
     try:
         parsed: list[StationClassification] = response.parsed
@@ -323,26 +327,24 @@ def classify_images(cameras, images_by_name):
             raise ValueError("response.parsed is None")
     except Exception as e:
         log.error("Failed to parse Gemini response: %s / raw=%r", e, getattr(response, "text", None))
-        return {}
+        return {}, set()
 
     result = {}
+    invalid_stations = set()
     for item in parsed:
         name = index_to_name.get(item.station_index)
         if name is None:
             log.warning("Unknown station_index in Gemini response: %s", item.station_index)
             continue
+        if item.code == CODE_INVALID_IMAGE:
+            invalid_stations.add(name)
+            log.info("Gemini judged image as non-photo/placeholder: %s", name)
+            continue
         if not (0 <= item.code <= 10):
             log.warning("Phenomenon code out of range in Gemini response: %s (%s)", item.code, name)
             continue
         result[name] = item.code
-    return result
-
-
-def wind_degrees_to_direction_ja(degrees):
-    if degrees is None:
-        return None
-    nearest = min(WIND_DIR_DEGREES.values(), key=lambda d: min(abs(d - degrees), 360 - abs(d - degrees)))
-    return DEGREES_TO_WIND_DIR[nearest]
+    return result, invalid_stations
 
 
 def fetch_weather():
@@ -434,29 +436,34 @@ def ensure_workbook():
         log.info("Created new workbook from template: %s", DATA_XLSX)
 
 
+def find_existing_row(ws, run_time_naive):
+    """同じ日時の行が既に存在すればその行番号を返す（直近数行のみ確認、無ければNone）。"""
+    max_row = ws.max_row
+    for row in range(max_row, max(max_row - 5, 1), -1):
+        if ws.cell(row=row, column=COL_DATETIME).value == run_time_naive:
+            return row
+    return None
+
+
 def append_row(cameras, phenom_by_name, weather, run_time):
     ensure_workbook()
     wb = openpyxl.load_workbook(DATA_XLSX)
     ws = wb.active
-    row = ws.max_row + 1
     # Excelはtzinfoつきのdatetimeを書き込めないため、ローカル時刻の値のまま外す
-    run_time = run_time.replace(tzinfo=None)
+    run_time_naive = run_time.replace(tzinfo=None)
 
-    def set_measure(col_value, col_qi, col_hn, value):
-        if value is None:
-            ws.cell(row=row, column=col_value).value = None
-            ws.cell(row=row, column=col_qi).value = None
-            ws.cell(row=row, column=col_hn).value = None
-        else:
-            ws.cell(row=row, column=col_value).value = value
-            ws.cell(row=row, column=col_qi).value = QUALITY_INFO_VALUE
-            ws.cell(row=row, column=col_hn).value = HOMOGENEITY_NUMBER_VALUE
+    existing_row = find_existing_row(ws, run_time_naive)
+    if existing_row is not None:
+        row = existing_row
+        log.warning("Row for %s already exists (row %d); overwriting instead of appending", run_time_naive, row)
+    else:
+        row = ws.max_row + 1
 
-    ws.cell(row=row, column=COL_DATETIME).value = run_time
+    ws.cell(row=row, column=COL_DATETIME).value = run_time_naive
 
     weather = weather or {}
-    set_measure(COL_TEMP, COL_TEMP_QI, COL_TEMP_HN, weather.get("temperature"))
-    set_measure(COL_PRECIP, COL_PRECIP_QI, COL_PRECIP_HN, weather.get("precipitation"))
+    set_measure(ws, row, COL_TEMP, COL_TEMP_QI, COL_TEMP_HN, weather.get("temperature"))
+    set_measure(ws, row, COL_PRECIP, COL_PRECIP_QI, COL_PRECIP_HN, weather.get("precipitation"))
 
     wind_speed = weather.get("wind_speed")
     if wind_speed is None:
@@ -476,11 +483,11 @@ def append_row(cameras, phenom_by_name, weather, run_time):
         ws.cell(row=row, column=COL_WIND_DIR).value = wind_dir_ja
         ws.cell(row=row, column=COL_WIND_DIR_QI).value = QUALITY_INFO_VALUE
 
-    set_measure(COL_SOLAR, COL_SOLAR_QI, COL_SOLAR_HN, weather.get("solar_radiation_mj"))
-    set_measure(COL_SUNSHINE, COL_SUNSHINE_QI, COL_SUNSHINE_HN, weather.get("sunshine_hours"))
-    set_measure(COL_DEWPOINT, COL_DEWPOINT_QI, COL_DEWPOINT_HN, weather.get("dew_point"))
-    set_measure(COL_HUMIDITY, COL_HUMIDITY_QI, COL_HUMIDITY_HN, weather.get("humidity"))
-    set_measure(COL_VISIBILITY, COL_VISIBILITY_QI, COL_VISIBILITY_HN, weather.get("visibility_km"))
+    set_measure(ws, row, COL_SOLAR, COL_SOLAR_QI, COL_SOLAR_HN, weather.get("solar_radiation_mj"))
+    set_measure(ws, row, COL_SUNSHINE, COL_SUNSHINE_QI, COL_SUNSHINE_HN, weather.get("sunshine_hours"))
+    set_measure(ws, row, COL_DEWPOINT, COL_DEWPOINT_QI, COL_DEWPOINT_HN, weather.get("dew_point"))
+    set_measure(ws, row, COL_HUMIDITY, COL_HUMIDITY_QI, COL_HUMIDITY_HN, weather.get("humidity"))
+    set_measure(ws, row, COL_VISIBILITY, COL_VISIBILITY_QI, COL_VISIBILITY_HN, weather.get("visibility_km"))
 
     for i, (name, _cam_id) in enumerate(cameras):
         col = COL_PHENOM_START + i
@@ -493,7 +500,8 @@ def append_row(cameras, phenom_by_name, weather, run_time):
             ws.cell(row=row, column=col).value = code
 
     wb.save(DATA_XLSX)
-    log.info("Appended row to xlsx: row %d (%s)", row, run_time)
+    action = "Overwrote" if existing_row is not None else "Appended"
+    log.info("%s row in xlsx: row %d (%s)", action, row, run_time_naive)
 
 
 def main():
@@ -516,11 +524,14 @@ def main():
     ok_count = sum(1 for v in images_by_name.values() if v)
     log.info("Image fetch succeeded: %d / %d", ok_count, len(cameras))
 
-    save_images(cameras, images_by_name, run_time)
-    prune_old_images()
+    phenom_by_name, invalid_stations = classify_images(cameras, images_by_name)
+    log.info(
+        "Gemini classification succeeded: %d / %d (invalid/placeholder: %d)",
+        len(phenom_by_name), len(cameras), len(invalid_stations),
+    )
 
-    phenom_by_name = classify_images(cameras, images_by_name)
-    log.info("Gemini classification succeeded: %d / %d", len(phenom_by_name), len(cameras))
+    save_images(cameras, images_by_name, invalid_stations, run_time)
+    prune_old_images()
 
     weather = fetch_weather()
     if weather is None:
