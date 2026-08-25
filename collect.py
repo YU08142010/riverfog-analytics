@@ -158,12 +158,12 @@ def resize_image(raw_bytes):
 
 def save_images(cameras, images_by_name, invalid_stations, run_time):
     """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。
-    Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと判定した地点はファイル名に
-    _unavailable を付けて区別する。
+    date/HHMM/地点名.jpg という時刻ごとのフォルダに分けて保存する（1フォルダに全時刻の画像が
+    混在すると見づらいため）。Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと
+    判定した地点はファイル名に _unavailable を付けて区別する。
     """
-    day_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d")
-    day_dir.mkdir(parents=True, exist_ok=True)
-    stamp = run_time.strftime("%H%M")
+    hour_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d") / run_time.strftime("%H%M")
+    hour_dir.mkdir(parents=True, exist_ok=True)
     for name, _cam_id in cameras:
         raw_bytes = images_by_name.get(name)
         if not raw_bytes:
@@ -174,7 +174,7 @@ def save_images(cameras, images_by_name, invalid_stations, run_time):
             log.warning("Image archive resize failed: %s: %s", name, e)
             continue
         suffix = "_unavailable" if name in invalid_stations else ""
-        (day_dir / f"{stamp}_{name}{suffix}.jpg").write_bytes(resized)
+        (hour_dir / f"{name}{suffix}.jpg").write_bytes(resized)
 
 
 def prune_old_images():
