@@ -82,6 +82,12 @@ RF_FALLBACK_PARAMS = dict(model__n_estimators=500, model__max_depth=14, model__m
 XGB_FALLBACK_PARAMS = dict(model__n_estimators=300, model__max_depth=4, model__learning_rate=0.1)
 BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 
+# プーリングモデル専用の追加特徴量：地点ごとの過去の霧発生率（他の特徴量は全地点で同一の
+# 気象データのため、これが無いと同時刻の予測が全地点で完全に一致してしまう）。
+# サンプル数が少ない地点で経験値がそのまま乗ると不安定なので、全地点平均へ向けてベイズ平滑化する。
+STATION_FOG_RATE_FEATURE = "地点別霧発生率"
+STATION_RATE_SMOOTHING = 20
+
 
 class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
     """歯抜けの現象コード（例: {0,1,2,7,9}）でもそのまま学習できるXGBoostのラッパ。"""
@@ -373,30 +379,58 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
     return models
 
 
+def _station_fog_rate(y, global_rate):
+    """地点ごとの霧発生率を、サンプル数が少ないほど全地点平均に寄せて平滑化する。"""
+    n = len(y)
+    if n == 0:
+        return global_rate
+    k = float(y.isin(SUMMARY_FOG_CODES).sum())
+    m = STATION_RATE_SMOOTHING
+    return (k + m * global_rate) / (n + m)
+
+
 def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
-    """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。"""
+    """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
+
+    気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
+    (STATION_FOG_RATE_FEATURE)を追加特徴量として与える。これが無いと、同時刻の予測が
+    全地点で完全に同一になってしまう（実際に2026-08-26の初回本番実行で発生した）。
+    """
     skipped_cols = [c for c in phenom_cols if c not in models]
     if not skipped_cols:
         return
 
-    pool_frames = []
+    per_station_xy = {}
+    total_k, total_n = 0.0, 0
     for col in phenom_cols:
         sub, X, y = _collect_location_xy(merged, col, feature_names)
         if sub.empty:
             continue
+        per_station_xy[col] = (sub, X, y)
+        total_k += float(y.isin(SUMMARY_FOG_CODES).sum())
+        total_n += len(y)
+    if not per_station_xy:
+        return
+    global_rate = (total_k / total_n) if total_n else 0.0
+
+    pool_frames = []
+    station_rates = {}
+    for col, (sub, X, y) in per_station_xy.items():
+        rate = _station_fog_rate(y, global_rate)
+        station_rates[col] = rate
         part = X.copy()
+        part[STATION_FOG_RATE_FEATURE] = rate
         part["__target"] = y.to_numpy()
         part["__datetime"] = sub["datetime"].to_numpy()
         pool_frames.append(part)
-    if not pool_frames:
-        return
 
+    pooled_feature_names = feature_names + [STATION_FOG_RATE_FEATURE]
     pooled = pd.concat(pool_frames, ignore_index=True).sort_values("__datetime").reset_index(drop=True)
     if len(pooled) < MIN_TOTAL_ROWS_FOR_POOLING or pooled["__target"].nunique() < 2:
         log.info("Not enough pooled data (%d rows) to rescue %d location(s)", len(pooled), len(skipped_cols))
         return
 
-    Xp, yp = pooled[feature_names], pooled["__target"]
+    Xp, yp = pooled[pooled_feature_names], pooled["__target"]
     Xp_train, Xp_test, yp_train, yp_test = _temporal_train_test_split(Xp, yp)
     if yp_train.nunique() < 2:
         return
@@ -406,10 +440,14 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
 
     rescued = 0
     for col in skipped_cols:
-        sub, X, y = _collect_location_xy(merged, col, feature_names)
+        if col not in per_station_xy:
+            continue
+        sub, X, y = per_station_xy[col]
         if len(sub) < MIN_ROWS_FOR_POOLED_RESCUE or y.nunique() < 2:
             continue
-        X_train2, X_test2, y_train2, y_test2 = _temporal_train_test_split(X, y)
+        X2 = X.copy()
+        X2[STATION_FOG_RATE_FEATURE] = station_rates[col]
+        X_train2, X_test2, y_train2, y_test2 = _temporal_train_test_split(X2, y)
         if len(X_test2) == 0:
             continue
         y_pred2 = pooled_pipe.predict(X_test2)
@@ -418,7 +456,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
         fog_f12 = _fog_class_f1(y_test2, y_pred2)
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
-            "n": len(sub), "features": feature_names,
+            "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
             "model_type": f"pooled({pooled_pipe.model_type})", "blend_weight": pooled_pipe.weight,
             "fog_threshold": pooled_threshold, "pooled": True,
         }
@@ -474,6 +512,9 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon):
         feature_names = info["features"]
         df, _ = prepare_features(forecast_raw, lat, lon, feature_names)
         X = df[feature_names]
+        if info.get("pooled") and "station_fog_rate" in info:
+            X = X.copy()
+            X[STATION_FOG_RATE_FEATURE] = info["station_fog_rate"]
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X)
     return pred_df, prob_df
