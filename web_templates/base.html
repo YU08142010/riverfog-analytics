@@ -5,16 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}只見川霧観測{% endblock %} - 只見川霧観測</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-<script>
-(function() {
-    try {
-        var saved = localStorage.getItem("theme");
-        if (saved === "light" || saved === "dark") {
-            document.documentElement.setAttribute("data-theme", saved);
-        }
-    } catch (e) {}
-})();
-</script>
 </head>
 <body>
 <header>
@@ -29,7 +19,6 @@
         <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
     </nav>
-    <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
 </header>
 <main>
 {% with messages = get_flashed_messages() %}
@@ -41,19 +30,5 @@
 {% endwith %}
 {% block content %}{% endblock %}
 </main>
-<script>
-(function() {
-    var btn = document.getElementById("theme-toggle-btn");
-    btn.addEventListener("click", function() {
-        var current = document.documentElement.getAttribute("data-theme");
-        if (!current) {
-            current = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
-        var next = current === "dark" ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", next);
-        try { localStorage.setItem("theme", next); } catch (e) {}
-    });
-})();
-</script>
 </body>
 </html>
