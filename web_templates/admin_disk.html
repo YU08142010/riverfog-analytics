@@ -24,6 +24,30 @@
 </div>
 
 <div class="card">
+    <h2>カメラ画像アーカイブの管理</h2>
+    <p class="muted">
+        カメラ画像は無期限に保存されます(自動削除は行いません)。
+        {% if image_archive.day_count %}
+        現在 {{ image_archive.oldest }} 〜 {{ image_archive.newest }} の{{ image_archive.day_count }}日分、
+        合計 {{ image_archive.human }} を保存中です。
+        {% else %}
+        現在保存されている画像アーカイブはありません。
+        {% endif %}
+        容量が圧迫してきた場合は、以下から古い画像をまとめて削除できます。
+    </p>
+    {% if image_archive.day_count %}
+    <form method="post" action="{{ url_for('admin_disk_images_cleanup') }}"
+          onsubmit="return confirm('指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？');">
+        <label>
+            <input type="number" name="days" value="{{ image_cleanup_default_days }}" min="1" style="width:5em; padding:0.3rem;">
+            日より前の画像を削除
+        </label>
+        <button type="submit" class="button" style="background:#c0392b;">削除する</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
     <h2>バックアップ</h2>
     <p class="muted">元データはこのサーバー1台にのみ存在します。定期的にダウンロードして保管することをおすすめします。</p>
     <p><a class="button" href="{{ url_for('admin_backup') }}">data/一式をZIPでダウンロード</a></p>

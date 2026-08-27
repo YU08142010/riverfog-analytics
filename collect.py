@@ -51,7 +51,9 @@ WEATHER_FETCH_RETRIES = 2
 WEATHER_RETRY_DELAY_SEC = 2
 
 IMAGE_ARCHIVE_DIR = BASE_DIR / "data" / "images"
-IMAGE_RETENTION_DAYS = 7
+# Noneにすると自動削除を行わず無期限に保存する。容量が圧迫してきた場合は
+# 管理者タブの「ディスク使用量」ページから手動で古い画像を削除できる。
+IMAGE_RETENTION_DAYS = None
 
 # cam.river.go.jp側の混雑等で取得自体に失敗した地点用のプレースホルダー（無地グレー画像）。
 # アーカイブに何も残さないと「その時刻だけ地点が丸ごと消える」ように見えてしまうため、
@@ -177,7 +179,7 @@ def _fetch_failed_placeholder_bytes():
 
 
 def save_images(cameras, images_by_name, invalid_stations, run_time):
-    """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。
+    """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、保存期間は無期限）。
     date/HHMM/地点名.jpg という時刻ごとのフォルダに分けて保存する（1フォルダに全時刻の画像が
     混在すると見づらいため）。Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと
     判定した地点、およびカメラサイト側の混雑等で取得自体に失敗した地点は、ファイル名に
@@ -202,8 +204,9 @@ def save_images(cameras, images_by_name, invalid_stations, run_time):
 
 
 def prune_old_images():
-    """保存期間を過ぎた画像アーカイブを削除する。"""
-    if not IMAGE_ARCHIVE_DIR.exists():
+    """保存期間を過ぎた画像アーカイブを削除する。IMAGE_RETENTION_DAYSがNoneの場合は
+    無期限保存とし、何もしない(古い画像は管理者タブから手動削除する運用)。"""
+    if IMAGE_RETENTION_DAYS is None or not IMAGE_ARCHIVE_DIR.exists():
         return
     cutoff = datetime.now(JST).date() - timedelta(days=IMAGE_RETENTION_DAYS)
     for day_dir in IMAGE_ARCHIVE_DIR.iterdir():

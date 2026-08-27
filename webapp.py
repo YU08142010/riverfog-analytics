@@ -95,6 +95,10 @@ BACKUP_ZIP_ROOT = BASE_DIR / "data"
 # 検証済み(答え合わせ済み)の予測レコードのうち、これより古いものは管理画面から削除できる。
 DB_CLEANUP_DEFAULT_DAYS = 180
 
+# カメラ画像アーカイブは無期限保存(collect.pyのIMAGE_RETENTION_DAYS=None)のため、
+# 容量が圧迫してきた場合はこの日数をデフォルト値として管理画面から手動で古い画像を削除する。
+IMAGE_CLEANUP_DEFAULT_DAYS = 30
+
 ENV_PATH = BASE_DIR / ".env"
 ENV_EXAMPLE_PATH = BASE_DIR / ".env.example"
 # 管理画面から直接編集してよい設定（APIキー・パスワード類は対象外。SSH側の.envで管理する）。
@@ -1630,6 +1634,23 @@ def admin_models_importance_low_accuracy_chart():
     return Response(png, mimetype="image/png")
 
 
+def _image_archive_day_dirs():
+    """images/配下の日付フォルダを(date, Path)のリストで日付昇順に返す(不正な名前は除外)。"""
+    if not IMAGE_DIR.exists():
+        return []
+    dirs = []
+    for d in IMAGE_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        try:
+            day = datetime.strptime(d.name, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dirs.append((day, d))
+    dirs.sort(key=lambda t: t[0])
+    return dirs
+
+
 @app.route("/admin/disk")
 @requires_admin
 def admin_disk():
@@ -1642,7 +1663,42 @@ def admin_disk():
         "total": _human_size(total), "used": _human_size(used), "free": _human_size(free),
         "used_pct": round(100.0 * used / total, 1) if total else 0,
     }
-    return render_template("admin_disk.html", rows=rows, disk=disk)
+    image_days = _image_archive_day_dirs()
+    image_archive = {
+        "day_count": len(image_days),
+        "oldest": image_days[0][0].strftime("%Y-%m-%d") if image_days else None,
+        "newest": image_days[-1][0].strftime("%Y-%m-%d") if image_days else None,
+        "human": _human_size(_dir_size_bytes(IMAGE_DIR)),
+    }
+    return render_template(
+        "admin_disk.html", rows=rows, disk=disk, image_archive=image_archive,
+        image_cleanup_default_days=IMAGE_CLEANUP_DEFAULT_DAYS,
+    )
+
+
+@app.route("/admin/disk/images_cleanup", methods=["POST"])
+@requires_admin
+def admin_disk_images_cleanup():
+    """容量が圧迫してきた場合に、指定日数より古いカメラ画像アーカイブを手動で削除する
+    (通常の自動削除は行わず無期限保存としているため、この手動操作が唯一の削除手段)。"""
+    try:
+        days = int(request.form.get("days", IMAGE_CLEANUP_DEFAULT_DAYS))
+    except ValueError:
+        days = IMAGE_CLEANUP_DEFAULT_DAYS
+    days = max(1, days)
+    cutoff = datetime.now(JST).date() - timedelta(days=days)
+    deleted = 0
+    freed_bytes = 0
+    for day, day_dir in _image_archive_day_dirs():
+        if day < cutoff:
+            freed_bytes += _dir_size_bytes(day_dir)
+            shutil.rmtree(day_dir)
+            deleted += 1
+    if deleted:
+        flash(f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。")
+    else:
+        flash("削除対象の画像アーカイブはありませんでした。")
+    return redirect(url_for("admin_disk"))
 
 
 @app.route("/admin/backup.zip")
