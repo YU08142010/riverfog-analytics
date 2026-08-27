@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS signup_requests (
     requested_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending'
 );
+CREATE TABLE IF NOT EXISTS login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    logged_in_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_events_user_id ON login_events(user_id);
 """
 
 
@@ -184,9 +190,41 @@ def reject_signup_request(conn, request_id):
         )
 
 
+def record_login(conn, user_id, logged_in_at):
+    with conn:
+        conn.execute(
+            "INSERT INTO login_events (user_id, logged_in_at) VALUES (?, ?)",
+            (user_id, logged_in_at),
+        )
+
+
+def login_history(conn, user_id):
+    """指定ユーザーの全ログイン履歴を新しい順で返す（メンバーページの一覧表示用）。"""
+    rows = conn.execute(
+        "SELECT logged_in_at FROM login_events WHERE user_id = ? ORDER BY logged_in_at DESC",
+        (user_id,),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def login_counts_by_day(conn, user_id):
+    """日付(YYYY-MM-DD)ごとのログイン回数を返す（ヒートマップ用、ログインがあった日のみ含む）。"""
+    rows = conn.execute(
+        "SELECT substr(logged_in_at, 1, 10) AS d, COUNT(*) FROM login_events WHERE user_id = ? GROUP BY d",
+        (user_id,),
+    ).fetchall()
+    return {d: c for d, c in rows}
+
+
+def login_count(conn, user_id):
+    row = conn.execute("SELECT COUNT(*) FROM login_events WHERE user_id = ?", (user_id,)).fetchone()
+    return row[0] if row else 0
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "set_role", "update_user", "delete_user", "count_admins", "email_taken",
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
+    "record_login", "login_history", "login_counts_by_day", "login_count",
 ]

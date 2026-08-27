@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}{{ member.name }}(メンバー){% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('members_list') }}">メンバー</a></li>
+    <li>{{ member.name }}</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;">
+        {% set avatar_url = member_avatar_url(member.id) %}
+        {% if avatar_url %}
+        <img class="avatar-circle avatar-lg" src="{{ avatar_url }}">
+        {% else %}
+        <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
+        {% endif %}
+        <div>
+            <h2 style="margin-bottom:0.3rem;">
+                {{ member.name }}
+                <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
+            </h2>
+            <p class="muted" style="margin:0;">登録日: {{ member.created_at }}</p>
+        </div>
+    </div>
+
+    {% if is_self %}
+    <div style="margin-top:1rem;">
+        <label class="muted" style="font-size:0.85rem;">プロフィール画像を変更(自分のみ設定できます)</label><br>
+        <input type="file" id="avatar-file-input" accept="image/*" style="margin-top:0.3rem;">
+        <div id="avatar-crop-editor" hidden style="margin-top:0.8rem;">
+            <div id="avatar-crop-viewport" class="avatar-crop-viewport">
+                <img id="avatar-crop-img" draggable="false" alt="">
+            </div>
+            <div style="margin-top:0.6rem; display:flex; align-items:center; gap:0.6rem; max-width:280px;">
+                <label class="muted" style="font-size:0.8rem; white-space:nowrap;">拡大</label>
+                <input type="range" id="avatar-crop-zoom" min="100" max="300" value="100" style="flex:1;">
+            </div>
+            <p class="muted" style="font-size:0.78rem; margin:0.4rem 0;">ドラッグして位置を調整できます。</p>
+            <button type="button" class="button" id="avatar-crop-save">この範囲で保存</button>
+            <button type="button" class="button" id="avatar-crop-cancel" style="background:#7f8c8d;">キャンセル</button>
+        </div>
+    </div>
+    <script>
+    (function() {
+        var fileInput = document.getElementById("avatar-file-input");
+        var editor = document.getElementById("avatar-crop-editor");
+        var viewport = document.getElementById("avatar-crop-viewport");
+        var img = document.getElementById("avatar-crop-img");
+        var zoom = document.getElementById("avatar-crop-zoom");
+        var saveBtn = document.getElementById("avatar-crop-save");
+        var cancelBtn = document.getElementById("avatar-crop-cancel");
+
+        var VIEWPORT_SIZE = 240; // .avatar-crop-viewportのCSSサイズと合わせる
+        var OUTPUT_SIZE = {{ avatar_size }};
+        var naturalW = 0, naturalH = 0, baseScale = 1;
+        var scale = 1, offsetX = 0, offsetY = 0;
+        var dragging = false, dragStartX = 0, dragStartY = 0, startOffsetX = 0, startOffsetY = 0;
+
+        function applyTransform() {
+            img.style.width = (naturalW * scale) + "px";
+            img.style.height = (naturalH * scale) + "px";
+            img.style.left = offsetX + "px";
+            img.style.top = offsetY + "px";
+        }
+
+        function clampOffset() {
+            var w = naturalW * scale, h = naturalH * scale;
+            var minX = VIEWPORT_SIZE - w, minY = VIEWPORT_SIZE - h;
+            offsetX = Math.min(0, Math.max(minX, offsetX));
+            offsetY = Math.min(0, Math.max(minY, offsetY));
+        }
+
+        fileInput.addEventListener("change", function() {
+            var file = fileInput.files[0];
+            if (!file) { return; }
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                img.onload = function() {
+                    naturalW = img.naturalWidth;
+                    naturalH = img.naturalHeight;
+                    baseScale = VIEWPORT_SIZE / Math.min(naturalW, naturalH);
+                    scale = baseScale;
+                    offsetX = (VIEWPORT_SIZE - naturalW * scale) / 2;
+                    offsetY = (VIEWPORT_SIZE - naturalH * scale) / 2;
+                    zoom.value = 100;
+                    clampOffset();
+                    applyTransform();
+                    editor.hidden = false;
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        zoom.addEventListener("input", function() {
+            var centerX = VIEWPORT_SIZE / 2, centerY = VIEWPORT_SIZE / 2;
+            var imgX = (centerX - offsetX) / scale, imgY = (centerY - offsetY) / scale;
+            scale = baseScale * (zoom.value / 100);
+            offsetX = centerX - imgX * scale;
+            offsetY = centerY - imgY * scale;
+            clampOffset();
+            applyTransform();
+        });
+
+        viewport.addEventListener("pointerdown", function(e) {
+            dragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            startOffsetX = offsetX;
+            startOffsetY = offsetY;
+            viewport.setPointerCapture(e.pointerId);
+        });
+        viewport.addEventListener("pointermove", function(e) {
+            if (!dragging) { return; }
+            offsetX = startOffsetX + (e.clientX - dragStartX);
+            offsetY = startOffsetY + (e.clientY - dragStartY);
+            clampOffset();
+            applyTransform();
+        });
+        ["pointerup", "pointercancel"].forEach(function(evt) {
+            viewport.addEventListener(evt, function() { dragging = false; });
+        });
+
+        cancelBtn.addEventListener("click", function() {
+            editor.hidden = true;
+            fileInput.value = "";
+        });
+
+        saveBtn.addEventListener("click", function() {
+            var canvas = document.createElement("canvas");
+            canvas.width = OUTPUT_SIZE;
+            canvas.height = OUTPUT_SIZE;
+            var ctx = canvas.getContext("2d");
+            var ratio = OUTPUT_SIZE / VIEWPORT_SIZE;
+            ctx.drawImage(img, offsetX * ratio, offsetY * ratio, naturalW * scale * ratio, naturalH * scale * ratio);
+            canvas.toBlob(function(blob) {
+                var formData = new FormData();
+                formData.append("avatar", blob, "avatar.jpg");
+                fetch("{{ url_for('member_avatar_upload', user_id=member.id) }}", {
+                    method: "POST",
+                    body: formData,
+                    headers: {"X-Requested-With": "XMLHttpRequest"},
+                })
+                .then(function(resp) {
+                    return resp.json().then(function(data) { return {ok: resp.ok, data: data}; });
+                })
+                .then(function(result) {
+                    showToast(result.data.message || (result.ok ? "更新しました。" : "エラーが発生しました。"), !result.ok);
+                    if (result.ok) { setTimeout(function() { window.location.reload(); }, 600); }
+                })
+                .catch(function() {
+                    showToast("通信エラーが発生しました。", true);
+                });
+            }, "image/jpeg", 0.9);
+        });
+    })();
+    </script>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>ログイン状況</h2>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">総ログイン回数</div>
+            <div class="stat-value">{{ total_logins }}<span class="stat-unit">回</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">初回ログイン</div>
+            <div class="stat-value" style="font-size:1.05rem;">{{ first_login[:10] if first_login else "-" }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">最終ログイン</div>
+            <div class="stat-value" style="font-size:1.05rem;">{{ last_login[:10] if last_login else "-" }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>ログイン頻度(直近1年)</h2>
+    <div class="heatmap-wrap">
+        <div id="login-heatmap-months" class="heatmap-months"></div>
+        <div id="login-heatmap" class="heatmap"></div>
+    </div>
+    <p class="muted" style="margin-top:0.5rem; display:flex; align-items:center; gap:0.3rem;">
+        少ない
+        <span class="cell"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span>
+        多い
+    </p>
+</div>
+<script>
+(function() {
+    var counts = {{ counts_by_day|tojson }};
+    var totalDays = {{ heatmap_days }};
+    var monthsEl = document.getElementById("login-heatmap-months");
+    var gridEl = document.getElementById("login-heatmap");
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var start = new Date(today);
+    start.setDate(start.getDate() - (totalDays - 1));
+    start.setDate(start.getDate() - start.getDay());
+
+    function fmt(d) {
+        var y = d.getFullYear(), m = ("0" + (d.getMonth() + 1)).slice(-2), day = ("0" + d.getDate()).slice(-2);
+        return y + "-" + m + "-" + day;
+    }
+    function levelClass(n) {
+        if (!n) { return ""; }
+        if (n === 1) { return "l1"; }
+        if (n === 2) { return "l2"; }
+        if (n === 3) { return "l3"; }
+        return "l4";
+    }
+
+    var weeks = [];
+    var cur = new Date(start);
+    while (cur <= today) {
+        var week = [];
+        for (var i = 0; i < 7; i++) {
+            week.push(new Date(cur));
+            cur.setDate(cur.getDate() + 1);
+        }
+        weeks.push(week);
+    }
+
+    var lastMonth = null;
+    weeks.forEach(function(week) {
+        var label = document.createElement("span");
+        var m = week[0].getMonth();
+        if (m !== lastMonth) {
+            label.textContent = (m + 1) + "月";
+            lastMonth = m;
+        }
+        monthsEl.appendChild(label);
+
+        week.forEach(function(d) {
+            var cell = document.createElement("div");
+            if (d > today) {
+                cell.className = "cell";
+                cell.style.visibility = "hidden";
+            } else {
+                var key = fmt(d);
+                var n = counts[key] || 0;
+                cell.className = "cell " + levelClass(n);
+                cell.title = key + ": " + n + "回ログイン";
+            }
+            gridEl.appendChild(cell);
+        });
+    });
+})();
+</script>
+
+<div class="card">
+    <h2>ログイン履歴(全{{ history|length }}件)</h2>
+    {% if history %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>#</th><th>日時</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+        <tr><td>{{ loop.index }}</td><td>{{ h }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">ログイン履歴がまだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

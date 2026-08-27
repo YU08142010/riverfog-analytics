@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}メンバー{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li>メンバー</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>メンバー一覧({{ members|length }}人)</h2>
+    <p class="muted">メンバーを選ぶと、そのメンバーのログイン履歴とログイン頻度のヒートマップを確認できます。</p>
+    {% if members %}
+    <div class="member-grid">
+        {% for m in members %}
+        <a class="member-tile" href="{{ url_for('member_detail', user_id=m.id) }}">
+            {% set avatar_url = member_avatar_url(m.id) %}
+            {% if avatar_url %}
+            <img class="avatar-circle" src="{{ avatar_url }}">
+            {% else %}
+            <span class="avatar-circle-fallback">{{ m.name[0] }}</span>
+            {% endif %}
+            <div style="margin-top:0.5rem; font-weight:600;">{{ m.name }}</div>
+            <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
+            <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">ログイン{{ m.login_count }}回</div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">メンバーがいません。</p>
+    {% endif %}
+</div>
+{% endblock %}

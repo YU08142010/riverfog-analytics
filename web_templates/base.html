@@ -17,13 +17,24 @@
         <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>
         <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">予測結果</a>
         <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
+        {% if session.get('user_id') %}
+        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">メンバー</a>
+        {% endif %}
         {% if session.get('role') == 'admin' %}
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
         {% endif %}
     </nav>
     {% if session.get('user_id') %}
-    <span style="color:rgba(255,255,255,0.85); font-size:0.85rem; margin-left:auto; white-space:nowrap;">
-        {{ session.get('name') }}さん
+    {% set my_avatar = member_avatar_url(session.get('user_id')) %}
+    <span style="color:rgba(255,255,255,0.85); font-size:0.85rem; margin-left:auto; white-space:nowrap; display:flex; align-items:center; gap:0.5rem;">
+        <a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}" style="display:inline-flex; align-items:center; gap:0.4rem; color:inherit; text-decoration:none;">
+            {% if my_avatar %}
+            <img src="{{ my_avatar }}" style="width:1.6rem; height:1.6rem; border-radius:50%; object-fit:cover;">
+            {% else %}
+            <span style="width:1.6rem; height:1.6rem; border-radius:50%; background:rgba(255,255,255,0.25); display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:600;">{{ session.get('name', '?')[0] }}</span>
+            {% endif %}
+            {{ session.get('name') }}さん
+        </a>
         <a href="{{ url_for('logout') }}" style="color:#fff;">ログアウト</a>
     </span>
     {% else %}

@@ -22,6 +22,7 @@ from functools import wraps
 from pathlib import Path
 
 from dotenv import load_dotenv
+from PIL import Image
 from flask import (
     Flask, Response, abort, flash, jsonify, redirect, render_template,
     request, send_file, send_from_directory, session, url_for,
@@ -58,6 +59,11 @@ MIN_PASSWORD_LENGTH = 8
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
 DB_PATH = BASE_DIR / "data" / "predictions.db"
+
+AVATAR_DIR = BASE_DIR / "data" / "avatars"
+AVATAR_SIZE = 256
+AVATAR_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ)と同じく約53週間分
 
 ALERT_HOURS_AHEAD = 24
 TIMELAPSE_MAX_ITEMS = 48
@@ -1323,6 +1329,12 @@ def login():
             session["role"] = user["role"]
             session["name"] = user["name"]
             session.permanent = True
+            login_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+            conn = _users_conn()
+            try:
+                users.record_login(conn, user["id"], login_at)
+            finally:
+                conn.close()
             return redirect(next_path)
         error = "メールアドレスまたはパスワードが違います。"
 
@@ -1333,6 +1345,121 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+def _avatar_path(user_id):
+    return AVATAR_DIR / f"{user_id}.jpg"
+
+
+@app.context_processor
+def _inject_avatar_url():
+    """テンプレートからmember_avatar_url(user_id)でアバター画像のURLを取れるようにする。
+    画像が未設定ならNoneを返す(テンプレート側でイニシャル円などにフォールバックする)。
+    ファイルのmtimeをクエリに付けて、差し替え後に古い画像がキャッシュされ続けるのを防ぐ。
+    """
+    def member_avatar_url(user_id):
+        if user_id is None:
+            return None
+        path = _avatar_path(user_id)
+        if not path.exists():
+            return None
+        return url_for("member_avatar_file", user_id=user_id) + f"?t={int(path.stat().st_mtime)}"
+    return {"member_avatar_url": member_avatar_url}
+
+
+@app.route("/members")
+def members_list():
+    """ログイン中の全ユーザーが見られるメンバー一覧。個々のログイン履歴・
+    ヒートマップはメンバー詳細ページ(member_detail)で確認する。"""
+    conn = _users_conn()
+    try:
+        all_users = users.list_users(conn)
+        login_counts = {u["id"]: users.login_count(conn, u["id"]) for u in all_users}
+    finally:
+        conn.close()
+    members = [
+        {
+            "id": u["id"], "name": u["name"], "role": u["role"],
+            "has_avatar": _avatar_path(u["id"]).exists(),
+            "login_count": login_counts.get(u["id"], 0),
+        }
+        for u in all_users
+    ]
+    return render_template("members_list.html", members=members)
+
+
+@app.route("/members/<int:user_id>")
+def member_detail(user_id):
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        history = users.login_history(conn, user_id)
+        counts_by_day = users.login_counts_by_day(conn, user_id)
+        total_logins = users.login_count(conn, user_id)
+    finally:
+        conn.close()
+    return render_template(
+        "member_detail.html",
+        member=target,
+        history=history,
+        counts_by_day=counts_by_day,
+        total_logins=total_logins,
+        first_login=history[-1] if history else None,
+        last_login=history[0] if history else None,
+        has_avatar=_avatar_path(user_id).exists(),
+        is_self=(session.get("user_id") == user_id),
+        heatmap_days=LOGIN_HEATMAP_DAYS,
+        avatar_size=AVATAR_SIZE,
+    )
+
+
+@app.route("/members/<int:user_id>/avatar", methods=["POST"])
+def member_avatar_upload(user_id):
+    """プロフィール画像は本人のみが設定できる(他人になりすませないようにするため)。
+    member_detail.htmlのクロップUIが既に正方形に切り出した画像をfetch()で送ってくるが、
+    JS無効時やクロップUIを経由しない直接POSTにも備えて、ここでも中央正方形切り出し+
+    リサイズをかける(既に正方形ならほぼ無処理で通る)。
+    """
+    if session.get("user_id") != user_id:
+        abort(403)
+    file = request.files.get("avatar")
+    if not file or not file.filename:
+        return _finish("member_detail", "画像ファイルを選択してください。", success=False, user_id=user_id)
+    raw = file.read(AVATAR_MAX_UPLOAD_BYTES + 1)
+    if len(raw) > AVATAR_MAX_UPLOAD_BYTES:
+        return _finish(
+            "member_detail",
+            f"画像ファイルが大きすぎます({AVATAR_MAX_UPLOAD_BYTES // (1024 * 1024)}MB以下にしてください)。",
+            success=False, user_id=user_id,
+        )
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img = img.convert("RGB")
+        w, h = img.size
+        side = min(w, h)
+        left, top = (w - side) // 2, (h - side) // 2
+        img = img.crop((left, top, left + side, top + side)).resize(
+            (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS
+        )
+        AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+        img.save(_avatar_path(user_id), format="JPEG", quality=88)
+    except Exception as e:
+        log.warning("Avatar upload failed for user %d: %s", user_id, e)
+        return _finish(
+            "member_detail", "画像を処理できませんでした。JPEGまたはPNG形式の画像を選んでください。",
+            success=False, user_id=user_id,
+        )
+    return _finish("member_detail", "プロフィール画像を更新しました。", user_id=user_id)
+
+
+@app.route("/members/<int:user_id>/avatar.jpg")
+def member_avatar_file(user_id):
+    path = _avatar_path(user_id)
+    if not path.exists():
+        abort(404)
+    return send_file(path, mimetype="image/jpeg")
 
 
 @app.route("/signup", methods=["GET", "POST"])
