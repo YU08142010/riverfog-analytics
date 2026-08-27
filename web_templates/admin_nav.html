@@ -16,4 +16,5 @@
     <a class="button" href="{{ url_for('admin_accounts') }}">
         アカウント管理{% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}
     </a>
+    <a class="button" href="{{ url_for('admin_audit_log') }}">操作ログ</a>
 </p>

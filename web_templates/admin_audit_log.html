@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}操作ログ{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+
+<div class="card">
+    <h2>管理操作ログ(最新{{ entries|length }}件)</h2>
+    <p class="muted">
+        ロール変更・アカウント編集/削除・登録申請の承認/拒否・画像アーカイブ/予測DBのクリーンアップなど、
+        取り消しにくい管理操作を誰がいつ行ったかを記録しています。
+    </p>
+    {% if entries %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>日時</th><th>実行者</th><th>操作</th><th>詳細</th></tr></thead>
+        <tbody>
+        {% for e in entries %}
+        <tr>
+            <td>{{ e.created_at }}</td>
+            <td>{{ e.actor_name or "(不明)" }}</td>
+            <td>{{ e.action }}</td>
+            <td style="text-align:left; white-space:normal;">{{ e.detail or "-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">まだ記録がありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

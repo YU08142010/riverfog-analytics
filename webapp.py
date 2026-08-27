@@ -266,6 +266,20 @@ def _finish(endpoint, message, success=True, **url_kwargs):
     return redirect(url_for(endpoint, **url_kwargs))
 
 
+def _record_audit(action, detail=""):
+    """アカウント管理・データ削除など、取り消しにくい管理操作を誰がいつ行ったか記録する
+    （管理者タブの「操作ログ」ページで確認できる）。実行者は現在のセッションから取る。
+    """
+    conn = _users_conn()
+    try:
+        users.record_audit(
+            conn, session.get("user_id"), session.get("name"), action, detail,
+            datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+
+
 @app.context_processor
 def _inject_pending_signup_count():
     """管理者タブの「アカウント管理」に未処理件数のバッジを出すため、admin_nav.htmlから
@@ -1502,6 +1516,17 @@ def admin_home():
     return render_template("admin.html", logs=logs)
 
 
+@app.route("/admin/audit_log")
+@requires_admin
+def admin_audit_log():
+    conn = _users_conn()
+    try:
+        entries = users.list_audit_log(conn, limit=500)
+    finally:
+        conn.close()
+    return render_template("admin_audit_log.html", entries=entries)
+
+
 @app.route("/admin/accounts")
 @requires_admin
 def admin_accounts():
@@ -1528,6 +1553,7 @@ def admin_accounts_role(user_id):
         if target["role"] == "admin" and role != "admin" and users.count_admins(conn) <= 1:
             return _finish("admin_accounts", "最後の管理者アカウントの権限は変更できません。", success=False)
         users.set_role(conn, user_id, role)
+        _record_audit("ロール変更", f"{target['name']}({target['email']})を{target['role']}→{role}に変更")
         return _finish("admin_accounts", f"{target['name']}さんのロールを変更しました。")
     finally:
         conn.close()
@@ -1563,6 +1589,14 @@ def admin_accounts_edit(user_id):
         users.update_user(conn, user_id, name=name, email=email, password_hash=password_hash)
         if session.get("user_id") == user_id:
             session["name"] = name
+        changes = []
+        if target["name"] != name:
+            changes.append(f"名前: {target['name']}→{name}")
+        if target["email"] != email:
+            changes.append(f"メール: {target['email']}→{email}")
+        if password:
+            changes.append("パスワード変更")
+        _record_audit("アカウント編集", f"{name}({email}): " + ("、".join(changes) if changes else "変更なし"))
         return _finish("admin_accounts", f"{name}さんの情報を更新しました。")
     finally:
         conn.close()
@@ -1582,6 +1616,7 @@ def admin_accounts_delete(user_id):
         message = f"{target['name']}さんのアカウントを削除しました。"
     finally:
         conn.close()
+    _record_audit("アカウント削除", f"{target['name']}({target['email']})を削除")
     if session.get("user_id") == user_id:
         session.clear()
         if _wants_json():
@@ -1596,10 +1631,13 @@ def admin_accounts_delete(user_id):
 def admin_accounts_approve(request_id):
     conn = _users_conn()
     try:
+        req = users.get_signup_request(conn, request_id)
         created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         ok = users.approve_signup_request(conn, request_id, created_at)
     finally:
         conn.close()
+    if ok and req:
+        _record_audit("登録申請承認", f"{req['name']}({req['email']})")
     return _finish(
         "admin_accounts", "承認してアカウントを作成しました。" if ok else "この申請は既に処理済みです。",
         success=ok,
@@ -1611,9 +1649,12 @@ def admin_accounts_approve(request_id):
 def admin_accounts_reject(request_id):
     conn = _users_conn()
     try:
+        req = users.get_signup_request(conn, request_id)
         users.reject_signup_request(conn, request_id)
     finally:
         conn.close()
+    if req:
+        _record_audit("登録申請拒否", f"{req['name']}({req['email']})")
     return _finish("admin_accounts", "申請を拒否しました。")
 
 
@@ -1627,6 +1668,7 @@ def admin_accounts_requests_bulk():
         return _finish("admin_accounts", "対象の申請を選択してください。", success=False)
 
     conn = _users_conn()
+    processed = []
     try:
         created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         n = 0
@@ -1635,15 +1677,22 @@ def admin_accounts_requests_bulk():
                 rid = int(rid)
             except ValueError:
                 continue
+            req = users.get_signup_request(conn, rid)
             if action == "approve":
                 if users.approve_signup_request(conn, rid, created_at):
                     n += 1
+                    if req:
+                        processed.append(req["email"])
             else:
                 users.reject_signup_request(conn, rid)
                 n += 1
+                if req:
+                    processed.append(req["email"])
     finally:
         conn.close()
     verb = "承認" if action == "approve" else "拒否"
+    if processed:
+        _record_audit(f"登録申請一括{verb}", f"{n}件: " + "、".join(processed))
     return _finish("admin_accounts", f"{n}件の申請を{verb}しました。")
 
 
@@ -1853,6 +1902,10 @@ def admin_disk_images_cleanup():
             deleted += 1
     if deleted:
         flash(f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。")
+        _record_audit(
+            "カメラ画像アーカイブ削除",
+            f"{cutoff.strftime('%Y-%m-%d')}より前を{deleted}日分削除(解放: {_human_size(freed_bytes)})",
+        )
     else:
         flash("削除対象の画像アーカイブはありませんでした。")
     return redirect(url_for("admin_disk"))
@@ -1917,6 +1970,7 @@ def admin_db_cleanup():
         finally:
             conn.close()
         flash(f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。")
+        _record_audit("予測DBクリーンアップ", f"{before_dt}より前の検証済みレコードを{deleted}件削除")
     except Exception as e:
         log.exception("DB cleanup failed")
         flash(f"クリーンアップに失敗しました: {e}")

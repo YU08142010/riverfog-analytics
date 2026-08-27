@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS login_events (
     logged_in_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_login_events_user_id ON login_events(user_id);
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id INTEGER,
+    actor_name TEXT,
+    action TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 """
 
 
@@ -221,10 +230,34 @@ def login_count(conn, user_id):
     return row[0] if row else 0
 
 
+def record_audit(conn, actor_id, actor_name, action, detail, created_at):
+    """管理操作(ロール変更・削除・承認・クリーンアップ等)の監査ログを1件追加する。
+    actor_nameは実行者のアカウントが後で削除されても表示できるよう、idと別に保存しておく。
+    """
+    with conn:
+        conn.execute(
+            "INSERT INTO audit_log (actor_id, actor_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)",
+            (actor_id, actor_name, action, detail, created_at),
+        )
+
+
+def list_audit_log(conn, limit=500):
+    """新しい順で監査ログを返す（管理画面の一覧表示用）。"""
+    rows = conn.execute(
+        "SELECT id, actor_id, actor_name, action, detail, created_at FROM audit_log ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [
+        {"id": r[0], "actor_id": r[1], "actor_name": r[2], "action": r[3], "detail": r[4], "created_at": r[5]}
+        for r in rows
+    ]
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "set_role", "update_user", "delete_user", "count_admins", "email_taken",
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
     "record_login", "login_history", "login_counts_by_day", "login_count",
+    "record_audit", "list_audit_log",
 ]
