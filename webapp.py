@@ -35,6 +35,7 @@ from matplotlib import font_manager
 
 from common import BASE_DIR, DATA_XLSX, JST
 import announcements
+import users
 import fog_data
 import fog_model
 import prediction_log
@@ -48,9 +49,11 @@ if os.path.exists(_NOTO_CJK_JP_PATH):
     matplotlib.rcParams["font.family"] = "Noto Sans CJK JP"
 
 load_dotenv(BASE_DIR / ".env")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 ADMIN_SESSION_LIFETIME = timedelta(minutes=15)
+
+USERS_DB_PATH = BASE_DIR / "data" / "users.db"
+MIN_PASSWORD_LENGTH = 8
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
@@ -137,7 +140,7 @@ except Exception:
 
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
-MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static")
+MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 
 
 @app.before_request
@@ -202,15 +205,32 @@ def _sorted_subdirs(base_dir, reverse=True):
     return sorted((p.name for p in base_dir.iterdir() if p.is_dir()), reverse=reverse)
 
 
+def _users_conn():
+    return users.connect(USERS_DB_PATH)
+
+
+def requires_login(view):
+    """ログイン必須（ロールは問わない）。未ログイン/期限切れなら/loginへリダイレクトする。"""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+
 def requires_admin(view):
-    """セッションログイン必須。未ログイン/期限切れなら/admin/loginへリダイレクトする。
+    """管理者ロールのアカウントでのログインを必須にする。
     HTTP Basic認証にすると、ブラウザがパスワードを覚えて自動送信し続けてしまい
     ブラウザを閉じない限り再入力を求められないため、あえてセッションCookie方式にしている
     （ADMIN_SESSION_LIFETIME分だけ無操作が続くと自動的にログアウトされる）。"""
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("is_admin"):
-            return redirect(url_for("admin_login", next=request.path))
+        if not session.get("user_id"):
+            return redirect(url_for("login", next=request.path))
+        if session.get("role") != "admin":
+            flash("この操作には管理者権限が必要です。")
+            return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
     return wrapped
 
@@ -1156,29 +1176,68 @@ def accuracy_chart():
     return Response(png, mimetype="image/png")
 
 
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    next_path = request.values.get("next") or url_for("admin_home")
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    next_path = request.values.get("next") or url_for("dashboard")
     if not next_path.startswith("/") or next_path.startswith("//"):
-        next_path = url_for("admin_home")  # オープンリダイレクト対策
+        next_path = url_for("dashboard")  # オープンリダイレクト対策
 
     error = None
     if request.method == "POST":
+        email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
-        if ADMIN_PASSWORD and secrets.compare_digest(password, ADMIN_PASSWORD):
+        conn = _users_conn()
+        try:
+            user = users.verify_login(conn, email, password)
+        finally:
+            conn.close()
+        if user:
             session.clear()
-            session["is_admin"] = True
+            session["user_id"] = user["id"]
+            session["role"] = user["role"]
+            session["name"] = user["name"]
             session.permanent = True
             return redirect(next_path)
-        error = "パスワードが違います。"
+        error = "メールアドレスまたはパスワードが違います。"
 
-    return render_template("admin_login.html", error=error, next=next_path)
+    return render_template("login.html", error=error, next=next_path)
 
 
-@app.route("/admin/logout")
-def admin_logout():
+@app.route("/logout")
+def logout():
     session.clear()
-    return redirect(url_for("admin_login"))
+    return redirect(url_for("login"))
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    error = None
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+        if not name or not email or not password:
+            error = "全ての項目を入力してください。"
+        elif "@" not in email:
+            error = "メールアドレスの形式が正しくありません。"
+        elif len(password) < MIN_PASSWORD_LENGTH:
+            error = f"パスワードは{MIN_PASSWORD_LENGTH}文字以上にしてください。"
+        else:
+            conn = _users_conn()
+            try:
+                if users.email_taken(conn, email):
+                    error = "このメールアドレスは既に登録済み、または申請中です。"
+                else:
+                    requested_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+                    users.create_signup_request(
+                        conn, name, email, users.generate_password_hash(password), requested_at,
+                    )
+            finally:
+                conn.close()
+            if not error:
+                return render_template("signup.html", submitted=True)
+
+    return render_template("signup.html", error=error, submitted=False)
 
 
 @app.route("/admin")
@@ -1188,6 +1247,85 @@ def admin_home():
              "size_kb": round(p.stat().st_size / 1024, 1) if p.exists() else 0}
             for k, p in ALLOWED_LOGS.items()]
     return render_template("admin.html", logs=logs)
+
+
+@app.route("/admin/accounts")
+@requires_admin
+def admin_accounts():
+    conn = _users_conn()
+    try:
+        accounts = users.list_users(conn)
+        pending = users.list_signup_requests(conn, status="pending")
+    finally:
+        conn.close()
+    return render_template("admin_accounts.html", accounts=accounts, pending=pending)
+
+
+@app.route("/admin/accounts/<int:user_id>/role", methods=["POST"])
+@requires_admin
+def admin_accounts_role(user_id):
+    role = request.form.get("role")
+    if role not in ("general", "admin"):
+        abort(400)
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        if target["role"] == "admin" and role != "admin" and users.count_admins(conn) <= 1:
+            flash("最後の管理者アカウントの権限は変更できません。")
+        else:
+            users.set_role(conn, user_id, role)
+            flash(f"{target['name']}さんのロールを変更しました。")
+    finally:
+        conn.close()
+    return redirect(url_for("admin_accounts"))
+
+
+@app.route("/admin/accounts/<int:user_id>/delete", methods=["POST"])
+@requires_admin
+def admin_accounts_delete(user_id):
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        if target["role"] == "admin" and users.count_admins(conn) <= 1:
+            flash("最後の管理者アカウントは削除できません。")
+        else:
+            users.delete_user(conn, user_id)
+            flash(f"{target['name']}さんのアカウントを削除しました。")
+    finally:
+        conn.close()
+    if session.get("user_id") == user_id:
+        session.clear()
+        return redirect(url_for("login"))
+    return redirect(url_for("admin_accounts"))
+
+
+@app.route("/admin/accounts/requests/<int:request_id>/approve", methods=["POST"])
+@requires_admin
+def admin_accounts_approve(request_id):
+    conn = _users_conn()
+    try:
+        created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        ok = users.approve_signup_request(conn, request_id, created_at)
+    finally:
+        conn.close()
+    flash("承認してアカウントを作成しました。" if ok else "この申請は既に処理済みです。")
+    return redirect(url_for("admin_accounts"))
+
+
+@app.route("/admin/accounts/requests/<int:request_id>/reject", methods=["POST"])
+@requires_admin
+def admin_accounts_reject(request_id):
+    conn = _users_conn()
+    try:
+        users.reject_signup_request(conn, request_id)
+    finally:
+        conn.close()
+    flash("申請を拒否しました。")
+    return redirect(url_for("admin_accounts"))
 
 
 @app.route("/admin/logs/<key>")

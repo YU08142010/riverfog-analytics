@@ -17,8 +17,18 @@
         <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>
         <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">予測結果</a>
         <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
+        {% if session.get('role') == 'admin' %}
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
+        {% endif %}
     </nav>
+    {% if session.get('user_id') %}
+    <span style="color:rgba(255,255,255,0.85); font-size:0.85rem; margin-left:auto; white-space:nowrap;">
+        {{ session.get('name') }}さん
+        <a href="{{ url_for('logout') }}" style="color:#fff;">ログアウト</a>
+    </span>
+    {% else %}
+    <a href="{{ url_for('login') }}" class="button" style="margin-left:auto;">ログイン</a>
+    {% endif %}
 </header>
 <main>
 {% with messages = get_flashed_messages() %}
