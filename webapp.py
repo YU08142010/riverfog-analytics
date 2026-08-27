@@ -141,6 +141,8 @@ except Exception:
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
 MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
+# サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
+LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
 
 
 @app.before_request
@@ -151,6 +153,18 @@ def _check_maintenance():
     if not state["enabled"]:
         return None
     return render_template("maintenance.html", message=state["message"]), 503
+
+
+@app.before_request
+def _require_login():
+    """サイト全体をログイン必須にする（ログイン・登録申請そのものと静的ファイルは除く）。
+    メンテナンスモードのチェックが先に走るため、メンテナンス中はここに到達しない。"""
+    if request.path.startswith(LOGIN_EXEMPT_PREFIXES):
+        return None
+    if not session.get("user_id"):
+        return redirect(url_for("login", next=request.path))
+    return None
+
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HHMM_RE = re.compile(r"^\d{4}$")
