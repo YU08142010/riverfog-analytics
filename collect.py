@@ -339,11 +339,12 @@ def _classify_with_model(contents, model, api_keys):
 
 def _parse_classifications(parsed, index_to_name):
     """Geminiのレスポンスを (地点名->code の辞書, 無効画像と判定された地点名のset,
-    confidence:lowだった地点名のlist) に変換する。
+    confidence:lowだった地点名のlist, 地点名->confidenceの辞書) に変換する。
     """
     result = {}
     invalid_stations = set()
     low_confidence = []
+    confidence_by_name = {}
     for item in parsed:
         name = index_to_name.get(item.station_index)
         if name is None:
@@ -357,9 +358,10 @@ def _parse_classifications(parsed, index_to_name):
             log.warning("Phenomenon code out of range in Gemini response: %s (%s)", item.code, name)
             continue
         result[name] = item.code
+        confidence_by_name[name] = item.confidence
         if item.confidence == "low":
             low_confidence.append(name)
-    return result, invalid_stations, low_confidence
+    return result, invalid_stations, low_confidence, confidence_by_name
 
 
 def classify_images(cameras, images_by_name):
@@ -367,16 +369,18 @@ def classify_images(cameras, images_by_name):
     より上位のモデル(GEMINI_ESCALATION_MODEL)で自動的に再判定する（自動修正）。
     再判定でも低confidenceのままだった地点はログに残した上で、その再判定結果
     （1回目より確度が高いはず）を採用する。
-    戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset)。
+    戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset,
+    地点名 -> 最終的に採用したconfidenceの辞書)。confidenceは学習時に低confidenceラベルを
+    除外できるよう、collect.py側でCSVに記録するために返している。
     """
     valid = [(name, images_by_name[name]) for name, _ in cameras if images_by_name.get(name)]
     if not valid:
-        return {}, set()
+        return {}, set(), {}
 
     api_keys = get_api_keys()
     if not api_keys:
         log.warning("GEMINI_API_KEY is not set, skipping Gemini classification (all stations missing)")
-        return {}, set()
+        return {}, set(), {}
 
     resized_by_name = {}
     for name, raw_bytes in valid:
@@ -386,15 +390,15 @@ def classify_images(cameras, images_by_name):
             log.warning("Image resize failed: %s: %s", name, e)
 
     if not resized_by_name:
-        return {}, set()
+        return {}, set(), {}
 
     contents, index_to_name = _build_contents(list(resized_by_name.items()))
     primary_model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
     parsed = _classify_with_model(contents, primary_model, api_keys)
     if parsed is None:
-        return {}, set()
+        return {}, set(), {}
 
-    result, invalid_stations, low_confidence = _parse_classifications(parsed, index_to_name)
+    result, invalid_stations, low_confidence, confidence_by_name = _parse_classifications(parsed, index_to_name)
 
     confidence_counts = {"high": 0, "medium": 0, "low": 0}
     for item in parsed:
@@ -420,20 +424,44 @@ def classify_images(cameras, images_by_name):
                 ", ".join(low_confidence),
             )
         else:
-            sub_result, sub_invalid, sub_low = _parse_classifications(sub_parsed, sub_index_to_name)
+            sub_result, sub_invalid, sub_low, sub_confidence = _parse_classifications(sub_parsed, sub_index_to_name)
             for name in low_confidence:
                 if name in sub_invalid:
                     invalid_stations.add(name)
                     result.pop(name, None)
+                    confidence_by_name.pop(name, None)
                 elif name in sub_result:
                     result[name] = sub_result[name]
+                    confidence_by_name[name] = sub_confidence.get(name, "low")
             if sub_low:
                 log.warning(
                     "Still low-confidence after escalation (kept escalation result anyway): %s",
                     ", ".join(sub_low),
                 )
 
-    return result, invalid_stations
+    return result, invalid_stations, confidence_by_name
+
+
+CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
+
+
+def append_confidence_log(confidence_by_name, run_time):
+    """Geminiの分類confidenceを記録する。fog_model.pyがこれを読み、学習時に
+    confidence:lowだったラベルを除外するために使う。"""
+    if not confidence_by_name:
+        return
+    try:
+        CONFIDENCE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        is_new = not CONFIDENCE_LOG_PATH.exists()
+        dt_str = run_time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(CONFIDENCE_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if is_new:
+                writer.writerow(["datetime", "station", "confidence"])
+            for name, confidence in confidence_by_name.items():
+                writer.writerow([dt_str, name, confidence])
+    except Exception as e:
+        log.warning("Failed to append confidence log: %s", e)
 
 
 def fetch_weather():
@@ -586,11 +614,12 @@ def main():
     ok_count = sum(1 for v in images_by_name.values() if v)
     log.info("Image fetch succeeded: %d / %d", ok_count, len(cameras))
 
-    phenom_by_name, invalid_stations = classify_images(cameras, images_by_name)
+    phenom_by_name, invalid_stations, confidence_by_name = classify_images(cameras, images_by_name)
     log.info(
         "Gemini classification succeeded: %d / %d (invalid/placeholder: %d)",
         len(phenom_by_name), len(cameras), len(invalid_stations),
     )
+    append_confidence_log(confidence_by_name, run_time)
 
     usable_count = ok_count - len(invalid_stations)
     problem_ratio = (1.0 - usable_count / len(cameras)) if cameras else 0.0

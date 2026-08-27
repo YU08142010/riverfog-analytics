@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, make_scorer
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, make_scorer
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_sample_weight
@@ -38,6 +38,7 @@ from fog_features import (
     COL_WIND_DIR_DEG,
     COL_WIND_SPEED,
     SUMMARY_FOG_CODES,
+    _lag_series,
     build_location_class_targets,
     prepare_features,
     select_feature_names,
@@ -92,6 +93,25 @@ BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 # サンプル数が少ない地点で経験値がそのまま乗ると不安定なので、全地点平均へ向けてベイズ平滑化する。
 STATION_FOG_RATE_FEATURE = "地点別霧発生率"
 STATION_RATE_SMOOTHING = 20
+
+# 地点間の空間相関を表す特徴量：自地点を除く他地点の(CROSS_STATION_FOG_LAG_HOURS)時間前の
+# 霧発生率。川霧は隣接区間で連動しやすいという想定に基づく。1時間前の値を使うのは、
+# 同時刻の値をそのまま使うと「今まさに霧かどうか」という答えの情報が特徴量に漏れてしまう
+# ため（他地点の現在値は、自地点の現在の判定と強く相関するが、それは推論時には使えない
+# 未来情報に等しい）。
+# 予報（未来）には他地点の実測が存在しないため、学習時のみ時間変化する値を使い、予報時は
+# 直近の実測時点での値を一定値として引き継ぐ近似とする（視程等と同様、予報期間が長くなる
+# ほど厳密ではなくなるが、無いよりは直近の広域的な傾向を反映できる）。
+CROSS_STATION_FOG_LAG_HOURS = 1
+CROSS_STATION_FOG_FEATURE = "広域霧指数"
+
+# 短い欠測（視程・降水量が単発で欠けている等）は行ごと捨てず時間方向に補間して活かす。
+# これを超える欠測はこれまで通り除外する。
+WEATHER_INTERPOLATE_LIMIT = 3
+
+# Geminiの分類confidenceのログ。collect.pyが分類のたびに追記し、ここでは
+# confidence:lowだったラベルを学習から除外するために読む。
+CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
 
 # モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）が悪化した地点を自動検出する。
 # 固定の許容誤差ではなく、各回のテストデータをブートストラップ再抽出して「今回のスコアが
@@ -202,16 +222,20 @@ def compute_fog_probability(pipe, X):
     return proba[:, fog_idx].sum(axis=1)
 
 
-def compute_feature_importance(state):
+def compute_feature_importance(state, only_stations=None):
     """学習済みモデル一式(model_state.joblibをload_model_stateしたもの)から、
     特徴量ごとの重要度を計算する。RandomForest/XGBoostのfeature_importances_を
     hybridの混合比(blend_weight)で重み付けし、複数地点で同一のpipeを共有している
     場合（プーリングモデル）は1回だけ数える。
+    only_stationsを指定すると、その地点名の集合に含まれる地点のモデルだけを対象にする
+    （精度が低い地点だけに絞って「何が効いていないか」を見る用途）。
     戻り値: [(特徴量名, 重要度), ...] 重要度の降順。計算できなければ空リスト。
     """
     seen_ids = set()
     totals, counts = {}, {}
-    for info in state.values():
+    for station_name, info in state.items():
+        if only_stations is not None and station_name not in only_stations:
+            continue
         pipe = info.get("pipe")
         if pipe is None or id(pipe) in seen_ids:
             continue
@@ -250,6 +274,28 @@ def compute_feature_importance(state):
     result = [(name, totals[name] / counts[name]) for name in totals]
     result.sort(key=lambda x: x[1], reverse=True)
     return result
+
+
+def compute_confusion_matrix(state):
+    """全地点のテストデータ(y_test/y_pred)を合算した混同行列を計算する
+    （どの現象コード同士をよく取り違えているかを把握するための診断用）。
+    戻り値: (labels, matrix)。labelsは行・列に対応する現象コードの昇順リスト、
+    matrixはlen(labels) x len(labels)のnumpy配列（行=実測、列=予測）。
+    データが無ければ (空リスト, 空配列)。
+    """
+    all_true, all_pred = [], []
+    for info in state.values():
+        y_test = info.get("y_test")
+        y_pred = info.get("y_pred")
+        if y_test is None or y_pred is None:
+            continue
+        all_true.extend(np.asarray(y_test).tolist())
+        all_pred.extend(np.asarray(y_pred).tolist())
+    if not all_true:
+        return [], np.zeros((0, 0))
+    labels = sorted(set(all_true) | set(all_pred))
+    matrix = confusion_matrix(all_true, all_pred, labels=labels)
+    return labels, matrix
 
 
 def _fog_class_f1(y_true, y_pred):
@@ -407,8 +453,29 @@ def _resolve_model_kind(kind):
 
 
 def _collect_location_xy(merged, col, feature_names):
-    sub = merged.dropna(subset=[col]).sort_values("datetime").reset_index(drop=True)
+    """[col]の欠測に加え、feature_names（地点ごとに値を入れ替えるCROSS_STATION_FOG_FEATURE等を
+    含みうる）の欠測行もここで除く。他の共通特徴量は呼び出し側で既に一括除去済みのため、
+    ここでの追加除去は主にCROSS_STATION_FOG_FEATURE用。"""
+    sub = merged.dropna(subset=[col, *feature_names]).sort_values("datetime").reset_index(drop=True)
     return sub, sub[feature_names], sub[col].astype(int)
+
+
+def load_low_confidence_set(path=CONFIDENCE_LOG_PATH):
+    """collect.pyが記録した確信度ログから、confidence=lowだった(datetime文字列, 地点名)の
+    組をsetで返す。学習時にそれらのラベルを欠測扱いして除外するために使う。
+    ファイルが無ければ空set（除外なしで従来通り学習する）。
+    """
+    if not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        log.warning("Failed to read confidence log (%s): %s", path, e)
+        return set()
+    if "confidence" not in df.columns:
+        return set()
+    low = df[df["confidence"] == "low"]
+    return set(zip(low["datetime"].astype(str), low["station"].astype(str)))
 
 
 def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybrid"):
@@ -418,15 +485,42 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
     戻り値: {地点名: {"pipe":, "features":, "fog_threshold":, "model_type":, "n":, ...}}
     """
     targets = build_location_class_targets(phenom_df, phenom_cols)
+
+    low_confidence = load_low_confidence_set()
+    if low_confidence:
+        dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        excluded_total = 0
+        for col in phenom_cols:
+            mask = dt_strs.apply(lambda s, c=col: (s, c) in low_confidence)
+            n = int(mask.sum())
+            if n:
+                targets.loc[mask, col] = np.nan
+                excluded_total += n
+        if excluded_total:
+            log.info(
+                "Excluded %d low-confidence label(s) from training across %d station(s)",
+                excluded_total, len(phenom_cols),
+            )
+
     merged = pd.merge(main_df, targets, on="datetime", how="inner")
+    merged = merged.sort_values("datetime").reset_index(drop=True)
+    cross_rates = _compute_cross_station_fog_rates(merged, phenom_cols)
+
     merged, feature_names = prepare_features(merged, lat, lon)
+    # 短い欠測は時間方向に補間して活かす（視程・降水量が単発で欠けているだけで行ごと
+    # 丸ごと捨てるのは勿体ないため）。それでも埋まらない大きな欠測は従来通り除外する。
+    merged[feature_names] = merged[feature_names].interpolate(
+        method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
+    )
     merged = merged.dropna(subset=feature_names)
+    feature_names = feature_names + [CROSS_STATION_FOG_FEATURE]
 
     kind = _resolve_model_kind(model)
     log.info("Training location models: kind=%s, features=%s", kind, feature_names)
 
     models = {}
     for col in phenom_cols:
+        merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(merged.index).to_numpy()
         sub, X, y = _collect_location_xy(merged, col, feature_names)
         if len(sub) < MIN_ROWS_PER_LOCATION:
             continue
@@ -456,10 +550,11 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
             "rf_only": rf_only, "xgb_only": xgb_only,
+            "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
 
     n_individual = len(models)
-    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind)
+    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates)
 
     n_pooled = len(models) - n_individual
     n_unmodeled = len(phenom_cols) - len(models)
@@ -480,7 +575,37 @@ def _station_fog_rate(y, global_rate):
     return (k + m * global_rate) / (n + m)
 
 
-def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
+def _compute_cross_station_fog_rates(merged, phenom_cols):
+    """各地点について、自分を除く他地点のCROSS_STATION_FOG_LAG_HOURS時間前の霧発生率を
+    計算する。戻り値: {地点名: pd.Series}（mergedと同じindexのSeries）。
+    他地点の実測が無い（欠測ばかり）時刻はNaNになる。
+    """
+    codes = merged[phenom_cols]
+    is_fog = codes.isin(SUMMARY_FOG_CODES)
+    valid = codes.notna()
+    fog_total = is_fog.sum(axis=1)
+    valid_total = valid.sum(axis=1)
+
+    rates = {}
+    for col in phenom_cols:
+        other_fog = fog_total - is_fog[col].astype(int)
+        other_valid = valid_total - valid[col].astype(int)
+        same_time_rate = (other_fog / other_valid.replace(0, np.nan)).astype(float)
+        tmp = pd.DataFrame({
+            "datetime": merged["datetime"].to_numpy(),
+            "_rate": same_time_rate.to_numpy(),
+        })
+        lagged = _lag_series(tmp, "_rate", CROSS_STATION_FOG_LAG_HOURS)
+        rates[col] = pd.Series(lagged.to_numpy(), index=merged.index)
+    return rates
+
+
+def _last_valid_value(series, default=0.0):
+    s = series.dropna()
+    return float(s.iloc[-1]) if len(s) else default
+
+
+def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates):
     """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
 
     気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
@@ -494,6 +619,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
     per_station_xy = {}
     total_k, total_n = 0.0, 0
     for col in phenom_cols:
+        merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(merged.index).to_numpy()
         sub, X, y = _collect_location_xy(merged, col, feature_names)
         if sub.empty:
             continue
@@ -554,6 +680,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
             "rf_only": rf_only2, "xgb_only": xgb_only2,
+            "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
         rescued += 1
     log.info("Pooled model rescued %d/%d location(s)", rescued, len(skipped_cols))
@@ -606,10 +733,13 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon):
     for col, info in models.items():
         feature_names = info["features"]
         df, _ = prepare_features(forecast_raw, lat, lon, feature_names)
-        X = df[feature_names]
+        X = df[feature_names].copy()
         if info.get("pooled") and "station_fog_rate" in info:
-            X = X.copy()
             X[STATION_FOG_RATE_FEATURE] = info["station_fog_rate"]
+        if CROSS_STATION_FOG_FEATURE in feature_names:
+            # 予報期間中は他地点の実測が存在しないため、直近の実測時点での値を
+            # 一定値として引き継ぐ近似値を使う（train_location_modelsのコメント参照）。
+            X[CROSS_STATION_FOG_FEATURE] = info.get("cross_fog_index_last", 0.0)
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X)
     return pred_df, prob_df
