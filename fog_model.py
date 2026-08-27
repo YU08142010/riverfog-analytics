@@ -4,7 +4,9 @@
 （アルゴリズム自体はそちらで検証済みのものを流用し、Colab専用の周辺機能だけを外した）。
 """
 import logging
+from datetime import datetime
 
+import joblib
 import numpy as np
 import pandas as pd
 import requests
@@ -14,6 +16,8 @@ from sklearn.metrics import accuracy_score, f1_score, make_scorer
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_sample_weight
+
+from common import BASE_DIR, JST
 
 try:
     from xgboost import XGBClassifier
@@ -87,6 +91,14 @@ BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 # サンプル数が少ない地点で経験値がそのまま乗ると不安定なので、全地点平均へ向けてベイズ平滑化する。
 STATION_FOG_RATE_FEATURE = "地点別霧発生率"
 STATION_RATE_SMOOTHING = 20
+
+# モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）がこの値以上下がった地点は、
+# 悪天候の偏りやデータ不整合等で今回だけ学習が崩れた可能性があるとみなし、自動的に前回の
+# モデルへロールバックする。どちらかの評価サンプル数が少なすぎる場合は、スコアの差が
+# ノイズによるものか判別できないため比較自体を行わない。
+MODEL_STATE_PATH = BASE_DIR / "data" / "models" / "model_state.joblib"
+MODEL_REGRESSION_TOLERANCE = 0.05
+MIN_N_FOR_REGRESSION_CHECK = 30
 
 
 class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
@@ -518,3 +530,58 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon):
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X)
     return pred_df, prob_df
+
+
+def _effective_score(info):
+    """モデル比較用のスコア。霧クラスのF1を優先し、無ければ全体F1を使う
+    （ハイパーパラメータ選択時の_blend_scoreと同じ考え方）。"""
+    fog_f1 = info.get("fog_f1")
+    if fog_f1 is not None and not (isinstance(fog_f1, float) and np.isnan(fog_f1)):
+        return float(fog_f1)
+    return float(info.get("f1", 0.0))
+
+
+def load_model_state(path=MODEL_STATE_PATH):
+    """前回保存したモデル一式を読み込む。無い/壊れている場合は空辞書（比較なしで続行）。"""
+    if not path.exists():
+        return {}
+    try:
+        return joblib.load(path)
+    except Exception as e:
+        log.warning("Failed to load previous model state (%s), skipping regression check: %s", path, e)
+        return {}
+
+
+def save_model_state(models, path=MODEL_STATE_PATH):
+    """今回採用した（＝ロールバック判定後の）モデル一式を、次回比較用に保存する。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    trained_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    state = {col: {**info, "trained_at": trained_at} for col, info in models.items()}
+    joblib.dump(state, path)
+
+
+def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
+    """新しく学習したモデルが前回より明らかに劣化している地点があれば、その地点だけ
+    前回のモデルへ自動的に差し戻す（models を直接書き換える）。
+    戻り値：ロールバックした地点名のリスト。
+    """
+    if prev_state is None:
+        prev_state = load_model_state(path)
+    rolled_back = []
+    for col, info in models.items():
+        prev = prev_state.get(col)
+        if prev is None:
+            continue
+        if info.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK or prev.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK:
+            continue
+        new_score = _effective_score(info)
+        prev_score = _effective_score(prev)
+        if new_score < prev_score - MODEL_REGRESSION_TOLERANCE:
+            log.warning(
+                "Regression detected for %s (new score=%.3f, previous score=%.3f, "
+                "tolerance=%.2f); rolling back to previous model",
+                col, new_score, prev_score, MODEL_REGRESSION_TOLERANCE,
+            )
+            models[col] = prev
+            rolled_back.append(col)
+    return rolled_back

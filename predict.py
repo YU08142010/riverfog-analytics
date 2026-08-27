@@ -149,6 +149,12 @@ def main():
         log.warning("No models could be trained (not enough data yet); skipping forecast/graphs")
         return
 
+    rolled_back = fog_model.apply_regression_guard(models)
+    if rolled_back:
+        log.warning("Rolled back to previous model due to regression: %s", ", ".join(rolled_back))
+    if not args.dry_run:
+        fog_model.save_model_state(models)
+
     try:
         forecast_raw = fog_model.fetch_forecast_range(lat, lon, args.forecast_days)
     except Exception as e:
