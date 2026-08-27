@@ -98,3 +98,52 @@ def accuracy_summary(conn, since=None):
         "by_lead_day": [{"lead_day": d, "n": n, "correct": c} for d, n, c in by_lead_bucket],
         "by_station": [{"station": s, "n": n, "correct": c} for s, n, c in by_station],
     }
+
+
+def accuracy_trend(conn, station=None):
+    """target_datetimeの日付ごとの的中率推移を返す。stationを指定すればその地点のみ。
+    戻り値: [{"date": "YYYY-MM-DD", "n": int, "correct": int}, ...]（日付昇順）
+    """
+    where = "WHERE actual_code IS NOT NULL"
+    params = ()
+    if station:
+        where += " AND station = ?"
+        params = (station,)
+
+    rows = conn.execute(
+        f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
+                   SUM(CASE WHEN predicted_code = actual_code THEN 1 ELSE 0 END)
+            FROM predictions {where}
+            GROUP BY d ORDER BY d""", params,
+    ).fetchall()
+    return [{"date": d, "n": n, "correct": c} for d, n, c in rows]
+
+
+def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
+    """from_dt_str〜to_dt_strの間で「霧」と予測されている地点・時刻を返す。
+    同じ(station, target_datetime)に複数回の予測記録がある場合、最新のrun_atのものを使う
+    （予報は毎日更新されるため、直近の実行結果の方が精度が高い）。
+    戻り値: [{"station":, "target_datetime":, "predicted_code":, "predicted_fog_prob":}, ...]
+    （target_datetime昇順）
+    """
+    rows = conn.execute(
+        """SELECT station, target_datetime, predicted_code, predicted_fog_prob, run_at
+           FROM predictions
+           WHERE target_datetime BETWEEN ? AND ?
+           ORDER BY run_at DESC""",
+        (from_dt_str, to_dt_str),
+    ).fetchall()
+    seen = set()
+    alerts = []
+    for station, target_dt, code, prob, _run_at in rows:
+        key = (station, target_dt)
+        if key in seen:
+            continue
+        seen.add(key)
+        if code in fog_codes:
+            alerts.append({
+                "station": station, "target_datetime": target_dt,
+                "predicted_code": code, "predicted_fog_prob": prob,
+            })
+    alerts.sort(key=lambda a: (a["target_datetime"], a["station"]))
+    return alerts

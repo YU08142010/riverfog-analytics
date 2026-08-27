@@ -3,22 +3,55 @@
 LAN/Tailscale内からのみアクセスされる想定で、認証は行わない
 （既存のSamba共有・Cockpitと同じセキュリティモデル）。外部公開はしないこと。
 """
+import io
 import logging
 import logging.handlers
+import os
 import re
+import secrets
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import wraps
 
-from flask import Flask, abort, render_template, send_from_directory
+from dotenv import load_dotenv
+from flask import Flask, Response, abort, render_template, request, send_from_directory
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib import font_manager
 
 from common import BASE_DIR, DATA_XLSX, JST
 import fog_data
 import prediction_log
-from fog_features import PHENOM_COLORS, PHENOM_LABELS, SLASH_COLOR, encode_phenomena_cell
+from fog_features import PHENOM_COLORS, PHENOM_LABELS, SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell
+
+# collect.py・fog_graphs.py と同じ日本語フォント設定（無ければグラフの日本語が文字化けするだけで、
+# 処理は止めない）。
+_NOTO_CJK_JP_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+if os.path.exists(_NOTO_CJK_JP_PATH):
+    font_manager.fontManager.addfont(_NOTO_CJK_JP_PATH)
+    matplotlib.rcParams["font.family"] = "Noto Sans CJK JP"
+
+load_dotenv(BASE_DIR / ".env")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
 DB_PATH = BASE_DIR / "data" / "predictions.db"
+
+ALERT_HOURS_AHEAD = 24
+TIMELAPSE_MAX_ITEMS = 48
+
+ALLOWED_LOGS = {
+    "collect": BASE_DIR / "logs" / "collect.log",
+    "predict": BASE_DIR / "logs" / "predict.log",
+    "backfill_weather": BASE_DIR / "logs" / "backfill_weather.log",
+    "cron": BASE_DIR / "logs" / "cron.log",
+    "webapp": BASE_DIR / "logs" / "webapp.log",
+}
+LOG_TAIL_LINES = 400
 
 LOG_FILE = BASE_DIR / "logs" / "webapp.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -37,6 +70,11 @@ logging.basicConfig(
 log = logging.getLogger("webapp")
 
 app = Flask(__name__, template_folder="web_templates", static_folder="web_static")
+
+try:
+    STATION_NAMES = fog_data.load_station_names()
+except Exception:
+    STATION_NAMES = []
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HHMM_RE = re.compile(r"^\d{4}$")
@@ -77,10 +115,121 @@ def _validate_hhmm(hhmm):
     return hhmm
 
 
+def _validate_station(name):
+    """既知の地点名(cameras.csv由来)以外は404にする。任意文字列からファイルパスを
+    組み立てる箇所(タイムラプス等)があるため、ここで厳格にホワイトリスト検証する。"""
+    if name not in STATION_NAMES:
+        abort(404)
+    return name
+
+
 def _sorted_subdirs(base_dir, reverse=True):
     if not base_dir.is_dir():
         return []
     return sorted((p.name for p in base_dir.iterdir() if p.is_dir()), reverse=reverse)
+
+
+def requires_admin(view):
+    """HTTP Basic認証。パスワードは.envのADMIN_PASSWORD（未設定なら常に拒否）。"""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        auth = request.authorization
+        ok = bool(ADMIN_PASSWORD) and auth is not None and \
+            secrets.compare_digest(auth.password or "", ADMIN_PASSWORD)
+        if not ok:
+            return Response(
+                "Authentication required", 401,
+                {"WWW-Authenticate": 'Basic realm="river-fog admin"'},
+            )
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _render_line_chart_png(dates, rates, title):
+    """日付ごとの的中率(%)を折れ線グラフのPNGバイト列にして返す。"""
+    fig, ax = plt.subplots(figsize=(9, 3.2))
+    if dates:
+        x = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
+        ax.plot(x, rates, marker="o", markersize=3, color="#1a5276", linewidth=1.4)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+        fig.autofmt_xdate()
+    else:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("的中率(%)")
+    ax.set_title(title, fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _accuracy_trend_safe(station=None):
+    if not DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            return prediction_log.accuracy_trend(conn, station=station)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to read accuracy trend: %s", e)
+        return []
+
+
+def _upcoming_fog_alerts_safe():
+    if not DB_PATH.exists():
+        return []
+    now_naive = datetime.now(JST).replace(tzinfo=None)
+    from_str = now_naive.strftime("%Y-%m-%d %H:%M:%S")
+    to_str = (now_naive + timedelta(hours=ALERT_HOURS_AHEAD)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            return prediction_log.upcoming_fog_alerts(conn, from_str, to_str, SUMMARY_FOG_CODES)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to read upcoming fog alerts: %s", e)
+        return []
+
+
+def _station_timelapse_images(station, max_items=TIMELAPSE_MAX_ITEMS):
+    """指定地点の直近の画像を古い→新しい順で返す（スライドショー用）。"""
+    items = []
+    for date in _sorted_subdirs(IMAGE_DIR):
+        date_dir = IMAGE_DIR / date
+        for hhmm in _sorted_subdirs(date_dir):
+            hour_dir = date_dir / hhmm
+            for suffix in ("", "_unavailable"):
+                f = hour_dir / f"{station}{suffix}.jpg"
+                if f.exists():
+                    items.append({"date": date, "hhmm": hhmm, "file": f.name,
+                                  "unavailable": bool(suffix)})
+                    break
+            if len(items) >= max_items:
+                break
+        if len(items) >= max_items:
+            break
+    items.reverse()
+    return items
+
+
+def _station_latest_forecast_file(station):
+    """最新の予測日付における、この地点の予測グラフファイル名を返す(無ければNone)。"""
+    latest_pred_date = next(iter(_sorted_subdirs(PRED_DIR)), None)
+    if not latest_pred_date:
+        return None, None
+    pred_dir = PRED_DIR / latest_pred_date
+    for p in pred_dir.iterdir():
+        m = STATION_FORECAST_RE.match(p.name)
+        if m and m.group(1) == station:
+            return latest_pred_date, p.name
+    return latest_pred_date, None
 
 
 def _accuracy_summary_safe():
@@ -150,6 +299,7 @@ def dashboard():
         "dashboard.html",
         observations=_latest_observations(),
         accuracy=_accuracy_summary_safe(),
+        alerts=_upcoming_fog_alerts_safe(),
         latest_image_date=latest_image_date,
         latest_image_hour=latest_image_hour,
         latest_images=latest_images,
@@ -272,6 +422,81 @@ def predictions_date(date):
 def predictions_file(date, filename):
     date = _validate_date(date)
     return send_from_directory(PRED_DIR / date, filename)
+
+
+@app.route("/stations")
+def stations_list():
+    return render_template("stations_list.html", station_names=STATION_NAMES)
+
+
+@app.route("/stations/<name>")
+def station_detail(name):
+    name = _validate_station(name)
+
+    observations = _latest_observations()
+    current = None
+    if observations:
+        current = next((s for s in observations["stations"] if s["name"] == name), None)
+
+    latest_pred_date, forecast_file = _station_latest_forecast_file(name)
+    timelapse = _station_timelapse_images(name)
+
+    return render_template(
+        "station_detail.html",
+        name=name,
+        current=current,
+        observations_datetime=observations["datetime"] if observations else None,
+        latest_pred_date=latest_pred_date,
+        forecast_file=forecast_file,
+        timelapse=timelapse,
+    )
+
+
+@app.route("/stations/<name>/chart.png")
+def station_chart(name):
+    name = _validate_station(name)
+    trend = _accuracy_trend_safe(station=name)
+    dates = [r["date"] for r in trend if r["n"] > 0]
+    rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
+    png = _render_line_chart_png(dates, rates, f"{name} の的中率推移")
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy")
+def accuracy_page():
+    summary = _accuracy_summary_safe()
+    return render_template("accuracy.html", summary=summary)
+
+
+@app.route("/accuracy/chart.png")
+def accuracy_chart():
+    trend = _accuracy_trend_safe()
+    dates = [r["date"] for r in trend if r["n"] > 0]
+    rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
+    png = _render_line_chart_png(dates, rates, "全地点の的中率推移")
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin")
+@requires_admin
+def admin_home():
+    logs = [{"key": k, "path": str(p), "exists": p.exists(),
+             "size_kb": round(p.stat().st_size / 1024, 1) if p.exists() else 0}
+            for k, p in ALLOWED_LOGS.items()]
+    return render_template("admin.html", logs=logs)
+
+
+@app.route("/admin/logs/<key>")
+@requires_admin
+def admin_log(key):
+    path = ALLOWED_LOGS.get(key)
+    if path is None:
+        abort(404)
+    if not path.exists():
+        return render_template("admin_log.html", key=key, lines=["(ログファイルがまだありません)"])
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()[-LOG_TAIL_LINES:]
+    return render_template("admin_log.html", key=key, lines=lines)
 
 
 if __name__ == "__main__":

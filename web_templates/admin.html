@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}管理者{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>ログ一覧</h2>
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>ログ</th><th>サイズ</th><th></th></tr></thead>
+        <tbody>
+        {% for l in logs %}
+        <tr>
+            <td>{{ l.key }}</td>
+            <td>{{ l.size_kb }} KB</td>
+            <td><a class="button" href="{{ url_for('admin_log', key=l.key) }}">表示</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

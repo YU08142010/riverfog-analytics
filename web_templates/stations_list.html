@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}地点別{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>地点一覧</h2>
+    {% if station_names %}
+    <ul class="date-list">
+        {% for name in station_names %}
+        <li><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">地点情報が読み込めませんでした。</p>
+    {% endif %}
+</div>
+{% endblock %}

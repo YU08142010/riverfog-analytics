@@ -11,9 +11,12 @@
     <h1>只見川霧観測・予測</h1>
     <nav>
         <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
+        <a href="{{ url_for('stations_list') }}">地点別</a>
         <a href="{{ url_for('observations_dates') }}">観測データ</a>
         <a href="{{ url_for('images_dates') }}">カメラ画像</a>
         <a href="{{ url_for('predictions_dates') }}">予測結果</a>
+        <a href="{{ url_for('accuracy_page') }}">予測精度</a>
+        <a href="{{ url_for('admin_home') }}">管理者</a>
     </nav>
 </header>
 <main>

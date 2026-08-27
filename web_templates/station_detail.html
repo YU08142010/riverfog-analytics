@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>{{ name }}</h2>
+    <p><a href="{{ url_for('stations_list') }}">&laquo; 地点一覧に戻る</a></p>
+
+    {% if current %}
+    <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>
+    <div class="station-chip" style="display:inline-block; background:{{ current.color }}; padding:0.6rem 1rem; font-size:0.95rem;">
+        現在の現象: {{ current.label }}
+    </div>
+    {% else %}
+    <p class="muted">観測データがまだありません。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>今後の予測グラフ</h2>
+    {% if forecast_file %}
+    <p class="muted">{{ latest_pred_date }}</p>
+    <img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}">
+    {% else %}
+    <p class="muted">この地点の予測グラフはまだありません。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>的中率の推移</h2>
+    <img class="full-graph" src="{{ url_for('station_chart', name=name) }}">
+</div>
+
+<div class="card">
+    <h2>画像タイムラプス</h2>
+    {% if timelapse %}
+    <div style="text-align:center;">
+        <img id="tl-img" class="full-graph" style="max-height:480px;" src="">
+        <p class="muted" id="tl-caption"></p>
+        <button type="button" class="button" id="tl-prev">&laquo; 前</button>
+        <button type="button" class="button" id="tl-play">再生</button>
+        <button type="button" class="button" id="tl-next">次 &raquo;</button>
+    </div>
+    <script>
+    (function() {
+        var items = [
+            {% for t in timelapse %}
+            {url: {{ url_for('images_file', date=t.date, hhmm=t.hhmm, filename=t.file)|tojson }},
+             caption: {{ (t.date ~ " " ~ t.hhmm[:2] ~ ":" ~ t.hhmm[2:] ~ (" (取得失敗)" if t.unavailable else ""))|tojson }}}{{ "," if not loop.last }}
+            {% endfor %}
+        ];
+        var idx = 0, timer = null;
+        var img = document.getElementById("tl-img");
+        var cap = document.getElementById("tl-caption");
+        function show(i) {
+            idx = (i + items.length) % items.length;
+            img.src = items[idx].url;
+            cap.textContent = items[idx].caption + " (" + (idx + 1) + "/" + items.length + ")";
+        }
+        document.getElementById("tl-prev").addEventListener("click", function() { show(idx - 1); });
+        document.getElementById("tl-next").addEventListener("click", function() { show(idx + 1); });
+        document.getElementById("tl-play").addEventListener("click", function(e) {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+                e.target.textContent = "再生";
+            } else {
+                timer = setInterval(function() { show(idx + 1); }, 800);
+                e.target.textContent = "停止";
+            }
+        });
+        show(0);
+    })();
+    </script>
+    {% else %}
+    <p class="muted">この地点の画像がまだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

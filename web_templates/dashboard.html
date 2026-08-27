@@ -2,6 +2,25 @@
 {% block title %}ダッシュボード{% endblock %}
 {% block content %}
 
+{% if alerts %}
+<div class="card" style="border-left: 5px solid #c0392b; background:#fdecea;">
+    <h2 style="border-color:#c0392b;">霧アラート(今後24時間)</h2>
+    <p class="muted">以下の地点・時刻で霧が予測されています。</p>
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>日時</th><th>地点</th><th>霧確率</th></tr></thead>
+        <tbody>
+        {% for a in alerts %}
+        <tr>
+            <td>{{ a.target_datetime }}</td>
+            <td><a href="{{ url_for('station_detail', name=a.station) }}">{{ a.station }}</a></td>
+            <td>{{ "%.0f"|format(a.predicted_fog_prob * 100) if a.predicted_fog_prob is not none else "-" }}%</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <div class="card">
     <h2>現在の状況</h2>
     {% if observations %}
