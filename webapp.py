@@ -14,7 +14,10 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, Response, abort, render_template, request, send_from_directory
+from flask import (
+    Flask, Response, abort, redirect, render_template, request, send_from_directory,
+    session, url_for,
+)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -36,6 +39,8 @@ if os.path.exists(_NOTO_CJK_JP_PATH):
 
 load_dotenv(BASE_DIR / ".env")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
+ADMIN_SESSION_LIFETIME = timedelta(minutes=15)
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
@@ -70,6 +75,12 @@ logging.basicConfig(
 log = logging.getLogger("webapp")
 
 app = Flask(__name__, template_folder="web_templates", static_folder="web_static")
+# 再起動のたびに変わってよい（管理者セッションが全員ログアウトされるだけ）ため、.envには
+# 保存せずプロセス起動時に毎回生成する。
+app.secret_key = secrets.token_hex(32)
+app.config["PERMANENT_SESSION_LIFETIME"] = ADMIN_SESSION_LIFETIME
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 try:
     STATION_NAMES = fog_data.load_station_names()
@@ -130,17 +141,14 @@ def _sorted_subdirs(base_dir, reverse=True):
 
 
 def requires_admin(view):
-    """HTTP Basic認証。パスワードは.envのADMIN_PASSWORD（未設定なら常に拒否）。"""
+    """セッションログイン必須。未ログイン/期限切れなら/admin/loginへリダイレクトする。
+    HTTP Basic認証にすると、ブラウザがパスワードを覚えて自動送信し続けてしまい
+    ブラウザを閉じない限り再入力を求められないため、あえてセッションCookie方式にしている
+    （ADMIN_SESSION_LIFETIME分だけ無操作が続くと自動的にログアウトされる）。"""
     @wraps(view)
     def wrapped(*args, **kwargs):
-        auth = request.authorization
-        ok = bool(ADMIN_PASSWORD) and auth is not None and \
-            secrets.compare_digest(auth.password or "", ADMIN_PASSWORD)
-        if not ok:
-            return Response(
-                "Authentication required", 401,
-                {"WWW-Authenticate": 'Basic realm="river-fog admin"'},
-            )
+        if not session.get("is_admin"):
+            return redirect(url_for("admin_login", next=request.path))
         return view(*args, **kwargs)
     return wrapped
 
@@ -475,6 +483,31 @@ def accuracy_chart():
     rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
     png = _render_line_chart_png(dates, rates, "全地点の的中率推移")
     return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    next_path = request.values.get("next") or url_for("admin_home")
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        next_path = url_for("admin_home")  # オープンリダイレクト対策
+
+    error = None
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if ADMIN_PASSWORD and secrets.compare_digest(password, ADMIN_PASSWORD):
+            session.clear()
+            session["is_admin"] = True
+            session.permanent = True
+            return redirect(next_path)
+        error = "パスワードが違います。"
+
+    return render_template("admin_login.html", error=error, next=next_path)
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect(url_for("admin_login"))
 
 
 @app.route("/admin")
