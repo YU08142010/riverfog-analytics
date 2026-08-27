@@ -4,11 +4,34 @@
 <div class="card">
     <h2>地点一覧</h2>
     {% if station_names %}
-    <ul class="date-list">
+    <input type="text" id="station-search" class="search-box" placeholder="地点名で絞り込み...">
+    <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
+    <ul class="tile-list" id="station-tiles">
         {% for name in station_names %}
-        <li><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
+        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
         {% endfor %}
     </ul>
+    <p class="muted" id="station-empty" hidden>該当する地点がありません。</p>
+    <script>
+    (function() {
+        var input = document.getElementById("station-search");
+        var items = Array.prototype.slice.call(document.querySelectorAll("#station-tiles > li"));
+        var countLabel = document.getElementById("station-count");
+        var emptyLabel = document.getElementById("station-empty");
+        var total = items.length;
+        input.addEventListener("input", function() {
+            var q = input.value.trim();
+            var shown = 0;
+            items.forEach(function(li) {
+                var match = li.dataset.name.indexOf(q) !== -1;
+                li.classList.toggle("hidden", !match);
+                if (match) shown++;
+            });
+            countLabel.textContent = q ? shown + " / " + total + "地点" : total + "地点";
+            emptyLabel.hidden = shown !== 0;
+        });
+    })();
+    </script>
     {% else %}
     <p class="muted">地点情報が読み込めませんでした。</p>
     {% endif %}

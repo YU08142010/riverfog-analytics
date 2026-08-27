@@ -10,13 +10,13 @@
 <header>
     <h1>只見川霧観測・予測</h1>
     <nav>
-        <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
-        <a href="{{ url_for('stations_list') }}">地点別</a>
-        <a href="{{ url_for('observations_dates') }}">観測データ</a>
-        <a href="{{ url_for('images_dates') }}">カメラ画像</a>
-        <a href="{{ url_for('predictions_dates') }}">予測結果</a>
-        <a href="{{ url_for('accuracy_page') }}">予測精度</a>
-        <a href="{{ url_for('admin_home') }}">管理者</a>
+        <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">ダッシュボード</a>
+        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) else '' }}">地点別</a>
+        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">観測データ</a>
+        <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>
+        <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">予測結果</a>
+        <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
+        <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
     </nav>
 </header>
 <main>
