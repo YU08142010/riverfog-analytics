@@ -1,9 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ name }}{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('stations_list') }}">地点別</a></li>
+    <li>{{ name }}</li>
+</ul>
+{% endblock %}
 {% block content %}
 <div class="card">
     <h2>{{ name }}</h2>
-    <p><a href="{{ url_for('stations_list') }}">&laquo; 地点一覧に戻る</a></p>
 
     {% if current %}
     <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>
@@ -19,7 +25,7 @@
     <h2>今後の予測グラフ</h2>
     {% if forecast_file %}
     <p class="muted">{{ latest_pred_date }}</p>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}"></div>
     {% else %}
     <p class="muted">この地点の予測グラフはまだありません。</p>
     {% endif %}
@@ -27,7 +33,7 @@
 
 <div class="card">
     <h2>的中率の推移</h2>
-    <img class="full-graph" src="{{ url_for('station_chart', name=name) }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('station_chart', name=name) }}"></div>
 </div>
 
 <div class="card">

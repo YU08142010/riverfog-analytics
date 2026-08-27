@@ -28,15 +28,43 @@
 
 <div class="card">
     <h2>サイト内検索</h2>
-    <p class="muted">地点名、または日付(例: 2026-08-27 / 20260827)を入力すると、関連ページへのリンクが表示されます。</p>
-    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名または日付で検索...">
+    <p class="muted">地点名、日付(例: 2026-08-27 / 20260827)、または機能名(例: 精度、アカウント管理)を入力すると、関連ページへのリンクが表示されます。</p>
+    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名・日付・機能名で検索...">
     <div id="global-search-results" style="margin-top:0.7rem; display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
 </div>
 <script>
 (function() {
     var stationNames = {{ station_names|tojson }};
+    var isAdmin = {{ (session.get('role') == 'admin')|tojson }};
     var input = document.getElementById("global-search");
     var results = document.getElementById("global-search-results");
+
+    var pages = [
+        {label: "ダッシュボード", href: "{{ url_for('dashboard') }}"},
+        {label: "地点一覧", href: "{{ url_for('stations_list') }}"},
+        {label: "地点比較", href: "{{ url_for('compare_stations') }}"},
+        {label: "観測データ", href: "{{ url_for('observations_dates') }}"},
+        {label: "カメラ画像", href: "{{ url_for('images_dates') }}"},
+        {label: "予測結果", href: "{{ url_for('predictions_dates') }}"},
+        {label: "予測精度", href: "{{ url_for('accuracy_page') }}"}
+    ];
+    var adminPages = [
+        {label: "管理者トップ / ログ", href: "{{ url_for('admin_home') }}"},
+        {label: "エラー/警告", href: "{{ url_for('admin_errors') }}"},
+        {label: "サービス状態", href: "{{ url_for('admin_status') }}"},
+        {label: "モデル状況", href: "{{ url_for('admin_models') }}"},
+        {label: "カメラ稼働率", href: "{{ url_for('admin_camera_health') }}"},
+        {label: "Gemini状況", href: "{{ url_for('admin_gemini') }}"},
+        {label: "精度レポート", href: "{{ url_for('admin_accuracy_report') }}"},
+        {label: "ディスク使用量", href: "{{ url_for('admin_disk') }}"},
+        {label: "DB管理", href: "{{ url_for('admin_db') }}"},
+        {label: "環境変数", href: "{{ url_for('admin_env') }}"},
+        {label: "設定", href: "{{ url_for('admin_settings') }}"},
+        {label: "メンテナンス", href: "{{ url_for('admin_maintenance') }}"},
+        {label: "お知らせ/アンケート", href: "{{ url_for('admin_announcements') }}"},
+        {label: "アカウント管理", href: "{{ url_for('admin_accounts') }}"}
+    ];
+    if (isAdmin) { pages = pages.concat(adminPages); }
 
     function normalizeDate(q) {
         var m = q.match(/^(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})$/);
@@ -59,6 +87,10 @@
         var matched = stationNames.filter(function(n) { return n.indexOf(q) !== -1; }).slice(0, 8);
         matched.forEach(function(name) { addLink("地点: " + name, "/stations/" + encodeURIComponent(name)); });
 
+        var qLower = q.toLowerCase();
+        var matchedPages = pages.filter(function(p) { return p.label.toLowerCase().indexOf(qLower) !== -1; }).slice(0, 8);
+        matchedPages.forEach(function(p) { addLink(p.label, p.href); });
+
         var date = normalizeDate(q);
         if (date) {
             addLink(date + " の観測データ", "/observations/" + date);
@@ -66,10 +98,10 @@
             addLink(date + " の予測結果", "/predictions/" + date);
         }
 
-        if (!matched.length && !date) {
+        if (!matched.length && !matchedPages.length && !date) {
             var p = document.createElement("p");
             p.className = "muted";
-            p.textContent = "該当する地点・日付が見つかりません。";
+            p.textContent = "該当するページが見つかりません。";
             results.appendChild(p);
         }
     });
@@ -190,7 +222,7 @@
     <h2>本日の予測サマリー</h2>
     {% if summary_file %}
     <p class="muted">{{ latest_pred_date }}</p>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}"></div>
     <p><a class="button" href="{{ url_for('predictions_date', date=latest_pred_date) }}">地点ごとのグラフを見る</a></p>
     {% else %}
     <p class="muted">予測結果がまだありません。</p>

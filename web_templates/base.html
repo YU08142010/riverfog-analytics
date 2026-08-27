@@ -31,6 +31,7 @@
     {% endif %}
 </header>
 <main>
+{% block breadcrumb %}{% endblock %}
 {% with messages = get_flashed_messages() %}
 {% if messages %}
 <div class="card" style="border-left: 4px solid var(--color-primary); background: var(--color-primary-light);">
@@ -40,5 +41,89 @@
 {% endwith %}
 {% block content %}{% endblock %}
 </main>
+<div class="toast-container" id="toast-container"></div>
+<script>
+function showToast(message, isError) {
+    var container = document.getElementById("toast-container");
+    var toast = document.createElement("div");
+    toast.className = "toast" + (isError ? " toast-error" : "");
+    toast.textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(function() { toast.classList.add("show"); });
+    setTimeout(function() {
+        toast.classList.remove("show");
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 3500);
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll(".chart-wrap img").forEach(function(img) {
+        var wrap = img.closest(".chart-wrap");
+        if (img.complete && img.naturalWidth > 0) { return; }
+        img.classList.add("loading");
+        if (wrap) { wrap.classList.add("is-loading"); }
+        var stop = function() {
+            img.classList.remove("loading");
+            if (wrap) { wrap.classList.remove("is-loading"); }
+        };
+        img.addEventListener("load", stop);
+        img.addEventListener("error", stop);
+    });
+});
+
+// data-ajax属性を持つフォームは、ページ遷移せずfetchで送信しトーストで結果を表示する。
+// サーバー側はX-Requested-Withヘッダの有無でJSON({message, success})かredirectかを切り替える。
+document.addEventListener("submit", function(e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-ajax")) { return; }
+    e.preventDefault();
+    var submitter = e.submitter;
+    var action = (submitter && submitter.getAttribute("formaction")) || form.action;
+    var formData = new FormData(form);
+    if (submitter && submitter.name) { formData.append(submitter.name, submitter.value); }
+    fetch(action, {
+        method: (form.method || "POST").toUpperCase(),
+        body: formData,
+        headers: {"X-Requested-With": "XMLHttpRequest"},
+    })
+    .then(function(resp) {
+        return resp.json().then(function(data) { return {ok: resp.ok, data: data}; });
+    })
+    .then(function(result) {
+        showToast(result.data.message || (result.ok ? "完了しました。" : "エラーが発生しました。"), !result.ok);
+        if (result.ok) {
+            document.dispatchEvent(new CustomEvent("ajaxformsuccess", {detail: {form: form, data: result.data}}));
+        }
+    })
+    .catch(function() {
+        showToast("通信エラーが発生しました。", true);
+    });
+});
+
+// class="js-pw-strength" の入力欄は、直後の.strength-meterバー/.strength-labelを更新する。
+function _pwStrength(pw) {
+    if (!pw) { return {score: 0, label: ""}; }
+    var score = 0;
+    if (pw.length >= 8) score++;
+    if (pw.length >= 12) score++;
+    if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    var labels = ["非常に弱い", "弱い", "普通", "強い", "非常に強い"];
+    var colors = ["#c0392b", "#c0392b", "#b9770e", "#27ae60", "#1e8449"];
+    var idx = Math.min(score, 4);
+    return {score: idx, label: labels[idx], color: colors[idx], pct: pw.length ? (idx + 1) * 20 : 0};
+}
+document.addEventListener("input", function(e) {
+    var input = e.target;
+    if (!(input instanceof HTMLInputElement) || !input.classList.contains("js-pw-strength")) { return; }
+    var wrap = input.closest(".pw-strength-wrap") || input.parentElement;
+    var bar = wrap.querySelector(".strength-meter-bar");
+    var label = wrap.querySelector(".strength-label");
+    var result = _pwStrength(input.value);
+    if (bar) { bar.style.width = result.pct + "%"; bar.style.background = result.color || "transparent"; }
+    if (label) { label.textContent = input.value ? "強度: " + result.label : ""; }
+});
+</script>
 </body>
 </html>

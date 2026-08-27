@@ -127,6 +127,86 @@ a.button, button.button {
 a.button:hover, button.button:hover { background: var(--color-primary-dark); box-shadow: 0 2px 6px rgba(16, 42, 67, 0.22); }
 a.button:active, button.button:active { transform: scale(0.97); }
 
+.badge {
+    display: inline-block;
+    background: var(--color-danger);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.2rem 0.4rem;
+    border-radius: 999px;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+}
+
+.breadcrumb {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+}
+.breadcrumb li:not(:last-child)::after { content: "›"; margin-left: 0.3rem; color: var(--color-text-muted); }
+.breadcrumb a { color: var(--color-primary); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.breadcrumb li:last-child { color: var(--color-text); font-weight: 500; }
+
+.toast-container {
+    position: fixed;
+    bottom: 1.2rem;
+    right: 1.2rem;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.toast {
+    background: #1c2733;
+    color: #fff;
+    padding: 0.7rem 1.1rem;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    font-size: 0.88rem;
+    max-width: 320px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.toast-error { background: var(--color-danger); }
+
+.spinner {
+    display: inline-block;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.chart-wrap { position: relative; min-height: 2.4rem; }
+.chart-wrap .spinner { position: absolute; top: 0.6rem; left: 0.6rem; display: none; }
+.chart-wrap.is-loading .spinner { display: inline-block; }
+.chart-wrap img { display: block; }
+.chart-wrap img.loading { visibility: hidden; height: 0; }
+
+.strength-meter {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--color-border);
+    overflow: hidden;
+    margin-top: 0.4rem;
+    max-width: 100%;
+}
+.strength-meter-bar { height: 100%; width: 0; transition: width 0.15s ease, background 0.15s ease; }
+.strength-label { font-size: 0.76rem; color: var(--color-text-muted); margin-top: 0.2rem; }
+
 .search-box {
     width: 100%;
     max-width: 320px;

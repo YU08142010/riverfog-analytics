@@ -23,7 +23,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import (
-    Flask, Response, abort, flash, redirect, render_template,
+    Flask, Response, abort, flash, jsonify, redirect, render_template,
     request, send_file, send_from_directory, session, url_for,
 )
 
@@ -221,6 +221,42 @@ def _sorted_subdirs(base_dir, reverse=True):
 
 def _users_conn():
     return users.connect(USERS_DB_PATH)
+
+
+def _wants_json():
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _finish(endpoint, message, success=True, **url_kwargs):
+    """通常のフォーム送信ならflash+redirect、fetch()経由のAjax送信ならJSONを返す。
+    どちらで来たかはX-Requested-Withヘッダの有無で判定する（base.htmlのdata-ajaxフォーム用）。
+    """
+    if _wants_json():
+        return jsonify({"message": message, "success": success}), (200 if success else 400)
+    flash(message)
+    return redirect(url_for(endpoint, **url_kwargs))
+
+
+@app.context_processor
+def _inject_pending_signup_count():
+    """管理者タブの「アカウント管理」に未処理件数のバッジを出すため、admin_nav.htmlから
+    使えるようテンプレート全体にpending_signup_count()を注入する。管理者以外には
+    バッジは出さない（admin_nav.html自体が管理者ページにしか出ないため実害はないが、
+    念のためロールも見ておく）。
+    """
+    def pending_signup_count():
+        if session.get("role") != "admin":
+            return 0
+        try:
+            conn = _users_conn()
+            try:
+                return len(users.list_signup_requests(conn, status="pending"))
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("Failed to count pending signup requests: %s", e)
+            return 0
+    return {"pending_signup_count": pending_signup_count}
 
 
 def requires_login(view):
@@ -465,6 +501,48 @@ def _render_feature_importance_png(importance, top_n=15):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+def _render_confusion_matrix_png(labels, matrix):
+    """全地点のテストデータを合算した混同行列をヒートマップで表示する。"""
+    fig, ax = plt.subplots(figsize=(4.6, 4.0))
+    if matrix is None or len(labels) == 0:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+    else:
+        label_texts = [PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
+        im = ax.imshow(matrix, cmap="Blues")
+        ax.set_xticks(range(len(labels)))
+        ax.set_yticks(range(len(labels)))
+        ax.set_xticklabels(label_texts, fontsize=9, rotation=30, ha="right")
+        ax.set_yticklabels(label_texts, fontsize=9)
+        ax.set_xlabel("予測")
+        ax.set_ylabel("実際")
+        vmax = matrix.max() if matrix.size else 0
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                v = matrix[i, j]
+                color = "white" if vmax and v > vmax * 0.6 else "#1c2733"
+                ax.text(j, i, str(int(v)), ha="center", va="center", color=color, fontsize=10)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    ax.set_title("混同行列(全地点合算)", fontsize=11)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _low_accuracy_stations(state, n=5):
+    """accuracyが低い順にn地点の名前を返す(精度未算出の地点は除く)。"""
+    scored = [
+        (name, info.get("accuracy"))
+        for name, info in state.items()
+        if _is_valid_number(info.get("accuracy"))
+    ]
+    scored.sort(key=lambda t: t[1])
+    return [name for name, _ in scored[:n]]
 
 
 def _upcoming_fog_alerts_safe():
@@ -1287,13 +1365,11 @@ def admin_accounts_role(user_id):
         if target is None:
             abort(404)
         if target["role"] == "admin" and role != "admin" and users.count_admins(conn) <= 1:
-            flash("最後の管理者アカウントの権限は変更できません。")
-        else:
-            users.set_role(conn, user_id, role)
-            flash(f"{target['name']}さんのロールを変更しました。")
+            return _finish("admin_accounts", "最後の管理者アカウントの権限は変更できません。", success=False)
+        users.set_role(conn, user_id, role)
+        return _finish("admin_accounts", f"{target['name']}さんのロールを変更しました。")
     finally:
         conn.close()
-    return redirect(url_for("admin_accounts"))
 
 
 @app.route("/admin/accounts/<int:user_id>/edit", methods=["POST"])
@@ -1310,27 +1386,25 @@ def admin_accounts_edit(user_id):
             abort(404)
 
         if not name or not email:
-            flash("お名前とメールアドレスは必須です。")
-            return redirect(url_for("admin_accounts"))
+            return _finish("admin_accounts", "お名前とメールアドレスは必須です。", success=False)
         if "@" not in email:
-            flash("メールアドレスの形式が正しくありません。")
-            return redirect(url_for("admin_accounts"))
+            return _finish("admin_accounts", "メールアドレスの形式が正しくありません。", success=False)
         existing = users.get_user_by_email(conn, email)
         if existing and existing["id"] != user_id:
-            flash("このメールアドレスは既に別のアカウントで使われています。")
-            return redirect(url_for("admin_accounts"))
+            return _finish("admin_accounts", "このメールアドレスは既に別のアカウントで使われています。", success=False)
         if password and len(password) < MIN_PASSWORD_LENGTH:
-            flash(f"パスワードを変更する場合は{MIN_PASSWORD_LENGTH}文字以上にしてください。")
-            return redirect(url_for("admin_accounts"))
+            return _finish(
+                "admin_accounts", f"パスワードを変更する場合は{MIN_PASSWORD_LENGTH}文字以上にしてください。",
+                success=False,
+            )
 
         password_hash = users.generate_password_hash(password) if password else None
         users.update_user(conn, user_id, name=name, email=email, password_hash=password_hash)
-        flash(f"{name}さんの情報を更新しました。")
         if session.get("user_id") == user_id:
             session["name"] = name
+        return _finish("admin_accounts", f"{name}さんの情報を更新しました。")
     finally:
         conn.close()
-    return redirect(url_for("admin_accounts"))
 
 
 @app.route("/admin/accounts/<int:user_id>/delete", methods=["POST"])
@@ -1342,16 +1416,18 @@ def admin_accounts_delete(user_id):
         if target is None:
             abort(404)
         if target["role"] == "admin" and users.count_admins(conn) <= 1:
-            flash("最後の管理者アカウントは削除できません。")
-        else:
-            users.delete_user(conn, user_id)
-            flash(f"{target['name']}さんのアカウントを削除しました。")
+            return _finish("admin_accounts", "最後の管理者アカウントは削除できません。", success=False)
+        users.delete_user(conn, user_id)
+        message = f"{target['name']}さんのアカウントを削除しました。"
     finally:
         conn.close()
     if session.get("user_id") == user_id:
         session.clear()
+        if _wants_json():
+            return jsonify({"message": message, "success": True, "redirect": url_for("login")})
+        flash(message)
         return redirect(url_for("login"))
-    return redirect(url_for("admin_accounts"))
+    return _finish("admin_accounts", message)
 
 
 @app.route("/admin/accounts/requests/<int:request_id>/approve", methods=["POST"])
@@ -1363,8 +1439,10 @@ def admin_accounts_approve(request_id):
         ok = users.approve_signup_request(conn, request_id, created_at)
     finally:
         conn.close()
-    flash("承認してアカウントを作成しました。" if ok else "この申請は既に処理済みです。")
-    return redirect(url_for("admin_accounts"))
+    return _finish(
+        "admin_accounts", "承認してアカウントを作成しました。" if ok else "この申請は既に処理済みです。",
+        success=ok,
+    )
 
 
 @app.route("/admin/accounts/requests/<int:request_id>/reject", methods=["POST"])
@@ -1375,8 +1453,37 @@ def admin_accounts_reject(request_id):
         users.reject_signup_request(conn, request_id)
     finally:
         conn.close()
-    flash("申請を拒否しました。")
-    return redirect(url_for("admin_accounts"))
+    return _finish("admin_accounts", "申請を拒否しました。")
+
+
+@app.route("/admin/accounts/requests/bulk", methods=["POST"])
+@requires_admin
+def admin_accounts_requests_bulk():
+    """選択した複数の登録申請を、まとめて承認/拒否する。"""
+    action = request.form.get("bulk_action")
+    request_ids = request.form.getlist("request_ids")
+    if action not in ("approve", "reject") or not request_ids:
+        return _finish("admin_accounts", "対象の申請を選択してください。", success=False)
+
+    conn = _users_conn()
+    try:
+        created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        n = 0
+        for rid in request_ids:
+            try:
+                rid = int(rid)
+            except ValueError:
+                continue
+            if action == "approve":
+                if users.approve_signup_request(conn, rid, created_at):
+                    n += 1
+            else:
+                users.reject_signup_request(conn, rid)
+                n += 1
+    finally:
+        conn.close()
+    verb = "承認" if action == "approve" else "拒否"
+    return _finish("admin_accounts", f"{n}件の申請を{verb}しました。")
 
 
 @app.route("/admin/logs/<key>")
@@ -1473,7 +1580,11 @@ def admin_models():
         except Exception as e:
             log.warning("Failed to scan predict.log for rollbacks: %s", e)
 
-    return render_template("admin_models.html", rows=rows, rollback_lines=rollback_lines[-50:])
+    low_accuracy_stations = _low_accuracy_stations(state)
+    return render_template(
+        "admin_models.html", rows=rows, rollback_lines=rollback_lines[-50:],
+        low_accuracy_stations=low_accuracy_stations,
+    )
 
 
 @app.route("/admin/models/chart.png")
@@ -1496,6 +1607,25 @@ def admin_models_compare_chart():
 def admin_models_importance_chart():
     state = fog_model.load_model_state()
     importance = fog_model.compute_feature_importance(state)
+    png = _render_feature_importance_png(importance)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/models/confusion_matrix.png")
+@requires_admin
+def admin_models_confusion_matrix():
+    state = fog_model.load_model_state()
+    labels, matrix = fog_model.compute_confusion_matrix(state)
+    png = _render_confusion_matrix_png(labels, matrix)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/models/importance_low_accuracy_chart.png")
+@requires_admin
+def admin_models_importance_low_accuracy_chart():
+    state = fog_model.load_model_state()
+    only_stations = set(_low_accuracy_stations(state))
+    importance = fog_model.compute_feature_importance(state, only_stations=only_stations)
     png = _render_feature_importance_png(importance)
     return Response(png, mimetype="image/png")
 

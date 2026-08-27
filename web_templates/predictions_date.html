@@ -1,9 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ date }}の予測結果{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('predictions_dates') }}">予測結果</a></li>
+    <li>{{ date }}</li>
+</ul>
+{% endblock %}
 {% block content %}
 <div class="card">
     <h2>{{ date }} の予測結果</h2>
-    <p><a href="{{ url_for('predictions_dates') }}">&laquo; 日付一覧に戻る</a></p>
 
     {% if csv_file %}
     <p><a class="button" href="{{ url_for('predictions_file', date=date, filename=csv_file) }}">予測結果CSVをダウンロード</a></p>
@@ -11,7 +17,7 @@
 
     {% if summary_file %}
     <h3 style="font-size:0.95rem;">全地点サマリー</h3>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=summary_file) }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=summary_file) }}"></div>
     {% endif %}
 
     {% if stations %}
@@ -23,7 +29,7 @@
     </ul>
     {% for s in stations %}
     <h4 id="station-{{ loop.index }}" style="font-size:0.9rem; margin-top:1.4rem;">{{ s.name }}</h4>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=s.file) }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=s.file) }}"></div>
     {% endfor %}
     {% endif %}
 

@@ -6,29 +6,45 @@
 <div class="card">
     <h2>登録申請(未処理: {{ pending|length }}件)</h2>
     {% if pending %}
-    <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
-        <thead><tr><th>お名前</th><th>メールアドレス</th><th>申請日時</th><th></th></tr></thead>
-        <tbody>
-        {% for r in pending %}
-        <tr>
-            <td>{{ r.name }}</td>
-            <td>{{ r.email }}</td>
-            <td>{{ r.requested_at }}</td>
-            <td style="white-space:nowrap;">
-                <form method="post" action="{{ url_for('admin_accounts_approve', request_id=r.id) }}" style="display:inline;">
-                    <button type="submit" class="button">承認</button>
-                </form>
-                <form method="post" action="{{ url_for('admin_accounts_reject', request_id=r.id) }}" style="display:inline;"
-                      onsubmit="return confirm('この申請を拒否しますか？');">
-                    <button type="submit" class="button" style="background:#c0392b;">拒否</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
+    <form id="bulk-signup-form" method="post" action="{{ url_for('admin_accounts_requests_bulk') }}" data-ajax>
+        <p>
+            <button type="submit" name="bulk_action" value="approve" class="button">選択した申請を承認</button>
+            <button type="submit" name="bulk_action" value="reject" class="button" style="background:#c0392b;"
+                    onclick="return confirm('選択した申請を拒否しますか？');">選択した申請を拒否</button>
+        </p>
+        <div class="table-scroll">
+        <table class="obs-table" style="width:100%;">
+            <thead><tr>
+                <th><input type="checkbox" id="pending-select-all"></th>
+                <th>お名前</th><th>メールアドレス</th><th>申請日時</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for r in pending %}
+            <tr>
+                <td><input type="checkbox" name="request_ids" value="{{ r.id }}" class="pending-checkbox"></td>
+                <td>{{ r.name }}</td>
+                <td>{{ r.email }}</td>
+                <td>{{ r.requested_at }}</td>
+                <td style="white-space:nowrap;">
+                    <button type="submit" formaction="{{ url_for('admin_accounts_approve', request_id=r.id) }}" class="button" formnovalidate>承認</button>
+                    <button type="submit" formaction="{{ url_for('admin_accounts_reject', request_id=r.id) }}" class="button" style="background:#c0392b;" formnovalidate
+                            onclick="return confirm('この申請を拒否しますか？');">拒否</button>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </form>
+    <script>
+    (function() {
+        var selectAll = document.getElementById("pending-select-all");
+        if (!selectAll) { return; }
+        selectAll.addEventListener("change", function() {
+            document.querySelectorAll(".pending-checkbox").forEach(function(cb) { cb.checked = selectAll.checked; });
+        });
+    })();
+    </script>
     {% else %}
     <p class="muted">未処理の申請はありません。</p>
     {% endif %}
@@ -45,11 +61,15 @@
         <tr>
             <td><input type="text" name="name" form="edit-form-{{ a.id }}" value="{{ a.name }}" required style="width:100%; min-width:8em; padding:0.3rem;"></td>
             <td><input type="email" name="email" form="edit-form-{{ a.id }}" value="{{ a.email }}" required style="width:100%; min-width:14em; padding:0.3rem;"></td>
-            <td><input type="password" name="password" form="edit-form-{{ a.id }}" placeholder="変更する場合のみ入力" style="width:100%; min-width:10em; padding:0.3rem;"></td>
+            <td class="pw-strength-wrap">
+                <input type="password" name="password" form="edit-form-{{ a.id }}" placeholder="変更する場合のみ入力" class="js-pw-strength" style="width:100%; min-width:10em; padding:0.3rem;">
+                <div class="strength-meter"><div class="strength-meter-bar"></div></div>
+                <div class="strength-label"></div>
+            </td>
             <td><button type="submit" form="edit-form-{{ a.id }}" class="button">更新</button></td>
             <td>
-                <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;">
-                    <select name="role" onchange="this.form.submit()" style="padding:0.3rem;">
+                <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;" data-ajax>
+                    <select name="role" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:0.3rem;">
                         <option value="general" {{ "selected" if a.role == "general" }}>一般</option>
                         <option value="admin" {{ "selected" if a.role == "admin" }}>管理者</option>
                     </select>
@@ -68,7 +88,7 @@
     </table>
     </div>
     {% for a in accounts %}
-    <form id="edit-form-{{ a.id }}" method="post" action="{{ url_for('admin_accounts_edit', user_id=a.id) }}"></form>
+    <form id="edit-form-{{ a.id }}" method="post" action="{{ url_for('admin_accounts_edit', user_id=a.id) }}" data-ajax></form>
     {% endfor %}
 </div>
 {% endblock %}

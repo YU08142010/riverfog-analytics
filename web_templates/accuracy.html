@@ -4,7 +4,7 @@
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
-    <img class="full-graph" src="{{ url_for('accuracy_chart') }}">
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('accuracy_chart') }}"></div>
     <p class="muted">累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
         （{{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
     {% else %}

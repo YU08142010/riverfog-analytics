@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}{{ date }}の観測データ{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('observations_dates') }}">観測データ</a></li>
+    <li>{{ date }}</li>
+</ul>
+{% endblock %}
 {% block content %}
 <div class="card">
     <h2>{{ date }} の観測値推移</h2>
-    <p><a href="{{ url_for('observations_dates') }}">&laquo; 日付一覧に戻る</a>
-        ｜ <a class="button" href="{{ url_for('download_xlsx') }}">観測データ(Excel)をダウンロード</a></p>
-    <img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}">
+    <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ(Excel)をダウンロード</a></p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}"></div>
 </div>
 
 <div class="card">
