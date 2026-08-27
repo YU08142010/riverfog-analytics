@@ -88,6 +88,25 @@ def set_role(conn, user_id, role):
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
 
 
+def update_user(conn, user_id, name=None, email=None, password_hash=None):
+    """name/email/password_hashのうち指定されたものだけを更新する（Noneは変更しない）。"""
+    fields, values = [], []
+    if name is not None:
+        fields.append("name = ?")
+        values.append(name)
+    if email is not None:
+        fields.append("email = ?")
+        values.append(_norm_email(email))
+    if password_hash is not None:
+        fields.append("password_hash = ?")
+        values.append(password_hash)
+    if not fields:
+        return
+    values.append(user_id)
+    with conn:
+        conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
+
+
 def delete_user(conn, user_id):
     with conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
@@ -167,7 +186,7 @@ def reject_signup_request(conn, request_id):
 
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
-    "list_users", "set_role", "delete_user", "count_admins", "email_taken",
+    "list_users", "set_role", "update_user", "delete_user", "count_admins", "email_taken",
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
 ]

@@ -36,14 +36,17 @@
 
 <div class="card">
     <h2>登録済みアカウント</h2>
+    <p class="muted">お名前・メールアドレス・パスワードはその場で編集できます(パスワード欄は空欄のままなら変更されません)。</p>
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>お名前</th><th>メールアドレス</th><th>ロール</th><th>登録日時</th><th></th></tr></thead>
+        <thead><tr><th>お名前</th><th>メールアドレス</th><th>新しいパスワード</th><th></th><th>ロール</th><th>登録日時</th><th></th></tr></thead>
         <tbody>
         {% for a in accounts %}
         <tr>
-            <td>{{ a.name }}</td>
-            <td>{{ a.email }}</td>
+            <td><input type="text" name="name" form="edit-form-{{ a.id }}" value="{{ a.name }}" required style="width:100%; min-width:8em; padding:0.3rem;"></td>
+            <td><input type="email" name="email" form="edit-form-{{ a.id }}" value="{{ a.email }}" required style="width:100%; min-width:14em; padding:0.3rem;"></td>
+            <td><input type="password" name="password" form="edit-form-{{ a.id }}" placeholder="変更する場合のみ入力" style="width:100%; min-width:10em; padding:0.3rem;"></td>
+            <td><button type="submit" form="edit-form-{{ a.id }}" class="button">更新</button></td>
             <td>
                 <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;">
                     <select name="role" onchange="this.form.submit()" style="padding:0.3rem;">
@@ -64,5 +67,8 @@
         </tbody>
     </table>
     </div>
+    {% for a in accounts %}
+    <form id="edit-form-{{ a.id }}" method="post" action="{{ url_for('admin_accounts_edit', user_id=a.id) }}"></form>
+    {% endfor %}
 </div>
 {% endblock %}

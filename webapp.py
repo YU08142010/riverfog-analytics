@@ -1296,6 +1296,43 @@ def admin_accounts_role(user_id):
     return redirect(url_for("admin_accounts"))
 
 
+@app.route("/admin/accounts/<int:user_id>/edit", methods=["POST"])
+@requires_admin
+def admin_accounts_edit(user_id):
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip()
+    password = request.form.get("password", "")
+
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+
+        if not name or not email:
+            flash("お名前とメールアドレスは必須です。")
+            return redirect(url_for("admin_accounts"))
+        if "@" not in email:
+            flash("メールアドレスの形式が正しくありません。")
+            return redirect(url_for("admin_accounts"))
+        existing = users.get_user_by_email(conn, email)
+        if existing and existing["id"] != user_id:
+            flash("このメールアドレスは既に別のアカウントで使われています。")
+            return redirect(url_for("admin_accounts"))
+        if password and len(password) < MIN_PASSWORD_LENGTH:
+            flash(f"パスワードを変更する場合は{MIN_PASSWORD_LENGTH}文字以上にしてください。")
+            return redirect(url_for("admin_accounts"))
+
+        password_hash = users.generate_password_hash(password) if password else None
+        users.update_user(conn, user_id, name=name, email=email, password_hash=password_hash)
+        flash(f"{name}さんの情報を更新しました。")
+        if session.get("user_id") == user_id:
+            session["name"] = name
+    finally:
+        conn.close()
+    return redirect(url_for("admin_accounts"))
+
+
 @app.route("/admin/accounts/<int:user_id>/delete", methods=["POST"])
 @requires_admin
 def admin_accounts_delete(user_id):
