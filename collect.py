@@ -53,6 +53,12 @@ WEATHER_RETRY_DELAY_SEC = 2
 IMAGE_ARCHIVE_DIR = BASE_DIR / "data" / "images"
 IMAGE_RETENTION_DAYS = 7
 
+# cam.river.go.jp側の混雑等で取得自体に失敗した地点用のプレースホルダー（無地グレー画像）。
+# アーカイブに何も残さないと「その時刻だけ地点が丸ごと消える」ように見えてしまうため、
+# Geminiが無効画像と判定した場合(_unavailable)と同じ命名・扱いにして残す。
+FETCH_FAILED_PLACEHOLDER_SIZE = (320, 240)
+FETCH_FAILED_PLACEHOLDER_COLOR = (128, 128, 128)
+
 LOG_FILE = BASE_DIR / "logs" / "collect.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -159,22 +165,33 @@ def resize_image(raw_bytes):
     return buf.getvalue()
 
 
+def _fetch_failed_placeholder_bytes():
+    img = Image.new("RGB", FETCH_FAILED_PLACEHOLDER_SIZE, color=FETCH_FAILED_PLACEHOLDER_COLOR)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY)
+    return buf.getvalue()
+
+
 def save_images(cameras, images_by_name, invalid_stations, run_time):
     """取得画像を後日の検証・再分類用にアーカイブ保存する（縮小版、直近IMAGE_RETENTION_DAYS日分のみ保持）。
     date/HHMM/地点名.jpg という時刻ごとのフォルダに分けて保存する（1フォルダに全時刻の画像が
     混在すると見づらいため）。Geminiが「カメラ画像が取得できませんでした」等のプレースホルダーと
-    判定した地点はファイル名に _unavailable を付けて区別する。
+    判定した地点、およびカメラサイト側の混雑等で取得自体に失敗した地点は、ファイル名に
+    _unavailable を付けたグレーのプレースホルダー画像として保存する
+    （何も残さないと、その時刻だけ地点が丸ごと消えたように見えてしまうため）。
     """
     hour_dir = IMAGE_ARCHIVE_DIR / run_time.strftime("%Y-%m-%d") / run_time.strftime("%H%M")
     hour_dir.mkdir(parents=True, exist_ok=True)
     for name, _cam_id in cameras:
         raw_bytes = images_by_name.get(name)
         if not raw_bytes:
+            (hour_dir / f"{name}_unavailable.jpg").write_bytes(_fetch_failed_placeholder_bytes())
             continue
         try:
             resized = resize_image(raw_bytes)
         except Exception as e:
             log.warning("Image archive resize failed: %s: %s", name, e)
+            (hour_dir / f"{name}_unavailable.jpg").write_bytes(_fetch_failed_placeholder_bytes())
             continue
         suffix = "_unavailable" if name in invalid_stations else ""
         (hour_dir / f"{name}{suffix}.jpg").write_bytes(resized)
@@ -380,7 +397,7 @@ def classify_images(cameras, images_by_name):
             "Low-confidence classification: %d station(s), retrying with escalation model: %s",
             len(low_confidence), ", ".join(low_confidence),
         )
-        escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-3.5-pro")
+        escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-2.5-pro")
         sub_contents, sub_index_to_name = _build_contents(
             [(name, resized_by_name[name]) for name in low_confidence]
         )
