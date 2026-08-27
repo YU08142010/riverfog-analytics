@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}精度レポート{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+<div class="card">
+    <h2>地点別 予測精度レポート(的中率が低い順)</h2>
+    {% if overall and overall.n %}
+    <p class="muted">全体 {{ overall.correct }}/{{ overall.n }}件
+        （{{ "%.1f"|format(100.0 * overall.correct / overall.n) }}%）</p>
+    {% endif %}
+    {% if by_station %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>地点</th><th>的中率</th><th>件数</th></tr></thead>
+        <tbody>
+        {% for r in by_station %}
+        <tr>
+            <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
+            <td style="{{ 'color:#c0392b; font-weight:600;' if r.n and (r.correct / r.n) < 0.5 else '' }}">
+                {{ "%.1f"|format(100.0 * r.correct / r.n) + "%" if r.n else "データなし" }}
+            </td>
+            <td>{{ r.correct }}/{{ r.n }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">答え合わせ済みの予測がまだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

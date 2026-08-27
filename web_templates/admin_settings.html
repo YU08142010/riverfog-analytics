@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}設定{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+<div class="card">
+    <h2>設定の変更</h2>
+    <p class="muted">APIキー等の秘密情報はここでは編集できません(サーバー上の.envを直接編集してください)。</p>
+    <form method="post">
+        <p>
+            <label>使用するGeminiモデル<br>
+                <input type="text" name="GEMINI_MODEL" value="{{ values.GEMINI_MODEL }}" style="width:100%; max-width:400px; padding:0.5rem;">
+            </label>
+        </p>
+        <p>
+            <label>低confidence再判定用モデル<br>
+                <input type="text" name="GEMINI_ESCALATION_MODEL" value="{{ values.GEMINI_ESCALATION_MODEL }}" style="width:100%; max-width:400px; padding:0.5rem;">
+            </label>
+        </p>
+        <p>
+            <label>観測地点の緯度<br>
+                <input type="text" name="WEATHER_LAT" value="{{ values.WEATHER_LAT }}" style="width:100%; max-width:200px; padding:0.5rem;">
+            </label>
+        </p>
+        <p>
+            <label>観測地点の経度<br>
+                <input type="text" name="WEATHER_LON" value="{{ values.WEATHER_LON }}" style="width:100%; max-width:200px; padding:0.5rem;">
+            </label>
+        </p>
+        <button type="submit" class="button">保存</button>
+    </form>
+</div>
+{% endblock %}

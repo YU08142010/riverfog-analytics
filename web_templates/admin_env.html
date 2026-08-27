@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}環境変数{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+<div class="card">
+    <h2>環境変数(.env)の設定状況</h2>
+    <p class="muted">値そのものは表示しません。設定済みかどうかだけを確認できます。</p>
+    {% if env_status %}
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>変数名</th><th>状態</th></tr></thead>
+        <tbody>
+        {% for e in env_status %}
+        <tr>
+            <td>{{ e.key }}</td>
+            <td style="color: {{ '#1a7a3c' if e.is_set else '#c0392b' }}; font-weight:600;">
+                {{ "設定済み" if e.is_set else "未設定" }}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">.env.exampleが見つかりませんでした。</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>メンテナンス中 - 只見川霧観測</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main style="max-width:500px; margin:4rem auto; padding:0 1.5rem; text-align:center;">
+    <div class="card">
+        <h2 style="border:none; padding:0;">ただいまメンテナンス中です</h2>
+        <p>{{ message or "しばらくしてから再度アクセスしてください。" }}</p>
+    </div>
+</main>
+</body>
+</html>

@@ -147,3 +147,29 @@ def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
             })
     alerts.sort(key=lambda a: (a["target_datetime"], a["station"]))
     return alerts
+
+
+def db_stats(conn):
+    """predictions.dbの規模を把握するための統計（管理画面のディスク使用量表示用）。"""
+    total = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+    verified = conn.execute("SELECT COUNT(*) FROM predictions WHERE actual_code IS NOT NULL").fetchone()[0]
+    pending = total - verified
+    oldest = conn.execute("SELECT MIN(target_datetime) FROM predictions").fetchone()[0]
+    newest = conn.execute("SELECT MAX(target_datetime) FROM predictions").fetchone()[0]
+    return {
+        "total": total, "verified": verified, "pending": pending,
+        "oldest": oldest, "newest": newest,
+    }
+
+
+def delete_verified_before(conn, before_dt_str):
+    """target_datetimeがbefore_dt_strより前で、既に答え合わせ済みのレコードを削除する。
+    未検証(actual_code IS NULL)のレコードは、まだ答え合わせに使うため対象外。
+    戻り値: 削除した件数。
+    """
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM predictions WHERE actual_code IS NOT NULL AND target_datetime < ?",
+            (before_dt_str,),
+        )
+        return cur.rowcount

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}お知らせ/アンケート{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+
+<div class="card">
+    <h2>新規作成</h2>
+    <form method="post" action="{{ url_for('admin_announcements_new') }}" id="announcement-form">
+        <p>
+            <label>種類<br>
+                <select name="kind" id="announcement-kind" style="padding:0.5rem;">
+                    <option value="message">お知らせのみ(回答なし)</option>
+                    <option value="choice">選択式アンケート</option>
+                    <option value="text">自由記述アンケート</option>
+                </select>
+            </label>
+        </p>
+        <p>
+            <label>本文/質問文<br>
+                <textarea name="message" rows="2" required style="width:100%; max-width:500px; padding:0.5rem;"></textarea>
+            </label>
+        </p>
+        <p id="choices-field" hidden>
+            <label>選択肢(1行に1つ)<br>
+                <textarea name="choices" rows="4" style="width:100%; max-width:500px; padding:0.5rem;"></textarea>
+            </label>
+        </p>
+        <p>
+            <label>表示開始(空欄ですぐに表示)<br>
+                <input type="datetime-local" name="start_at_local" id="start_at_local" style="padding:0.5rem;">
+                <input type="hidden" name="start_at" id="start_at">
+            </label>
+        </p>
+        <p>
+            <label>表示終了(空欄で無期限)<br>
+                <input type="datetime-local" name="end_at_local" id="end_at_local" style="padding:0.5rem;">
+                <input type="hidden" name="end_at" id="end_at">
+            </label>
+        </p>
+        <button type="submit" class="button">作成</button>
+    </form>
+    <script>
+    (function() {
+        var kindSelect = document.getElementById("announcement-kind");
+        var choicesField = document.getElementById("choices-field");
+        kindSelect.addEventListener("change", function() {
+            choicesField.hidden = kindSelect.value !== "choice";
+        });
+        function wireDatetime(localId, hiddenId) {
+            var localInput = document.getElementById(localId);
+            var hiddenInput = document.getElementById(hiddenId);
+            document.getElementById("announcement-form").addEventListener("submit", function() {
+                hiddenInput.value = localInput.value ? localInput.value.replace("T", " ") + ":00" : "";
+            });
+        }
+        wireDatetime("start_at_local", "start_at");
+        wireDatetime("end_at_local", "end_at");
+    })();
+    </script>
+</div>
+
+<div class="card">
+    <h2>一覧</h2>
+    {% if items %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>種類</th><th>本文</th><th>期間</th><th>状態</th><th>回答数</th><th></th></tr></thead>
+        <tbody>
+        {% for item in items %}
+        <tr>
+            <td>{{ {"message": "お知らせ", "choice": "選択式", "text": "自由記述"}[item.kind] }}</td>
+            <td style="text-align:left; max-width:260px; white-space:normal;">{{ item.message }}</td>
+            <td style="white-space:normal;">{{ item.start_at or "(即時)" }} 〜 {{ item.end_at or "(無期限)" }}</td>
+            <td>{{ "有効" if item.active else "無効" }}</td>
+            <td>
+                {% if item.kind != "message" %}
+                <a href="{{ url_for('admin_announcements_results', announcement_id=item.id) }}">{{ item.response_count }}件</a>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td style="white-space:nowrap;">
+                <form method="post" action="{{ url_for('admin_announcements_toggle', announcement_id=item.id) }}" style="display:inline;">
+                    <button type="submit" class="button">{{ "無効化" if item.active else "有効化" }}</button>
+                </form>
+                <form method="post" action="{{ url_for('admin_announcements_delete', announcement_id=item.id) }}" style="display:inline;"
+                      onsubmit="return confirm('削除しますか？回答データも消えます。');">
+                    <button type="submit" class="button" style="background:#c0392b;">削除</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">まだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

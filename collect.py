@@ -396,6 +396,14 @@ def classify_images(cameras, images_by_name):
 
     result, invalid_stations, low_confidence = _parse_classifications(parsed, index_to_name)
 
+    confidence_counts = {"high": 0, "medium": 0, "low": 0}
+    for item in parsed:
+        confidence_counts[item.confidence] = confidence_counts.get(item.confidence, 0) + 1
+    log.info(
+        "Confidence distribution: high=%d, medium=%d, low=%d",
+        confidence_counts["high"], confidence_counts["medium"], confidence_counts["low"],
+    )
+
     if low_confidence:
         log.info(
             "Low-confidence classification: %d station(s), retrying with escalation model: %s",

@@ -2,6 +2,30 @@
 {% block title %}ダッシュボード{% endblock %}
 {% block content %}
 
+{% for ann in announcements_list %}
+<div class="card" style="border-left: 5px solid var(--color-primary); background: var(--color-primary-light);">
+    <h2>お知らせ</h2>
+    <p style="white-space:pre-wrap;">{{ ann.message }}</p>
+    {% if ann.already_responded %}
+    <p class="muted">回答済みです。ご協力ありがとうございました。</p>
+    {% elif ann.kind == "choice" %}
+    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+        {% for choice in ann.choices %}
+        <label style="display:block; margin:0.3rem 0;">
+            <input type="radio" name="choice_index" value="{{ loop.index0 }}" required> {{ choice }}
+        </label>
+        {% endfor %}
+        <button type="submit" class="button" style="margin-top:0.5rem;">回答する</button>
+    </form>
+    {% elif ann.kind == "text" %}
+    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+        <textarea name="answer_text" rows="2" required style="width:100%; max-width:500px; padding:0.5rem;"></textarea>
+        <br><button type="submit" class="button" style="margin-top:0.5rem;">送信する</button>
+    </form>
+    {% endif %}
+</div>
+{% endfor %}
+
 <div class="card">
     <h2>サイト内検索</h2>
     <p class="muted">地点名、または日付(例: 2026-08-27 / 20260827)を入力すると、関連ページへのリンクが表示されます。</p>

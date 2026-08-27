@@ -4,6 +4,40 @@
 {% include "admin_nav.html" %}
 
 <div class="card">
+    <h2>サーバーリソース</h2>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">CPU負荷(1分)</div>
+            <div class="stat-value">{{ "%.2f"|format(resources.load1) if resources.load1 is not none else "-" }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">CPU負荷(5分/15分)</div>
+            <div class="stat-value" style="font-size:1.1rem;">
+                {{ "%.2f"|format(resources.load5) if resources.load5 is not none else "-" }}
+                / {{ "%.2f"|format(resources.load15) if resources.load15 is not none else "-" }}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">メモリ使用率</div>
+            <div class="stat-value">{{ resources.mem_used_pct if resources.mem_used_pct is not none else "-" }}<span class="stat-unit">%</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">温度</div>
+            <div class="stat-value">{{ "%.1f"|format(resources.temp_c) if resources.temp_c is not none else "-" }}<span class="stat-unit">℃</span></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>webappサービス</h2>
+    <form method="post" action="{{ url_for('admin_restart') }}"
+          onsubmit="return confirm('webappサービスを再起動します。よろしいですか？');">
+        <button type="submit" class="button">webappを再起動</button>
+    </form>
+    <p class="muted">再起動中の数秒間、サイトに一時的にアクセスできなくなります。</p>
+</div>
+
+<div class="card">
     <h2>手動実行</h2>
     <p class="muted">通常はsystemdタイマー(収集、毎時4〜19時)・cron(予測、毎日19:30)が自動実行します。
         ここからは動作確認等のために任意のタイミングで実行できます。</p>
@@ -34,6 +68,19 @@
                 {% endif %}
             </td>
             <td><a href="{{ url_for('admin_log', key='predict') }}">ログを見る</a></td>
+        </tr>
+        <tr>
+            <td>気象データ後埋め(backfill_weather.py)</td>
+            <td>
+                {% if running.backfill_weather %}
+                <span class="muted">実行中...</span>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_run', key='backfill_weather') }}" style="display:inline;">
+                    <button type="submit" class="button">今すぐ実行</button>
+                </form>
+                {% endif %}
+            </td>
+            <td><a href="{{ url_for('admin_log', key='backfill_weather') }}">ログを見る</a></td>
         </tr>
         </tbody>
     </table>

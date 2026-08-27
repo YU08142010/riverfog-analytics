@@ -5,6 +5,7 @@ LAN/Tailscale内からのみアクセスされる想定で、認証は行わな�
 """
 import csv
 import io
+import json
 import logging
 import logging.handlers
 import os
@@ -13,9 +14,12 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import tempfile
+import uuid
 import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import (
@@ -30,6 +34,7 @@ import matplotlib.dates as mdates
 from matplotlib import font_manager
 
 from common import BASE_DIR, DATA_XLSX, JST
+import announcements
 import fog_data
 import fog_model
 import prediction_log
@@ -68,7 +73,11 @@ LOG_ISSUE_MAX_TOTAL = 300
 
 VENV_PYTHON = BASE_DIR / ".venv" / "bin" / "python"
 # キー: 管理画面の「今すぐ実行」ボタンから起動できるバッチスクリプト。
-RUNNABLE_SCRIPTS = {"collect": "collect.py", "predict": "predict.py"}
+RUNNABLE_SCRIPTS = {
+    "collect": "collect.py",
+    "predict": "predict.py",
+    "backfill_weather": "backfill_weather.py",
+}
 
 SYSTEMD_UNITS = ["river-fog-collect.timer", "river-fog-collect.service", "river-fog-web.service"]
 DISK_USAGE_PARTS = [
@@ -78,6 +87,24 @@ DISK_USAGE_PARTS = [
     ("観測データ (只見川.xlsx)", DATA_XLSX),
     ("モデル (models/)", BASE_DIR / "data" / "models"),
 ]
+BACKUP_ZIP_ROOT = BASE_DIR / "data"
+
+# 検証済み(答え合わせ済み)の予測レコードのうち、これより古いものは管理画面から削除できる。
+DB_CLEANUP_DEFAULT_DAYS = 180
+
+ENV_PATH = BASE_DIR / ".env"
+ENV_EXAMPLE_PATH = BASE_DIR / ".env.example"
+# 管理画面から直接編集してよい設定（APIキー・パスワード類は対象外。SSH側の.envで管理する）。
+EDITABLE_ENV_KEYS = ["GEMINI_MODEL", "GEMINI_ESCALATION_MODEL", "WEATHER_LAT", "WEATHER_LON"]
+
+MAINTENANCE_FLAG_PATH = BASE_DIR / "data" / ".maintenance.json"
+
+ANNOUNCEMENTS_DB_PATH = BASE_DIR / "data" / "announcements.db"
+VISITOR_COOKIE_NAME = "visitor_id"
+VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2年
+
+CAMERA_HEALTH_DAYS = 7
+GEMINI_LOG_DAYS = 14
 
 LOG_FILE = BASE_DIR / "logs" / "webapp.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -107,6 +134,20 @@ try:
     STATION_NAMES = fog_data.load_station_names()
 except Exception:
     STATION_NAMES = []
+
+# メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
+# （でないと自分でオンにしたら誰もオフに戻せなくなる）。
+MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static")
+
+
+@app.before_request
+def _check_maintenance():
+    if request.path.startswith(MAINTENANCE_EXEMPT_PREFIXES):
+        return None
+    state = _maintenance_state()
+    if not state["enabled"]:
+        return None
+    return render_template("maintenance.html", message=state["message"]), 503
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HHMM_RE = re.compile(r"^\d{4}$")
@@ -561,6 +602,220 @@ def _human_size(n):
     return f"{n:.1f}TB"
 
 
+def _read_server_resources():
+    """CPU負荷・メモリ・温度をベストエフォートで読む。取得できない項目はNoneのまま返す。"""
+    info = {"load1": None, "load5": None, "load15": None,
+            "mem_used_pct": None, "mem_total": None, "mem_available": None,
+            "temp_c": None}
+    try:
+        with open("/proc/loadavg", encoding="utf-8") as f:
+            parts = f.read().split()
+        info["load1"], info["load5"], info["load15"] = float(parts[0]), float(parts[1]), float(parts[2])
+    except Exception as e:
+        log.warning("Failed to read /proc/loadavg: %s", e)
+
+    try:
+        meminfo = {}
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                meminfo[key.strip()] = int(rest.strip().split()[0])  # kB
+        total_kb = meminfo.get("MemTotal")
+        avail_kb = meminfo.get("MemAvailable")
+        if total_kb:
+            info["mem_total"] = total_kb * 1024
+            if avail_kb is not None:
+                info["mem_available"] = avail_kb * 1024
+                info["mem_used_pct"] = round(100.0 * (total_kb - avail_kb) / total_kb, 1)
+    except Exception as e:
+        log.warning("Failed to read /proc/meminfo: %s", e)
+
+    try:
+        thermal_root = Path("/sys/class/thermal")
+        best = None
+        if thermal_root.is_dir():
+            for zone in thermal_root.glob("thermal_zone*/temp"):
+                try:
+                    milli = int(zone.read_text().strip())
+                    celsius = milli / 1000.0
+                    if best is None or celsius > best:
+                        best = celsius
+                except Exception:
+                    continue
+        info["temp_c"] = best
+    except Exception as e:
+        log.warning("Failed to read thermal zone temperature: %s", e)
+
+    return info
+
+
+def _maintenance_state():
+    """メンテナンスモードの状態(enabled, message)を読む。無ければ無効扱い。"""
+    if not MAINTENANCE_FLAG_PATH.exists():
+        return {"enabled": False, "message": ""}
+    try:
+        data = json.loads(MAINTENANCE_FLAG_PATH.read_text(encoding="utf-8"))
+        return {"enabled": bool(data.get("enabled")), "message": data.get("message", "")}
+    except Exception as e:
+        log.warning("Failed to read maintenance flag: %s", e)
+        return {"enabled": False, "message": ""}
+
+
+def _set_maintenance_state(enabled, message):
+    MAINTENANCE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MAINTENANCE_FLAG_PATH.write_text(
+        json.dumps({"enabled": bool(enabled), "message": message}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _env_status():
+    """.env.exampleに列挙されている設定項目それぞれが、実際に(値を見ずに)設定済みかを返す。"""
+    if not ENV_EXAMPLE_PATH.exists():
+        return []
+    keys = []
+    for line in ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        keys.append(key)
+    return [{"key": k, "is_set": bool(os.environ.get(k))} for k in keys]
+
+
+def _read_env_file_lines():
+    if not ENV_PATH.exists():
+        return []
+    return ENV_PATH.read_text(encoding="utf-8").splitlines()
+
+
+def _read_editable_env_values():
+    lines = _read_env_file_lines()
+    values = {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, val = stripped.partition("=")
+        values[key.strip()] = val
+    return {k: values.get(k, "") for k in EDITABLE_ENV_KEYS}
+
+
+def _write_editable_env_values(updates):
+    """updates: {key: value}。EDITABLE_ENV_KEYSに含まれるものだけを.envに書き戻す。
+    既存の行は値だけ置き換え、無ければ末尾に追記する。他の行(APIキー等)には触れない。
+    """
+    updates = {k: v for k, v in updates.items() if k in EDITABLE_ENV_KEYS}
+    lines = _read_env_file_lines()
+    seen = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}")
+                seen.add(key)
+                continue
+        new_lines.append(line)
+    for key, val in updates.items():
+        if key not in seen:
+            new_lines.append(f"{key}={val}")
+    ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+def _camera_uptime_stats(days=CAMERA_HEALTH_DAYS):
+    """直近days日間、各地点で「使える写真」が撮れた割合を計算する
+    (_unavailableでない.jpgがある = 成功、フォルダはあるがファイルが無い/_unavailable = 失敗)。
+    """
+    date_dirs = _sorted_subdirs(IMAGE_DIR)[:days]
+    ok_counts = {name: 0 for name in STATION_NAMES}
+    total_counts = {name: 0 for name in STATION_NAMES}
+    for date in date_dirs:
+        for hhmm in _sorted_subdirs(IMAGE_DIR / date):
+            hour_dir = IMAGE_DIR / date / hhmm
+            for name in STATION_NAMES:
+                ok_path = hour_dir / f"{name}.jpg"
+                bad_path = hour_dir / f"{name}_unavailable.jpg"
+                if ok_path.exists():
+                    ok_counts[name] += 1
+                    total_counts[name] += 1
+                elif bad_path.exists():
+                    total_counts[name] += 1
+    rows = []
+    for name in STATION_NAMES:
+        total = total_counts[name]
+        rate = (100.0 * ok_counts[name] / total) if total else None
+        rows.append({"station": name, "ok": ok_counts[name], "total": total, "rate": rate})
+    rows.sort(key=lambda r: (r["rate"] is None, r["rate"]))
+    return rows
+
+
+_GEMINI_LINE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+_GEMINI_FALLBACK_RE = re.compile(r"fell back to sub key")
+_GEMINI_QUOTA_RE = re.compile(r"RESOURCE_EXHAUSTED|429")
+_GEMINI_CONFIDENCE_RE = re.compile(r"Confidence distribution: high=(\d+), medium=(\d+), low=(\d+)")
+
+
+def _gemini_log_stats(days=GEMINI_LOG_DAYS):
+    """collect.logからGeminiまわりの状況(APIキーのフォールバック回数・クォータ超過回数・
+    confidence分布)を日付ごとに集計する。"""
+    path = ALLOWED_LOGS.get("collect")
+    by_date = {}
+    if not path or not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = _GEMINI_LINE_DATE_RE.match(line)
+                if not m:
+                    continue
+                date = m.group(1)
+                entry = by_date.setdefault(date, {
+                    "fallback": 0, "quota_error": 0, "high": 0, "medium": 0, "low": 0,
+                })
+                if _GEMINI_FALLBACK_RE.search(line):
+                    entry["fallback"] += 1
+                if _GEMINI_QUOTA_RE.search(line):
+                    entry["quota_error"] += 1
+                cm = _GEMINI_CONFIDENCE_RE.search(line)
+                if cm:
+                    entry["high"] += int(cm.group(1))
+                    entry["medium"] += int(cm.group(2))
+                    entry["low"] += int(cm.group(3))
+    except Exception as e:
+        log.warning("Failed to scan collect.log for Gemini stats: %s", e)
+        return []
+
+    dates = sorted(by_date.keys())[-days:]
+    return [{"date": d, **by_date[d]} for d in dates]
+
+
+def _get_visitor_id():
+    """アンケートの二重回答防止用に、ブラウザごとのIDをCookieで管理する。"""
+    vid = request.cookies.get(VISITOR_COOKIE_NAME)
+    if vid:
+        return vid, False
+    return str(uuid.uuid4()), True
+
+
+def _announcements_conn():
+    return announcements.connect(ANNOUNCEMENTS_DB_PATH)
+
+
+def _active_announcements_safe():
+    try:
+        conn = _announcements_conn()
+        try:
+            now_str = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+            return announcements.get_active_announcements(conn, now_str)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to load active announcements: %s", e)
+        return []
+
+
 def _accuracy_summary_safe():
     """予測精度サマリーを読み取り専用で取得する。DBが無い/読めない場合はNoneを返す。"""
     if not DB_PATH.exists():
@@ -624,6 +879,22 @@ def dashboard():
         pred_dir = PRED_DIR / latest_pred_date
         summary_file = next((p.name for p in pred_dir.iterdir() if SUMMARY_RE.match(p.name)), None)
 
+    active_announcements = _active_announcements_safe()
+    existing_visitor_id = request.cookies.get(VISITOR_COOKIE_NAME)
+    if active_announcements:
+        conn = None
+        if existing_visitor_id:
+            try:
+                conn = _announcements_conn()
+            except Exception as e:
+                log.warning("Failed to open announcements db: %s", e)
+        for ann in active_announcements:
+            ann["already_responded"] = bool(
+                conn and announcements.has_responded(conn, ann["id"], existing_visitor_id)
+            )
+        if conn:
+            conn.close()
+
     return render_template(
         "dashboard.html",
         observations=_latest_observations(),
@@ -635,6 +906,7 @@ def dashboard():
         latest_pred_date=latest_pred_date,
         summary_file=summary_file,
         station_names=STATION_NAMES,
+        announcements_list=active_announcements,
     )
 
 
@@ -948,6 +1220,7 @@ def admin_status():
     return render_template(
         "admin_status.html", units=units, timer_info=timer_info,
         crontab=_crontab_safe(), running=running,
+        resources=_read_server_resources(),
     )
 
 
@@ -962,6 +1235,24 @@ def admin_run(key):
     else:
         _run_script_async(script)
         flash(f"{script} の実行を開始しました。数分後にログを確認してください。")
+    return redirect(url_for("admin_status"))
+
+
+@app.route("/admin/restart", methods=["POST"])
+@requires_admin
+def admin_restart():
+    """webappサービス自体の再起動。今応答しているプロセスがまさに落ちるため、応答を
+    返し切ってから少し遅れて再起動するようにする（sudoers側でこのコマンド1つだけ
+    パスワード無しの実行を許可している）。"""
+    try:
+        subprocess.Popen(
+            ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
+            start_new_session=True,
+        )
+        flash("webappサービスを再起動します(数秒後にページを再読み込みしてください)。")
+    except Exception as e:
+        log.exception("Failed to trigger webapp restart")
+        flash(f"再起動の開始に失敗しました: {e}")
     return redirect(url_for("admin_status"))
 
 
@@ -1033,6 +1324,235 @@ def admin_disk():
         "used_pct": round(100.0 * used / total, 1) if total else 0,
     }
     return render_template("admin_disk.html", rows=rows, disk=disk)
+
+
+@app.route("/admin/backup.zip")
+@requires_admin
+def admin_backup():
+    """data/一式をZIPにまとめてダウンロードする（現状バックアップが無いことの補い）。
+    容量が大きくなりうるため、メモリ上ではなく一時ファイルに書き出してから送る。
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+    tmp_path = tmp.name
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in BACKUP_ZIP_ROOT.rglob("*"):
+                if f.is_file():
+                    zf.write(f, arcname=str(f.relative_to(BACKUP_ZIP_ROOT)))
+        stamp = datetime.now(JST).strftime("%Y%m%d_%H%M")
+        response = send_file(
+            tmp_path, mimetype="application/zip", as_attachment=True,
+            download_name=f"river-fog-backup_{stamp}.zip",
+        )
+        response.call_on_close(lambda: os.path.exists(tmp_path) and os.remove(tmp_path))
+        return response
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
+@app.route("/admin/db")
+@requires_admin
+def admin_db():
+    stats = None
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            try:
+                stats = prediction_log.db_stats(conn)
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("Failed to read predictions.db stats: %s", e)
+    return render_template("admin_db.html", stats=stats, default_days=DB_CLEANUP_DEFAULT_DAYS)
+
+
+@app.route("/admin/db/cleanup", methods=["POST"])
+@requires_admin
+def admin_db_cleanup():
+    try:
+        days = int(request.form.get("days", DB_CLEANUP_DEFAULT_DAYS))
+    except ValueError:
+        days = DB_CLEANUP_DEFAULT_DAYS
+    days = max(1, days)
+    before_dt = (datetime.now(JST).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            deleted = prediction_log.delete_verified_before(conn, before_dt)
+        finally:
+            conn.close()
+        flash(f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。")
+    except Exception as e:
+        log.exception("DB cleanup failed")
+        flash(f"クリーンアップに失敗しました: {e}")
+    return redirect(url_for("admin_db"))
+
+
+@app.route("/admin/camera_health")
+@requires_admin
+def admin_camera_health():
+    rows = _camera_uptime_stats()
+    return render_template("admin_camera_health.html", rows=rows, days=CAMERA_HEALTH_DAYS)
+
+
+@app.route("/admin/env")
+@requires_admin
+def admin_env():
+    return render_template("admin_env.html", env_status=_env_status())
+
+
+@app.route("/admin/settings", methods=["GET", "POST"])
+@requires_admin
+def admin_settings():
+    if request.method == "POST":
+        updates = {key: request.form.get(key, "").strip() for key in EDITABLE_ENV_KEYS}
+        try:
+            _write_editable_env_values(updates)
+            flash("設定を保存しました。次回のcollect.py/predict.py実行から反映されます。")
+        except Exception as e:
+            log.exception("Failed to write .env")
+            flash(f"設定の保存に失敗しました: {e}")
+        return redirect(url_for("admin_settings"))
+    return render_template("admin_settings.html", values=_read_editable_env_values())
+
+
+@app.route("/admin/accuracy_report")
+@requires_admin
+def admin_accuracy_report():
+    summary = _accuracy_summary_safe()
+    by_station = []
+    if summary:
+        by_station = sorted(
+            summary["by_station"],
+            key=lambda r: (r["n"] == 0, r["correct"] / r["n"] if r["n"] else 1.0),
+        )
+    return render_template("admin_accuracy_report.html", by_station=by_station, overall=summary["overall"] if summary else None)
+
+
+@app.route("/admin/gemini")
+@requires_admin
+def admin_gemini():
+    return render_template("admin_gemini.html", rows=_gemini_log_stats())
+
+
+@app.route("/admin/maintenance", methods=["GET", "POST"])
+@requires_admin
+def admin_maintenance():
+    if request.method == "POST":
+        enabled = request.form.get("enabled") == "on"
+        message = request.form.get("message", "").strip()
+        _set_maintenance_state(enabled, message)
+        flash("メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。")
+        return redirect(url_for("admin_maintenance"))
+    return render_template("admin_maintenance.html", state=_maintenance_state())
+
+
+@app.route("/admin/announcements")
+@requires_admin
+def admin_announcements():
+    conn = _announcements_conn()
+    try:
+        items = announcements.list_announcements(conn)
+        for item in items:
+            item["response_count"] = announcements.response_count(conn, item["id"])
+    finally:
+        conn.close()
+    return render_template("admin_announcements.html", items=items)
+
+
+@app.route("/admin/announcements/new", methods=["POST"])
+@requires_admin
+def admin_announcements_new():
+    kind = request.form.get("kind", "message")
+    message = request.form.get("message", "").strip()
+    start_at = request.form.get("start_at", "").strip() or None
+    end_at = request.form.get("end_at", "").strip() or None
+    choices = None
+    if kind == "choice":
+        choices = [c.strip() for c in request.form.get("choices", "").splitlines() if c.strip()]
+        if len(choices) < 2:
+            flash("選択式アンケートには選択肢を2つ以上入力してください。")
+            return redirect(url_for("admin_announcements"))
+    if not message:
+        flash("本文/質問文を入力してください。")
+        return redirect(url_for("admin_announcements"))
+
+    created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _announcements_conn()
+    try:
+        announcements.create_announcement(conn, kind, message, choices, start_at, end_at, created_at)
+    finally:
+        conn.close()
+    flash("お知らせ/アンケートを作成しました。")
+    return redirect(url_for("admin_announcements"))
+
+
+@app.route("/admin/announcements/<int:announcement_id>/toggle", methods=["POST"])
+@requires_admin
+def admin_announcements_toggle(announcement_id):
+    conn = _announcements_conn()
+    try:
+        ann = announcements.get_announcement(conn, announcement_id)
+        if ann is None:
+            abort(404)
+        announcements.set_active(conn, announcement_id, not ann["active"])
+    finally:
+        conn.close()
+    return redirect(url_for("admin_announcements"))
+
+
+@app.route("/admin/announcements/<int:announcement_id>/delete", methods=["POST"])
+@requires_admin
+def admin_announcements_delete(announcement_id):
+    conn = _announcements_conn()
+    try:
+        announcements.delete_announcement(conn, announcement_id)
+    finally:
+        conn.close()
+    flash("削除しました。")
+    return redirect(url_for("admin_announcements"))
+
+
+@app.route("/admin/announcements/<int:announcement_id>/results")
+@requires_admin
+def admin_announcements_results(announcement_id):
+    conn = _announcements_conn()
+    try:
+        ann = announcements.get_announcement(conn, announcement_id)
+        if ann is None:
+            abort(404)
+        summary = announcements.response_summary(conn, announcement_id)
+    finally:
+        conn.close()
+    return render_template("admin_announcement_results.html", ann=ann, summary=summary)
+
+
+@app.route("/announcements/<int:announcement_id>/respond", methods=["POST"])
+def respond_announcement(announcement_id):
+    conn = _announcements_conn()
+    try:
+        ann = announcements.get_announcement(conn, announcement_id)
+        if ann is None or not ann["active"]:
+            abort(404)
+        visitor_id, is_new = _get_visitor_id()
+        choice_index = request.form.get("choice_index")
+        answer_text = request.form.get("answer_text", "").strip() or None
+        submitted_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        announcements.record_response(
+            conn, announcement_id, visitor_id,
+            int(choice_index) if choice_index not in (None, "") else None,
+            answer_text, submitted_at,
+        )
+    finally:
+        conn.close()
+    flash("回答ありがとうございました。")
+    response = redirect(request.referrer or url_for("dashboard"))
+    if is_new:
+        response.set_cookie(VISITOR_COOKIE_NAME, visitor_id, max_age=VISITOR_COOKIE_MAX_AGE)
+    return response
 
 
 if __name__ == "__main__":

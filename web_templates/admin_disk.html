@@ -22,4 +22,15 @@
         </tbody>
     </table>
 </div>
+
+<div class="card">
+    <h2>バックアップ</h2>
+    <p class="muted">元データはこのサーバー1台にのみ存在します。定期的にダウンロードして保管することをおすすめします。</p>
+    <p><a class="button" href="{{ url_for('admin_backup') }}">data/一式をZIPでダウンロード</a></p>
+</div>
+
+<div class="card">
+    <h2>予測DBの管理</h2>
+    <p><a class="button" href="{{ url_for('admin_db') }}">DB管理ページへ</a></p>
+</div>
 {% endblock %}

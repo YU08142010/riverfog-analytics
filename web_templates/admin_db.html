@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}DB管理{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+<div class="card">
+    <h2>predictions.dbの状況</h2>
+    {% if stats %}
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">全レコード数</div>
+            <div class="stat-value">{{ stats.total }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">答え合わせ済み</div>
+            <div class="stat-value">{{ stats.verified }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">未検証</div>
+            <div class="stat-value">{{ stats.pending }}</div>
+        </div>
+    </div>
+    <p class="muted" style="margin-top:0.8rem;">対象期間: {{ stats.oldest or "-" }} 〜 {{ stats.newest or "-" }}</p>
+    {% else %}
+    <p class="muted">DBがまだ存在しないか、読み込めませんでした。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>古いレコードのクリーンアップ</h2>
+    <p class="muted">答え合わせ済み(actual_codeが確定済み)のレコードのうち、指定日数より古いものだけを削除します。未検証のレコードは削除されません。</p>
+    <form method="post" action="{{ url_for('admin_db_cleanup') }}"
+          onsubmit="return confirm('本当に削除しますか？この操作は取り消せません。');">
+        <label>これより古い(日数): <input type="number" name="days" value="{{ default_days }}" min="1" style="width:6rem; padding:0.4rem;"></label>
+        <button type="submit" class="button">削除を実行</button>
+    </form>
+</div>
+{% endblock %}

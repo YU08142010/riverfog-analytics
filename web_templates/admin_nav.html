@@ -3,6 +3,14 @@
     <a class="button" href="{{ url_for('admin_errors') }}">エラー/警告</a>
     <a class="button" href="{{ url_for('admin_status') }}">サービス状態</a>
     <a class="button" href="{{ url_for('admin_models') }}">モデル状況</a>
+    <a class="button" href="{{ url_for('admin_camera_health') }}">カメラ稼働率</a>
+    <a class="button" href="{{ url_for('admin_gemini') }}">Gemini状況</a>
+    <a class="button" href="{{ url_for('admin_accuracy_report') }}">精度レポート</a>
     <a class="button" href="{{ url_for('admin_disk') }}">ディスク使用量</a>
+    <a class="button" href="{{ url_for('admin_db') }}">DB管理</a>
+    <a class="button" href="{{ url_for('admin_env') }}">環境変数</a>
+    <a class="button" href="{{ url_for('admin_settings') }}">設定</a>
+    <a class="button" href="{{ url_for('admin_maintenance') }}">メンテナンス</a>
+    <a class="button" href="{{ url_for('admin_announcements') }}">お知らせ/アンケート</a>
     <a href="{{ url_for('admin_logout') }}" style="margin-left:0.6rem;">ログアウト</a>
 </p>
