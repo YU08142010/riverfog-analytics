@@ -10,11 +10,28 @@
 </div>
 
 <div class="card">
+    <h2>モデル方式ごとの性能比較</h2>
+    <p class="muted">RandomForest単体・XGBoost単体・実際に採用しているhybridの霧F1を、全地点で平均して比較します。</p>
+    <img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}">
+</div>
+
+<div class="card">
+    <h2>特徴量の重要度</h2>
+    <p class="muted">どの気象要素が霧予測に効いているか(RandomForest/XGBoostのfeature_importances_をhybridの混合比で加重平均)。</p>
+    <img class="full-graph" src="{{ url_for('admin_models_importance_chart') }}">
+</div>
+
+<div class="card">
     <h2>地点ごとのモデル状況(最新)</h2>
     {% if rows %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>地点</th><th>種類</th><th>プーリング</th><th>n</th><th>accuracy</th><th>霧F1</th><th>学習日時</th></tr></thead>
+        <thead><tr>
+            <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
+            <th>accuracy</th><th>霧F1(hybrid)</th>
+            <th>霧F1(RF単体)</th><th>霧F1(XGB単体)</th>
+            <th>学習日時</th>
+        </tr></thead>
         <tbody>
         {% for r in rows %}
         <tr>
@@ -24,6 +41,8 @@
             <td>{{ r.n if r.n is not none else "-" }}</td>
             <td>{{ "%.3f"|format(r.accuracy) if r.accuracy is not none else "-" }}</td>
             <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none and r.fog_f1 == r.fog_f1 else "n/a" }}</td>
+            <td>{{ "%.3f"|format(r.rf_only.fog_f1) if r.rf_only and r.rf_only.fog_f1 is not none else "n/a" }}</td>
+            <td>{{ "%.3f"|format(r.xgb_only.fog_f1) if r.xgb_only and r.xgb_only.fog_f1 is not none else "n/a" }}</td>
             <td>{{ r.trained_at or "-" }}</td>
         </tr>
         {% endfor %}

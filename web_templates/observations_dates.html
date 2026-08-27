@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card">
     <h2>観測データ(日付一覧)</h2>
-    <p class="muted">元データ全体は共有フォルダの「只見川.xlsx」からも参照できます。</p>
+    <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ全体(Excel)をダウンロード</a></p>
     {% if dates %}
     <ul class="date-list">
         {% for d in dates %}

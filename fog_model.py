@@ -202,6 +202,56 @@ def compute_fog_probability(pipe, X):
     return proba[:, fog_idx].sum(axis=1)
 
 
+def compute_feature_importance(state):
+    """学習済みモデル一式(model_state.joblibをload_model_stateしたもの)から、
+    特徴量ごとの重要度を計算する。RandomForest/XGBoostのfeature_importances_を
+    hybridの混合比(blend_weight)で重み付けし、複数地点で同一のpipeを共有している
+    場合（プーリングモデル）は1回だけ数える。
+    戻り値: [(特徴量名, 重要度), ...] 重要度の降順。計算できなければ空リスト。
+    """
+    seen_ids = set()
+    totals, counts = {}, {}
+    for info in state.values():
+        pipe = info.get("pipe")
+        if pipe is None or id(pipe) in seen_ids:
+            continue
+        seen_ids.add(id(pipe))
+
+        features = list(info.get("features", []))
+        if info.get("pooled") and "station_fog_rate" in info:
+            features = features + [STATION_FOG_RATE_FEATURE]
+
+        rf_imp = xgb_imp = None
+        try:
+            if pipe.rf is not None:
+                rf_imp = pipe.rf.named_steps["model"].feature_importances_
+        except Exception:
+            rf_imp = None
+        try:
+            if pipe.xgb is not None:
+                xgb_imp = pipe.xgb.named_steps["model"].model_.feature_importances_
+        except Exception:
+            xgb_imp = None
+
+        if rf_imp is not None and xgb_imp is not None \
+                and len(rf_imp) == len(features) and len(xgb_imp) == len(features):
+            importances = pipe.weight * rf_imp + (1.0 - pipe.weight) * xgb_imp
+        elif rf_imp is not None and len(rf_imp) == len(features):
+            importances = rf_imp
+        elif xgb_imp is not None and len(xgb_imp) == len(features):
+            importances = xgb_imp
+        else:
+            continue
+
+        for name, val in zip(features, importances):
+            totals[name] = totals.get(name, 0.0) + float(val)
+            counts[name] = counts.get(name, 0) + 1
+
+    result = [(name, totals[name] / counts[name]) for name in totals]
+    result.sort(key=lambda x: x[1], reverse=True)
+    return result
+
+
 def _fog_class_f1(y_true, y_pred):
     fog_labels = [c for c in sorted(SUMMARY_FOG_CODES) if c in set(pd.Series(y_true).unique())]
     if not fog_labels:
@@ -214,6 +264,23 @@ def _blend_score(y_true, y_pred):
     if np.isnan(score):
         score = f1_score(y_true, y_pred, average="macro", zero_division=0)
     return score
+
+
+def _single_component_metrics(component_pipe, is_rf, X_test, y_test):
+    """RandomForest単体・XGBoost単体それぞれで予測した場合のaccuracy・霧F1を返す
+    （採用しているhybridとの性能比較を管理画面で見せるための診断用。モデル選択自体には
+    使わない）。コンポーネントが学習されていない場合はNoneを返す。
+    """
+    if component_pipe is None or len(X_test) == 0:
+        return None
+    solo = HybridFogClassifier(component_pipe, None, weight=1.0) if is_rf \
+        else HybridFogClassifier(None, component_pipe, weight=0.0)
+    y_pred = solo.predict(X_test)
+    fog_f1 = _fog_class_f1(y_test, y_pred)
+    return {
+        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "fog_f1": None if np.isnan(fog_f1) else float(fog_f1),
+    }
 
 
 FOG_F1_SCORER = make_scorer(_blend_score)
@@ -375,6 +442,8 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
         fog_f1 = _fog_class_f1(y_test, y_pred)
+        rf_only = _single_component_metrics(rf_pipe, True, X_test, y_test)
+        xgb_only = _single_component_metrics(xgb_pipe, False, X_test, y_test)
         log.info(
             "%s: n=%d, model=%s, accuracy=%.3f, f1=%.3f, fog_f1=%s, threshold=%.0f%%, tuned=%s",
             col, len(sub), pipe.model_type,
@@ -386,6 +455,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "model_type": pipe.model_type, "blend_weight": pipe.weight,
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
+            "rf_only": rf_only, "xgb_only": xgb_only,
         }
 
     n_individual = len(models)
@@ -457,7 +527,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
         return
 
     log.info("Training pooled model to rescue %d location(s) (%d total rows)", len(skipped_cols), len(pooled))
-    pooled_pipe, pooled_tuned, pooled_threshold, *_ = _fit_and_select(kind, Xp_train, yp_train)
+    pooled_pipe, pooled_tuned, pooled_threshold, pooled_rf, pooled_xgb = _fit_and_select(kind, Xp_train, yp_train)
 
     rescued = 0
     for col in skipped_cols:
@@ -475,12 +545,15 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
         acc2 = accuracy_score(y_test2, y_pred2)
         f12 = f1_score(y_test2, y_pred2, average="weighted", zero_division=0)
         fog_f12 = _fog_class_f1(y_test2, y_pred2)
+        rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
+        xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2)
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
             "model_type": f"pooled({pooled_pipe.model_type})", "blend_weight": pooled_pipe.weight,
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
+            "rf_only": rf_only2, "xgb_only": xgb_only2,
         }
         rescued += 1
     log.info("Pooled model rescued %d/%d location(s)", rescued, len(skipped_cols))

@@ -2,6 +2,56 @@
 {% block title %}ダッシュボード{% endblock %}
 {% block content %}
 
+<div class="card">
+    <h2>サイト内検索</h2>
+    <p class="muted">地点名、または日付(例: 2026-08-27 / 20260827)を入力すると、関連ページへのリンクが表示されます。</p>
+    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名または日付で検索...">
+    <div id="global-search-results" style="margin-top:0.7rem; display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
+</div>
+<script>
+(function() {
+    var stationNames = {{ station_names|tojson }};
+    var input = document.getElementById("global-search");
+    var results = document.getElementById("global-search-results");
+
+    function normalizeDate(q) {
+        var m = q.match(/^(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})$/);
+        if (m) { return m[1] + "-" + m[2] + "-" + m[3]; }
+        return null;
+    }
+    function addLink(text, href) {
+        var a = document.createElement("a");
+        a.className = "button";
+        a.href = href;
+        a.textContent = text;
+        results.appendChild(a);
+    }
+
+    input.addEventListener("input", function() {
+        var q = input.value.trim();
+        results.innerHTML = "";
+        if (!q) { return; }
+
+        var matched = stationNames.filter(function(n) { return n.indexOf(q) !== -1; }).slice(0, 8);
+        matched.forEach(function(name) { addLink("地点: " + name, "/stations/" + encodeURIComponent(name)); });
+
+        var date = normalizeDate(q);
+        if (date) {
+            addLink(date + " の観測データ", "/observations/" + date);
+            addLink(date + " のカメラ画像", "/images/" + date);
+            addLink(date + " の予測結果", "/predictions/" + date);
+        }
+
+        if (!matched.length && !date) {
+            var p = document.createElement("p");
+            p.className = "muted";
+            p.textContent = "該当する地点・日付が見つかりません。";
+            results.appendChild(p);
+        }
+    });
+})();
+</script>
+
 {% set alert_preview_n = 5 %}
 {% if alerts %}
 <div class="card" style="border-left: 5px solid #c0392b; background:#fdecea;">
@@ -85,6 +135,7 @@
         <div class="station-chip" style="background:{{ s.color }};">{{ s.name }}<br>{{ s.label }}</div>
         {% endfor %}
     </div>
+    <p style="margin-top:0.8rem;"><a class="button" href="{{ url_for('download_xlsx') }}">観測データ全体(Excel)をダウンロード</a></p>
     {% else %}
     <p class="muted">観測データがまだありません。</p>
     {% endif %}
@@ -102,7 +153,10 @@
         </figure>
         {% endfor %}
     </div>
-    <p><a class="button" href="{{ url_for('images_dates') }}">過去の画像を見る</a></p>
+    <p>
+        <a class="button" href="{{ url_for('images_dates') }}">過去の画像を見る</a>
+        <a class="button" href="{{ url_for('images_hour_zip', date=latest_image_date, hhmm=latest_image_hour) }}">この時刻の画像をZIPでダウンロード</a>
+    </p>
     {% else %}
     <p class="muted">画像がまだありません。</p>
     {% endif %}

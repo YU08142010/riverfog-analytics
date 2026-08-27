@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}地点比較{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>地点比較</h2>
+    <p><a href="{{ url_for('stations_list') }}">&laquo; 地点一覧に戻る(選び直す)</a></p>
+    {% if observations_datetime %}
+    <p class="muted">最新観測: {{ observations_datetime.strftime("%Y/%m/%d %H:%M") }}</p>
+    {% endif %}
+</div>
+
+{% if not entries %}
+<div class="card">
+    <p class="muted">比較する地点が選択されていません。地点一覧から選び直してください。</p>
+</div>
+{% else %}
+<div class="table-scroll">
+<table class="obs-table" style="width:100%;">
+    <thead>
+    <tr>
+        <th>地点</th>
+        <th>現在の現象</th>
+        <th>予測グラフ</th>
+        <th>的中率</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+    <tr>
+        <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
+        <td style="{{ 'background:' + e.current.color + '; color:#1c2733' if e.current else '' }};">
+            {{ e.current.label if e.current else "-" }}
+        </td>
+        <td>
+            {% if e.forecast_file %}
+            <a href="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}">グラフを見る</a>
+            {% else %}
+            -
+            {% endif %}
+        </td>
+        <td>
+            {% if e.accuracy and e.accuracy.n %}
+            {{ "%.1f"|format(100.0 * e.accuracy.correct / e.accuracy.n) }}%
+            <span class="muted">({{ e.accuracy.correct }}/{{ e.accuracy.n }})</span>
+            {% else %}
+            -
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="card">
+    <h2>予測グラフの並び</h2>
+    {% for e in entries %}
+    {% if e.forecast_file %}
+    <h3>{{ e.name }}</h3>
+    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;">
+    {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

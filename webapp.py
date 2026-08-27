@@ -13,13 +13,14 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
 from flask import (
     Flask, Response, abort, flash, redirect, render_template,
-    request, send_from_directory, session, url_for,
+    request, send_file, send_from_directory, session, url_for,
 )
 
 import matplotlib
@@ -202,6 +203,40 @@ def _render_line_chart_png(dates, rates, title):
     return buf.getvalue()
 
 
+def _render_weather_timeseries_png(day_main, date_label):
+    """1日分の気温・視程・湿度・降水量の推移をPNGにして返す。"""
+    fig, ax1 = plt.subplots(figsize=(9, 3.6))
+    if day_main is None or day_main.empty:
+        ax1.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax1.transAxes)
+    else:
+        x = day_main["datetime"]
+        ax1.plot(x, day_main["気温(℃)"], color="#e74c3c", linewidth=1.4, marker="o", markersize=3, label="気温(℃)")
+        ax1.plot(x, day_main["視程(km)"], color="#16a085", linewidth=1.4, marker="o", markersize=3, label="視程(km)")
+        ax1.set_ylabel("気温(℃) / 視程(km)")
+        ax1.grid(True, alpha=0.3)
+
+        ax2 = ax1.twinx()
+        ax2.bar(x, day_main["降水量(mm)"], width=1 / 48, color="#2980b9", alpha=0.35, label="降水量(mm)")
+        ax2.plot(x, day_main["相対湿度(％)"], color="#8e44ad", linewidth=1.2, linestyle="--", alpha=0.8, label="相対湿度(％)")
+        ax2.set_ylabel("相対湿度(％) / 降水量(mm)")
+        ax2.set_ylim(bottom=0)
+
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        fig.autofmt_xdate()
+
+        h1, l1 = ax1.get_legend_handles_labels()
+        h2, l2 = ax2.get_legend_handles_labels()
+        ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=8, ncol=2)
+
+    ax1.set_title(f"{date_label} の観測値推移", fontsize=11)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 def _accuracy_trend_safe(station=None):
     if not DB_PATH.exists():
         return []
@@ -281,6 +316,74 @@ def _render_metrics_trend_png(trend):
     ax.set_ylabel("スコア(%)")
     ax.set_title("学習時のモデル精度推移(全地点平均)", fontsize=11)
     ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _is_valid_number(v):
+    """NoneでもNaNでもない数値かを判定する（NaN != NaNを利用、numpyを追加importしない）。"""
+    return v is not None and v == v
+
+
+def _render_model_compare_png(state):
+    """RandomForest単体・XGBoost単体・採用中のhybridの霧F1平均を棒グラフで比較する。"""
+    labels = ["RandomForest単体", "XGBoost単体", "採用中(hybrid)"]
+    keys = ["rf_only", "xgb_only", None]
+    colors = ["#7f8c8d", "#8e44ad", "#1a5276"]
+    values, counts = [], []
+    for key in keys:
+        vals = []
+        for info in state.values():
+            if key is None:
+                v = info.get("fog_f1")
+            else:
+                sub = info.get(key)
+                v = sub.get("fog_f1") if sub else None
+            if _is_valid_number(v):
+                vals.append(float(v) * 100.0)
+        values.append(sum(vals) / len(vals) if vals else None)
+        counts.append(len(vals))
+
+    fig, ax = plt.subplots(figsize=(6.2, 3.4))
+    x = list(range(len(labels)))
+    plotted = [v if v is not None else 0 for v in values]
+    ax.bar(x, plotted, color=colors, width=0.55)
+    for i, (v, n) in enumerate(zip(values, counts)):
+        label = f"{v:.1f}%\n(n={n}地点)" if v is not None else "データなし"
+        ax.text(i, (v or 0) + 2, label, ha="center", fontsize=9)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("霧F1(平均, %)")
+    ax.set_title("モデル方式ごとの性能比較(全地点平均)", fontsize=11)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_feature_importance_png(importance, top_n=15):
+    """特徴量重要度の上位top_n件を横棒グラフにする。"""
+    top = importance[:top_n]
+    fig_h = max(3.0, 0.35 * max(len(top), 1))
+    fig, ax = plt.subplots(figsize=(7.2, fig_h))
+    if not top:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+    else:
+        names = [n for n, _ in top][::-1]
+        vals = [v for _, v in top][::-1]
+        ax.barh(names, vals, color="#1a5276")
+        ax.set_xlabel("重要度(平均)")
+        for i, v in enumerate(vals):
+            ax.text(v, i, f" {v:.3f}", va="center", fontsize=8)
+    ax.set_title("特徴量の重要度(上位)", fontsize=11)
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
@@ -531,6 +634,7 @@ def dashboard():
         latest_images=latest_images,
         latest_pred_date=latest_pred_date,
         summary_file=summary_file,
+        station_names=STATION_NAMES,
     )
 
 
@@ -584,6 +688,28 @@ def observations_date(date):
     return render_template("observations_date.html", date=date, station_names=station_names, rows=rows)
 
 
+@app.route("/observations/<date>/chart.png")
+def observations_date_chart(date):
+    date = _validate_date(date)
+    try:
+        main_df, _, _ = fog_data.load_river_fog_data()
+    except Exception as e:
+        log.warning("Failed to load observation data: %s", e)
+        main_df = None
+    day_main = None
+    if main_df is not None:
+        day_main = main_df[main_df["datetime"].dt.strftime("%Y-%m-%d") == date].sort_values("datetime")
+    png = _render_weather_timeseries_png(day_main, date)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/download/xlsx")
+def download_xlsx():
+    if not DATA_XLSX.exists():
+        abort(404)
+    return send_file(DATA_XLSX, as_attachment=True, download_name="只見川.xlsx")
+
+
 @app.route("/images")
 def images_dates():
     return render_template("images_dates.html", dates=_sorted_subdirs(IMAGE_DIR))
@@ -614,6 +740,28 @@ def images_file(date, hhmm, filename):
     date = _validate_date(date)
     hhmm = _validate_hhmm(hhmm)
     return send_from_directory(IMAGE_DIR / date / hhmm, filename)
+
+
+@app.route("/images/<date>/<hhmm>/download.zip")
+def images_hour_zip(date, hhmm):
+    date = _validate_date(date)
+    hhmm = _validate_hhmm(hhmm)
+    hour_dir = IMAGE_DIR / date / hhmm
+    if not hour_dir.is_dir():
+        abort(404)
+    files = sorted(p for p in hour_dir.iterdir() if p.suffix.lower() == ".jpg")
+    if not files:
+        abort(404)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, arcname=f.name)
+    buf.seek(0)
+    return send_file(
+        buf, mimetype="application/zip", as_attachment=True,
+        download_name=f"{date}_{hhmm}.zip",
+    )
 
 
 @app.route("/predictions")
@@ -653,6 +801,39 @@ def predictions_file(date, filename):
 @app.route("/stations")
 def stations_list():
     return render_template("stations_list.html", station_names=STATION_NAMES)
+
+
+@app.route("/compare")
+def compare_stations():
+    selected = [s for s in request.args.get("stations", "").split(",") if s]
+    selected = [s for s in selected if s in STATION_NAMES]
+
+    observations = _latest_observations()
+    current_by_name = {}
+    if observations:
+        current_by_name = {s["name"]: s for s in observations["stations"]}
+
+    accuracy_by_station = {}
+    summary = _accuracy_summary_safe()
+    if summary:
+        for row in summary["by_station"]:
+            accuracy_by_station[row["station"]] = row
+
+    entries = []
+    for name in selected:
+        latest_pred_date, forecast_file = _station_latest_forecast_file(name)
+        entries.append({
+            "name": name,
+            "current": current_by_name.get(name),
+            "latest_pred_date": latest_pred_date,
+            "forecast_file": forecast_file,
+            "accuracy": accuracy_by_station.get(name),
+        })
+
+    return render_template(
+        "compare.html", station_names=STATION_NAMES, selected=selected, entries=entries,
+        observations_datetime=observations["datetime"] if observations else None,
+    )
 
 
 @app.route("/stations/<name>")
@@ -797,6 +978,8 @@ def admin_models():
             "n": info.get("n"),
             "accuracy": info.get("accuracy"),
             "fog_f1": info.get("fog_f1"),
+            "rf_only": info.get("rf_only"),
+            "xgb_only": info.get("xgb_only"),
             "pooled": info.get("pooled"),
             "trained_at": info.get("trained_at"),
         })
@@ -817,6 +1000,23 @@ def admin_models():
 @requires_admin
 def admin_models_chart():
     png = _render_metrics_trend_png(_load_metrics_history_trend())
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/models/compare_chart.png")
+@requires_admin
+def admin_models_compare_chart():
+    state = fog_model.load_model_state()
+    png = _render_model_compare_png(state)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/models/importance_chart.png")
+@requires_admin
+def admin_models_importance_chart():
+    state = fog_model.load_model_state()
+    importance = fog_model.compute_feature_importance(state)
+    png = _render_feature_importance_png(importance)
     return Response(png, mimetype="image/png")
 
 

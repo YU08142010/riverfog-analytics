@@ -2,8 +2,14 @@
 {% block title %}{{ date }}の観測データ{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>{{ date }} の観測データ</h2>
-    <p><a href="{{ url_for('observations_dates') }}">&laquo; 日付一覧に戻る</a></p>
+    <h2>{{ date }} の観測値推移</h2>
+    <p><a href="{{ url_for('observations_dates') }}">&laquo; 日付一覧に戻る</a>
+        ｜ <a class="button" href="{{ url_for('download_xlsx') }}">観測データ(Excel)をダウンロード</a></p>
+    <img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}">
+</div>
+
+<div class="card">
+    <h2>{{ date }} の観測データ(一覧)</h2>
     <div class="table-scroll">
     <table class="obs-table">
         <thead>
@@ -27,7 +33,7 @@
             <td>{{ "%.1f"|format(row.precip) if row.precip is not none else "-" }}</td>
             <td>{{ "%.1f"|format(row.visibility) if row.visibility is not none else "-" }}</td>
             {% for c in row.cells %}
-            <td style="background:{{ c.color }};">{{ c.label }}</td>
+            <td style="background:{{ c.color }}; color:#1c2733;">{{ c.label }}</td>
             {% endfor %}
         </tr>
         {% endfor %}

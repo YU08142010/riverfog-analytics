@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}只見川霧観測{% endblock %} - 只見川霧観測</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script>
+(function() {
+    try {
+        var saved = localStorage.getItem("theme");
+        if (saved === "light" || saved === "dark") {
+            document.documentElement.setAttribute("data-theme", saved);
+        }
+    } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <header>
@@ -12,22 +22,38 @@
     <nav>
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">ダッシュボード</a>
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) else '' }}">地点別</a>
+        <a href="{{ url_for('compare_stations') }}" class="{{ 'active' if request.path.startswith('/compare') else '' }}">地点比較</a>
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">観測データ</a>
         <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>
         <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">予測結果</a>
         <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
     </nav>
+    <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
 </header>
 <main>
 {% with messages = get_flashed_messages() %}
 {% if messages %}
-<div class="card" style="border-left: 4px solid #1a5276; background:#eaf2f8;">
+<div class="card" style="border-left: 4px solid var(--color-primary); background: var(--color-primary-light);">
     {% for m in messages %}<p style="margin:0.2rem 0;">{{ m }}</p>{% endfor %}
 </div>
 {% endif %}
 {% endwith %}
 {% block content %}{% endblock %}
 </main>
+<script>
+(function() {
+    var btn = document.getElementById("theme-toggle-btn");
+    btn.addEventListener("click", function() {
+        var current = document.documentElement.getAttribute("data-theme");
+        if (!current) {
+            current = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        var next = current === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("theme", next); } catch (e) {}
+    });
+})();
+</script>
 </body>
 </html>

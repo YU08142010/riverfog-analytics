@@ -67,6 +67,10 @@ LOG_BACKUP_COUNT = 5
 OBSERVATION_START_HOUR = 4
 OBSERVATION_END_HOUR = 19
 
+# この割合以上の地点で使える写真が無かった場合、単発の失敗ではなくカメラサイト
+# (cam.river.go.jp)側の障害等の可能性が高いとみなしERRORで警告する（/admin/errorsに出る）。
+IMAGE_FAILURE_ALERT_RATIO = 0.3
+
 RESIZE_MAX_SIDE = 768
 JPEG_QUALITY = 80
 
@@ -579,6 +583,15 @@ def main():
         "Gemini classification succeeded: %d / %d (invalid/placeholder: %d)",
         len(phenom_by_name), len(cameras), len(invalid_stations),
     )
+
+    usable_count = ok_count - len(invalid_stations)
+    problem_ratio = (1.0 - usable_count / len(cameras)) if cameras else 0.0
+    if problem_ratio >= IMAGE_FAILURE_ALERT_RATIO:
+        log.error(
+            "Many stations have no usable photo this run: %d/%d (%.0f%%) -- possible outage on "
+            "the camera source site (cam.river.go.jp) or a transient network issue",
+            len(cameras) - usable_count, len(cameras), problem_ratio * 100,
+        )
 
     save_images(cameras, images_by_name, invalid_stations, run_time)
     prune_old_images()

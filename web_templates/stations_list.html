@@ -36,4 +36,30 @@
     <p class="muted">地点情報が読み込めませんでした。</p>
     {% endif %}
 </div>
+
+{% if station_names %}
+<div class="card">
+    <h2>地点を比較する</h2>
+    <p class="muted">比較したい地点にチェックを入れて「比較する」を押してください。</p>
+    <form action="{{ url_for('compare_stations') }}" method="get" id="compare-form">
+        <div class="station-grid">
+            {% for name in station_names %}
+            <label class="station-chip" style="background: var(--color-primary-light); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.3rem;">
+                <input type="checkbox" name="station_cb" value="{{ name }}" style="margin:0;">
+                <span>{{ name }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <input type="hidden" name="stations" id="compare-stations-field">
+        <button type="submit" class="button" style="margin-top:1rem;">比較する</button>
+    </form>
+    <script>
+    document.getElementById("compare-form").addEventListener("submit", function() {
+        var checked = Array.prototype.slice.call(document.querySelectorAll('input[name="station_cb"]:checked'))
+            .map(function(cb) { return cb.value; });
+        document.getElementById("compare-stations-field").value = checked.join(",");
+    });
+    </script>
+</div>
+{% endif %}
 {% endblock %}
