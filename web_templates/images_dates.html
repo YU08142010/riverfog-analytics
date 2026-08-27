@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}カメラ画像{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>カメラ画像(日付一覧)</h2>
+    {% if dates %}
+    <ul class="date-list">
+        {% for d in dates %}
+        <li><a href="{{ url_for('images_date', date=d) }}">{{ d }}</a></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">画像がまだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

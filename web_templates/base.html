@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}只見川霧観測{% endblock %} - 只見川霧観測</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+    <h1>只見川霧観測・予測</h1>
+    <nav>
+        <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
+        <a href="{{ url_for('observations_dates') }}">観測データ</a>
+        <a href="{{ url_for('images_dates') }}">カメラ画像</a>
+        <a href="{{ url_for('predictions_dates') }}">予測結果</a>
+    </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

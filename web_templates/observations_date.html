@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ date }}の観測データ{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>{{ date }} の観測データ</h2>
+    <p><a href="{{ url_for('observations_dates') }}">&laquo; 日付一覧に戻る</a></p>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead>
+        <tr>
+            <th>時刻</th>
+            <th>気温(℃)</th>
+            <th>湿度(%)</th>
+            <th>降水量(mm)</th>
+            <th>視程(km)</th>
+            {% for name in station_names %}
+            <th>{{ name }}</th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row.time }}</td>
+            <td>{{ "%.1f"|format(row.temp) if row.temp is not none else "-" }}</td>
+            <td>{{ "%.0f"|format(row.humidity) if row.humidity is not none else "-" }}</td>
+            <td>{{ "%.1f"|format(row.precip) if row.precip is not none else "-" }}</td>
+            <td>{{ "%.1f"|format(row.visibility) if row.visibility is not none else "-" }}</td>
+            {% for c in row.cells %}
+            <td style="background:{{ c.color }};">{{ c.label }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

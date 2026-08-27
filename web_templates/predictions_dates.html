@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}予測結果{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>予測結果(日付一覧)</h2>
+    {% if dates %}
+    <ul class="date-list">
+        {% for d in dates %}
+        <li><a href="{{ url_for('predictions_date', date=d) }}">{{ d }}</a></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">予測結果がまだありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

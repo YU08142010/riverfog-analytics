@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード{% endblock %}
+{% block content %}
+
+<div class="card">
+    <h2>現在の状況</h2>
+    {% if observations %}
+    <p class="muted">最新観測: {{ observations.datetime.strftime("%Y/%m/%d %H:%M") }}</p>
+    <div class="stat-row">
+        <div>気温 <strong>{{ "%.1f"|format(observations.temp) if observations.temp is not none else "-" }}</strong> ℃</div>
+        <div>湿度 <strong>{{ "%.0f"|format(observations.humidity) if observations.humidity is not none else "-" }}</strong> %</div>
+        <div>降水量 <strong>{{ "%.1f"|format(observations.precip) if observations.precip is not none else "-" }}</strong> mm</div>
+        <div>視程 <strong>{{ "%.1f"|format(observations.visibility) if observations.visibility is not none else "-" }}</strong> km</div>
+        {% if accuracy and accuracy.overall.n %}
+        <div>予測的中率(累計) <strong>{{ "%.0f"|format(100.0 * accuracy.overall.correct / accuracy.overall.n) }}</strong> %
+            <span class="muted">({{ accuracy.overall.correct }}/{{ accuracy.overall.n }})</span>
+        </div>
+        {% endif %}
+    </div>
+    <h3 style="font-size:0.95rem; margin-bottom:0.4rem;">地点ごとの現象</h3>
+    <div class="station-grid">
+        {% for s in observations.stations %}
+        <div class="station-chip" style="background:{{ s.color }};">{{ s.name }}<br>{{ s.label }}</div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">観測データがまだありません。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>最新のカメラ画像</h2>
+    {% if latest_image_date and latest_image_hour %}
+    <p class="muted">{{ latest_image_date }} {{ latest_image_hour[:2] }}:{{ latest_image_hour[2:] }} 撮影</p>
+    <div class="image-grid">
+        {% for f in latest_images %}
+        <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
+            <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy">
+            <figcaption>{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}</figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+    <p><a class="button" href="{{ url_for('images_dates') }}">過去の画像を見る</a></p>
+    {% else %}
+    <p class="muted">画像がまだありません。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>本日の予測サマリー</h2>
+    {% if summary_file %}
+    <p class="muted">{{ latest_pred_date }}</p>
+    <img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}">
+    <p><a class="button" href="{{ url_for('predictions_date', date=latest_pred_date) }}">地点ごとのグラフを見る</a></p>
+    {% else %}
+    <p class="muted">予測結果がまだありません。</p>
+    {% endif %}
+    <p><a class="button" href="{{ url_for('predictions_dates') }}">過去の予測を見る</a></p>
+</div>
+
+{% endblock %}
