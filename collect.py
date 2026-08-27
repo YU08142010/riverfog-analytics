@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 import openpyxl
 import requests
@@ -101,6 +102,7 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 class StationClassification(BaseModel):
     station_index: int
     code: int
+    confidence: Literal["high", "medium", "low"]
 
 
 def load_cameras():
@@ -205,71 +207,64 @@ def get_api_keys():
     return [single] if single else []
 
 
-def classify_images(cameras, images_by_name):
-    """Gemini APIで一括分類する。
-    戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset)。
-    """
-    from google import genai
+SYSTEM_INSTRUCTION = (
+    "あなたは河川監視カメラの画像から気象現象を分類する専門家です。\n"
+    "各画像を、以下の現象コード表に従って-1〜10の整数のいずれか1つに分類してください。\n"
+    "-1: この画像は実際のカメラ写真ではない（例：「カメラ画像が取得できませんでした」等の"
+    "エラーメッセージ画面、単色の塗りつぶし、システムのロゴやUI画面など、河川や周辺の風景が"
+    "写っていないもの）\n"
+    "0: 実際のカメラ写真だが、該当する現象なし（霧・層雲・霧雨・雨のいずれも見られない）\n"
+    "1: 薄い川霧\n2: 川霧\n3: 濃い川霧\n"
+    "4: 薄い全体霧\n5: 全体霧\n6: 全体濃い霧\n"
+    "7: 薄い層雲\n8: 濃い層雲\n9: 霧雨\n10: 雨\n"
+    "\n"
+    "注意（レンズ付着物との区別）: 屋外設置のカメラのため、レンズに雨滴・水滴や泥・砂埃が"
+    "付着していることがあります。これらは画面の一部がにじむ・水玉状に歪む・茶色く汚れた斑点や"
+    "曇りとして写り、風景全体が均一に白く煙る自然の霧・層雲とは見え方が異なります。"
+    "判定の際は次のように扱ってください。\n"
+    "- レンズに水滴や泥汚れが付着していても、背景の川面・対岸・空などの風景がある程度視認できる"
+    "場合は、その視認できる範囲の実際の風景の様子から現象を判定してください"
+    "（水滴・泥汚れ自体は霧・層雲・雨として数えない）。\n"
+    "- レンズの水滴・泥汚れで背景の風景がほとんど視認できない場合は、-1（実際のカメラ写真ではない）"
+    "としてください。\n"
+    "- レンズに水滴が付着しているだけでは、その時点で実際に降雨中かどうかは判断できません。"
+    "水滴の付着だけを根拠に9（霧雨）や10（雨）と判定せず、背景に見える降雨の様子"
+    "（路面や川面の波紋、視界不良の均一な広がり方など）から総合的に判断してください。\n"
+    "\n"
+    "注意（特定カメラの恒常的な曇り）: 「三島大橋」「西谷橋」「鹿島橋」「麻生大橋」の4地点は"
+    "レンズ自体が常時わずかに曇っており、天候に関わらずいつも少し霞んで見えます。"
+    "この4地点については、その常時の軽い霞みだけを根拠に霧・層雲と判定せず、"
+    "普段のその地点の見え方と比べて明らかに視界が悪化している場合のみ現象ありと判定してください。\n"
+    "各画像の直前に「地点N: 地点名」というラベルがテキストで付与されています。"
+    "station_index には、このラベルのNの数字をそのまま入れてください。"
+    "画像とラベルの対応を取り違えないよう、慎重に対応させてください。\n"
+    "\n"
+    "confidenceには、その判定の確信度をhigh/medium/lowのいずれかで入れてください。\n"
+    "- high: 画像が明瞭で、該当コードであることに疑いがない\n"
+    "- medium: おおむね妥当だが、画質・逆光・時間帯（薄暮など）により多少の不確実性がある\n"
+    "- low: 不鮮明・逆光・薄暮・レンズ汚れの影響が大きい等の理由で、この判定に自信が持てない"
+)
+
+
+def _build_contents(name_bytes_pairs):
+    """[(地点名, 縮小済み画像bytes), ...] からGeminiに渡すcontentsとindex->地点名の対応を作る。"""
     from google.genai import types
-
-    valid = [(name, images_by_name[name]) for name, _ in cameras if images_by_name.get(name)]
-    if not valid:
-        return {}, set()
-
-    api_keys = get_api_keys()
-    if not api_keys:
-        log.warning("GEMINI_API_KEY is not set, skipping Gemini classification (all stations missing)")
-        return {}, set()
 
     contents = []
     index_to_name = {}
-    for i, (name, raw_bytes) in enumerate(valid, start=1):
-        try:
-            resized = resize_image(raw_bytes)
-        except Exception as e:
-            log.warning("Image resize failed: %s: %s", name, e)
-            continue
+    for i, (name, resized) in enumerate(name_bytes_pairs, start=1):
         contents.append(f"地点{i}: {name}")
         contents.append(types.Part.from_bytes(data=resized, mime_type="image/jpeg"))
         index_to_name[i] = name
+    return contents, index_to_name
 
-    if not contents:
-        return {}, set()
 
-    system_instruction = (
-        "あなたは河川監視カメラの画像から気象現象を分類する専門家です。\n"
-        "各画像を、以下の現象コード表に従って-1〜10の整数のいずれか1つに分類してください。\n"
-        "-1: この画像は実際のカメラ写真ではない（例：「カメラ画像が取得できませんでした」等の"
-        "エラーメッセージ画面、単色の塗りつぶし、システムのロゴやUI画面など、河川や周辺の風景が"
-        "写っていないもの）\n"
-        "0: 実際のカメラ写真だが、該当する現象なし（霧・層雲・霧雨・雨のいずれも見られない）\n"
-        "1: 薄い川霧\n2: 川霧\n3: 濃い川霧\n"
-        "4: 薄い全体霧\n5: 全体霧\n6: 全体濃い霧\n"
-        "7: 薄い層雲\n8: 濃い層雲\n9: 霧雨\n10: 雨\n"
-        "\n"
-        "注意（レンズ付着物との区別）: 屋外設置のカメラのため、レンズに雨滴・水滴や泥・砂埃が"
-        "付着していることがあります。これらは画面の一部がにじむ・水玉状に歪む・茶色く汚れた斑点や"
-        "曇りとして写り、風景全体が均一に白く煙る自然の霧・層雲とは見え方が異なります。"
-        "判定の際は次のように扱ってください。\n"
-        "- レンズに水滴や泥汚れが付着していても、背景の川面・対岸・空などの風景がある程度視認できる"
-        "場合は、その視認できる範囲の実際の風景の様子から現象を判定してください"
-        "（水滴・泥汚れ自体は霧・層雲・雨として数えない）。\n"
-        "- レンズの水滴・泥汚れで背景の風景がほとんど視認できない場合は、-1（実際のカメラ写真ではない）"
-        "としてください。\n"
-        "- レンズに水滴が付着しているだけでは、その時点で実際に降雨中かどうかは判断できません。"
-        "水滴の付着だけを根拠に9（霧雨）や10（雨）と判定せず、背景に見える降雨の様子"
-        "（路面や川面の波紋、視界不良の均一な広がり方など）から総合的に判断してください。\n"
-        "\n"
-        "注意（特定カメラの恒常的な曇り）: 「三島大橋」「西谷橋」「鹿島橋」「麻生大橋」の4地点は"
-        "レンズ自体が常時わずかに曇っており、天候に関わらずいつも少し霞んで見えます。"
-        "この4地点については、その常時の軽い霞みだけを根拠に霧・層雲と判定せず、"
-        "普段のその地点の見え方と比べて明らかに視界が悪化している場合のみ現象ありと判定してください。\n"
-        "各画像の直前に「地点N: 地点名」というラベルがテキストで付与されています。"
-        "station_index には、このラベルのNの数字をそのまま入れてください。"
-        "画像とラベルの対応を取り違えないよう、慎重に対応させてください。"
-    )
-
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+def _classify_with_model(contents, model, api_keys):
+    """指定モデルで1回分類を試みる（APIキーのフォールバック・複数パスのリトライ込み）。
+    失敗時はNoneを返す。
+    """
+    from google import genai
+    from google.genai import types
 
     def try_all_keys():
         for key_idx, api_key in enumerate(api_keys, start=1):
@@ -279,7 +274,7 @@ def classify_images(cameras, images_by_name):
                     model=model,
                     contents=contents,
                     config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
+                        system_instruction=SYSTEM_INSTRUCTION,
                         response_mime_type="application/json",
                         response_schema=list[StationClassification],
                         temperature=0,
@@ -288,10 +283,10 @@ def classify_images(cameras, images_by_name):
                     ),
                 )
             except Exception as e:
-                log.warning("Gemini API call failed (key %d/%d): %s", key_idx, len(api_keys), e)
+                log.warning("Gemini API call failed (model=%s, key %d/%d): %s", model, key_idx, len(api_keys), e)
                 continue
             if key_idx > 1:
-                log.info("Main API key unavailable, fell back to sub key %d", key_idx)
+                log.info("Main API key unavailable, fell back to sub key %d (model=%s)", key_idx, model)
             return resp
         return None
 
@@ -302,25 +297,32 @@ def classify_images(cameras, images_by_name):
             break
         if pass_idx < GEMINI_RETRY_PASSES:
             log.warning(
-                "All Gemini API keys failed (pass %d/%d), retrying in %ds",
-                pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC,
+                "All Gemini API keys failed (model=%s, pass %d/%d), retrying in %ds",
+                model, pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC,
             )
             time.sleep(GEMINI_RETRY_DELAY_SEC)
 
     if response is None:
-        log.error("Gemini API call failed with all configured keys")
-        return {}, set()
+        log.error("Gemini API call failed with all configured keys (model=%s)", model)
+        return None
 
     try:
         parsed: list[StationClassification] = response.parsed
         if parsed is None:
             raise ValueError("response.parsed is None")
     except Exception as e:
-        log.error("Failed to parse Gemini response: %s / raw=%r", e, getattr(response, "text", None))
-        return {}, set()
+        log.error("Failed to parse Gemini response (model=%s): %s / raw=%r", model, e, getattr(response, "text", None))
+        return None
+    return parsed
 
+
+def _parse_classifications(parsed, index_to_name):
+    """Geminiのレスポンスを (地点名->code の辞書, 無効画像と判定された地点名のset,
+    confidence:lowだった地点名のlist) に変換する。
+    """
     result = {}
     invalid_stations = set()
+    low_confidence = []
     for item in parsed:
         name = index_to_name.get(item.station_index)
         if name is None:
@@ -334,6 +336,74 @@ def classify_images(cameras, images_by_name):
             log.warning("Phenomenon code out of range in Gemini response: %s (%s)", item.code, name)
             continue
         result[name] = item.code
+        if item.confidence == "low":
+            low_confidence.append(name)
+    return result, invalid_stations, low_confidence
+
+
+def classify_images(cameras, images_by_name):
+    """Gemini APIで一括分類する。confidence:low（判定に自信が持てない）と申告された地点は、
+    より上位のモデル(GEMINI_ESCALATION_MODEL)で自動的に再判定する（自動修正）。
+    再判定でも低confidenceのままだった地点はログに残した上で、その再判定結果
+    （1回目より確度が高いはず）を採用する。
+    戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset)。
+    """
+    valid = [(name, images_by_name[name]) for name, _ in cameras if images_by_name.get(name)]
+    if not valid:
+        return {}, set()
+
+    api_keys = get_api_keys()
+    if not api_keys:
+        log.warning("GEMINI_API_KEY is not set, skipping Gemini classification (all stations missing)")
+        return {}, set()
+
+    resized_by_name = {}
+    for name, raw_bytes in valid:
+        try:
+            resized_by_name[name] = resize_image(raw_bytes)
+        except Exception as e:
+            log.warning("Image resize failed: %s: %s", name, e)
+
+    if not resized_by_name:
+        return {}, set()
+
+    contents, index_to_name = _build_contents(list(resized_by_name.items()))
+    primary_model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    parsed = _classify_with_model(contents, primary_model, api_keys)
+    if parsed is None:
+        return {}, set()
+
+    result, invalid_stations, low_confidence = _parse_classifications(parsed, index_to_name)
+
+    if low_confidence:
+        log.info(
+            "Low-confidence classification: %d station(s), retrying with escalation model: %s",
+            len(low_confidence), ", ".join(low_confidence),
+        )
+        escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-3.5-pro")
+        sub_contents, sub_index_to_name = _build_contents(
+            [(name, resized_by_name[name]) for name in low_confidence]
+        )
+        sub_parsed = _classify_with_model(sub_contents, escalation_model, api_keys)
+        if sub_parsed is None:
+            log.warning(
+                "Escalation classification failed; keeping first-pass result for: %s",
+                ", ".join(low_confidence),
+            )
+        else:
+            sub_result, sub_invalid, sub_low = _parse_classifications(sub_parsed, sub_index_to_name)
+            for name in low_confidence:
+                if name in sub_invalid:
+                    invalid_stations.add(name)
+                    result.pop(name, None)
+                elif name in sub_result:
+                    result[name] = sub_result[name]
+            if sub_low:
+                log.warning(
+                    "Still low-confidence after escalation (kept escalation result anyway): %s",
+                    ", ".join(sub_low),
+                )
+
     return result, invalid_stations
 
 
