@@ -2,14 +2,18 @@
 {% block title %}ダッシュボード{% endblock %}
 {% block content %}
 
+{% set alert_preview_n = 5 %}
 {% if alerts %}
 <div class="card" style="border-left: 5px solid #c0392b; background:#fdecea;">
-    <h2 style="border-color:#c0392b;">霧アラート(今後24時間)</h2>
-    <p class="muted">以下の地点・時刻で霧が予測されています。</p>
+    <h2 style="border-color:#c0392b;">霧アラート(今後24時間)
+        <span class="muted" style="font-size:0.8rem; font-weight:normal;">全{{ alerts|length }}件</span>
+    </h2>
+    <p class="muted">以下の地点・時刻で霧が予測されています(近い時刻順)。</p>
+    <div class="table-scroll">
     <table class="obs-table" style="width:auto;">
         <thead><tr><th>日時</th><th>地点</th><th>霧確率</th></tr></thead>
         <tbody>
-        {% for a in alerts %}
+        {% for a in alerts[:alert_preview_n] %}
         <tr>
             <td>{{ a.target_datetime }}</td>
             <td><a href="{{ url_for('station_detail', name=a.station) }}">{{ a.station }}</a></td>
@@ -17,7 +21,32 @@
         </tr>
         {% endfor %}
         </tbody>
+        {% if alerts|length > alert_preview_n %}
+        <tbody id="alert-hidden-rows" hidden>
+        {% for a in alerts[alert_preview_n:] %}
+        <tr>
+            <td>{{ a.target_datetime }}</td>
+            <td><a href="{{ url_for('station_detail', name=a.station) }}">{{ a.station }}</a></td>
+            <td>{{ "%.0f"|format(a.predicted_fog_prob * 100) if a.predicted_fog_prob is not none else "-" }}%</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+        {% endif %}
     </table>
+    </div>
+    {% if alerts|length > alert_preview_n %}
+    <button type="button" class="button" id="alert-toggle-btn"
+            data-more-label="&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示"
+            data-less-label="&#9650; 閉じる">&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示</button>
+    <script>
+    document.getElementById("alert-toggle-btn").addEventListener("click", function() {
+        var rows = document.getElementById("alert-hidden-rows");
+        var wasHidden = rows.hidden;
+        rows.hidden = !wasHidden;
+        this.textContent = wasHidden ? this.dataset.lessLabel : this.dataset.moreLabel;
+    });
+    </script>
+    {% endif %}
 </div>
 {% endif %}
 
