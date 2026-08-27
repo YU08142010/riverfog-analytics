@@ -54,18 +54,32 @@
     <h2>現在の状況</h2>
     {% if observations %}
     <p class="muted">最新観測: {{ observations.datetime.strftime("%Y/%m/%d %H:%M") }}</p>
-    <div class="stat-row">
-        <div>気温 <strong>{{ "%.1f"|format(observations.temp) if observations.temp is not none else "-" }}</strong> ℃</div>
-        <div>湿度 <strong>{{ "%.0f"|format(observations.humidity) if observations.humidity is not none else "-" }}</strong> %</div>
-        <div>降水量 <strong>{{ "%.1f"|format(observations.precip) if observations.precip is not none else "-" }}</strong> mm</div>
-        <div>視程 <strong>{{ "%.1f"|format(observations.visibility) if observations.visibility is not none else "-" }}</strong> km</div>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">気温</div>
+            <div class="stat-value">{{ "%.1f"|format(observations.temp) if observations.temp is not none else "-" }}<span class="stat-unit">℃</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">湿度</div>
+            <div class="stat-value">{{ "%.0f"|format(observations.humidity) if observations.humidity is not none else "-" }}<span class="stat-unit">%</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">降水量</div>
+            <div class="stat-value">{{ "%.1f"|format(observations.precip) if observations.precip is not none else "-" }}<span class="stat-unit">mm</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">視程</div>
+            <div class="stat-value">{{ "%.1f"|format(observations.visibility) if observations.visibility is not none else "-" }}<span class="stat-unit">km</span></div>
+        </div>
         {% if accuracy and accuracy.overall.n %}
-        <div>予測的中率(累計) <strong>{{ "%.0f"|format(100.0 * accuracy.overall.correct / accuracy.overall.n) }}</strong> %
-            <span class="muted">({{ accuracy.overall.correct }}/{{ accuracy.overall.n }})</span>
+        <div class="stat-card">
+            <div class="stat-label">予測的中率(累計)</div>
+            <div class="stat-value">{{ "%.0f"|format(100.0 * accuracy.overall.correct / accuracy.overall.n) }}<span class="stat-unit">%</span></div>
+            <div class="stat-sub">{{ accuracy.overall.correct }}/{{ accuracy.overall.n }}件</div>
         </div>
         {% endif %}
     </div>
-    <h3 style="font-size:0.95rem; margin-bottom:0.4rem;">地点ごとの現象</h3>
+    <h3 style="margin-bottom:0.5rem;">地点ごとの現象</h3>
     <div class="station-grid">
         {% for s in observations.stations %}
         <div class="station-chip" style="background:{{ s.color }};">{{ s.name }}<br>{{ s.label }}</div>
