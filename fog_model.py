@@ -92,12 +92,15 @@ BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 STATION_FOG_RATE_FEATURE = "地点別霧発生率"
 STATION_RATE_SMOOTHING = 20
 
-# モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）がこの値以上下がった地点は、
-# 悪天候の偏りやデータ不整合等で今回だけ学習が崩れた可能性があるとみなし、自動的に前回の
-# モデルへロールバックする。どちらかの評価サンプル数が少なすぎる場合は、スコアの差が
-# ノイズによるものか判別できないため比較自体を行わない。
+# モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）が悪化した地点を自動検出する。
+# 固定の許容誤差ではなく、各回のテストデータをブートストラップ再抽出して「今回のスコアが
+# 前回以上になる確率」を推定し、それがREGRESSION_CONFIDENCE分の1未満（＝ノイズでは説明が
+# つかないほど明確に悪化）と判断できた地点だけ、自動的に前回のモデルへロールバックする。
+# サンプル数が少なすぎる、または前回の生データ(y_test/y_pred)が保存されていない（形式が古い等）
+# 場合は、判定できないため比較自体を行わない。
 MODEL_STATE_PATH = BASE_DIR / "data" / "models" / "model_state.joblib"
-MODEL_REGRESSION_TOLERANCE = 0.05
+REGRESSION_CONFIDENCE = 0.95
+REGRESSION_N_BOOTSTRAP = 500
 MIN_N_FOR_REGRESSION_CHECK = 30
 
 
@@ -377,6 +380,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "n": len(sub), "features": feature_names,
             "model_type": pipe.model_type, "blend_weight": pipe.weight,
             "fog_threshold": threshold, "pooled": False,
+            "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
         }
 
     n_individual = len(models)
@@ -471,6 +475,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind):
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
             "model_type": f"pooled({pooled_pipe.model_type})", "blend_weight": pooled_pipe.weight,
             "fog_threshold": pooled_threshold, "pooled": True,
+            "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
         }
         rescued += 1
     log.info("Pooled model rescued %d/%d location(s)", rescued, len(skipped_cols))
@@ -560,9 +565,46 @@ def save_model_state(models, path=MODEL_STATE_PATH):
     joblib.dump(state, path)
 
 
+def _score_from_predictions(y_true, y_pred):
+    """_effective_scoreと同じ考え方（霧クラスF1優先、無ければ全体F1）を、任意の
+    (y_true, y_pred)配列に対して計算する（ブートストラップ再抽出のたびに呼び出す）。"""
+    fog_f1 = _fog_class_f1(y_true, y_pred)
+    if not (isinstance(fog_f1, float) and np.isnan(fog_f1)):
+        return float(fog_f1)
+    return float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
+
+
+def _bootstrap_scores(y_true, y_pred, n_boot, seed):
+    """テストデータをn_boot回、復元抽出でリサンプリングし、そのたびのスコアを配列で返す。"""
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    n = len(y_true)
+    rng = np.random.default_rng(seed)
+    return np.array([
+        _score_from_predictions(y_true[idx], y_pred[idx])
+        for idx in rng.integers(0, n, size=(n_boot, n))
+    ])
+
+
+def _bootstrap_prob_not_worse(prev_info, new_info, n_boot=REGRESSION_N_BOOTSTRAP):
+    """前回・今回それぞれのテストデータを独立にブートストラップし、「今回のスコアが
+    前回以上になる」割合を推定して返す（0〜1）。前回の生データ(y_test/y_pred)が
+    保存されていない（形式が古い等）場合はNoneを返し、判定不能を表す。
+    """
+    prev_y, prev_pred = prev_info.get("y_test"), prev_info.get("y_pred")
+    new_y, new_pred = new_info.get("y_test"), new_info.get("y_pred")
+    if prev_y is None or prev_pred is None or new_y is None or new_pred is None:
+        return None
+    if len(prev_y) == 0 or len(new_y) == 0:
+        return None
+    prev_scores = _bootstrap_scores(prev_y, prev_pred, n_boot, seed=1)
+    new_scores = _bootstrap_scores(new_y, new_pred, n_boot, seed=2)
+    return float(np.mean(new_scores >= prev_scores))
+
+
 def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
-    """新しく学習したモデルが前回より明らかに劣化している地点があれば、その地点だけ
-    前回のモデルへ自動的に差し戻す（models を直接書き換える）。
+    """新しく学習したモデルが前回より統計的に有意に劣化していると判断できる地点があれば、
+    その地点だけ前回のモデルへ自動的に差し戻す（models を直接書き換える）。
     戻り値：ロールバックした地点名のリスト。
     """
     if prev_state is None:
@@ -574,13 +616,15 @@ def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
             continue
         if info.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK or prev.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK:
             continue
-        new_score = _effective_score(info)
-        prev_score = _effective_score(prev)
-        if new_score < prev_score - MODEL_REGRESSION_TOLERANCE:
+        prob_not_worse = _bootstrap_prob_not_worse(prev, info)
+        if prob_not_worse is None:
+            continue
+        if prob_not_worse < (1.0 - REGRESSION_CONFIDENCE):
             log.warning(
                 "Regression detected for %s (new score=%.3f, previous score=%.3f, "
-                "tolerance=%.2f); rolling back to previous model",
-                col, new_score, prev_score, MODEL_REGRESSION_TOLERANCE,
+                "bootstrap prob(new>=prev)=%.3f < %.2f); rolling back to previous model",
+                col, _effective_score(info), _effective_score(prev),
+                prob_not_worse, 1.0 - REGRESSION_CONFIDENCE,
             )
             models[col] = prev
             rolled_back.append(col)
