@@ -4,12 +4,17 @@
 <div class="card">
     <h2>観測データ(日付一覧)</h2>
     <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ全体(Excel)をダウンロード</a></p>
-    {% if dates %}
-    <ul class="date-list">
-        {% for d in dates %}
-        <li><a href="{{ url_for('observations_date', date=d) }}">{{ d }}</a></li>
-        {% endfor %}
-    </ul>
+    {% if date_groups %}
+    {% for g in date_groups %}
+    <details class="date-month-group" {{ "open" if loop.first }}>
+        <summary>{{ g.label }}<span class="muted">({{ g.days|length }}日分)</span></summary>
+        <ul class="date-list compact">
+            {% for d in g.days %}
+            <li><a href="{{ url_for(endpoint, date=d.date) }}" title="{{ d.date }}">{{ d.day }}日</a></li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endfor %}
     {% else %}
     <p class="muted">観測データがまだありません。</p>
     {% endif %}

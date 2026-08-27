@@ -223,6 +223,25 @@ def _sorted_subdirs(base_dir, reverse=True):
     return sorted((p.name for p in base_dir.iterdir() if p.is_dir()), reverse=reverse)
 
 
+def _group_dates_by_month(dates):
+    """"YYYY-MM-DD"形式の日付文字列のリストを年月ごとにグループ化する。
+    画像アーカイブを無期限保存にしたことで日付一覧が長期化するため、日付ボタンを
+    バラバラに並べるのではなく月単位でまとめて見やすくする。元のリストの並び順
+    (通常は新しい日付順)は維持したまま、連続する同じ年月をまとめるだけなので、
+    降順・昇順どちらのリストを渡してもそのまま使える。
+    """
+    groups = []
+    current_key = None
+    for d in dates:
+        key = d[:7]
+        if key != current_key:
+            year, month = d[:4], d[5:7]
+            groups.append({"label": f"{year}年{int(month)}月", "days": []})
+            current_key = key
+        groups[-1]["days"].append({"date": d, "day": d[8:10]})
+    return groups
+
+
 def _users_conn():
     return users.connect(USERS_DB_PATH)
 
@@ -1036,7 +1055,10 @@ def observations_dates():
         log.warning("Failed to load observation data: %s", e)
         return render_template("observations_dates.html", dates=[])
     dates = sorted({dt.strftime("%Y-%m-%d") for dt in main_df["datetime"]}, reverse=True)
-    return render_template("observations_dates.html", dates=dates)
+    return render_template(
+        "observations_dates.html", dates=dates,
+        date_groups=_group_dates_by_month(dates), endpoint="observations_date",
+    )
 
 
 @app.route("/observations/<date>")
@@ -1100,7 +1122,11 @@ def download_xlsx():
 
 @app.route("/images")
 def images_dates():
-    return render_template("images_dates.html", dates=_sorted_subdirs(IMAGE_DIR))
+    dates = _sorted_subdirs(IMAGE_DIR)
+    return render_template(
+        "images_dates.html", dates=dates,
+        date_groups=_group_dates_by_month(dates), endpoint="images_date",
+    )
 
 
 @app.route("/images/<date>")
@@ -1154,7 +1180,11 @@ def images_hour_zip(date, hhmm):
 
 @app.route("/predictions")
 def predictions_dates():
-    return render_template("predictions_dates.html", dates=_sorted_subdirs(PRED_DIR))
+    dates = _sorted_subdirs(PRED_DIR)
+    return render_template(
+        "predictions_dates.html", dates=dates,
+        date_groups=_group_dates_by_month(dates), endpoint="predictions_date",
+    )
 
 
 @app.route("/predictions/<date>")

@@ -257,6 +257,34 @@ ul.tile-list li a:hover, ul.date-list li a:hover {
 ul.tile-list li a:active, ul.date-list li a:active { transform: translateY(0); }
 ul.tile-list li.hidden { display: none; }
 ul.tile-list.compact { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+ul.date-list.compact { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 0.4rem; }
+
+details.date-month-group {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.6rem;
+    overflow: hidden;
+}
+details.date-month-group summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.6rem 0.9rem;
+    font-weight: 600;
+    background: var(--color-primary-light);
+    color: var(--color-primary-dark);
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+details.date-month-group summary::-webkit-details-marker { display: none; }
+details.date-month-group summary::before {
+    content: "▶";
+    font-size: 0.7em;
+    transition: transform 0.15s ease;
+}
+details.date-month-group[open] summary::before { transform: rotate(90deg); }
+details.date-month-group summary .muted { font-weight: 400; }
+details.date-month-group .date-list { padding: 0.8rem 0.9rem; margin: 0; }
 ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 
 .station-grid {
