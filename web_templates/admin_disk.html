@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}ディスク使用量{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+
+<div class="card">
+    <h2>サーバー全体のディスク使用量</h2>
+    <div style="background:#eaf2f8; border-radius:6px; overflow:hidden; height:1.4rem; margin-bottom:0.6rem;">
+        <div style="background:#1a5276; height:100%; width:{{ disk.used_pct }}%;"></div>
+    </div>
+    <p class="muted">使用中 {{ disk.used }} / 全体 {{ disk.total }}（空き {{ disk.free }}、{{ disk.used_pct }}%使用）</p>
+</div>
+
+<div class="card">
+    <h2>river-fogデータの内訳</h2>
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>項目</th><th>サイズ</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+        <tr><td>{{ r.label }}</td><td>{{ r.human }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

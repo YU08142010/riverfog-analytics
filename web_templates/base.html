@@ -20,6 +20,13 @@
     </nav>
 </header>
 <main>
+{% with messages = get_flashed_messages() %}
+{% if messages %}
+<div class="card" style="border-left: 4px solid #1a5276; background:#eaf2f8;">
+    {% for m in messages %}<p style="margin:0.2rem 0;">{{ m }}</p>{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
 {% block content %}{% endblock %}
 </main>
 </body>

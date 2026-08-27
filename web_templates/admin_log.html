@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ key }}.log{% endblock %}
 {% block content %}
+{% include "admin_nav.html" %}
 <div class="card">
     <h2>{{ key }}.log (末尾{{ lines|length }}行)</h2>
-    <p><a href="{{ url_for('admin_home') }}">&laquo; ログ一覧に戻る</a> ｜ <a href="{{ url_for('admin_logout') }}">ログアウト</a></p>
     <div class="table-scroll">
     <pre style="background:#1c2733; color:#e8edf1; padding:1rem; border-radius:6px; font-size:0.78rem; line-height:1.4; max-height:70vh; overflow-y:auto;">{{ lines|join('') }}</pre>
     </div>

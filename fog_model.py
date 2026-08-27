@@ -3,6 +3,7 @@
 ~/Desktop/fog-prediction/weather_visualizer.py のモデル設計をそのまま踏襲している
 （アルゴリズム自体はそちらで検証済みのものを流用し、Colab専用の周辺機能だけを外した）。
 """
+import csv
 import logging
 from datetime import datetime
 
@@ -99,6 +100,10 @@ STATION_RATE_SMOOTHING = 20
 # サンプル数が少なすぎる、または前回の生データ(y_test/y_pred)が保存されていない（形式が古い等）
 # 場合は、判定できないため比較自体を行わない。
 MODEL_STATE_PATH = BASE_DIR / "data" / "models" / "model_state.joblib"
+# model_state.joblibは常に最新状態で上書きされ過去の履歴が残らないため、精度が実際に
+# 改善しているかを後で振り返れるよう、学習のたびに地点ごとのaccuracy/F1をここに追記する。
+METRICS_HISTORY_PATH = BASE_DIR / "data" / "models" / "model_metrics_history.csv"
+METRICS_HISTORY_FIELDS = ["trained_at", "station", "model_type", "pooled", "n", "accuracy", "f1", "fog_f1"]
 REGRESSION_CONFIDENCE = 0.95
 REGRESSION_N_BOOTSTRAP = 500
 MIN_N_FOR_REGRESSION_CHECK = 30
@@ -557,12 +562,40 @@ def load_model_state(path=MODEL_STATE_PATH):
         return {}
 
 
+def append_metrics_history(models, trained_at, path=METRICS_HISTORY_PATH):
+    """地点ごとのaccuracy/F1を履歴CSVに1行ずつ追記する（無ければヘッダーから作成）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=METRICS_HISTORY_FIELDS)
+        if is_new:
+            writer.writeheader()
+        for col, info in models.items():
+            fog_f1 = info.get("fog_f1")
+            if isinstance(fog_f1, float) and np.isnan(fog_f1):
+                fog_f1 = ""
+            writer.writerow({
+                "trained_at": trained_at,
+                "station": col,
+                "model_type": info.get("model_type", ""),
+                "pooled": info.get("pooled", False),
+                "n": info.get("n", ""),
+                "accuracy": info.get("accuracy", ""),
+                "f1": info.get("f1", ""),
+                "fog_f1": fog_f1,
+            })
+
+
 def save_model_state(models, path=MODEL_STATE_PATH):
-    """今回採用した（＝ロールバック判定後の）モデル一式を、次回比較用に保存する。"""
+    """今回採用した（＝ロールバック判定後の）モデル一式を、次回比較用に保存する。
+    あわせて地点ごとのaccuracy/F1を履歴CSV（METRICS_HISTORY_PATH）に追記し、
+    精度が実際に改善しているかを後から追えるようにする。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     trained_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
     state = {col: {**info, "trained_at": trained_at} for col, info in models.items()}
     joblib.dump(state, path)
+    append_metrics_history(models, trained_at)
 
 
 def _score_from_predictions(y_true, y_pred):

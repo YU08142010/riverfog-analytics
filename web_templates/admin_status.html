@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}サービス状態{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+
+<div class="card">
+    <h2>手動実行</h2>
+    <p class="muted">通常はsystemdタイマー(収集、毎時4〜19時)・cron(予測、毎日19:30)が自動実行します。
+        ここからは動作確認等のために任意のタイミングで実行できます。</p>
+    <table class="obs-table" style="width:auto;">
+        <tbody>
+        <tr>
+            <td>画像収集(collect.py)</td>
+            <td>
+                {% if running.collect %}
+                <span class="muted">実行中...</span>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_run', key='collect') }}" style="display:inline;">
+                    <button type="submit" class="button">今すぐ実行</button>
+                </form>
+                {% endif %}
+            </td>
+            <td><a href="{{ url_for('admin_log', key='collect') }}">ログを見る</a></td>
+        </tr>
+        <tr>
+            <td>予測(predict.py)</td>
+            <td>
+                {% if running.predict %}
+                <span class="muted">実行中...</span>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_run', key='predict') }}" style="display:inline;">
+                    <button type="submit" class="button">今すぐ実行</button>
+                </form>
+                {% endif %}
+            </td>
+            <td><a href="{{ url_for('admin_log', key='predict') }}">ログを見る</a></td>
+        </tr>
+        </tbody>
+    </table>
+    <p class="muted">予測の実行は再学習を含むため数分かかります。実行後はログで完了を確認してください。</p>
+</div>
+
+<div class="card">
+    <h2>収集タイマー</h2>
+    <table class="obs-table" style="width:auto;">
+        <tbody>
+        <tr><td>次回実行予定</td><td>{{ timer_info.get("NextElapseUSecRealtime", "-") }}</td></tr>
+        <tr><td>前回実行</td><td>{{ timer_info.get("LastTriggerUSec", "-") }}</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>systemdサービス状態</h2>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>ユニット</th><th>状態</th><th>詳細</th><th>結果</th><th>開始</th><th>終了</th></tr></thead>
+        <tbody>
+        {% for u in units %}
+        <tr>
+            <td>{{ u.unit }}</td>
+            <td>{{ u.get("ActiveState", "-") }}</td>
+            <td>{{ u.get("SubState", "-") }}</td>
+            <td>{{ u.get("Result", "-") }}</td>
+            <td>{{ u.get("ExecMainStartTimestamp", "-") }}</td>
+            <td>{{ u.get("ExecMainExitTimestamp", "-") }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h2>cron(sshuser)</h2>
+    <div class="table-scroll">
+    <pre style="background:#1c2733; color:#e8edf1; padding:1rem; border-radius:6px; font-size:0.8rem;">{{ crontab or "(crontabが空か取得できませんでした)" }}</pre>
+    </div>
+</div>
+{% endblock %}

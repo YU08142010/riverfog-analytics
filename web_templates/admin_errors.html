@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}エラー/警告{% endblock %}
+{% block content %}
+{% include "admin_nav.html" %}
+<div class="card">
+    <h2>直近のWARNING/ERROR({{ issues|length }}件)</h2>
+    <p class="muted">各ログの末尾から抽出しています。多い場合は新しい順に最大300件まで表示します。</p>
+    {% if issues %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>ログ</th><th>レベル</th><th style="text-align:left;">内容</th></tr></thead>
+        <tbody>
+        {% for i in issues %}
+        <tr>
+            <td>{{ i.log }}</td>
+            <td style="color: {{ '#c0392b' if i.level == 'ERROR' else '#b9770e' }}; font-weight:600;">{{ i.level }}</td>
+            <td style="text-align:left; white-space:normal; font-family:monospace; font-size:0.78rem;">{{ i.text }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">直近のログにWARNING/ERRORはありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

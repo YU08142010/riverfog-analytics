@@ -3,20 +3,23 @@
 LAN/Tailscale内からのみアクセスされる想定で、認証は行わない
 （既存のSamba共有・Cockpitと同じセキュリティモデル）。外部公開はしないこと。
 """
+import csv
 import io
 import logging
 import logging.handlers
 import os
 import re
 import secrets
+import shutil
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
 from flask import (
-    Flask, Response, abort, redirect, render_template, request, send_from_directory,
-    session, url_for,
+    Flask, Response, abort, flash, redirect, render_template,
+    request, send_from_directory, session, url_for,
 )
 
 import matplotlib
@@ -27,6 +30,7 @@ from matplotlib import font_manager
 
 from common import BASE_DIR, DATA_XLSX, JST
 import fog_data
+import fog_model
 import prediction_log
 from fog_features import PHENOM_COLORS, PHENOM_LABELS, SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell
 
@@ -57,6 +61,22 @@ ALLOWED_LOGS = {
     "webapp": BASE_DIR / "logs" / "webapp.log",
 }
 LOG_TAIL_LINES = 400
+LOG_ISSUE_RE = re.compile(r"\[(WARNING|ERROR)\]")
+LOG_ISSUE_SCAN_LINES = 3000
+LOG_ISSUE_MAX_TOTAL = 300
+
+VENV_PYTHON = BASE_DIR / ".venv" / "bin" / "python"
+# キー: 管理画面の「今すぐ実行」ボタンから起動できるバッチスクリプト。
+RUNNABLE_SCRIPTS = {"collect": "collect.py", "predict": "predict.py"}
+
+SYSTEMD_UNITS = ["river-fog-collect.timer", "river-fog-collect.service", "river-fog-web.service"]
+DISK_USAGE_PARTS = [
+    ("カメラ画像 (images/)", IMAGE_DIR),
+    ("予測結果 (predictions/)", PRED_DIR),
+    ("予測DB (predictions.db)", DB_PATH),
+    ("観測データ (只見川.xlsx)", DATA_XLSX),
+    ("モデル (models/)", BASE_DIR / "data" / "models"),
+]
 
 LOG_FILE = BASE_DIR / "logs" / "webapp.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -196,6 +216,79 @@ def _accuracy_trend_safe(station=None):
         return []
 
 
+def _load_metrics_history_trend():
+    """fog_model.append_metrics_historyが書く履歴CSVから、学習日ごとの
+    平均accuracy・平均霧F1(%)を計算する（『精度が向上しているか』を見るための集計）。
+    """
+    if not fog_model.METRICS_HISTORY_PATH.exists():
+        return []
+    by_date = {}
+    try:
+        with open(fog_model.METRICS_HISTORY_PATH, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                date = (row.get("trained_at") or "")[:10]
+                if not date:
+                    continue
+                entry = by_date.setdefault(date, {"acc_sum": 0.0, "acc_n": 0, "fog_sum": 0.0, "fog_n": 0})
+                acc = row.get("accuracy")
+                if acc:
+                    entry["acc_sum"] += float(acc)
+                    entry["acc_n"] += 1
+                fog_f1 = row.get("fog_f1")
+                if fog_f1:
+                    entry["fog_sum"] += float(fog_f1)
+                    entry["fog_n"] += 1
+    except Exception as e:
+        log.warning("Failed to read metrics history: %s", e)
+        return []
+
+    trend = []
+    for date in sorted(by_date.keys()):
+        e = by_date[date]
+        trend.append({
+            "date": date,
+            "accuracy": (e["acc_sum"] / e["acc_n"] * 100.0) if e["acc_n"] else None,
+            "fog_f1": (e["fog_sum"] / e["fog_n"] * 100.0) if e["fog_n"] else None,
+        })
+    return trend
+
+
+def _render_metrics_trend_png(trend):
+    """学習時のaccuracy・霧F1（全地点平均、%）の推移を折れ線グラフのPNGにして返す。"""
+    fig, ax = plt.subplots(figsize=(9, 3.2))
+    all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
+    acc_pts = [(d, t["accuracy"]) for d, t in zip(all_dates, trend) if t["accuracy"] is not None]
+    fog_pts = [(d, t["fog_f1"]) for d, t in zip(all_dates, trend) if t["fog_f1"] is not None]
+
+    if all_dates:
+        if acc_pts:
+            xs, ys = zip(*acc_pts)
+            ax.plot(xs, ys, marker="o", markersize=3, color="#1a5276", linewidth=1.4, label="accuracy(平均,%)")
+        if fog_pts:
+            xs, ys = zip(*fog_pts)
+            ax.plot(xs, ys, marker="s", markersize=3, color="#c0392b", linewidth=1.4, label="霧F1(平均,%)")
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=10))
+        span = max(all_dates) - min(all_dates)
+        pad = max(span * 0.1, timedelta(hours=12))
+        ax.set_xlim(min(all_dates) - pad, max(all_dates) + pad)
+        fig.autofmt_xdate()
+        ax.legend(loc="upper left", fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("スコア(%)")
+    ax.set_title("学習時のモデル精度推移(全地点平均)", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 def _upcoming_fog_alerts_safe():
     if not DB_PATH.exists():
         return []
@@ -245,6 +338,124 @@ def _station_latest_forecast_file(station):
         if m and m.group(1) == station:
             return latest_pred_date, p.name
     return latest_pred_date, None
+
+
+def _recent_log_issues(max_per_log=LOG_ISSUE_SCAN_LINES, max_total=LOG_ISSUE_MAX_TOTAL):
+    """各ログファイルの末尾からWARNING/ERROR行だけを抜き出し、新しい順にまとめて返す。"""
+    issues = []
+    for key, path in ALLOWED_LOGS.items():
+        if not path.exists():
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()[-max_per_log:]
+        except Exception as e:
+            log.warning("Failed to read log for issue scan: %s: %s", key, e)
+            continue
+        for line in lines:
+            m = LOG_ISSUE_RE.search(line)
+            if m:
+                issues.append({"log": key, "level": m.group(1), "text": line.rstrip("\n")})
+    # 各行の先頭が "YYYY-MM-DD HH:MM:SS,mmm" 形式であることを前提に、文字列としてソートすれば
+    # そのまま時系列になる。
+    issues.sort(key=lambda x: x["text"][:23], reverse=True)
+    return issues[:max_total]
+
+
+def _systemctl_show(unit, properties):
+    """systemctl show の出力（Key=Value の羅列）を辞書にして返す。取得できなければ空辞書。"""
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", unit, "-p", ",".join(properties), "--no-pager"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        log.warning("systemctl show failed for %s: %s", unit, e)
+        return {}
+    info = {}
+    for line in result.stdout.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            info[k] = v
+    return info
+
+
+def _crontab_safe():
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+        return result.stdout
+    except Exception as e:
+        log.warning("crontab -l failed: %s", e)
+        return ""
+
+
+def _pid_file(script_name):
+    return BASE_DIR / "data" / f".{script_name}.pid"
+
+
+def _is_script_running(script_name):
+    """PIDファイルに記録したプロセスがまだ生きているかで判定する。
+    以前は`pgrep -f script_name`（コマンドライン全体の部分一致）を使っていたが、
+    "predict.py"という文字列を含む無関係なコマンド（ログファイル名やSSHでの調査コマンド
+    そのものなど）にまで誤ってマッチしてしまい、実際には動いていないのに「実行中」と
+    誤判定するバグがあったため、PIDの生死を直接確認する方式に変更した。
+    """
+    pid_file = _pid_file(script_name)
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _run_script_async(script_name):
+    """バッチスクリプトをwebappから切り離したプロセスとしてバックグラウンド起動する
+    （webapp自体の再起動・停止で巻き添えにならないようにstart_new_session=Trueにする）。
+    ログはスクリプト自身がlogs/配下に書くため、標準出力は捨てる。起動時の予期しない失敗
+    （import例外等）だけは拾えるよう、標準エラーだけは小さなデバッグログに残す。
+    PIDはファイルに記録し、_is_script_runningの二重起動チェックに使う。
+    """
+    debug_log = BASE_DIR / "logs" / f"{script_name}.launch_debug.log"
+    try:
+        with open(debug_log, "ab") as stderr_f:
+            proc = subprocess.Popen(
+                [str(VENV_PYTHON), str(BASE_DIR / script_name)],
+                cwd=str(BASE_DIR), stdout=subprocess.DEVNULL, stderr=stderr_f,
+                start_new_session=True,
+            )
+        _pid_file(script_name).write_text(str(proc.pid))
+        log.info("Launched %s as pid %d", script_name, proc.pid)
+    except Exception:
+        log.exception("Failed to launch %s", script_name)
+
+
+def _dir_size_bytes(path):
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+
+def _human_size(n):
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
 
 
 def _accuracy_summary_safe():
@@ -537,6 +748,91 @@ def admin_log(key):
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()[-LOG_TAIL_LINES:]
     return render_template("admin_log.html", key=key, lines=lines)
+
+
+@app.route("/admin/errors")
+@requires_admin
+def admin_errors():
+    return render_template("admin_errors.html", issues=_recent_log_issues())
+
+
+@app.route("/admin/status")
+@requires_admin
+def admin_status():
+    props = ["ActiveState", "SubState", "Result", "ActiveEnterTimestamp",
+              "ExecMainStartTimestamp", "ExecMainExitTimestamp"]
+    units = [{"unit": unit, **_systemctl_show(unit, props)} for unit in SYSTEMD_UNITS]
+    timer_info = _systemctl_show("river-fog-collect.timer", ["NextElapseUSecRealtime", "LastTriggerUSec"])
+    running = {key: _is_script_running(script) for key, script in RUNNABLE_SCRIPTS.items()}
+    return render_template(
+        "admin_status.html", units=units, timer_info=timer_info,
+        crontab=_crontab_safe(), running=running,
+    )
+
+
+@app.route("/admin/run/<key>", methods=["POST"])
+@requires_admin
+def admin_run(key):
+    script = RUNNABLE_SCRIPTS.get(key)
+    if script is None:
+        abort(404)
+    if _is_script_running(script):
+        flash(f"{script} は既に実行中のため、開始しませんでした。")
+    else:
+        _run_script_async(script)
+        flash(f"{script} の実行を開始しました。数分後にログを確認してください。")
+    return redirect(url_for("admin_status"))
+
+
+@app.route("/admin/models")
+@requires_admin
+def admin_models():
+    state = fog_model.load_model_state()
+    rows = []
+    for col in sorted(state.keys()):
+        info = state[col]
+        rows.append({
+            "station": col,
+            "model_type": info.get("model_type"),
+            "n": info.get("n"),
+            "accuracy": info.get("accuracy"),
+            "fog_f1": info.get("fog_f1"),
+            "pooled": info.get("pooled"),
+            "trained_at": info.get("trained_at"),
+        })
+
+    rollback_lines = []
+    predict_log_path = ALLOWED_LOGS.get("predict")
+    if predict_log_path and predict_log_path.exists():
+        try:
+            with open(predict_log_path, encoding="utf-8", errors="replace") as f:
+                rollback_lines = [ln.rstrip("\n") for ln in f if "Rolled back to previous model" in ln]
+        except Exception as e:
+            log.warning("Failed to scan predict.log for rollbacks: %s", e)
+
+    return render_template("admin_models.html", rows=rows, rollback_lines=rollback_lines[-50:])
+
+
+@app.route("/admin/models/chart.png")
+@requires_admin
+def admin_models_chart():
+    png = _render_metrics_trend_png(_load_metrics_history_trend())
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/admin/disk")
+@requires_admin
+def admin_disk():
+    rows = []
+    for label, path in DISK_USAGE_PARTS:
+        size = _dir_size_bytes(path)
+        rows.append({"label": label, "human": _human_size(size)})
+    total, used, free = shutil.disk_usage(BASE_DIR)
+    disk = {
+        "total": _human_size(total), "used": _human_size(used), "free": _human_size(free),
+        "used_pct": round(100.0 * used / total, 1) if total else 0,
+    }
+    return render_template("admin_disk.html", rows=rows, disk=disk)
 
 
 if __name__ == "__main__":
