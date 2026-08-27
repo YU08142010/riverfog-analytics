@@ -160,6 +160,13 @@ def _render_line_chart_png(dates, rates, title):
         x = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
         ax.plot(x, rates, marker="o", markersize=3, color="#1a5276", linewidth=1.4)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=10))
+        # データが1点、または期間が非常に短いと、軸の範囲をmatplotlibが自動決定できず
+        # 数年単位の既定レンジにフォールバックしてしまう（目盛りが7/1・1/1ばかりになる）。
+        # 明示的にデータの範囲＋余白でxlimを指定して防ぐ。
+        span = x[-1] - x[0]
+        pad = max(span * 0.1, timedelta(hours=12))
+        ax.set_xlim(x[0] - pad, x[-1] + pad)
         fig.autofmt_xdate()
     else:
         ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
