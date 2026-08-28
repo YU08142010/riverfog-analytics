@@ -66,6 +66,10 @@ AVATAR_SIZE = 256
 AVATAR_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ)と同じく約53週間分
 
+# ttydはTailscaleインターフェース(tailscale0)のみにバインドし、Basic認証をかけた別プロセスとして
+# systemdで動かしている(river-fog-terminal.service)。ここではその画面をiframeで埋め込むだけ。
+TTYD_URL = "http://100.78.220.44:7681"
+
 ALERT_HOURS_AHEAD = 24
 TIMELAPSE_MAX_ITEMS = 48
 
@@ -2302,6 +2306,15 @@ def admin_backup_restore():
         if staging_dir is not None and staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
     return redirect(url_for("admin_disk"))
+
+
+@app.route("/admin/terminal")
+@requires_admin
+def admin_terminal():
+    """サーバーのシェルにブラウザからアクセスするためのページ(ttydをiframeで埋め込む)。
+    ttydはTailscaleインターフェースにのみバインドしてBasic認証をかけてあるため、
+    ここでは単にそのURLをiframeに埋め込むだけで、認証自体はttyd側が別途行う。"""
+    return render_template("admin_terminal.html", terminal_url=TTYD_URL)
 
 
 @app.route("/admin/db")

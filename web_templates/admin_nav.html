@@ -2,8 +2,9 @@
 <div class="card">
     <h2>管理メニュー</h2>
     <input type="text" id="admin-nav-search" class="search-box" placeholder="メニュー名で絞り込み...">
-    <p class="muted list-count" id="admin-nav-count">15件</p>
+    <p class="muted list-count" id="admin-nav-count">16件</p>
     <ul class="tile-list compact" id="admin-nav-tiles">
+        <li data-name="ターミナル"><a href="{{ url_for('admin_terminal') }}">ターミナル</a></li>
         <li data-name="ログ"><a href="{{ url_for('admin_home') }}">ログ</a></li>
         <li data-name="エラー/警告"><a href="{{ url_for('admin_errors') }}">エラー/警告</a></li>
         <li data-name="サービス状態"><a href="{{ url_for('admin_status') }}">サービス状態</a></li>
