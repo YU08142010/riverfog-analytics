@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}DB管理{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>predictions.dbの状況</h2>
     {% if stats %}

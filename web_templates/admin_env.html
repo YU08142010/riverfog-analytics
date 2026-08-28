@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}環境変数{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>環境変数(.env)の設定状況</h2>
     <p class="muted">値そのものは表示しません。設定済みかどうかだけを確認できます。</p>

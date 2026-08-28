@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}ディスク使用量{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
-
 <div class="card">
     <h2>サーバー全体のディスク使用量</h2>
     <div style="background: var(--color-primary-lighter); border-radius:6px; overflow:hidden; height:1.4rem; margin-bottom:0.6rem;">

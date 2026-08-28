@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}メンテナンス{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>メンテナンスモード</h2>
     <p class="muted">有効にすると、一般の訪問者にはメンテナンス中の案内だけが表示されます。

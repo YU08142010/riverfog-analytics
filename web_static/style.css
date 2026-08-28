@@ -627,3 +627,60 @@ table.obs-table tbody tr:hover { background: var(--color-primary-light); }
     user-select: none;
     pointer-events: none;
 }
+
+/* ログイン/新規登録申請ページ用の独立レイアウト(base_auth.html)。
+   base.htmlのヘッダー・ナビ・サイドバーを一切持たず、中央寄せの1枚カードのみで構成する
+   (cockpit等のログイン画面を参考に、認証前は本体アプリのナビを見せない)。 */
+.auth-body { min-height: 100vh; }
+.auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    box-sizing: border-box;
+}
+.auth-card {
+    width: 100%;
+    max-width: 400px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 2rem 1.8rem;
+    text-align: center;
+}
+.auth-title {
+    font-size: 1.25rem;
+    color: var(--color-primary);
+    margin: 0 0 1.4rem;
+}
+.auth-card .card {
+    box-shadow: none;
+    border: none;
+    padding: 0;
+    margin-bottom: 1.2rem;
+}
+.auth-card form { text-align: left; }
+.auth-theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+}
+.auth-theme-toggle:hover { background: var(--color-bg); }
+
+/* 管理者メニューの左サイドバー(_admin_sidebar.html)。_station_sidebar.htmlと同じ
+   .sidebar-panel/.sidebar-search/.sidebar-listを流用し、グループ見出しだけ追加する。 */
+.sidebar-group { margin-bottom: 0.6rem; }
+.sidebar-group:last-child { margin-bottom: 0; }
+.sidebar-group-label {
+    margin: 0.6rem 0.6rem 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+}

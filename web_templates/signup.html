@@ -1,8 +1,7 @@
-{% extends "base.html" %}
+{% extends "base_auth.html" %}
 {% block title %}アカウント登録申請{% endblock %}
 {% block content %}
-<div class="card" style="max-width:420px; margin:0 auto;">
-    <h2>アカウント登録の申請</h2>
+    <h2 style="margin-top:0;">アカウント登録の申請</h2>
     {% if submitted %}
     <p>申請を受け付けました。管理者が承認すると、ログインできるようになります。</p>
     <p><a href="{{ url_for('login') }}">ログイン画面に戻る</a></p>
@@ -33,5 +32,4 @@
     </form>
     <p class="muted" style="margin-top:1rem;">既にアカウントをお持ちの方は <a href="{{ url_for('login') }}">ログイン</a> へ。</p>
     {% endif %}
-</div>
 {% endblock %}

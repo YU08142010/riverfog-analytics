@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}アカウント管理{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
-
 <div class="card">
     <h2>登録申請(未処理: {{ pending|length }}件)</h2>
     {% if pending %}

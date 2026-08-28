@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Gemini状況{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>Gemini API利用状況(直近{{ rows|length }}日分)</h2>
     <p class="muted">collect.logから集計しています。「フォールバック」はメインAPIキーが使えずサブキーに切り替わった回数、

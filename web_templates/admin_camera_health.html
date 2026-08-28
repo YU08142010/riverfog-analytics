@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}カメラ稼働率{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>地点ごとのカメラ稼働率(直近{{ days }}日)</h2>
     <p class="muted">「使える写真」が撮れた割合です。低い地点はカメラ側の障害や設置状況を確認してください。</p>

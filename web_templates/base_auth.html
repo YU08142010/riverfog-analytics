@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}ログイン{% endblock %} - 只見川霧観測</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script>
+(function() {
+    try {
+        var saved = localStorage.getItem("theme");
+        if (saved === "light" || saved === "dark") {
+            document.documentElement.setAttribute("data-theme", saved);
+        }
+    } catch (e) {}
+})();
+</script>
+</head>
+<body class="auth-body">
+<button type="button" class="theme-toggle auth-theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
+<div class="auth-page">
+    <div class="auth-card">
+        <h1 class="auth-title">只見川霧観測・予測</h1>
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="card" style="border-left: 4px solid var(--color-primary); background: var(--color-primary-light); margin-bottom:1rem; text-align:left;">
+            {% for m in messages %}<p style="margin:0.2rem 0;">{{ m }}</p>{% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+</div>
+<script>
+document.getElementById("theme-toggle-btn").addEventListener("click", function() {
+    var current = document.documentElement.getAttribute("data-theme");
+    if (!current) {
+        current = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    var next = current === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+});
+
+// class="js-pw-strength" の入力欄は、直後の.strength-meterバー/.strength-labelを更新する
+// (signup.htmlで使用。base.htmlと同じロジック)。
+function _pwStrength(pw) {
+    if (!pw) { return {score: 0, label: ""}; }
+    var score = 0;
+    if (pw.length >= 8) score++;
+    if (pw.length >= 12) score++;
+    if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    var labels = ["非常に弱い", "弱い", "普通", "強い", "非常に強い"];
+    var colors = ["#c0392b", "#c0392b", "#b9770e", "#27ae60", "#1e8449"];
+    var idx = Math.min(score, 4);
+    return {score: idx, label: labels[idx], color: colors[idx], pct: pw.length ? (idx + 1) * 20 : 0};
+}
+document.addEventListener("input", function(e) {
+    var input = e.target;
+    if (!(input instanceof HTMLInputElement) || !input.classList.contains("js-pw-strength")) { return; }
+    var wrap = input.closest(".pw-strength-wrap") || input.parentElement;
+    var bar = wrap.querySelector(".strength-meter-bar");
+    var label = wrap.querySelector(".strength-label");
+    var result = _pwStrength(input.value);
+    if (bar) { bar.style.width = result.pct + "%"; bar.style.background = result.color || "transparent"; }
+    if (label) { label.textContent = input.value ? "強度: " + result.label : ""; }
+});
+</script>
+</body>
+</html>

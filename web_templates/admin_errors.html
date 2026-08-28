@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}エラー/警告{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
-
 <div class="card">
     <h2>DNS/ネットワーク障害の記録</h2>
     <p class="muted">

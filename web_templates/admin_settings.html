@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}設定{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>設定の変更</h2>
     <p class="muted">APIキー等の秘密情報はここでは編集できません(サーバー上の.envを直接編集してください)。</p>

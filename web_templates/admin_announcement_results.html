@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}回答結果{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
 <div class="card">
     <h2>{{ ann.message }}</h2>
     <p><a href="{{ url_for('admin_announcements') }}">&laquo; 一覧に戻る</a></p>

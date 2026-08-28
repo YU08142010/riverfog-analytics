@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}モデル状況{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
-{% include "admin_nav.html" %}
-
 <div class="card">
     <h2>学習精度の推移(全地点平均)</h2>
     <p class="muted">毎日の再学習ごとに記録したaccuracy・霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
