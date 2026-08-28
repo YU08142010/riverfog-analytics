@@ -5,6 +5,7 @@
 パスワードは常にハッシュ化して保存し、平文は一切保持しない。
 """
 import sqlite3
+from datetime import date
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -15,7 +16,9 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'general',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    bio TEXT NOT NULL DEFAULT '',
+    favorite_stations TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS signup_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,12 +43,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+CREATE TABLE IF NOT EXISTS station_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_name TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_station_comments_station_name ON station_comments(station_name);
 """
+
+
+def _ensure_profile_columns(conn):
+    """bio/favorite_stationsは後から追加した列。既存のusers.dbには無いことがあるため、
+    無ければALTER TABLEで追加する(重複追加はsqlite3.OperationalErrorとして無視する)。
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "bio" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''")
+    if "favorite_stations" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN favorite_stations TEXT NOT NULL DEFAULT ''")
 
 
 def connect(db_path):
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
+    _ensure_profile_columns(conn)
     return conn
 
 
@@ -53,10 +76,14 @@ def _norm_email(email):
     return email.strip().lower()
 
 
+_USER_COLUMNS = "id, name, email, password_hash, role, created_at, bio, favorite_stations"
+
+
 def _user_row_to_dict(row):
     return {
         "id": row[0], "name": row[1], "email": row[2],
         "password_hash": row[3], "role": row[4], "created_at": row[5],
+        "bio": row[6], "favorite_stations": row[7],
     }
 
 
@@ -70,7 +97,7 @@ def create_user(conn, name, email, password_hash, role, created_at):
 
 def get_user_by_email(conn, email):
     row = conn.execute(
-        "SELECT id, name, email, password_hash, role, created_at FROM users WHERE email = ?",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE email = ?",
         (_norm_email(email),),
     ).fetchone()
     return _user_row_to_dict(row) if row else None
@@ -78,7 +105,7 @@ def get_user_by_email(conn, email):
 
 def get_user_by_id(conn, user_id):
     row = conn.execute(
-        "SELECT id, name, email, password_hash, role, created_at FROM users WHERE id = ?",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE id = ?",
         (user_id,),
     ).fetchone()
     return _user_row_to_dict(row) if row else None
@@ -92,9 +119,7 @@ def verify_login(conn, email, password):
 
 
 def list_users(conn):
-    rows = conn.execute(
-        "SELECT id, name, email, password_hash, role, created_at FROM users ORDER BY id"
-    ).fetchall()
+    rows = conn.execute(f"SELECT {_USER_COLUMNS} FROM users ORDER BY id").fetchall()
     return [_user_row_to_dict(r) for r in rows]
 
 
@@ -115,6 +140,23 @@ def update_user(conn, user_id, name=None, email=None, password_hash=None):
     if password_hash is not None:
         fields.append("password_hash = ?")
         values.append(password_hash)
+    if not fields:
+        return
+    values.append(user_id)
+    with conn:
+        conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
+
+
+def update_profile(conn, user_id, bio=None, favorite_stations=None):
+    """bio/favorite_stationsのうち指定されたものだけを更新する(Noneは変更しない)。
+    favorite_stationsはカンマ区切りの地点名文字列として保存する。"""
+    fields, values = [], []
+    if bio is not None:
+        fields.append("bio = ?")
+        values.append(bio)
+    if favorite_stations is not None:
+        fields.append("favorite_stations = ?")
+        values.append(favorite_stations)
     if not fields:
         return
     values.append(user_id)
@@ -230,6 +272,41 @@ def login_count(conn, user_id):
     return row[0] if row else 0
 
 
+def last_login(conn, user_id):
+    row = conn.execute(
+        "SELECT MAX(logged_in_at) FROM login_events WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def login_streak(conn, user_id, today=None):
+    """直近の連続ログイン日数を返す。今日または昨日のログインを起点に、日付が
+    1日ずつ途切れず遡れる限り数える(2日以上ログインが無ければ0)。
+    todayは基準日(date、省略時はサーバーのローカル日付)。ログイン記録はJSTで
+    保存されているため、呼び出し側はJSTの日付を渡すこと。"""
+    if today is None:
+        today = date.today()
+    rows = conn.execute(
+        "SELECT DISTINCT substr(logged_in_at, 1, 10) AS d FROM login_events "
+        "WHERE user_id = ? ORDER BY d DESC",
+        (user_id,),
+    ).fetchall()
+    if not rows:
+        return 0
+    days = [date.fromisoformat(r[0]) for r in rows]
+    if (today - days[0]).days > 1:
+        return 0
+    streak = 1
+    cur = days[0]
+    for d in days[1:]:
+        if (cur - d).days == 1:
+            streak += 1
+            cur = d
+        else:
+            break
+    return streak
+
+
 def record_audit(conn, actor_id, actor_name, action, detail, created_at):
     """管理操作(ロール変更・削除・承認・クリーンアップ等)の監査ログを1件追加する。
     actor_nameは実行者のアカウントが後で削除されても表示できるよう、idと別に保存しておく。
@@ -253,11 +330,53 @@ def list_audit_log(conn, limit=500):
     ]
 
 
+def add_station_comment(conn, station_name, user_id, body, created_at):
+    with conn:
+        conn.execute(
+            "INSERT INTO station_comments (station_name, user_id, body, created_at) VALUES (?, ?, ?, ?)",
+            (station_name, user_id, body, created_at),
+        )
+
+
+def _comment_row_to_dict(row):
+    return {
+        "id": row[0], "station_name": row[1], "user_id": row[2],
+        "body": row[3], "created_at": row[4],
+    }
+
+
+def list_station_comments(conn, station_name):
+    """指定地点のコメントを古い順で返す(掲示板表示用)。"""
+    rows = conn.execute(
+        "SELECT id, station_name, user_id, body, created_at FROM station_comments "
+        "WHERE station_name = ? ORDER BY id",
+        (station_name,),
+    ).fetchall()
+    return [_comment_row_to_dict(r) for r in rows]
+
+
+def get_station_comment(conn, comment_id):
+    row = conn.execute(
+        "SELECT id, station_name, user_id, body, created_at FROM station_comments WHERE id = ?",
+        (comment_id,),
+    ).fetchone()
+    return _comment_row_to_dict(row) if row else None
+
+
+def delete_station_comment(conn, comment_id):
+    with conn:
+        conn.execute("DELETE FROM station_comments WHERE id = ?", (comment_id,))
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
-    "list_users", "set_role", "update_user", "delete_user", "count_admins", "email_taken",
+    "list_users", "set_role", "update_user", "update_profile", "delete_user",
+    "count_admins", "email_taken",
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
     "record_login", "login_history", "login_counts_by_day", "login_count",
+    "last_login", "login_streak",
     "record_audit", "list_audit_log",
+    "add_station_comment", "list_station_comments", "get_station_comment",
+    "delete_station_comment",
 ]

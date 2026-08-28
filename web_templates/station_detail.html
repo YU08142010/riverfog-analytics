@@ -147,4 +147,32 @@
     <p class="muted">この地点の画像がまだありません。</p>
     {% endif %}
 </div>
+
+<div class="card">
+    <h2>コメント({{ comments|length }}件)</h2>
+    {% if comments %}
+    <div style="display:flex; flex-direction:column; gap:0.7rem; margin-bottom:1rem;">
+        {% for c in comments %}
+        <div style="border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:0.6rem 0.8rem;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
+                <span style="font-weight:600;">{{ c.author_name }}</span>
+                <span class="muted" style="font-size:0.78rem;">{{ c.created_at }}</span>
+            </div>
+            <p style="white-space:pre-wrap; margin:0.3rem 0 0;">{{ c.body }}</p>
+            {% if c.user_id == session.get("user_id") or session.get("role") == "admin" %}
+            <form action="{{ url_for('station_comment_delete', name=name, comment_id=c.id) }}" method="post" style="margin-top:0.3rem;">
+                <button type="submit" class="button" style="background:#7f8c8d; font-size:0.78rem; padding:0.25rem 0.6rem;">削除</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">まだコメントはありません。</p>
+    {% endif %}
+    <form action="{{ url_for('station_comment_add', name=name) }}" method="post">
+        <textarea name="body" rows="2" maxlength="1000" placeholder="この地点についてコメントを残す..." style="width:100%; max-width:480px; padding:0.5rem; font-family:inherit;"></textarea><br>
+        <button type="submit" class="button" style="margin-top:0.5rem;">投稿する</button>
+    </form>
+</div>
 {% endblock %}

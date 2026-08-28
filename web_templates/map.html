@@ -5,9 +5,9 @@
 <div class="card">
     <h2>地点マップ</h2>
     <p class="muted">
-        本システムでは各地点の緯度経度を保持していないため、地点名からのGoogleマップ検索結果を
-        埋め込んで表示しています。地点名の特定に多少の曖昧さが残るため、正確な位置は
-        下の一覧の「公式地図で見る」(カメラの取得元である国交省「川の防災情報」)もご利用ください。
+        各地点の緯度経度(国交省「川の防災情報」の公開データに基づく実測値)でGoogleマップを
+        埋め込み表示しています。より詳しい情報は下の一覧の「公式地図で見る」
+        (カメラの取得元である国交省「川の防災情報」)もご利用ください。
     </p>
     <div style="margin:0.8rem 0;">
         <label>
@@ -51,7 +51,13 @@
             -
             {% endif %}
         </td>
-        <td><a href="{{ e.google_url }}" target="_blank" rel="noopener">Googleマップで見る</a></td>
+        <td>
+            {% if e.google_url %}
+            <a href="{{ e.google_url }}" target="_blank" rel="noopener">Googleマップで見る</a>
+            {% else %}
+            -
+            {% endif %}
+        </td>
     </tr>
     {% endfor %}
     </tbody>

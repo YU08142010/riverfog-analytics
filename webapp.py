@@ -239,17 +239,29 @@ def _validate_station(name):
     return name
 
 
-def _load_camera_ids():
-    """cameras.csvから {地点名: カメラID} を読む。読めない場合は空dict。"""
+def _load_camera_info():
+    """cameras.csvから {地点名: {カメラID, 緯度, 経度}} を読む。読めない場合は空dict。
+    緯度経度は国交省「川の防災情報」(river.go.jp)が地図描画に使っている公開GeoJSON
+    (/kawabou/file/gjson/scam/{市町村コード}.json)から取得した実測値であり、
+    地点名からの逆ジオコーディング等による推測値ではない。
+    """
     try:
         with open(CAMERAS_CSV, encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
-            return {row["地点名"]: row["カメラID"] for row in reader}
+            info = {}
+            for row in reader:
+                entry = {"cam_id": row["カメラID"]}
+                lat, lon = row.get("緯度"), row.get("経度")
+                if lat and lon:
+                    entry["lat"] = float(lat)
+                    entry["lon"] = float(lon)
+                info[row["地点名"]] = entry
+            return info
     except Exception:
         return {}
 
 
-CAMERA_IDS = _load_camera_ids()
+CAMERA_INFO = _load_camera_info()
 
 
 def _river_go_jp_map_url(cam_id):
@@ -268,32 +280,24 @@ def _river_go_jp_map_url(cam_id):
     )
 
 
-def _map_search_query(name):
-    """Googleマップ検索用のクエリ文字列。橋名等は単独だと同名の別地点(全国に多数)と
-    衝突しやすく、「只見川」だけでは曖昧なまま解決されてしまう地点があったため、
-    確実な事実である都道府県名(只見川は全域が福島県内)も加えて精度を上げる。
-    それでも、Googleの地図に登録されていない小規模な橋は一意に解決できないことがある
-    （座標を持たない以上、この方式の構造的な限界）。
-    """
-    return f"{name} 只見川 福島県"
-
-
-def _google_maps_search_url(name):
-    """地点名でのGoogleマップ検索URL(座標不要、Google自身のジオコーディングに依存)。
+def _google_maps_search_url(lat, lon):
+    """緯度経度でのGoogleマップ検索URL。ジオコーディング不要でその座標に直接ピンが立つ。
     新しいタブで開く用（埋め込みはできない見た目のフルGoogleマップ画面）。
     """
-    return "https://www.google.com/maps/search/?api=1&query=" + quote(_map_search_query(name))
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{lat},{lon}")
 
 
-def _google_maps_embed_url(name):
-    """地点名でのGoogleマップをサイト内にiframe埋め込みするためのURL。
+def _google_maps_embed_url(lat, lon):
+    """緯度経度でのGoogleマップをサイト内にiframe埋め込みするためのURL。
     APIキー不要の簡易埋め込み方式(maps.google.com/maps?...&output=embed)を使う。
     このURLはGoogle側で最終的な埋め込み用URL(/maps/embed?...)へ301リダイレクトされ、
     そちらはX-Frame-Optionsによる制限が無いことをヘッダ確認済み（iframe内で正常に追従される）。
     国交省「川の防災情報」側は同様の埋め込みを試すとX-Frame-Options: SAMEORIGINで
     ブロックされる(通常のリンクとしては問題なくアクセスできる)ため、埋め込みにはこちらを使う。
+    地点名でのテキスト検索では、Googleに登録されていない小規模な橋の大半でピンポイント
+    表示に失敗していたため、実測の緯度経度を直接渡す方式に変更した。
     """
-    return "https://maps.google.com/maps?q=" + quote(_map_search_query(name)) + "&output=embed"
+    return f"https://maps.google.com/maps?q={lat},{lon}&z=16&output=embed"
 
 
 def _sorted_subdirs(base_dir, reverse=True):
@@ -1420,13 +1424,20 @@ def map_page():
     entries = []
     embed_urls_by_name = {}
     for name in STATION_NAMES:
-        cam_id = CAMERA_IDS.get(name)
-        embed_urls_by_name[name] = _google_maps_embed_url(name)
+        info = CAMERA_INFO.get(name, {})
+        cam_id = info.get("cam_id")
+        lat, lon = info.get("lat"), info.get("lon")
+        if lat is not None and lon is not None:
+            embed_urls_by_name[name] = _google_maps_embed_url(lat, lon)
+            google_url = _google_maps_search_url(lat, lon)
+        else:
+            embed_urls_by_name[name] = None
+            google_url = None
         entries.append({
             "name": name,
             "current": current_by_name.get(name),
             "river_gov_url": _river_go_jp_map_url(cam_id) if cam_id else None,
-            "google_url": _google_maps_search_url(name),
+            "google_url": google_url,
         })
 
     return render_template(
@@ -1450,6 +1461,17 @@ def station_detail(name):
     timelapse = _station_timelapse_images(name)
     image_dates = _sorted_subdirs(IMAGE_DIR)
 
+    conn = _users_conn()
+    try:
+        raw_comments = users.list_station_comments(conn, name)
+        author_names = {u["id"]: u["name"] for u in users.list_users(conn)}
+    finally:
+        conn.close()
+    comments = [
+        {**c, "author_name": author_names.get(c["user_id"], "(退会済みユーザー)")}
+        for c in raw_comments
+    ]
+
     return render_template(
         "station_detail.html",
         name=name,
@@ -1462,7 +1484,41 @@ def station_detail(name):
         station_names=STATION_NAMES,
         current_by_name=current_by_name,
         active_names=[name],
+        comments=comments,
     )
+
+
+@app.route("/stations/<name>/comments", methods=["POST"])
+def station_comment_add(name):
+    name = _validate_station(name)
+    body = request.form.get("body", "").strip()[:1000]
+    if not body:
+        return _finish("station_detail", "コメントを入力してください。", success=False, name=name)
+    conn = _users_conn()
+    try:
+        users.add_station_comment(
+            conn, name, session["user_id"], body,
+            datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+    return _finish("station_detail", "コメントを投稿しました。", name=name)
+
+
+@app.route("/stations/<name>/comments/<int:comment_id>/delete", methods=["POST"])
+def station_comment_delete(name, comment_id):
+    name = _validate_station(name)
+    conn = _users_conn()
+    try:
+        comment = users.get_station_comment(conn, comment_id)
+        if comment is None or comment["station_name"] != name:
+            abort(404)
+        if comment["user_id"] != session.get("user_id") and session.get("role") != "admin":
+            abort(403)
+        users.delete_station_comment(conn, comment_id)
+    finally:
+        conn.close()
+    return _finish("station_detail", "コメントを削除しました。", name=name)
 
 
 @app.route("/stations/<name>/timelapse.json")
@@ -1579,10 +1635,13 @@ def _inject_avatar_url():
 def members_list():
     """ログイン中の全ユーザーが見られるメンバー一覧。個々のログイン履歴・
     ヒートマップはメンバー詳細ページ(member_detail)で確認する。"""
+    today = datetime.now(JST).date()
     conn = _users_conn()
     try:
         all_users = users.list_users(conn)
         login_counts = {u["id"]: users.login_count(conn, u["id"]) for u in all_users}
+        last_logins = {u["id"]: users.last_login(conn, u["id"]) for u in all_users}
+        streaks = {u["id"]: users.login_streak(conn, u["id"], today) for u in all_users}
     finally:
         conn.close()
     members = [
@@ -1590,10 +1649,16 @@ def members_list():
             "id": u["id"], "name": u["name"], "role": u["role"],
             "has_avatar": _avatar_path(u["id"]).exists(),
             "login_count": login_counts.get(u["id"], 0),
+            "last_login": last_logins.get(u["id"]),
+            "streak": streaks.get(u["id"], 0),
+            "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
         }
         for u in all_users
     ]
-    return render_template("members_list.html", members=members)
+    ranking = sorted(
+        [m for m in members if m["login_count"] > 0], key=lambda m: -m["login_count"]
+    )[:5]
+    return render_template("members_list.html", members=members, ranking=ranking)
 
 
 @app.route("/members/<int:user_id>")
@@ -1606,14 +1671,19 @@ def member_detail(user_id):
         history = users.login_history(conn, user_id)
         counts_by_day = users.login_counts_by_day(conn, user_id)
         total_logins = users.login_count(conn, user_id)
+        streak = users.login_streak(conn, user_id, datetime.now(JST).date())
     finally:
         conn.close()
+    favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
     return render_template(
         "member_detail.html",
         member=target,
         history=history,
         counts_by_day=counts_by_day,
         total_logins=total_logins,
+        streak=streak,
+        favorite_stations=favorite_stations,
+        station_names=STATION_NAMES,
         first_login=history[-1] if history else None,
         last_login=history[0] if history else None,
         has_avatar=_avatar_path(user_id).exists(),
@@ -1621,6 +1691,21 @@ def member_detail(user_id):
         heatmap_days=LOGIN_HEATMAP_DAYS,
         avatar_size=AVATAR_SIZE,
     )
+
+
+@app.route("/members/<int:user_id>/profile", methods=["POST"])
+def member_profile_update(user_id):
+    """自己紹介文とお気に入り地点は本人のみが変更できる(アバターと同じ制限)。"""
+    if session.get("user_id") != user_id:
+        abort(403)
+    bio = request.form.get("bio", "").strip()[:300]
+    favorite_stations = [s for s in request.form.getlist("favorite_stations") if s in STATION_NAMES]
+    conn = _users_conn()
+    try:
+        users.update_profile(conn, user_id, bio=bio, favorite_stations=",".join(favorite_stations))
+    finally:
+        conn.close()
+    return _finish("member_detail", "プロフィールを更新しました。", user_id=user_id)
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

@@ -22,8 +22,7 @@
     <span style="color:rgba(255,255,255,0.6); font-size:0.72rem; align-self:flex-end; margin-bottom:0.15rem;">v{{ app_version }}</span>
     <nav>
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">ダッシュボード</a>
-        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) else '' }}">地点別</a>
-        <a href="{{ url_for('compare_stations') }}" class="{{ 'active' if request.path.startswith('/compare') else '' }}">地点比較</a>
+        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) or request.path.startswith('/compare') else '' }}">地点別</a>
         <a href="{{ url_for('map_page') }}" class="{{ 'active' if request.path.startswith(url_for('map_page')) else '' }}">地図</a>
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">観測データ</a>
         <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>

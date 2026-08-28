@@ -7,6 +7,19 @@
 </ul>
 {% endblock %}
 {% block content %}
+{% if ranking %}
+<div class="card">
+    <h2>ログイン回数ランキング</h2>
+    <ol style="margin:0; padding-left:1.4rem;">
+        {% for m in ranking %}
+        <li style="margin-bottom:0.3rem;">
+            <a href="{{ url_for('member_detail', user_id=m.id) }}">{{ m.name }}</a>
+            <span class="muted">— {{ m.login_count }}回{% if m.streak > 1 %}(連続{{ m.streak }}日){% endif %}</span>
+        </li>
+        {% endfor %}
+    </ol>
+</div>
+{% endif %}
 <div class="card">
     <h2>メンバー一覧({{ members|length }}人)</h2>
     <p class="muted">メンバーを選ぶと、そのメンバーのログイン履歴とログイン頻度のヒートマップを確認できます。</p>
@@ -22,7 +35,22 @@
             {% endif %}
             <div style="margin-top:0.5rem; font-weight:600;">{{ m.name }}</div>
             <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
-            <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">ログイン{{ m.login_count }}回</div>
+            <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">
+                ログイン{{ m.login_count }}回{% if m.streak > 1 %}・連続{{ m.streak }}日{% endif %}
+            </div>
+            <div class="muted" style="font-size:0.72rem; margin-top:0.15rem;">
+                最終ログイン: {{ m.last_login[:10] if m.last_login else "-" }}
+            </div>
+            {% if m.favorite_stations %}
+            <div style="margin-top:0.4rem; display:flex; flex-wrap:wrap; gap:0.25rem; justify-content:center;">
+                {% for s in m.favorite_stations[:3] %}
+                <span class="role-tag general" style="margin-top:0;">{{ s }}</span>
+                {% endfor %}
+                {% if m.favorite_stations|length > 3 %}
+                <span class="muted" style="font-size:0.72rem;">他{{ m.favorite_stations|length - 3 }}件</span>
+                {% endif %}
+            </div>
+            {% endif %}
         </a>
         {% endfor %}
     </div>

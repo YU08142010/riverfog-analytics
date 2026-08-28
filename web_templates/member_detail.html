@@ -161,11 +161,45 @@
 </div>
 
 <div class="card">
+    <h2>プロフィール</h2>
+    {% if is_self %}
+    <form action="{{ url_for('member_profile_update', user_id=member.id) }}" method="post">
+        <label class="muted" style="font-size:0.85rem;">自己紹介(300文字まで)</label><br>
+        <textarea name="bio" rows="3" maxlength="300" style="width:100%; max-width:480px; margin-top:0.3rem; padding:0.5rem; font-family:inherit;">{{ member.bio }}</textarea>
+        <p class="muted" style="font-size:0.85rem; margin-top:1rem; margin-bottom:0.3rem;">お気に入り地点</p>
+        <div class="station-grid" style="max-width:640px;">
+            {% for name in station_names %}
+            <label class="station-chip" style="background: var(--color-primary-light); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.3rem;">
+                <input type="checkbox" name="favorite_stations" value="{{ name }}" style="margin:0;" {{ "checked" if name in favorite_stations }}>
+                <span>{{ name }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="button" style="margin-top:1rem;">プロフィールを保存</button>
+    </form>
+    {% else %}
+    <p style="white-space:pre-wrap;">{{ member.bio if member.bio else "(自己紹介は未設定です)" }}</p>
+    {% if favorite_stations %}
+    <p class="muted" style="font-size:0.85rem; margin-top:0.8rem; margin-bottom:0.3rem;">お気に入り地点</p>
+    <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
+        {% for name in favorite_stations %}
+        <a class="role-tag general" href="{{ url_for('station_detail', name=name) }}">{{ name }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+
+<div class="card">
     <h2>ログイン状況</h2>
     <div class="stat-grid">
         <div class="stat-card">
             <div class="stat-label">総ログイン回数</div>
             <div class="stat-value">{{ total_logins }}<span class="stat-unit">回</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">連続ログイン日数</div>
+            <div class="stat-value">{{ streak }}<span class="stat-unit">日</span></div>
         </div>
         <div class="stat-card">
             <div class="stat-label">初回ログイン</div>
