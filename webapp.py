@@ -1300,6 +1300,7 @@ def station_detail(name):
 
     latest_pred_date, forecast_file = _station_latest_forecast_file(name)
     timelapse = _station_timelapse_images(name)
+    image_dates = _sorted_subdirs(IMAGE_DIR)
 
     return render_template(
         "station_detail.html",
@@ -1309,7 +1310,34 @@ def station_detail(name):
         latest_pred_date=latest_pred_date,
         forecast_file=forecast_file,
         timelapse=timelapse,
+        date_groups=_group_dates_by_month(image_dates),
     )
+
+
+@app.route("/stations/<name>/timelapse.json")
+def station_timelapse_json(name):
+    """タイムラプスで特定の日を選んだ際に、その日1日分の画像一覧を返す(Ajax用)。
+    画像が無期限保存になり件数が増え続けるため、タイムラプス自体には直近分のみを
+    埋め込み、日付を選んだ時だけその日の分を取りに行くようにしている。
+    """
+    name = _validate_station(name)
+    date = request.args.get("date", "")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        abort(400)
+    items = []
+    date_dir = IMAGE_DIR / date
+    if date_dir.is_dir():
+        for hhmm in _sorted_subdirs(date_dir, reverse=False):
+            hour_dir = date_dir / hhmm
+            for suffix in ("", "_unavailable"):
+                f = hour_dir / f"{name}{suffix}.jpg"
+                if f.exists():
+                    items.append({
+                        "url": url_for("images_file", date=date, hhmm=hhmm, filename=f.name),
+                        "caption": f"{date} {hhmm[:2]}:{hhmm[2:]}" + ("(取得失敗)" if suffix else ""),
+                    })
+                    break
+    return jsonify({"items": items})
 
 
 @app.route("/stations/<name>/chart.png")

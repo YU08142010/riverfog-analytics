@@ -40,6 +40,19 @@
     <h2>画像タイムラプス</h2>
     {% if timelapse %}
     <div style="text-align:center;">
+        {% if date_groups %}
+        <div style="margin-bottom:0.8rem; display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
+            <select id="tl-month-select" style="padding:0.4rem;">
+                <option value="">月を選んで移動...</option>
+                {% for g in date_groups %}
+                <option value="{{ loop.index0 }}">{{ g.label }}</option>
+                {% endfor %}
+            </select>
+            <select id="tl-day-select" style="padding:0.4rem;" disabled>
+                <option value="">日を選択</option>
+            </select>
+        </div>
+        {% endif %}
         <img id="tl-img" class="full-graph" style="max-height:480px;" src="">
         <p class="muted" id="tl-caption"></p>
         <button type="button" class="button" id="tl-prev">&laquo; 前</button>
@@ -54,27 +67,79 @@
              caption: {{ (t.date ~ " " ~ t.hhmm[:2] ~ ":" ~ t.hhmm[2:] ~ (" (取得失敗)" if t.unavailable else ""))|tojson }}}{{ "," if not loop.last }}
             {% endfor %}
         ];
+        var dateGroups = {{ (date_groups or [])|tojson }};
         var idx = 0, timer = null;
         var img = document.getElementById("tl-img");
         var cap = document.getElementById("tl-caption");
+        var playBtn = document.getElementById("tl-play");
+        var monthSelect = document.getElementById("tl-month-select");
+        var daySelect = document.getElementById("tl-day-select");
+
+        function stopPlaying() {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+                playBtn.textContent = "再生";
+            }
+        }
+
         function show(i) {
+            if (!items.length) { return; }
             idx = (i + items.length) % items.length;
             img.src = items[idx].url;
             cap.textContent = items[idx].caption + " (" + (idx + 1) + "/" + items.length + ")";
         }
+
         document.getElementById("tl-prev").addEventListener("click", function() { show(idx - 1); });
         document.getElementById("tl-next").addEventListener("click", function() { show(idx + 1); });
-        document.getElementById("tl-play").addEventListener("click", function(e) {
+        playBtn.addEventListener("click", function() {
             if (timer) {
-                clearInterval(timer);
-                timer = null;
-                e.target.textContent = "再生";
+                stopPlaying();
             } else {
                 timer = setInterval(function() { show(idx + 1); }, 800);
-                e.target.textContent = "停止";
+                playBtn.textContent = "停止";
             }
         });
-        show(0);
+
+        if (monthSelect) {
+            monthSelect.addEventListener("change", function() {
+                daySelect.innerHTML = '<option value="">日を選択</option>';
+                var gi = monthSelect.value;
+                if (gi === "") {
+                    daySelect.disabled = true;
+                    return;
+                }
+                dateGroups[parseInt(gi, 10)].days.forEach(function(d) {
+                    var opt = document.createElement("option");
+                    opt.value = d.date;
+                    opt.textContent = d.day + "日";
+                    daySelect.appendChild(opt);
+                });
+                daySelect.disabled = false;
+            });
+
+            daySelect.addEventListener("change", function() {
+                var date = daySelect.value;
+                if (!date) { return; }
+                stopPlaying();
+                fetch("{{ url_for('station_timelapse_json', name=name) }}?date=" + encodeURIComponent(date))
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        items = data.items || [];
+                        if (!items.length) {
+                            cap.textContent = "この日の画像はありません。";
+                            img.removeAttribute("src");
+                            return;
+                        }
+                        show(items.length - 1);
+                    })
+                    .catch(function() {
+                        cap.textContent = "画像の取得に失敗しました。";
+                    });
+            });
+        }
+
+        show(items.length - 1);
     })();
     </script>
     {% else %}
