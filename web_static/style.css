@@ -108,6 +108,71 @@ body {
 }
 .theme-toggle:hover { background: rgba(255, 255, 255, 0.24); }
 
+/* 通知ベル(base.html)。既読管理はサーバー側に持たず、ブラウザのlocalStorageで行う。 */
+.notif-bell-wrap { position: relative; }
+.notif-bell {
+    position: relative;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.9);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.55rem;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.notif-bell:hover { background: rgba(255, 255, 255, 0.24); }
+.notif-badge {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.3rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--color-danger);
+    box-shadow: 0 0 0 2px var(--color-primary-dark);
+}
+.notif-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: 320px;
+    max-width: calc(100vw - 2rem);
+    max-height: 420px;
+    overflow-y: auto;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card-hover);
+    z-index: 20;
+}
+.notif-panel-header {
+    padding: 0.7rem 1rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    background: var(--color-surface);
+}
+.notif-item {
+    display: block;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+    text-decoration: none;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    border-left: 3px solid transparent;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--color-primary-light); }
+.notif-item.notif-level-danger { border-left-color: var(--color-danger); }
+.notif-item.notif-level-warning { border-left-color: #b9770e; }
+.notif-item.notif-level-info { border-left-color: var(--color-primary); }
+.notif-empty { padding: 1rem; margin: 0; }
+
 a { color: var(--color-primary); }
 
 :focus-visible {
@@ -178,7 +243,7 @@ header nav a .icon { vertical-align: -3px; margin-right: 0.3rem; }
         overflow-x: visible;
     }
     header nav.open { display: flex; }
-    header .theme-toggle, header .header-user { order: 4; }
+    header .theme-toggle, header .header-user, header .notif-bell-wrap { order: 4; }
 }
 
 main {

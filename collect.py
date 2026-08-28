@@ -34,6 +34,7 @@ from common import (
     TEMPLATE_XLSX,
     load_camera_coords,
     record_network_failure,
+    representative_coords,
     request_with_dns_fallback,
     set_weather_measures,
 )
@@ -671,12 +672,12 @@ def _extract_weather_at_target_hour(hourly):
 
 
 def fetch_weather():
-    """代表地点（只見町役場）のOpen-Meteo実況に近い直近時刻の値を取得する。取得失敗時はNoneを返す。
-    2026-08-28以降はこれとは別に、fetch_weather_multi()で全地点分もあわせて取得している
-    （只見川.xlsxとの互換性のため、この代表地点の値の書き込み自体は変えていない）。
+    """代表地点（全33地点の座標の重心）のOpen-Meteo実況に近い直近時刻の値を取得する。
+    取得失敗時はNoneを返す。2026-08-28以降はこれとは別に、fetch_weather_multi()で
+    全地点分もあわせて取得している（只見川.xlsxとの互換性のため、この代表地点の値の
+    書き込み自体は変えていない）。
     """
-    lat = os.environ.get("WEATHER_LAT", "37.34861")
-    lon = os.environ.get("WEATHER_LON", "139.31583")
+    lat, lon = representative_coords()
     params = {
         "latitude": lat,
         "longitude": lon,

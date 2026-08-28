@@ -72,7 +72,7 @@ LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ
 TTYD_PORT = 7681
 
 ALERT_HOURS_AHEAD = 24
-ALERT_MIN_FOG_PROB = 0.85
+ALERT_MIN_FOG_PROB = 0.95
 TIMELAPSE_MAX_ITEMS = 48
 
 ALLOWED_LOGS = {
@@ -117,7 +117,7 @@ IMAGE_CLEANUP_DEFAULT_DAYS = 30
 ENV_PATH = BASE_DIR / ".env"
 ENV_EXAMPLE_PATH = BASE_DIR / ".env.example"
 # 管理画面から直接編集してよい設定（APIキー・パスワード類は対象外。SSH側の.envで管理する）。
-EDITABLE_ENV_KEYS = ["GEMINI_MODEL", "GEMINI_ESCALATION_MODEL", "WEATHER_LAT", "WEATHER_LON"]
+EDITABLE_ENV_KEYS = ["GEMINI_MODEL", "GEMINI_ESCALATION_MODEL"]
 
 MAINTENANCE_FLAG_PATH = BASE_DIR / "data" / ".maintenance.json"
 
@@ -388,6 +388,71 @@ def _inject_pending_signup_count():
             log.warning("Failed to count pending signup requests: %s", e)
             return 0
     return {"pending_signup_count": pending_signup_count}
+
+
+def _current_notifications():
+    """通知ベル(base.html)の一覧。一般利用者には霧アラートのみ、管理者にはシステム状態の
+    通知も加える。通知はDBに記録された履歴ではなく、その時点の状態から毎回計算するだけ
+    （霧アラートは_upcoming_fog_alerts_safe()、システム状態は_admin_overview()を再利用）。
+    既読管理はサーバー側に持たず、base.htmlのJSがlocalStorageで行う。
+    """
+    notifications = []
+    nearest_by_station = {}
+    for a in _upcoming_fog_alerts_safe():
+        station = a["station"]
+        if station not in nearest_by_station or a["target_datetime"] < nearest_by_station[station]["target_datetime"]:
+            nearest_by_station[station] = a
+    for station, a in sorted(nearest_by_station.items(), key=lambda kv: kv[1]["target_datetime"]):
+        prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
+        notifications.append({
+            "id": f"fog:{station}:{a['target_datetime']}",
+            "level": "warning",
+            "message": f"{station}: {a['target_datetime']}頃に霧の予測です（確率{prob_pct}%）",
+            "url": url_for("station_detail", name=station),
+        })
+
+    if session.get("role") == "admin":
+        overview = _admin_overview()
+        if overview["disk_used_pct"] is not None and overview["disk_used_pct"] >= 85:
+            notifications.append({
+                "id": "sys:disk",
+                "level": "danger",
+                "message": f"ディスク使用率が{overview['disk_used_pct']}%です",
+                "url": url_for("admin_disk"),
+            })
+        if not overview["collect_timer_active"]:
+            notifications.append({
+                "id": "sys:collect_timer",
+                "level": "danger",
+                "message": "毎時収集タイマーが停止しています",
+                "url": url_for("admin_status"),
+            })
+        if overview["network_failures_24h"]:
+            notifications.append({
+                "id": "sys:network",
+                "level": "warning",
+                "message": f"直近24時間でDNS/ネットワーク障害が{overview['network_failures_24h']}件発生しています",
+                "url": url_for("admin_errors"),
+            })
+        if overview["pending_signups"]:
+            notifications.append({
+                "id": "sys:pending_signups",
+                "level": "info",
+                "message": f"保留中の登録申請が{overview['pending_signups']}件あります",
+                "url": url_for("admin_accounts"),
+            })
+    return notifications
+
+
+@app.context_processor
+def _inject_notifications():
+    def notifications_data():
+        try:
+            return _current_notifications()
+        except Exception as e:
+            log.warning("Failed to build notifications: %s", e)
+            return []
+    return {"notifications_data": notifications_data}
 
 
 def requires_login(view):

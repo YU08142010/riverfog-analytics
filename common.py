@@ -31,6 +31,21 @@ def load_camera_coords(cameras_csv=CAMERAS_CSV):
                 coords[row["地点名"]] = (float(lat), float(lon))
     return coords
 
+
+def representative_coords(cameras_csv=CAMERAS_CSV):
+    """全33地点の座標の重心を返す。cross_rates計算やプールド救済モデルが使う
+    共有気象データ("代表地点"の気象)の取得地点として使う。
+    2026-08-28以前はWEATHER_LAT/WEATHER_LON環境変数で固定の1地点(只見町役場)を
+    指定していたが、全地点の実測座標が揃ったため、その重心に置き換えた。
+    """
+    coords = load_camera_coords(cameras_csv)
+    if not coords:
+        return 37.34861, 139.31583
+    lats = [lat for lat, _ in coords.values()]
+    lons = [lon for _, lon in coords.values()]
+    return sum(lats) / len(lats), sum(lons) / len(lons)
+
+
 QUALITY_INFO_VALUE = 8
 HOMOGENEITY_NUMBER_VALUE = 1
 

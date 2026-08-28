@@ -23,7 +23,6 @@ cron 等で定期実行する場合は毎時収集(04:00-19:00台の00分)を避
 """
 import logging
 import logging.handlers
-import os
 import sys
 import time
 from datetime import datetime, timedelta
@@ -39,6 +38,7 @@ from common import (
     DATA_XLSX,
     JST,
     record_network_failure,
+    representative_coords,
     request_with_dns_fallback,
     set_weather_measures,
 )
@@ -251,8 +251,7 @@ def main():
     load_dotenv(BASE_DIR / ".env")
     dry_run = "--dry-run" in sys.argv[1:]
 
-    lat = os.environ.get("WEATHER_LAT", "37.34861")
-    lon = os.environ.get("WEATHER_LON", "139.31583")
+    lat, lon = representative_coords()
 
     if not DATA_XLSX.exists():
         log.info("xlsx not found, nothing to backfill: %s", DATA_XLSX)

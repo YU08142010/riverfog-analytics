@@ -12,14 +12,13 @@
 import argparse
 import logging
 import logging.handlers
-import os
 import sys
 from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
 
-from common import BASE_DIR, DATA_XLSX, JST, STATION_WEATHER_DB_PATH, load_camera_coords
+from common import BASE_DIR, DATA_XLSX, JST, STATION_WEATHER_DB_PATH, load_camera_coords, representative_coords
 import fog_data
 import fog_graphs
 import fog_model
@@ -127,8 +126,7 @@ def main():
     args = parser.parse_args()
 
     load_dotenv(BASE_DIR / ".env")
-    lat = float(os.environ.get("WEATHER_LAT", "37.34861"))
-    lon = float(os.environ.get("WEATHER_LON", "139.31583"))
+    lat, lon = representative_coords()
 
     now_naive = datetime.now(JST).replace(tzinfo=None)
     run_at_str = now_naive.strftime("%Y-%m-%d %H:%M:%S")

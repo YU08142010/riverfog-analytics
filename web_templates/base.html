@@ -42,6 +42,16 @@
         {% endif %}
     </nav>
     <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
+    <div class="notif-bell-wrap">
+        <button type="button" class="notif-bell" id="notif-bell-btn" aria-label="通知" aria-expanded="false">
+            {{ icon("bell", size=18) }}
+            <span class="notif-badge" id="notif-badge" hidden></span>
+        </button>
+        <div class="notif-panel" id="notif-panel" hidden>
+            <div class="notif-panel-header">通知</div>
+            <div id="notif-list"></div>
+        </div>
+    </div>
     {% if session.get('user_id') %}
     {% set my_avatar = member_avatar_url(session.get('user_id')) %}
     <span class="header-user" style="color:rgba(255,255,255,0.85); font-size:0.85rem; white-space:nowrap; display:flex; align-items:center; gap:0.5rem;">
@@ -365,6 +375,70 @@ document.addEventListener("input", function(e) {
     img.src = link.href;
 })();
 {% endif %}
+
+// 通知ベル。既読管理はサーバーに状態を持たず、ブラウザのlocalStorageで通知idごとに行う
+// (通知の内容自体は霧アラート・システム状態から毎回計算しているだけで、DBに保存された
+// 通知レコードではないため)。
+(function() {
+    var notifications = {{ notifications_data()|tojson }};
+    var STORAGE_KEY = "read-notification-ids";
+    var bellBtn = document.getElementById("notif-bell-btn");
+    var panel = document.getElementById("notif-panel");
+    var badge = document.getElementById("notif-badge");
+    var list = document.getElementById("notif-list");
+    if (!bellBtn || !panel || !badge || !list) { return; }
+
+    function loadRead() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch (e) { return []; }
+    }
+    function saveRead(ids) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch (e) {}
+    }
+    function updateBadge() {
+        var read = loadRead();
+        var unread = notifications.some(function(n) { return read.indexOf(n.id) === -1; });
+        badge.hidden = !unread;
+    }
+    function renderList() {
+        list.innerHTML = "";
+        if (!notifications.length) {
+            var empty = document.createElement("p");
+            empty.className = "muted notif-empty";
+            empty.textContent = "通知はありません。";
+            list.appendChild(empty);
+            return;
+        }
+        notifications.forEach(function(n) {
+            var a = document.createElement("a");
+            a.className = "notif-item notif-level-" + n.level;
+            a.href = n.url;
+            a.textContent = n.message;
+            list.appendChild(a);
+        });
+    }
+    function openPanel() {
+        panel.hidden = false;
+        bellBtn.setAttribute("aria-expanded", "true");
+        saveRead(notifications.map(function(n) { return n.id; }));
+        updateBadge();
+    }
+    function closePanel() {
+        panel.hidden = true;
+        bellBtn.setAttribute("aria-expanded", "false");
+    }
+    bellBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        if (panel.hidden) { openPanel(); } else { closePanel(); }
+    });
+    document.addEventListener("click", function(e) {
+        if (!panel.hidden && !panel.contains(e.target) && e.target !== bellBtn) { closePanel(); }
+    });
+    document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape" && !panel.hidden) { closePanel(); }
+    });
+    renderList();
+    updateBadge();
+})();
 </script>
 </body>
 </html>
