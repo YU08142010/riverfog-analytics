@@ -1,20 +1,48 @@
-<p>
-    <a class="button" href="{{ url_for('admin_home') }}">ログ</a>
-    <a class="button" href="{{ url_for('admin_errors') }}">エラー/警告</a>
-    <a class="button" href="{{ url_for('admin_status') }}">サービス状態</a>
-    <a class="button" href="{{ url_for('admin_models') }}">モデル状況</a>
-    <a class="button" href="{{ url_for('admin_camera_health') }}">カメラ稼働率</a>
-    <a class="button" href="{{ url_for('admin_gemini') }}">Gemini状況</a>
-    <a class="button" href="{{ url_for('admin_accuracy_report') }}">精度レポート</a>
-    <a class="button" href="{{ url_for('admin_disk') }}">ディスク使用量</a>
-    <a class="button" href="{{ url_for('admin_db') }}">DB管理</a>
-    <a class="button" href="{{ url_for('admin_env') }}">環境変数</a>
-    <a class="button" href="{{ url_for('admin_settings') }}">設定</a>
-    <a class="button" href="{{ url_for('admin_maintenance') }}">メンテナンス</a>
-    <a class="button" href="{{ url_for('admin_announcements') }}">お知らせ/アンケート</a>
-    {% set pending_count = pending_signup_count() %}
-    <a class="button" href="{{ url_for('admin_accounts') }}">
-        アカウント管理{% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}
-    </a>
-    <a class="button" href="{{ url_for('admin_audit_log') }}">操作ログ</a>
-</p>
+{% set pending_count = pending_signup_count() %}
+<div class="card">
+    <h2>管理メニュー</h2>
+    <input type="text" id="admin-nav-search" class="search-box" placeholder="メニュー名で絞り込み...">
+    <p class="muted list-count" id="admin-nav-count">15件</p>
+    <ul class="tile-list compact" id="admin-nav-tiles">
+        <li data-name="ログ"><a href="{{ url_for('admin_home') }}">ログ</a></li>
+        <li data-name="エラー/警告"><a href="{{ url_for('admin_errors') }}">エラー/警告</a></li>
+        <li data-name="サービス状態"><a href="{{ url_for('admin_status') }}">サービス状態</a></li>
+        <li data-name="モデル状況"><a href="{{ url_for('admin_models') }}">モデル状況</a></li>
+        <li data-name="カメラ稼働率"><a href="{{ url_for('admin_camera_health') }}">カメラ稼働率</a></li>
+        <li data-name="Gemini状況"><a href="{{ url_for('admin_gemini') }}">Gemini状況</a></li>
+        <li data-name="精度レポート"><a href="{{ url_for('admin_accuracy_report') }}">精度レポート</a></li>
+        <li data-name="ディスク使用量"><a href="{{ url_for('admin_disk') }}">ディスク使用量</a></li>
+        <li data-name="DB管理"><a href="{{ url_for('admin_db') }}">DB管理</a></li>
+        <li data-name="環境変数"><a href="{{ url_for('admin_env') }}">環境変数</a></li>
+        <li data-name="設定"><a href="{{ url_for('admin_settings') }}">設定</a></li>
+        <li data-name="メンテナンス"><a href="{{ url_for('admin_maintenance') }}">メンテナンス</a></li>
+        <li data-name="お知らせ/アンケート"><a href="{{ url_for('admin_announcements') }}">お知らせ/アンケート</a></li>
+        <li data-name="アカウント管理">
+            <a href="{{ url_for('admin_accounts') }}">
+                アカウント管理{% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}
+            </a>
+        </li>
+        <li data-name="操作ログ"><a href="{{ url_for('admin_audit_log') }}">操作ログ</a></li>
+    </ul>
+    <p class="muted" id="admin-nav-empty" hidden>該当するメニューがありません。</p>
+</div>
+<script>
+(function() {
+    var input = document.getElementById("admin-nav-search");
+    var items = Array.prototype.slice.call(document.querySelectorAll("#admin-nav-tiles > li"));
+    var countLabel = document.getElementById("admin-nav-count");
+    var emptyLabel = document.getElementById("admin-nav-empty");
+    var total = items.length;
+    input.addEventListener("input", function() {
+        var q = input.value.trim();
+        var shown = 0;
+        items.forEach(function(li) {
+            var match = li.dataset.name.indexOf(q) !== -1;
+            li.classList.toggle("hidden", !match);
+            if (match) shown++;
+        });
+        countLabel.textContent = q ? shown + " / " + total + "件" : total + "件";
+        emptyLabel.hidden = shown !== 0;
+    });
+})();
+</script>
