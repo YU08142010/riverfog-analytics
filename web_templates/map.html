@@ -2,28 +2,16 @@
 {% from "_icons.html" import icon %}
 {% block title %}地図{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+{% endblock %}
 {% block content %}
 <div class="card">
     <h2>地点マップ</h2>
-    <p class="muted">
-        各地点の緯度経度(国交省「川の防災情報」の公開データに基づく実測値)でGoogleマップを
-        埋め込み表示しています。より詳しい情報は下の一覧の「公式地図で見る」
-        (カメラの取得元である国交省「川の防災情報」)もご利用ください。
-    </p>
-    <div style="margin:0.8rem 0;">
-        <label>
-            地図に表示する地点:
-            <select id="map-station-select" style="padding:0.4rem;">
-                {% for name in station_names %}
-                <option value="{{ name }}">{{ name }}</option>
-                {% endfor %}
-            </select>
-        </label>
-    </div>
-    <div class="chart-wrap">
-        <div class="spinner"></div>
-        <iframe id="map-embed-frame" src="" style="width:100%; height:420px; border:0; border-radius: var(--radius-sm); display:block;" loading="lazy"></iframe>
-    </div>
+    {% if has_alert %}
+    <p class="muted">点滅している地点は霧アラート(今後24時間以内に霧の予測あり)が発生しています。</p>
+    {% endif %}
+    <div id="station-map" style="height:560px; border-radius: var(--radius-sm); overflow:hidden;"></div>
 </div>
 
 <div class="table-scroll">
@@ -33,7 +21,6 @@
         <th>地点</th>
         <th>現在の現象</th>
         <th>座標</th>
-        <th>埋め込み地図</th>
         <th>国交省の地図</th>
         <th>Googleマップ</th>
     </tr>
@@ -53,7 +40,6 @@
             -
             {% endif %}
         </td>
-        <td><button type="button" class="button map-show-btn" data-name="{{ e.name }}">上に表示</button></td>
         <td>
             {% if e.river_gov_url %}
             <a href="{{ e.river_gov_url }}" target="_blank" rel="noopener">公式地図で見る</a>
@@ -74,31 +60,38 @@
 </table>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 (function() {
-    var embedUrls = {{ embed_urls_by_name|tojson }};
-    var select = document.getElementById("map-station-select");
-    var frame = document.getElementById("map-embed-frame");
-    var wrap = frame.closest(".chart-wrap");
+    var points = {{ map_points|tojson }};
+    var map = L.map("station-map");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
 
-    function loadStation(name) {
-        select.value = name;
-        if (wrap) { wrap.classList.add("is-loading"); }
-        frame.src = embedUrls[name] || "";
+    var bounds = [];
+    points.forEach(function(p) {
+        if (p.lat === null || p.lon === null) { return; }
+        bounds.push([p.lat, p.lon]);
+        var marker = L.circleMarker([p.lat, p.lon], {
+            radius: p.alert ? 11 : 8,
+            color: p.alert ? "#c0392b" : "#2c3e50",
+            weight: p.alert ? 3 : 1.5,
+            fillColor: p.color,
+            fillOpacity: 0.9,
+            className: p.alert ? "map-marker-alert" : ""
+        }).addTo(map);
+        var html = "<strong>" + p.name + "</strong><br>" + p.label;
+        if (p.alert) { html += "<br><span style=\"color:#c0392b;\">霧アラート発生中</span>"; }
+        html += "<br><a href=\"" + p.detail_url + "\">地点の詳細を見る</a>";
+        marker.bindPopup(html);
+    });
+    if (bounds.length) {
+        map.fitBounds(bounds, {padding: [24, 24]});
+    } else {
+        map.setView([37.35, 139.32], 12);
     }
-    frame.addEventListener("load", function() {
-        if (wrap) { wrap.classList.remove("is-loading"); }
-    });
-    select.addEventListener("change", function() { loadStation(select.value); });
-
-    document.querySelectorAll(".map-show-btn").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-            loadStation(btn.dataset.name);
-            window.scrollTo({top: 0, behavior: "smooth"});
-        });
-    });
-
-    if (select.options.length) { loadStation(select.options[0].value); }
 })();
 </script>
 {% endblock %}

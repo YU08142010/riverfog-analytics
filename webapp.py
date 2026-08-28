@@ -292,19 +292,6 @@ def _google_maps_search_url(lat, lon):
     return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{lat},{lon}")
 
 
-def _google_maps_embed_url(lat, lon):
-    """緯度経度でのGoogleマップをサイト内にiframe埋め込みするためのURL。
-    APIキー不要の簡易埋め込み方式(maps.google.com/maps?...&output=embed)を使う。
-    このURLはGoogle側で最終的な埋め込み用URL(/maps/embed?...)へ301リダイレクトされ、
-    そちらはX-Frame-Optionsによる制限が無いことをヘッダ確認済み（iframe内で正常に追従される）。
-    国交省「川の防災情報」側は同様の埋め込みを試すとX-Frame-Options: SAMEORIGINで
-    ブロックされる(通常のリンクとしては問題なくアクセスできる)ため、埋め込みにはこちらを使う。
-    地点名でのテキスト検索では、Googleに登録されていない小規模な橋の大半でピンポイント
-    表示に失敗していたため、実測の緯度経度を直接渡す方式に変更した。
-    """
-    return f"https://maps.google.com/maps?q={lat},{lon}&z=16&output=embed"
-
-
 def _sorted_subdirs(base_dir, reverse=True):
     if not base_dir.is_dir():
         return []
@@ -1452,30 +1439,38 @@ def map_page():
     if observations:
         current_by_name = {s["name"]: s for s in observations["stations"]}
 
+    alert_stations = {a["station"] for a in _upcoming_fog_alerts_safe()}
+
     entries = []
-    embed_urls_by_name = {}
+    map_points = []
     for name in STATION_NAMES:
         info = CAMERA_INFO.get(name, {})
         cam_id = info.get("cam_id")
         lat, lon = info.get("lat"), info.get("lon")
-        if lat is not None and lon is not None:
-            embed_urls_by_name[name] = _google_maps_embed_url(lat, lon)
-            google_url = _google_maps_search_url(lat, lon)
-        else:
-            embed_urls_by_name[name] = None
-            google_url = None
+        current = current_by_name.get(name)
+        google_url = _google_maps_search_url(lat, lon) if lat is not None and lon is not None else None
         entries.append({
             "name": name,
-            "current": current_by_name.get(name),
+            "current": current,
             "river_gov_url": _river_go_jp_map_url(cam_id) if cam_id else None,
             "google_url": google_url,
             "lat": lat,
             "lon": lon,
         })
+        map_points.append({
+            "name": name,
+            "lat": lat,
+            "lon": lon,
+            "label": current["label"] if current else "データなし",
+            "color": current["color"] if current else "#bdc3c7",
+            "alert": name in alert_stations,
+            "detail_url": url_for("station_detail", name=name),
+        })
 
     return render_template(
         "map.html", station_names=STATION_NAMES, entries=entries,
-        current_by_name=current_by_name, embed_urls_by_name=embed_urls_by_name,
+        current_by_name=current_by_name, map_points=map_points,
+        has_alert=bool(alert_stations),
     )
 
 

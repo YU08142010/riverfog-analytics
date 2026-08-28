@@ -20,6 +20,11 @@
 <body class="auth-body">
 <button type="button" class="theme-toggle auth-theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
 <div class="auth-page">
+    <div class="fog-layer" aria-hidden="true">
+        <div class="fog-band fog-band-1"></div>
+        <div class="fog-band fog-band-2"></div>
+        <div class="fog-band fog-band-3"></div>
+    </div>
     <div class="auth-card">
         <h1 class="auth-title">只見川霧観測・予測</h1>
         {% with messages = get_flashed_messages() %}
