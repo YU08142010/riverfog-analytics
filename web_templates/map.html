@@ -5,11 +5,28 @@
 <div class="card">
     <h2>地点マップ</h2>
     <p class="muted">
-        本システムでは各地点の緯度経度を保持していないため、独自の地図は表示できません。
-        代わりに、カメラの取得元である国交省「川の防災情報」の地点別地図、および
-        Googleマップの地点名検索へのリンクを掲載しています(いずれも新しいタブで開きます)。
+        本システムでは各地点の緯度経度を保持していないため、地点名からのGoogleマップ検索結果を
+        埋め込んで表示しています。地点名の特定に多少の曖昧さが残るため、正確な位置は
+        下の一覧の「公式地図で見る」(カメラの取得元である国交省「川の防災情報」)もご利用ください。
     </p>
-    <div style="margin-top:0.8rem;">
+    <div style="margin:0.8rem 0;">
+        <label>
+            地図に表示する地点:
+            <select id="map-station-select" style="padding:0.4rem;">
+                {% for name in station_names %}
+                <option value="{{ name }}">{{ name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <div class="chart-wrap">
+        <div class="spinner"></div>
+        <iframe id="map-embed-frame" src="" style="width:100%; height:420px; border:0; border-radius: var(--radius-sm); display:block;" loading="lazy"></iframe>
+    </div>
+</div>
+
+<div class="card">
+    <div style="margin-top:0.2rem;">
         <button type="button" class="button" id="map-view-list">一覧表示</button>
         <button type="button" class="button" id="map-view-dots" style="background: var(--color-text-muted);">ドットマップ</button>
     </div>
@@ -36,6 +53,7 @@
     <tr>
         <th>地点</th>
         <th>現在の現象</th>
+        <th>埋め込み地図</th>
         <th>国交省の地図</th>
         <th>Googleマップ</th>
     </tr>
@@ -47,6 +65,7 @@
         <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
             {{ e.current.label if e.current else "-" }}
         </td>
+        <td><button type="button" class="button map-show-btn" data-name="{{ e.name }}">上に表示</button></td>
         <td>
             {% if e.river_gov_url %}
             <a href="{{ e.river_gov_url }}" target="_blank" rel="noopener">公式地図で見る</a>
@@ -76,6 +95,32 @@
     }
     listBtn.addEventListener("click", function() { show("list"); });
     dotBtn.addEventListener("click", function() { show("dots"); });
+})();
+
+(function() {
+    var embedUrls = {{ embed_urls_by_name|tojson }};
+    var select = document.getElementById("map-station-select");
+    var frame = document.getElementById("map-embed-frame");
+    var wrap = frame.closest(".chart-wrap");
+
+    function loadStation(name) {
+        select.value = name;
+        if (wrap) { wrap.classList.add("is-loading"); }
+        frame.src = embedUrls[name] || "";
+    }
+    frame.addEventListener("load", function() {
+        if (wrap) { wrap.classList.remove("is-loading"); }
+    });
+    select.addEventListener("change", function() { loadStation(select.value); });
+
+    document.querySelectorAll(".map-show-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            loadStation(btn.dataset.name);
+            window.scrollTo({top: 0, behavior: "smooth"});
+        });
+    });
+
+    if (select.options.length) { loadStation(select.options[0].value); }
 })();
 </script>
 {% endblock %}

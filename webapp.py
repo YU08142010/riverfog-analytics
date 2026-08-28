@@ -271,8 +271,20 @@ def _river_go_jp_map_url(cam_id):
 def _google_maps_search_url(name):
     """地点名でのGoogleマップ検索URL(座標不要、Google自身のジオコーディングに依存)。
     橋名等は単独だと曖昧なことがあるため、川名を付けて検索精度を上げる。
+    新しいタブで開く用（埋め込みはできない見た目のフルGoogleマップ画面）。
     """
     return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{name} 只見川")
+
+
+def _google_maps_embed_url(name):
+    """地点名でのGoogleマップをサイト内にiframe埋め込みするためのURL。
+    APIキー不要の簡易埋め込み方式(maps.google.com/maps?...&output=embed)を使う。
+    このURLはGoogle側で最終的な埋め込み用URL(/maps/embed?...)へ301リダイレクトされ、
+    そちらはX-Frame-Optionsによる制限が無いことをヘッダ確認済み（iframe内で正常に追従される）。
+    国交省「川の防災情報」側は同様の埋め込みを試すとX-Frame-Options: SAMEORIGINで
+    ブロックされる(通常のリンクとしては問題なくアクセスできる)ため、埋め込みにはこちらを使う。
+    """
+    return "https://maps.google.com/maps?q=" + quote(f"{name} 只見川") + "&output=embed"
 
 
 def _sorted_subdirs(base_dir, reverse=True):
@@ -1359,8 +1371,10 @@ def map_page():
         current_by_name = {s["name"]: s for s in observations["stations"]}
 
     entries = []
+    embed_urls_by_name = {}
     for name in STATION_NAMES:
         cam_id = CAMERA_IDS.get(name)
+        embed_urls_by_name[name] = _google_maps_embed_url(name)
         entries.append({
             "name": name,
             "current": current_by_name.get(name),
@@ -1370,7 +1384,7 @@ def map_page():
 
     return render_template(
         "map.html", station_names=STATION_NAMES, entries=entries,
-        current_by_name=current_by_name,
+        current_by_name=current_by_name, embed_urls_by_name=embed_urls_by_name,
     )
 
 
