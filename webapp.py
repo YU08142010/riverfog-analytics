@@ -268,12 +268,21 @@ def _river_go_jp_map_url(cam_id):
     )
 
 
+def _map_search_query(name):
+    """Googleマップ検索用のクエリ文字列。橋名等は単独だと同名の別地点(全国に多数)と
+    衝突しやすく、「只見川」だけでは曖昧なまま解決されてしまう地点があったため、
+    確実な事実である都道府県名(只見川は全域が福島県内)も加えて精度を上げる。
+    それでも、Googleの地図に登録されていない小規模な橋は一意に解決できないことがある
+    （座標を持たない以上、この方式の構造的な限界）。
+    """
+    return f"{name} 只見川 福島県"
+
+
 def _google_maps_search_url(name):
     """地点名でのGoogleマップ検索URL(座標不要、Google自身のジオコーディングに依存)。
-    橋名等は単独だと曖昧なことがあるため、川名を付けて検索精度を上げる。
     新しいタブで開く用（埋め込みはできない見た目のフルGoogleマップ画面）。
     """
-    return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{name} 只見川")
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(_map_search_query(name))
 
 
 def _google_maps_embed_url(name):
@@ -284,7 +293,7 @@ def _google_maps_embed_url(name):
     国交省「川の防災情報」側は同様の埋め込みを試すとX-Frame-Options: SAMEORIGINで
     ブロックされる(通常のリンクとしては問題なくアクセスできる)ため、埋め込みにはこちらを使う。
     """
-    return "https://maps.google.com/maps?q=" + quote(f"{name} 只見川") + "&output=embed"
+    return "https://maps.google.com/maps?q=" + quote(_map_search_query(name)) + "&output=embed"
 
 
 def _sorted_subdirs(base_dir, reverse=True):
