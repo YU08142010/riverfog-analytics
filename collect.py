@@ -30,6 +30,8 @@ from common import (
     DATA_XLSX,
     JST,
     TEMPLATE_XLSX,
+    record_network_failure,
+    request_with_dns_fallback,
     set_weather_measures,
 )
 
@@ -127,9 +129,10 @@ def fetch_one_image(name, cam_id):
     """画像を取得する。中身が本物の写真かプレースホルダーかはここでは判定しない（Gemini側で行う）。"""
     url = CAM_IMAGE_URL.format(cam_id=cam_id)
     attempts = FETCH_RETRIES + 1
+    last_exc = None
     for attempt in range(1, attempts + 1):
         try:
-            resp = requests.get(url, headers=CAM_HEADERS, timeout=FETCH_TIMEOUT)
+            resp = request_with_dns_fallback("GET", url, headers=CAM_HEADERS, timeout=FETCH_TIMEOUT, log=log)
             if resp.status_code == 200 and resp.content:
                 return name, cam_id, resp.content
             log.warning(
@@ -137,12 +140,15 @@ def fetch_one_image(name, cam_id):
                 resp.status_code, attempt, attempts, name, cam_id,
             )
         except requests.RequestException as e:
+            last_exc = e
             log.warning(
                 "Image fetch failed (attempt %d/%d): %s (%s): %s",
                 attempt, attempts, name, cam_id, e,
             )
         if attempt < attempts:
             time.sleep(FETCH_RETRY_DELAY)
+    if last_exc is not None:
+        record_network_failure("image_fetch", f"{name}: {last_exc}")
     return name, cam_id, None
 
 
@@ -494,13 +500,15 @@ def fetch_weather():
     }
     attempts = WEATHER_FETCH_RETRIES + 1
     data = None
+    last_exc = None
     for attempt in range(1, attempts + 1):
         try:
-            resp = requests.get(OPEN_METEO_URL, params=params, timeout=15)
+            resp = request_with_dns_fallback("GET", OPEN_METEO_URL, params=params, timeout=15, log=log)
             resp.raise_for_status()
             data = resp.json()
             break
         except requests.RequestException as e:
+            last_exc = e
             log.warning(
                 "Weather fetch failed (attempt %d/%d): %s", attempt, attempts, e,
             )
@@ -508,6 +516,8 @@ def fetch_weather():
                 time.sleep(WEATHER_RETRY_DELAY_SEC)
     if data is None:
         log.error("Open-Meteo fetch failed after %d attempts", attempts)
+        if last_exc is not None:
+            record_network_failure("weather_fetch", str(last_exc))
         return None
 
     hourly = data.get("hourly", {})

@@ -1,6 +1,12 @@
 """collect.py と backfill_weather.py で共有する定数・ヘルパー。"""
+import logging
+import socket
+import threading
 from datetime import timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_XLSX = BASE_DIR / "data" / "只見川.xlsx"
@@ -103,3 +109,106 @@ def set_weather_measures(ws, row, weather):
     set_measure(ws, row, COL_DEWPOINT, COL_DEWPOINT_QI, COL_DEWPOINT_HN, weather.get("dew_point"))
     set_measure(ws, row, COL_HUMIDITY, COL_HUMIDITY_QI, COL_HUMIDITY_HN, weather.get("humidity"))
     set_measure(ws, row, COL_VISIBILITY, COL_VISIBILITY_QI, COL_VISIBILITY_HN, weather.get("visibility_km"))
+
+
+# --- DNSフォールバック ---------------------------------------------------------------
+# このサーバーの名前解決はTailscale MagicDNS(100.100.100.100)を経由しており、
+# Tailscale側やホストのネットワークが一瞬不安定になるだけで、天気API・カメラサイトの
+# 外部ドメインの名前解決が丸ごと失敗することが分かっている(2026-08-20頃から断続的に発生)。
+# システムDNSでの解決に失敗した時だけ、パブリックDNSへ直接問い合わせて再試行する。
+FALLBACK_DNS_SERVERS = ["8.8.8.8", "1.1.1.1"]
+_DNS_FAILURE_MARKERS = (
+    "Temporary failure in name resolution",
+    "Name or service not known",
+    "No address associated with hostname",
+    "nodename nor servname provided",
+)
+_dns_fallback_lock = threading.Lock()
+
+
+def _is_dns_failure(exc):
+    return any(marker in str(exc) for marker in _DNS_FAILURE_MARKERS)
+
+
+def _resolve_via_fallback_dns(hostname, timeout=5):
+    """システムDNSが失敗した時に、パブリックDNSへ直接問い合わせて解決する。
+    dnspython未インストールの環境でもcommon.py自体は読み込めるよう、遅延importにする。
+    """
+    import dns.resolver
+
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = FALLBACK_DNS_SERVERS
+    resolver.timeout = timeout
+    resolver.lifetime = timeout
+    answer = resolver.resolve(hostname, "A")
+    return str(answer[0])
+
+
+def request_with_dns_fallback(method, url, log=None, **kwargs):
+    """requests.request()のラッパー。システムDNSでの名前解決失敗を検知した場合のみ、
+    パブリックDNS(8.8.8.8等)で直接解決したIPに対して1回だけ再試行する。
+    TLS証明書検証は元のホスト名のまま行われるよう、socket.getaddrinfoをそのホスト名だけ
+    一時的に差し替える(requests/urllib3の他の挙動は変えない)。フォールバックの名前解決
+    自体が失敗した場合や、DNS以外のエラーの場合は、元の例外をそのまま送出する。
+
+    ThreadPoolExecutorから並列に呼ばれる状況(collect.pyの画像取得等)を考慮し、
+    socket.getaddrinfoの差し替え中は_dns_fallback_lockで排他する
+    (差し替え自体は他ホスト名の解決には影響しないが、複数スレッドが同時に
+    差し替え/復元を行うと互いのパッチを消し合う競合が起こりうるため)。
+    """
+    try:
+        return requests.request(method, url, **kwargs)
+    except requests.exceptions.ConnectionError as e:
+        if not _is_dns_failure(e):
+            raise
+        hostname = urlparse(url).hostname
+        if not hostname:
+            raise
+        try:
+            ip = _resolve_via_fallback_dns(hostname)
+        except Exception:
+            raise e from None
+
+        if log:
+            log.warning(
+                "System DNS resolution failed for %s; retrying via fallback DNS (resolved to %s)",
+                hostname, ip,
+            )
+
+        with _dns_fallback_lock:
+            original_getaddrinfo = socket.getaddrinfo
+
+            def _patched_getaddrinfo(host, *args, **kw):
+                if host == hostname:
+                    host = ip
+                return original_getaddrinfo(host, *args, **kw)
+
+            socket.getaddrinfo = _patched_getaddrinfo
+            try:
+                return requests.request(method, url, **kwargs)
+            finally:
+                socket.getaddrinfo = original_getaddrinfo
+
+
+NETWORK_FAILURE_LOG_PATH = BASE_DIR / "data" / "network_failures.csv"
+
+
+def record_network_failure(source, detail, when=None):
+    """DNS/ネットワーク障害を、日次の発生回数を後で集計できるようCSVに追記する
+    （管理者タブでの可視化・将来の通知機能のための記録用）。書き込み自体が失敗しても
+    収集処理を止めないよう、例外は握りつぶしてログにだけ残す。
+    """
+    import csv
+    from datetime import datetime
+
+    when = when or datetime.now(JST).replace(tzinfo=None)
+    try:
+        NETWORK_FAILURE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        is_new = not NETWORK_FAILURE_LOG_PATH.exists()
+        with open(NETWORK_FAILURE_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if is_new:
+                writer.writerow(["datetime", "source", "detail"])
+            writer.writerow([when.strftime("%Y-%m-%d %H:%M:%S"), source, detail])
+    except Exception as e:
+        logging.getLogger("common").warning("Failed to record network failure: %s", e)

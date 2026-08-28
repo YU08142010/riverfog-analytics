@@ -33,7 +33,15 @@ import requests
 from dotenv import load_dotenv
 
 import collect
-from common import BASE_DIR, COL_DATETIME, COL_PHENOM_START, DATA_XLSX, JST
+from common import (
+    BASE_DIR,
+    COL_DATETIME,
+    COL_PHENOM_START,
+    DATA_XLSX,
+    JST,
+    record_network_failure,
+    request_with_dns_fallback,
+)
 
 HISTORY_URL = "https://cam.river.go.jp/cam/history/{ts}/{cam_id}.jpg"
 HISTORY_SEARCH_STEP_MIN = 5  # history側の実際の保存間隔（5分刻み以外は404になる）
@@ -80,16 +88,23 @@ def fetch_history_image(cam_id, target_dt):
     """target_dtちょうど、またはその前後の近いスナップショットを取得する。
     成功したら (画像bytes, 実際に取れた時刻) を返す。見つからなければ (None, None)。
     """
+    connection_failed = False
     for offset in _search_offsets():
         dt = target_dt + timedelta(minutes=offset)
         ts = dt.strftime("%Y%m%d%H%M")
         url = HISTORY_URL.format(ts=ts, cam_id=cam_id)
         try:
-            resp = requests.get(url, headers=collect.CAM_HEADERS, timeout=HISTORY_FETCH_TIMEOUT)
+            resp = request_with_dns_fallback(
+                "GET", url, headers=collect.CAM_HEADERS, timeout=HISTORY_FETCH_TIMEOUT, log=log,
+            )
         except requests.RequestException:
+            # DNS障害時は全オフセットで同じ理由で失敗するため、記録は1回にまとめる
+            connection_failed = True
             continue
         if resp.status_code == 200 and resp.content:
             return resp.content, dt
+    if connection_failed:
+        record_network_failure("backfill_images", f"cam_id={cam_id}, target={target_dt}")
     return None, None
 
 

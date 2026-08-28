@@ -2,6 +2,44 @@
 {% block title %}エラー/警告{% endblock %}
 {% block content %}
 {% include "admin_nav.html" %}
+
+<div class="card">
+    <h2>DNS/ネットワーク障害の記録</h2>
+    <p class="muted">
+        このサーバーの名前解決はTailscale経由のため、断続的に外部サイト(天気API・カメラサイト)への
+        アクセスが失敗することがあります(自動でフォールバックDNSに再試行しますが、それも失敗した
+        回数をここに記録しています)。
+    </p>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">過去24時間</div>
+            <div class="stat-value">{{ network_failures.count_24h }}<span class="stat-unit">件</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">過去7日間</div>
+            <div class="stat-value">{{ network_failures.count_7d }}<span class="stat-unit">件</span></div>
+        </div>
+    </div>
+    {% if network_failures.recent %}
+    <div class="table-scroll" style="margin-top:1rem;">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>日時</th><th>種別</th><th style="text-align:left;">詳細</th></tr></thead>
+        <tbody>
+        {% for f in network_failures.recent %}
+        <tr>
+            <td>{{ f.datetime }}</td>
+            <td>{{ f.source }}</td>
+            <td style="text-align:left; white-space:normal; font-family:monospace; font-size:0.78rem;">{{ f.detail }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">記録されたDNS/ネットワーク障害はまだありません。</p>
+    {% endif %}
+</div>
+
 <div class="card">
     <h2>直近のWARNING/ERROR({{ issues|length }}件)</h2>
     <p class="muted">各ログの末尾から抽出しています。多い場合は新しい順に最大300件まで表示します。</p>

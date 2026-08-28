@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import font_manager
 
-from common import BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST
+from common import BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH
 import announcements
 import users
 import fog_data
@@ -52,7 +52,7 @@ if os.path.exists(_NOTO_CJK_JP_PATH):
 
 load_dotenv(BASE_DIR / ".env")
 
-ADMIN_SESSION_LIFETIME = timedelta(minutes=15)
+ADMIN_SESSION_LIFETIME = timedelta(hours=2)
 
 USERS_DB_PATH = BASE_DIR / "data" / "users.db"
 MIN_PASSWORD_LENGTH = 8
@@ -755,6 +755,39 @@ def _recent_log_issues(max_per_log=LOG_ISSUE_SCAN_LINES, max_total=LOG_ISSUE_MAX
     # そのまま時系列になる。
     issues.sort(key=lambda x: x["text"][:23], reverse=True)
     return issues[:max_total]
+
+
+def _network_failure_summary(recent_n=30):
+    """common.record_network_failure()が記録したDNS/ネットワーク障害を集計する。
+    このサーバーの名前解決はTailscale MagicDNS経由で、断続的に外部ドメインの解決が
+    失敗することが分かっているため、頻度を可視化して気づきやすくする。
+    """
+    empty = {"count_24h": 0, "count_7d": 0, "recent": []}
+    if not NETWORK_FAILURE_LOG_PATH.exists():
+        return empty
+    try:
+        rows = []
+        with open(NETWORK_FAILURE_LOG_PATH, encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    dt = datetime.strptime(row["datetime"], "%Y-%m-%d %H:%M:%S")
+                except (KeyError, ValueError):
+                    continue
+                rows.append({"datetime": dt, "source": row.get("source", ""), "detail": row.get("detail", "")})
+    except Exception as e:
+        log.warning("Failed to read network failure log: %s", e)
+        return empty
+
+    now = datetime.now(JST).replace(tzinfo=None)
+    count_24h = sum(1 for r in rows if now - r["datetime"] <= timedelta(hours=24))
+    count_7d = sum(1 for r in rows if now - r["datetime"] <= timedelta(days=7))
+    rows.sort(key=lambda r: r["datetime"], reverse=True)
+    recent = [
+        {"datetime": r["datetime"].strftime("%Y-%m-%d %H:%M:%S"), "source": r["source"], "detail": r["detail"]}
+        for r in rows[:recent_n]
+    ]
+    return {"count_24h": count_24h, "count_7d": count_7d, "recent": recent}
 
 
 def _systemctl_show(unit, properties):
@@ -1873,7 +1906,10 @@ def admin_log(key):
 @app.route("/admin/errors")
 @requires_admin
 def admin_errors():
-    return render_template("admin_errors.html", issues=_recent_log_issues())
+    return render_template(
+        "admin_errors.html", issues=_recent_log_issues(),
+        network_failures=_network_failure_summary(),
+    )
 
 
 @app.route("/admin/status")

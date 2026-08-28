@@ -38,6 +38,8 @@ from common import (
     COL_TEMP,
     DATA_XLSX,
     JST,
+    record_network_failure,
+    request_with_dns_fallback,
     set_weather_measures,
 )
 
@@ -89,13 +91,15 @@ def query_open_meteo(url, params):
     attempts = REQUEST_RETRIES + 1
     for attempt in range(1, attempts + 1):
         try:
-            resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            resp = request_with_dns_fallback("GET", url, params=params, timeout=REQUEST_TIMEOUT, log=log)
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:
             log.warning("Open-Meteo request failed (%s, attempt %d/%d): %s", url, attempt, attempts, e)
             if attempt < attempts:
                 time.sleep(REQUEST_RETRY_DELAY_SEC)
+            else:
+                record_network_failure("backfill_weather", f"{url}: {e}")
     return None
 
 
