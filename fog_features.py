@@ -196,8 +196,16 @@ def prepare_features(df, lat, lon, feature_names=None):
 
 
 def build_location_class_targets(phenom_df, phenom_cols):
-    """地点それぞれの現象コード（0="/"、1〜10、欠測はNaN）を作る。"""
+    """地点それぞれの現象コード（0="/"、1〜10、欠測はNaN）を作る。
+
+    雨・霧雨(9・10)は学習ターゲットとしては0(現象なし)に丸める。雨予報は
+    別途一般の天気予報で足りるため、この霧予測モデルでは雨そのものを予測対象に
+    しない（学習データに9・10が出てこなくなるため、scikit-learnの分類器も
+    自然にそれらのクラスを一切予測しなくなる）。実況分類(collect.py)側は
+    引き続き9・10を判定・記録し、霧との誤認別を防ぐ。
+    """
     codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
+    codes = codes.replace({9: 0, 10: 0})
     targets = codes.copy()
     targets.insert(0, "datetime", phenom_df["datetime"].values)
     return targets
