@@ -28,7 +28,7 @@
     {% for e in entries %}
     <tr>
         <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
-        <td style="{{ 'background:' + e.current.color + '; color:#1c2733' if e.current else '' }};">
+        <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
             {{ e.current.label if e.current else "-" }}
         </td>
         <td>

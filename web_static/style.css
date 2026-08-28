@@ -11,10 +11,73 @@
     --color-danger: #c0392b;
     --color-danger-bg: #fdecea;
     --color-warning: #b9770e;
+    --color-success: #1a7a3c;
     --radius-sm: 6px;
     --radius-md: 10px;
     --shadow-card: 0 1px 2px rgba(16, 42, 67, 0.06), 0 4px 12px rgba(16, 42, 67, 0.05);
     --shadow-card-hover: 0 2px 4px rgba(16, 42, 67, 0.08), 0 8px 20px rgba(16, 42, 67, 0.08);
+}
+
+/* ダークモード。以前一度削除された経緯があり、原因は現象コードのチップ・セルが
+   背景色を直接指定する一方、文字色をこのCSS変数任せにしていたため、暗い背景色
+   （#1a5276や#2c3e50など）の上で文字が読めなくなっていたこと。今回は
+   _phenom_label_color()（webapp.py）が背景の輝度から文字色(濃紺/白)を計算して
+   返すようにし、テンプレート側は必ずその文字色を明示するよう修正済み。
+   また警告/成功/危険を示す各所のハードコードされた文字色も
+   var(--color-danger)/var(--color-warning)/var(--color-success)に置き換え、
+   カード背景等のハードコードされたごく薄い色もvar(--color-bg)等に統一した。
+   グラフ画像(matplotlib生成のPNG)は背景が常に白のままなので、ダークモードでは
+   白いカードで囲って浮いて見えないようにしている（画像自体の配色は変更しない）。 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --color-primary: #5b9bd0;
+        --color-primary-dark: #7fb3dc;
+        --color-primary-light: #1c3a4d;
+        --color-primary-lighter: #234a63;
+        --color-bg: #12191f;
+        --color-surface: #1b242c;
+        --color-border: #2c3944;
+        --color-text: #e6edf3;
+        --color-text-muted: #94a4b3;
+        --color-danger: #e5776a;
+        --color-danger-bg: #3a2323;
+        --color-warning: #e0a751;
+        --color-success: #4caf6f;
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
+        --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.3);
+    }
+}
+:root[data-theme="dark"] {
+    --color-primary: #5b9bd0;
+    --color-primary-dark: #7fb3dc;
+    --color-primary-light: #1c3a4d;
+    --color-primary-lighter: #234a63;
+    --color-bg: #12191f;
+    --color-surface: #1b242c;
+    --color-border: #2c3944;
+    --color-text: #e6edf3;
+    --color-text-muted: #94a4b3;
+    --color-danger: #e5776a;
+    --color-danger-bg: #3a2323;
+    --color-warning: #e0a751;
+    --color-success: #4caf6f;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
+    --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) img.full-graph,
+    :root:not([data-theme="light"]) .chart-wrap img {
+        background: #fff;
+        border-radius: var(--radius-sm);
+        padding: 0.4rem;
+    }
+}
+:root[data-theme="dark"] img.full-graph,
+:root[data-theme="dark"] .chart-wrap img {
+    background: #fff;
+    border-radius: var(--radius-sm);
+    padding: 0.4rem;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +89,23 @@ body {
     color: var(--color-text);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
+    transition: background 0.15s ease, color 0.15s ease;
 }
+
+.theme-toggle {
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.9);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.7rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+}
+.theme-toggle:hover { background: rgba(255, 255, 255, 0.24); }
 
 a { color: var(--color-primary); }
 
@@ -299,8 +378,9 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
     text-align: center;
     line-height: 1.35;
     word-break: break-all;
-    color: #1c2733;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+    /* 文字色は現象コードごとにサーバー側で背景輝度から計算して渡す（暗い現象色の上では白文字になる）。
+       境界線は明暗どちらの背景でも見えるよう、黒/白ではなく中間グレーで固定する。 */
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.4);
 }
 
 .image-grid {
@@ -310,14 +390,14 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 }
 .image-grid figure {
     margin: 0;
-    background: #fafbfc;
+    background: var(--color-bg);
     border-radius: var(--radius-sm);
     overflow: hidden;
     border: 1px solid var(--color-border);
     transition: box-shadow 0.15s ease;
 }
 .image-grid figure:hover { box-shadow: var(--shadow-card-hover); }
-.image-grid img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; background: #eef1f4; }
+.image-grid img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; background: var(--color-border); }
 .image-grid figcaption {
     font-size: 0.78rem;
     padding: 0.35rem 0.4rem;
@@ -351,7 +431,7 @@ table.obs-table th {
     position: sticky;
     top: 0;
 }
-table.obs-table tbody tr:nth-child(even) { background: #f7f9fb; }
+table.obs-table tbody tr:nth-child(even) { background: var(--color-bg); }
 table.obs-table tbody tr:hover { background: var(--color-primary-light); }
 .table-scroll { overflow-x: auto; }
 

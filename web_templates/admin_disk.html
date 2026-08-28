@@ -5,8 +5,8 @@
 
 <div class="card">
     <h2>サーバー全体のディスク使用量</h2>
-    <div style="background:#eaf2f8; border-radius:6px; overflow:hidden; height:1.4rem; margin-bottom:0.6rem;">
-        <div style="background:#1a5276; height:100%; width:{{ disk.used_pct }}%;"></div>
+    <div style="background: var(--color-primary-lighter); border-radius:6px; overflow:hidden; height:1.4rem; margin-bottom:0.6rem;">
+        <div style="background: var(--color-primary); height:100%; width:{{ disk.used_pct }}%;"></div>
     </div>
     <p class="muted">使用中 {{ disk.used }} / 全体 {{ disk.total }}（空き {{ disk.free }}、{{ disk.used_pct }}%使用）</p>
 </div>

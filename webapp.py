@@ -184,19 +184,32 @@ SUMMARY_RE = re.compile(r"^全地点サマリー_\d{8}\.png$")
 CSV_RE = re.compile(r"^予測結果_\d{8}\.csv$")
 
 
+def _contrasting_text_color(hex_color):
+    """背景色(#rrggbb)に対して読みやすい文字色(濃紺 or 白)を、知覚輝度から選ぶ。
+    現象コードの色には#1a5276や#2c3e50のような暗い色も含まれており、
+    文字色を常に濃紺で固定すると暗い背景色の上で判読できなくなる
+    （ダークモード導入時に実際にこれが原因で文字が見えなくなった）。
+    """
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return "#1c2733" if brightness > 140 else "#ffffff"
+
+
 def _phenom_label_color(code):
-    """現象コード(0〜10、またはNaN)をラベルと表示色に変換する。"""
+    """現象コード(0〜10、またはNaN)をラベル・背景色・文字色に変換する。"""
     if code is None:
-        return "-", "#ffffff"
+        return "-", "#ffffff", "#1c2733"
     try:
         if code != code:  # NaN
-            return "-", "#ffffff"
+            return "-", "#ffffff", "#1c2733"
     except TypeError:
         pass
     code = int(code)
     if code == 0:
-        return "現象なし", SLASH_COLOR
-    return PHENOM_LABELS.get(code, f"コード{code}"), PHENOM_COLORS.get(code, "#ffffff")
+        return "現象なし", SLASH_COLOR, _contrasting_text_color(SLASH_COLOR)
+    bg = PHENOM_COLORS.get(code, "#ffffff")
+    return PHENOM_LABELS.get(code, f"コード{code}"), bg, _contrasting_text_color(bg)
 
 
 def _validate_date(date_str):
@@ -1004,8 +1017,8 @@ def _latest_observations():
     stations = []
     for name in station_names:
         code = encode_phenomena_cell(phenom_row.get(name))
-        label, color = _phenom_label_color(code)
-        stations.append({"name": name, "label": label, "color": color})
+        label, color, text_color = _phenom_label_color(code)
+        stations.append({"name": name, "label": label, "color": color, "text_color": text_color})
 
     return {
         "datetime": last_dt,
@@ -1104,8 +1117,8 @@ def observations_date(date):
             phenom_row = phenom_row.iloc[0]
             for name in station_names:
                 code = encode_phenomena_cell(phenom_row.get(name))
-                label, color = _phenom_label_color(code)
-                cells.append({"label": label, "color": color})
+                label, color, text_color = _phenom_label_color(code)
+                cells.append({"label": label, "color": color, "text_color": text_color})
         rows.append({
             "time": dt.strftime("%H:%M"),
             "temp": main_row.get("気温(℃)"),

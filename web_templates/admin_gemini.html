@@ -14,8 +14,8 @@
         {% for r in rows %}
         <tr>
             <td>{{ r.date }}</td>
-            <td style="{{ 'color:#c0392b; font-weight:600;' if r.fallback > 0 else '' }}">{{ r.fallback }}</td>
-            <td style="{{ 'color:#c0392b; font-weight:600;' if r.quota_error > 0 else '' }}">{{ r.quota_error }}</td>
+            <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.fallback > 0 else '' }}">{{ r.fallback }}</td>
+            <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.quota_error > 0 else '' }}">{{ r.quota_error }}</td>
             <td>{{ r.high }}</td>
             <td>{{ r.medium }}</td>
             <td>{{ r.low }}</td>

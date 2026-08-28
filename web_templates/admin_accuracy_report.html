@@ -16,7 +16,7 @@
         {% for r in by_station %}
         <tr>
             <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
-            <td style="{{ 'color:#c0392b; font-weight:600;' if r.n and (r.correct / r.n) < 0.5 else '' }}">
+            <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.n and (r.correct / r.n) < 0.5 else '' }}">
                 {{ "%.1f"|format(100.0 * r.correct / r.n) + "%" if r.n else "データなし" }}
             </td>
             <td>{{ r.correct }}/{{ r.n }}</td>

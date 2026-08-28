@@ -12,7 +12,7 @@
         {% for e in env_status %}
         <tr>
             <td>{{ e.key }}</td>
-            <td style="color: {{ '#1a7a3c' if e.is_set else '#c0392b' }}; font-weight:600;">
+            <td style="color: {{ 'var(--color-success)' if e.is_set else 'var(--color-danger)' }}; font-weight:600;">
                 {{ "設定済み" if e.is_set else "未設定" }}
             </td>
         </tr>

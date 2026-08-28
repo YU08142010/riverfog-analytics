@@ -39,7 +39,7 @@
             <td>{{ "%.1f"|format(row.precip) if row.precip is not none else "-" }}</td>
             <td>{{ "%.1f"|format(row.visibility) if row.visibility is not none else "-" }}</td>
             {% for c in row.cells %}
-            <td style="background:{{ c.color }}; color:#1c2733;">{{ c.label }}</td>
+            <td style="background:{{ c.color }}; color:{{ c.text_color }};">{{ c.label }}</td>
             {% endfor %}
         </tr>
         {% endfor %}

@@ -8,7 +8,7 @@
     <p><a href="{{ url_for('login') }}">ログイン画面に戻る</a></p>
     {% else %}
     {% if error %}
-    <p style="color:#c0392b;">{{ error }}</p>
+    <p style="color: var(--color-danger);">{{ error }}</p>
     {% endif %}
     <p class="muted">申請後、管理者の承認が必要です。承認されるとログインできるようになります。</p>
     <form method="post">

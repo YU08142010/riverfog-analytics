@@ -13,7 +13,7 @@
 
     {% if current %}
     <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>
-    <div class="station-chip" style="display:inline-block; background:{{ current.color }}; padding:0.6rem 1rem; font-size:0.95rem;">
+    <div class="station-chip" style="display:inline-block; background:{{ current.color }}; color:{{ current.text_color }}; padding:0.6rem 1rem; font-size:0.95rem;">
         現在の現象: {{ current.label }}
     </div>
     {% else %}

@@ -13,7 +13,7 @@
         {% for r in rows %}
         <tr>
             <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
-            <td style="{{ 'color:#c0392b; font-weight:600;' if r.rate is not none and r.rate < 70 else '' }}">
+            <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.rate is not none and r.rate < 70 else '' }}">
                 {{ "%.0f"|format(r.rate) + "%" if r.rate is not none else "データなし" }}
             </td>
             <td>{{ r.ok }}/{{ r.total }}</td>

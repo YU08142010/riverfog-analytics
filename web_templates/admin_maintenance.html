@@ -7,7 +7,7 @@
     <p class="muted">有効にすると、一般の訪問者にはメンテナンス中の案内だけが表示されます。
         管理者(このページを含む/admin配下)は有効中でも常にアクセスできます。</p>
     <p>現在の状態:
-        <strong style="color: {{ '#c0392b' if state.enabled else '#1a7a3c' }};">
+        <strong style="color: {{ 'var(--color-danger)' if state.enabled else 'var(--color-success)' }};">
             {{ "有効(メンテナンス中)" if state.enabled else "無効(通常運用中)" }}
         </strong>
     </p>
