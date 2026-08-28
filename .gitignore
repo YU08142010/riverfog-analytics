@@ -4,3 +4,4 @@ __pycache__/
 .env
 data/
 logs/
+data_before_restore_*/

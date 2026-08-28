@@ -97,6 +97,8 @@ DISK_USAGE_PARTS = [
     ("モデル (models/)", BASE_DIR / "data" / "models"),
 ]
 BACKUP_ZIP_ROOT = BASE_DIR / "data"
+RESTORE_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
+RESTORE_CONFIRM_PHRASE = "restore"
 
 # 検証済み(答え合わせ済み)の予測レコードのうち、これより古いものは管理画面から削除できる。
 DB_CLEANUP_DEFAULT_DAYS = 180
@@ -1949,6 +1951,90 @@ def admin_backup():
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
+
+
+def _safe_extract_zip(zf, dest_dir):
+    """zip-slip対策: 各エントリの展開先がdest_dir配下に収まることを、実際に展開する前に
+    全件確認する（絶対パスや".."を含むエントリで想定外の場所に書き込まれるのを防ぐ）。
+    """
+    dest_dir = dest_dir.resolve()
+    for member in zf.infolist():
+        member_path = (dest_dir / member.filename).resolve()
+        if member_path != dest_dir and dest_dir not in member_path.parents:
+            raise ValueError(f"Unsafe path in zip: {member.filename}")
+    zf.extractall(dest_dir)
+
+
+@app.route("/admin/backup/restore", methods=["POST"])
+@requires_admin
+def admin_backup_restore():
+    """アップロードされたバックアップZIPでdata/一式を丸ごと復元する。
+    アカウント情報を含む全データを置き換える取り消しにくい操作のため、確認フレーズの
+    一致を必須にし、復元前のdata/は削除せず日時付きディレクトリに退避しておく
+    （何か問題があれば手動で戻せるように）。
+    """
+    confirm = request.form.get("confirm", "").strip().lower()
+    if confirm != RESTORE_CONFIRM_PHRASE:
+        flash(f'確認のため、入力欄に半角で "{RESTORE_CONFIRM_PHRASE}" と入力してください。')
+        return redirect(url_for("admin_disk"))
+
+    file = request.files.get("backup_zip")
+    if not file or not file.filename:
+        flash("ZIPファイルを選択してください。")
+        return redirect(url_for("admin_disk"))
+    if not file.filename.lower().endswith(".zip"):
+        flash("ZIPファイル(.zip)を選択してください。")
+        return redirect(url_for("admin_disk"))
+
+    tmp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp_zip_path = Path(tmp_zip.name)
+    tmp_zip.close()
+    staging_dir = None
+    try:
+        file.save(tmp_zip_path)
+        if tmp_zip_path.stat().st_size > RESTORE_MAX_UPLOAD_BYTES:
+            flash(f"ファイルが大きすぎます({RESTORE_MAX_UPLOAD_BYTES // (1024 ** 3)}GB以下にしてください)。")
+            return redirect(url_for("admin_disk"))
+
+        try:
+            zf = zipfile.ZipFile(tmp_zip_path)
+        except zipfile.BadZipFile:
+            flash("有効なZIPファイルではありません。")
+            return redirect(url_for("admin_disk"))
+
+        staging_dir = Path(tempfile.mkdtemp(prefix="river-fog-restore-", dir=str(BASE_DIR)))
+        with zf:
+            _safe_extract_zip(zf, staging_dir)
+
+        stamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
+        pre_restore_dir = BASE_DIR / f"data_before_restore_{stamp}"
+        data_dir = BASE_DIR / "data"
+        if data_dir.exists():
+            data_dir.rename(pre_restore_dir)
+        staging_dir.rename(data_dir)
+        staging_dir = None
+
+        _record_audit(
+            "バックアップ復元",
+            f"アップロードされたZIPからdata/を復元(復元前を{pre_restore_dir.name}に退避)",
+        )
+        flash(
+            f"data/一式を復元しました。復元前のデータは {pre_restore_dir.name} "
+            "に退避してあります(問題なければ後で手動削除してください)。サービスを再起動します。"
+        )
+        subprocess.Popen(
+            ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
+            start_new_session=True,
+        )
+    except Exception as e:
+        log.exception("Backup restore failed")
+        flash(f"復元に失敗しました: {e}")
+    finally:
+        if tmp_zip_path.exists():
+            tmp_zip_path.unlink()
+        if staging_dir is not None and staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+    return redirect(url_for("admin_disk"))
 
 
 @app.route("/admin/db")

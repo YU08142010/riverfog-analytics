@@ -51,6 +51,25 @@
     <h2>バックアップ</h2>
     <p class="muted">元データはこのサーバー1台にのみ存在します。定期的にダウンロードして保管することをおすすめします。</p>
     <p><a class="button" href="{{ url_for('admin_backup') }}">data/一式をZIPでダウンロード</a></p>
+
+    <h3 style="margin-top:1.5rem; font-size:0.95rem;">バックアップからの復元</h3>
+    <p class="muted" style="color: var(--color-danger);">
+        アカウント情報を含むdata/一式が、アップロードしたZIPの内容で置き換わります。元に戻せない操作です
+        (復元前のデータは自動的に退避されますが、通常時に使う機能ではありません)。
+    </p>
+    <form method="post" action="{{ url_for('admin_backup_restore') }}" enctype="multipart/form-data"
+          onsubmit="return confirm('本当にdata/一式を、アップロードしたZIPの内容で置き換えますか？アカウント情報も含めて全て置き換わります。');">
+        <p>
+            <input type="file" name="backup_zip" accept=".zip" required>
+        </p>
+        <p>
+            <label class="muted" style="font-size:0.85rem;">
+                確認のため、半角で <code>restore</code> と入力してください<br>
+                <input type="text" name="confirm" required autocomplete="off" style="padding:0.4rem; margin-top:0.3rem; max-width:200px;">
+            </label>
+        </p>
+        <button type="submit" class="button" style="background: var(--color-danger);">復元を実行する</button>
+    </form>
 </div>
 
 <div class="card">
