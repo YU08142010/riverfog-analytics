@@ -19,6 +19,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_sample_weight
 
 from common import BASE_DIR, JST
+import station_weather
 
 try:
     from xgboost import XGBClassifier
@@ -519,7 +520,32 @@ def load_low_confidence_set(path=CONFIDENCE_LOG_PATH):
     return set(zip(low["datetime"].astype(str), low["station"].astype(str)))
 
 
-def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybrid"):
+# station_weather.py（Open-Meteoのキー名）-> fog_features.py列名（学習・予報のDataFrameで使う名前）
+_STATION_WEATHER_COL_MAP = {
+    "temperature": COL_TEMP, "precipitation": COL_PRECIP, "wind_speed": COL_WIND_SPEED,
+    "wind_direction_deg": COL_WIND_DIR_DEG, "solar_radiation_mj": COL_SOLAR,
+    "sunshine_hours": COL_SUNSHINE, "dew_point": COL_DEWPOINT, "humidity": COL_HUMIDITY,
+    "visibility_km": COL_VISIBILITY,
+}
+
+
+def _apply_station_weather(main_df, station_name, weather_conn):
+    """station_weather.dbに地点固有の気象実測があれば、main_dfの該当日時だけその値で
+    上書きしたコピーを返す（値が無い日時・欠測項目は共通の代表値のまま）。
+    記録が1件も無ければNoneを返す（呼び出し側は共通のmain_dfをそのまま使う）。
+    """
+    station_df = station_weather.load_station_weather_df(weather_conn, station_name)
+    if station_df.empty:
+        return None
+    station_df = station_df.rename(columns=_STATION_WEATHER_COL_MAP)
+    out = main_df.set_index("datetime")
+    patch = station_df.set_index("datetime")
+    out.update(patch)
+    return out.reset_index()
+
+
+def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybrid",
+                           camera_coords=None, weather_conn=None):
     """地点それぞれについて独立した多クラス分類モデルを学習する。データ不足の地点は
     全地点共通の「プーリングモデル」で補う。
 
@@ -559,10 +585,37 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
     kind = _resolve_model_kind(model)
     log.info("Training location models: kind=%s, features=%s", kind, feature_names)
 
+    # 地点固有の気象実測(station_weather.db、2026-08-28以降蓄積分)があれば、個別モデルの
+    # 学習だけそれを使う。無い地点・記録がまだ無い日時は、これまで通り共通の代表値
+    # (main_df)にフォールバックする。データ不足時の「プーリングモデル」(下のrescue)は
+    # 元々「全地点で共通の気象値」を前提に設計されているため、意図的にここでは変えず、
+    # 上のmerged/feature_names(共通の代表値ベース)をそのまま使い続ける。
+    station_frames = {}
+    if weather_conn is not None and camera_coords:
+        for col in phenom_cols:
+            coords = camera_coords.get(col)
+            if not coords:
+                continue
+            station_main_df = _apply_station_weather(main_df, col, weather_conn)
+            if station_main_df is None:
+                continue
+            s_merged = pd.merge(station_main_df, targets, on="datetime", how="inner")
+            s_merged = s_merged.sort_values("datetime").reset_index(drop=True)
+            s_lat, s_lon = coords
+            s_merged, s_features = prepare_features(s_merged, s_lat, s_lon)
+            s_merged[s_features] = s_merged[s_features].interpolate(
+                method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
+            )
+            s_merged = s_merged.dropna(subset=s_features)
+            station_frames[col] = (s_merged, s_features + [CROSS_STATION_FOG_FEATURE])
+        if station_frames:
+            log.info("Using per-station weather for %d/%d station(s)", len(station_frames), len(phenom_cols))
+
     models = {}
     for col in phenom_cols:
-        merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(merged.index).to_numpy()
-        sub, X, y = _collect_location_xy(merged, col, feature_names)
+        col_merged, col_features = station_frames.get(col, (merged, feature_names))
+        col_merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(col_merged.index).to_numpy()
+        sub, X, y = _collect_location_xy(col_merged, col, col_features)
         if len(sub) < MIN_ROWS_PER_LOCATION:
             continue
         if y.nunique() < MIN_CLASSES_PER_LOCATION:
@@ -603,7 +656,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
         )
         models[col] = {
             "pipe": pipe, "accuracy": acc, "f1": f1, "fog_f1": fog_f1,
-            "n": len(sub), "features": feature_names,
+            "n": len(sub), "features": col_features,
             "model_type": pipe.model_type, "blend_weight": pipe.weight,
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
@@ -798,15 +851,59 @@ def fetch_forecast_range(lat, lon, forecast_days):
     return _forecast_payload_to_df(payload["hourly"])
 
 
-def build_location_forecast_codes(models, forecast_raw, lat, lon):
+def fetch_forecast_range_multi(camera_coords, forecast_days):
+    """全地点分の予報を1回のAPI呼び出しでまとめて取得する。戻り値: {地点名: forecast_df}。
+    地点ごとに取得・変換できた分だけを含む（失敗した地点はキーごと含まれない）。
+    """
+    if not camera_coords:
+        return {}
+    names = list(camera_coords.keys())
+    params = {
+        "latitude": ",".join(str(camera_coords[n][0]) for n in names),
+        "longitude": ",".join(str(camera_coords[n][1]) for n in names),
+        "hourly": ",".join(_FORECAST_VARS.keys()),
+        "timezone": "Asia/Tokyo",
+        "forecast_days": forecast_days,
+        "wind_speed_unit": "ms",
+        "precipitation_unit": "mm",
+        "temperature_unit": "celsius",
+    }
+    resp = requests.get(OPEN_METEO_FORECAST_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json()
+    if isinstance(payload, dict):
+        payload = [payload]  # 地点が1件だけの時は単一オブジェクトで返ってくるため揃える
+
+    result = {}
+    for name, item in zip(names, payload):
+        if not item or "hourly" not in item:
+            continue
+        try:
+            result[name] = _forecast_payload_to_df(item["hourly"])
+        except ValueError:
+            continue
+    return result
+
+
+def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_station=None, camera_coords=None):
     """予報データに対して地点ごとの現象コードと霧確率を予測する。
+    forecast_by_station/camera_coordsが与えられ、かつその地点の予報が取得できていれば、
+    共通の代表地点予報(forecast_raw/lat/lon)の代わりにその地点自身の予報を使う。
     戻り値: (pred_df, prob_df)。どちらもdatetime列 + 地点ごとの列。
     """
     pred_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
     prob_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
     for col, info in models.items():
         feature_names = info["features"]
-        df, _ = prepare_features(forecast_raw, lat, lon, feature_names)
+        station_forecast = (forecast_by_station or {}).get(col)
+        if station_forecast is not None and len(station_forecast) == len(forecast_raw):
+            f_raw = station_forecast
+            f_lat, f_lon = (camera_coords or {}).get(col, (lat, lon))
+        else:
+            # 地点別の予報が無い/行数が代表地点と食い違う(取得の一部失敗等)場合は
+            # 共通の代表地点予報にフォールバックする。
+            f_raw, f_lat, f_lon = forecast_raw, lat, lon
+        df, _ = prepare_features(f_raw, f_lat, f_lon, feature_names)
         X = df[feature_names].copy()
         if info.get("pooled") and "station_fog_rate" in info:
             X[STATION_FOG_RATE_FEATURE] = info["station_fog_rate"]

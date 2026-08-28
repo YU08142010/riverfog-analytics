@@ -29,11 +29,14 @@ from common import (
     COL_PHENOM_START,
     DATA_XLSX,
     JST,
+    STATION_WEATHER_DB_PATH,
     TEMPLATE_XLSX,
+    load_camera_coords,
     record_network_failure,
     request_with_dns_fallback,
     set_weather_measures,
 )
+import station_weather
 
 CAM_IMAGE_URL = "https://cam.river.go.jp/cam/now/{cam_id}.jpg"
 CAM_HEADERS = {
@@ -473,26 +476,69 @@ def append_confidence_log(confidence_by_name, run_time):
         log.warning("Failed to append confidence log: %s", e)
 
 
+WEATHER_HOURLY_VARS = [
+    "temperature_2m",
+    "precipitation",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "shortwave_radiation",
+    "sunshine_duration",
+    "dew_point_2m",
+    "relative_humidity_2m",
+    "visibility",
+]
+
+
+def _extract_weather_at_target_hour(hourly):
+    """hourly応答(1地点分)から直近時刻の値を取り出し、weather dictにして返す。
+    該当時刻が無ければNone。fetch_weather()・fetch_weather_multi()の両方で使う。"""
+    times = hourly.get("time", [])
+    if not times:
+        return None
+
+    now_jst = datetime.now(JST).replace(minute=0, second=0, microsecond=0)
+    target = now_jst.strftime("%Y-%m-%dT%H:00")
+    try:
+        idx = times.index(target)
+    except ValueError:
+        # ぴったりの時刻が無ければ直近の過去時刻を使う
+        past = [t for t in times if t <= target]
+        if not past:
+            return None
+        idx = times.index(past[-1])
+
+    def at(key):
+        vals = hourly.get(key, [])
+        return vals[idx] if idx < len(vals) else None
+
+    solar_wm2 = at("shortwave_radiation")
+    sunshine_sec = at("sunshine_duration")
+    visibility_m = at("visibility")
+
+    return {
+        "temperature": at("temperature_2m"),
+        "precipitation": at("precipitation"),
+        "wind_speed": at("wind_speed_10m"),
+        "wind_direction_deg": at("wind_direction_10m"),
+        "solar_radiation_mj": None if solar_wm2 is None else round(solar_wm2 * 0.0036, 3),
+        "sunshine_hours": None if sunshine_sec is None else round(sunshine_sec / 3600, 3),
+        "dew_point": at("dew_point_2m"),
+        "humidity": at("relative_humidity_2m"),
+        "visibility_km": None if visibility_m is None else round(visibility_m / 1000, 2),
+    }
+
+
 def fetch_weather():
-    """代表地点（只見町役場）のOpen-Meteo実況に近い直近時刻の値を取得する。取得失敗時はNoneを返す。"""
+    """代表地点（只見町役場）のOpen-Meteo実況に近い直近時刻の値を取得する。取得失敗時はNoneを返す。
+    2026-08-28以降はこれとは別に、fetch_weather_multi()で全地点分もあわせて取得している
+    （只見川.xlsxとの互換性のため、この代表地点の値の書き込み自体は変えていない）。
+    """
     lat = os.environ.get("WEATHER_LAT", "37.34861")
     lon = os.environ.get("WEATHER_LON", "139.31583")
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": ",".join(
-            [
-                "temperature_2m",
-                "precipitation",
-                "wind_speed_10m",
-                "wind_direction_10m",
-                "shortwave_radiation",
-                "sunshine_duration",
-                "dew_point_2m",
-                "relative_humidity_2m",
-                "visibility",
-            ]
-        ),
+        "hourly": ",".join(WEATHER_HOURLY_VARS),
         "wind_speed_unit": "ms",
         "timezone": "Asia/Tokyo",
         "past_days": 1,
@@ -520,43 +566,84 @@ def fetch_weather():
             record_network_failure("weather_fetch", str(last_exc))
         return None
 
-    hourly = data.get("hourly", {})
-    times = hourly.get("time", [])
-    if not times:
-        log.error("Open-Meteo response has no time field")
-        return None
+    weather = _extract_weather_at_target_hour(data.get("hourly", {}))
+    if weather is None:
+        log.error("No matching time in Open-Meteo response")
+    return weather
 
-    now_jst = datetime.now(JST).replace(minute=0, second=0, microsecond=0)
-    target = now_jst.strftime("%Y-%m-%dT%H:00")
-    try:
-        idx = times.index(target)
-    except ValueError:
-        # ぴったりの時刻が無ければ直近の過去時刻を使う
-        past = [t for t in times if t <= target]
-        if not past:
-            log.error("No matching time in Open-Meteo data: %s", target)
-            return None
-        idx = times.index(past[-1])
 
-    def at(key):
-        vals = hourly.get(key, [])
-        return vals[idx] if idx < len(vals) else None
-
-    solar_wm2 = at("shortwave_radiation")
-    sunshine_sec = at("sunshine_duration")
-    visibility_m = at("visibility")
-
-    return {
-        "temperature": at("temperature_2m"),
-        "precipitation": at("precipitation"),
-        "wind_speed": at("wind_speed_10m"),
-        "wind_direction_deg": at("wind_direction_10m"),
-        "solar_radiation_mj": None if solar_wm2 is None else round(solar_wm2 * 0.0036, 3),
-        "sunshine_hours": None if sunshine_sec is None else round(sunshine_sec / 3600, 3),
-        "dew_point": at("dew_point_2m"),
-        "humidity": at("relative_humidity_2m"),
-        "visibility_km": None if visibility_m is None else round(visibility_m / 1000, 2),
+def fetch_weather_multi(coords_by_name):
+    """全地点分の気象値を1回のAPI呼び出しでまとめて取得する(Open-Meteoは緯度経度を
+    カンマ区切りで渡すと地点ごとの結果を配列で返す)。取得失敗/該当地点分の欠落は
+    その地点をdictに含めないことで表す（部分的な失敗があっても他地点は活かす）。
+    """
+    if not coords_by_name:
+        return {}
+    names = list(coords_by_name.keys())
+    params = {
+        "latitude": ",".join(str(coords_by_name[n][0]) for n in names),
+        "longitude": ",".join(str(coords_by_name[n][1]) for n in names),
+        "hourly": ",".join(WEATHER_HOURLY_VARS),
+        "wind_speed_unit": "ms",
+        "timezone": "Asia/Tokyo",
+        "past_days": 1,
+        "forecast_days": 1,
     }
+    attempts = WEATHER_FETCH_RETRIES + 1
+    payload = None
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = request_with_dns_fallback("GET", OPEN_METEO_URL, params=params, timeout=20, log=log)
+            resp.raise_for_status()
+            payload = resp.json()
+            break
+        except requests.RequestException as e:
+            last_exc = e
+            log.warning("Per-station weather fetch failed (attempt %d/%d): %s", attempt, attempts, e)
+            if attempt < attempts:
+                time.sleep(WEATHER_RETRY_DELAY_SEC)
+    if payload is None:
+        log.error("Per-station Open-Meteo fetch failed after %d attempts", attempts)
+        if last_exc is not None:
+            record_network_failure("weather_fetch_multi", str(last_exc))
+        return {}
+
+    if isinstance(payload, dict):
+        payload = [payload]  # 地点が1件だけの時は単一オブジェクトで返ってくるため揃える
+
+    result = {}
+    for name, item in zip(names, payload):
+        weather = _extract_weather_at_target_hour((item or {}).get("hourly", {}))
+        if weather is not None:
+            result[name] = weather
+    if len(result) < len(names):
+        log.warning("Per-station weather: got %d/%d station(s)", len(result), len(names))
+    return result
+
+
+def record_station_weather(run_time):
+    """全地点分の気象値を取得し、station_weather.dbに記録する。失敗しても収集全体は止めない
+    （只見川.xlsx側の代表地点の値は従来通り記録済みのため、地点別データが今回だけ
+    欠けても致命的ではない）。"""
+    try:
+        coords = load_camera_coords(CAMERAS_CSV)
+        if not coords:
+            log.warning("No camera coordinates available; skipping per-station weather")
+            return
+        weather_by_name = fetch_weather_multi(coords)
+        if not weather_by_name:
+            return
+        dt_str = run_time.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        conn = station_weather.connect(STATION_WEATHER_DB_PATH)
+        try:
+            for name, weather in weather_by_name.items():
+                station_weather.record_weather(conn, name, dt_str, weather)
+        finally:
+            conn.close()
+        log.info("Recorded per-station weather for %d/%d station(s)", len(weather_by_name), len(coords))
+    except Exception:
+        log.exception("Failed to record per-station weather")
 
 
 def ensure_workbook():
@@ -651,6 +738,8 @@ def main():
         log.warning("Failed to fetch weather data (all fields treated as missing)")
 
     append_row(cameras, phenom_by_name, weather, run_time)
+
+    record_station_weather(run_time)
     log.info("=== Collection finished ===")
 
 

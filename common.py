@@ -1,4 +1,5 @@
 """collect.py と backfill_weather.py で共有する定数・ヘルパー。"""
+import csv
 import logging
 import socket
 import threading
@@ -12,8 +13,23 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_XLSX = BASE_DIR / "data" / "只見川.xlsx"
 TEMPLATE_XLSX = BASE_DIR / "template" / "header_template.xlsx"
 CAMERAS_CSV = BASE_DIR / "cameras.csv"
+STATION_WEATHER_DB_PATH = BASE_DIR / "data" / "station_weather.db"
 
 JST = timezone(timedelta(hours=9))
+
+
+def load_camera_coords(cameras_csv=CAMERAS_CSV):
+    """cameras.csvから {地点名: (緯度, 経度)} を読む。緯度・経度の列が無い/空の行はスキップする
+    （2026-08-28にriver.go.jpの公開GeoJSONから実測値を追加した列。それより前のcameras.csvには無い）。
+    """
+    coords = {}
+    with open(cameras_csv, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            lat, lon = row.get("緯度"), row.get("経度")
+            if lat and lon:
+                coords[row["地点名"]] = (float(lat), float(lon))
+    return coords
 
 QUALITY_INFO_VALUE = 8
 HOMOGENEITY_NUMBER_VALUE = 1

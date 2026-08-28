@@ -19,11 +19,12 @@ from datetime import datetime
 import pandas as pd
 from dotenv import load_dotenv
 
-from common import BASE_DIR, DATA_XLSX, JST
+from common import BASE_DIR, DATA_XLSX, JST, STATION_WEATHER_DB_PATH, load_camera_coords
 import fog_data
 import fog_graphs
 import fog_model
 import prediction_log
+import station_weather
 from fog_features import encode_phenomena_cell
 
 # 観測時間帯（collect.pyの毎時収集と合わせている）。この時間帯以外は実測が存在しないため
@@ -140,11 +141,17 @@ def main():
     main_df, phenom_df, station_names = fog_data.load_river_fog_data()
     log.info("Loaded %d observation row(s), %d station(s)", len(main_df), len(station_names))
 
+    camera_coords = load_camera_coords()
+    weather_conn = station_weather.connect(STATION_WEATHER_DB_PATH)
+
     conn = prediction_log.connect(":memory:" if args.dry_run else str(DB_PATH))
 
     verify_pending_predictions(conn, phenom_df, station_names, now_naive)
 
-    models = fog_model.train_location_models(main_df, phenom_df, station_names, lat, lon, model="hybrid")
+    models = fog_model.train_location_models(
+        main_df, phenom_df, station_names, lat, lon, model="hybrid",
+        camera_coords=camera_coords, weather_conn=weather_conn,
+    )
     if not models:
         log.warning("No models could be trained (not enough data yet); skipping forecast/graphs")
         return
@@ -163,7 +170,17 @@ def main():
     log.info("Fetched forecast: %d hour(s), %s - %s",
              len(forecast_raw), forecast_raw["datetime"].min(), forecast_raw["datetime"].max())
 
-    pred_df, prob_df = fog_model.build_location_forecast_codes(models, forecast_raw, lat, lon)
+    try:
+        forecast_by_station = fog_model.fetch_forecast_range_multi(camera_coords, args.forecast_days)
+        log.info("Fetched per-station forecast: %d/%d station(s)", len(forecast_by_station), len(camera_coords))
+    except Exception as e:
+        log.warning("Per-station forecast fetch failed, falling back to the shared forecast: %s", e)
+        forecast_by_station = {}
+
+    pred_df, prob_df = fog_model.build_location_forecast_codes(
+        models, forecast_raw, lat, lon,
+        forecast_by_station=forecast_by_station, camera_coords=camera_coords,
+    )
 
     if not args.dry_run:
         out_dir = OUTPUT_ROOT / now_naive.strftime("%Y-%m-%d")
@@ -185,6 +202,7 @@ def main():
         record_new_predictions(conn, run_at_str, pred_df, prob_df, models)
         conn.commit()
 
+    weather_conn.close()
     log.info("=== Predict run finished ===")
 
 
