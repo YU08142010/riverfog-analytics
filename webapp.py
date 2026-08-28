@@ -1253,7 +1253,13 @@ def predictions_file(date, filename):
 
 @app.route("/stations")
 def stations_list():
-    return render_template("stations_list.html", station_names=STATION_NAMES)
+    observations = _latest_observations()
+    current_by_name = {}
+    if observations:
+        current_by_name = {s["name"]: s for s in observations["stations"]}
+    return render_template(
+        "stations_list.html", station_names=STATION_NAMES, current_by_name=current_by_name,
+    )
 
 
 @app.route("/compare")
@@ -1286,6 +1292,7 @@ def compare_stations():
     return render_template(
         "compare.html", station_names=STATION_NAMES, selected=selected, entries=entries,
         observations_datetime=observations["datetime"] if observations else None,
+        current_by_name=current_by_name, active_names=selected,
     )
 
 
@@ -1295,8 +1302,10 @@ def station_detail(name):
 
     observations = _latest_observations()
     current = None
+    current_by_name = {}
     if observations:
-        current = next((s for s in observations["stations"] if s["name"] == name), None)
+        current_by_name = {s["name"]: s for s in observations["stations"]}
+        current = current_by_name.get(name)
 
     latest_pred_date, forecast_file = _station_latest_forecast_file(name)
     timelapse = _station_timelapse_images(name)
@@ -1311,6 +1320,9 @@ def station_detail(name):
         forecast_file=forecast_file,
         timelapse=timelapse,
         date_groups=_group_dates_by_month(image_dates),
+        station_names=STATION_NAMES,
+        current_by_name=current_by_name,
+        active_names=[name],
     )
 
 

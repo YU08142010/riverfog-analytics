@@ -7,6 +7,7 @@
     <li>{{ name }}</li>
 </ul>
 {% endblock %}
+{% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
     <h2>{{ name }}</h2>

@@ -61,7 +61,12 @@
 </div>
 {% endif %}
 {% endwith %}
+<div class="layout">
+<aside class="sidebar">{%- block sidebar -%}{%- endblock -%}</aside>
+<div class="layout-content">
 {% block content %}{% endblock %}
+</div>
+</div>
 </main>
 <div class="toast-container" id="toast-container"></div>
 <script>

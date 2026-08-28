@@ -1,0 +1,41 @@
+{% set active = active_names or [] %}
+<div class="sidebar-panel">
+    <input type="text" class="sidebar-search" id="sidebar-station-search" placeholder="地点を検索...">
+    {% if station_names %}
+    <ul class="sidebar-list" id="sidebar-station-list">
+        {% for name in station_names %}
+        {% set info = current_by_name.get(name) if current_by_name else None %}
+        <li>
+            <a href="{{ url_for('station_detail', name=name) }}"
+               class="{{ 'active' if name in active else '' }}"
+               data-name="{{ name }}" title="{{ name }}{{ '(' + info.label + ')' if info else '' }}">
+                <span class="sidebar-dot" style="background: {{ info.color if info else 'var(--color-border)' }};"></span>
+                <span class="sidebar-label">{{ name }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="muted sidebar-empty" id="sidebar-station-empty" hidden>該当する地点がありません。</p>
+    {% else %}
+    <p class="muted sidebar-empty">地点情報が読み込めませんでした。</p>
+    {% endif %}
+</div>
+<script>
+(function() {
+    var input = document.getElementById("sidebar-station-search");
+    var list = document.getElementById("sidebar-station-list");
+    if (!input || !list) { return; }
+    var items = Array.prototype.slice.call(list.querySelectorAll(":scope > li"));
+    var emptyLabel = document.getElementById("sidebar-station-empty");
+    input.addEventListener("input", function() {
+        var q = input.value.trim();
+        var shown = 0;
+        items.forEach(function(li) {
+            var match = li.querySelector("a").dataset.name.indexOf(q) !== -1;
+            li.style.display = match ? "" : "none";
+            if (match) { shown++; }
+        });
+        if (emptyLabel) { emptyLabel.hidden = shown !== 0; }
+    });
+})();
+</script>
