@@ -34,6 +34,7 @@
     {% endif %}
 </div>
 
+<div class="content-grid-2">
 <div class="card">
     <h2>今後の予測グラフ</h2>
     {% if forecast_file %}
@@ -47,6 +48,7 @@
 <div class="card">
     <h2>的中率の推移</h2>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('station_chart', name=name) }}"></div>
+</div>
 </div>
 
 <div class="card">

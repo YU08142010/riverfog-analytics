@@ -208,6 +208,7 @@
     {% endif %}
 </div>
 
+<div class="content-grid-2">
 <div class="card">
     <h2>最新のカメラ画像</h2>
     {% if latest_image_date and latest_image_hour %}
@@ -239,6 +240,7 @@
     <div class="empty-state">{{ icon("empty") }}<span>予測結果がまだありません。</span></div>
     {% endif %}
     <p><a class="button" href="{{ url_for('predictions_dates') }}">過去の予測を見る</a></p>
+</div>
 </div>
 
 {% endblock %}
