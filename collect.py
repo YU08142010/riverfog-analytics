@@ -151,7 +151,7 @@ def fetch_one_image(name, cam_id):
         if attempt < attempts:
             time.sleep(FETCH_RETRY_DELAY)
     if last_exc is not None:
-        record_network_failure("image_fetch", f"{name}: {last_exc}")
+        record_network_failure("image_fetch", str(last_exc), station=name)
     return name, cam_id, None
 
 

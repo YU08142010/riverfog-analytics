@@ -84,7 +84,7 @@ def _search_offsets():
         step += HISTORY_SEARCH_STEP_MIN
 
 
-def fetch_history_image(cam_id, target_dt):
+def fetch_history_image(cam_id, target_dt, station_name=None):
     """target_dtちょうど、またはその前後の近いスナップショットを取得する。
     成功したら (画像bytes, 実際に取れた時刻) を返す。見つからなければ (None, None)。
     """
@@ -104,7 +104,9 @@ def fetch_history_image(cam_id, target_dt):
         if resp.status_code == 200 and resp.content:
             return resp.content, dt
     if connection_failed:
-        record_network_failure("backfill_images", f"cam_id={cam_id}, target={target_dt}")
+        record_network_failure(
+            "backfill_images", f"cam_id={cam_id}, target={target_dt}", station=station_name,
+        )
     return None, None
 
 
@@ -188,7 +190,7 @@ def main():
             cam_id = cam_id_by_name.get(name)
             if cam_id is None:
                 continue
-            content, found_dt = fetch_history_image(cam_id, target_dt)
+            content, found_dt = fetch_history_image(cam_id, target_dt, station_name=name)
             if content is None:
                 if age_days <= GIVE_UP_AFTER_DAYS:
                     log.info("Still unavailable: %s %s %s", date_str, hhmm, name)

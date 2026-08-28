@@ -22,12 +22,13 @@
     {% if network_failures.recent %}
     <div class="table-scroll" style="margin-top:1rem;">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>日時</th><th>種別</th><th style="text-align:left;">詳細</th></tr></thead>
+        <thead><tr><th>日時</th><th>種別</th><th>地点</th><th style="text-align:left;">詳細</th></tr></thead>
         <tbody>
         {% for f in network_failures.recent %}
         <tr>
             <td>{{ f.datetime }}</td>
             <td>{{ f.source }}</td>
+            <td>{{ f.station if f.station else "-" }}</td>
             <td style="text-align:left; white-space:normal; font-family:monospace; font-size:0.78rem;">{{ f.detail }}</td>
         </tr>
         {% endfor %}

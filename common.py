@@ -209,10 +209,12 @@ def request_with_dns_fallback(method, url, log=None, **kwargs):
 NETWORK_FAILURE_LOG_PATH = BASE_DIR / "data" / "network_failures.csv"
 
 
-def record_network_failure(source, detail, when=None):
+def record_network_failure(source, detail, when=None, station=None):
     """DNS/ネットワーク障害を、日次の発生回数を後で集計できるようCSVに追記する
     （管理者タブでの可視化・将来の通知機能のための記録用）。書き込み自体が失敗しても
     収集処理を止めないよう、例外は握りつぶしてログにだけ残す。
+    stationは障害が特定の地点に紐づく場合(画像取得失敗等)だけ渡す。天気APIのように
+    地点を問わない障害はNone(空文字)のままでよい。
     """
     import csv
     from datetime import datetime
@@ -224,7 +226,7 @@ def record_network_failure(source, detail, when=None):
         with open(NETWORK_FAILURE_LOG_PATH, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             if is_new:
-                writer.writerow(["datetime", "source", "detail"])
-            writer.writerow([when.strftime("%Y-%m-%d %H:%M:%S"), source, detail])
+                writer.writerow(["datetime", "source", "station", "detail"])
+            writer.writerow([when.strftime("%Y-%m-%d %H:%M:%S"), source, station or "", detail])
     except Exception as e:
         logging.getLogger("common").warning("Failed to record network failure: %s", e)

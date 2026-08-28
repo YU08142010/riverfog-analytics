@@ -783,7 +783,10 @@ def _network_failure_summary(recent_n=30):
                     dt = datetime.strptime(row["datetime"], "%Y-%m-%d %H:%M:%S")
                 except (KeyError, ValueError):
                     continue
-                rows.append({"datetime": dt, "source": row.get("source", ""), "detail": row.get("detail", "")})
+                rows.append({
+                    "datetime": dt, "source": row.get("source", ""),
+                    "station": row.get("station") or "", "detail": row.get("detail", ""),
+                })
     except Exception as e:
         log.warning("Failed to read network failure log: %s", e)
         return empty
@@ -793,7 +796,10 @@ def _network_failure_summary(recent_n=30):
     count_7d = sum(1 for r in rows if now - r["datetime"] <= timedelta(days=7))
     rows.sort(key=lambda r: r["datetime"], reverse=True)
     recent = [
-        {"datetime": r["datetime"].strftime("%Y-%m-%d %H:%M:%S"), "source": r["source"], "detail": r["detail"]}
+        {
+            "datetime": r["datetime"].strftime("%Y-%m-%d %H:%M:%S"), "source": r["source"],
+            "station": r["station"], "detail": r["detail"],
+        }
         for r in rows[:recent_n]
     ]
     return {"count_24h": count_24h, "count_7d": count_7d, "recent": recent}
