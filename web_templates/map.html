@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}地図{% endblock %}
+{% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>地点マップ</h2>
+    <p class="muted">
+        本システムでは各地点の緯度経度を保持していないため、独自の地図は表示できません。
+        代わりに、カメラの取得元である国交省「川の防災情報」の地点別地図、および
+        Googleマップの地点名検索へのリンクを掲載しています(いずれも新しいタブで開きます)。
+    </p>
+    <div style="margin-top:0.8rem;">
+        <button type="button" class="button" id="map-view-list">一覧表示</button>
+        <button type="button" class="button" id="map-view-dots" style="background: var(--color-text-muted);">ドットマップ</button>
+    </div>
+</div>
+
+<div class="card" id="map-dot-view" hidden>
+    <h3 style="margin-top:0;">地点ごとの現在の現象(ドット表示)</h3>
+    <div class="station-grid">
+        {% for name in station_names %}
+        {% set info = current_by_name.get(name) %}
+        <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem;">
+            <span class="sidebar-dot" style="width:16px; height:16px; background: {{ info.color if info else 'var(--color-border)' }};"
+                  title="{{ name }}{{ '：' + info.label if info else '' }}"></span>
+            <span style="font-size:0.78rem; text-align:center;">{{ name }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div id="map-list-view">
+<div class="table-scroll">
+<table class="obs-table" style="width:100%;">
+    <thead>
+    <tr>
+        <th>地点</th>
+        <th>現在の現象</th>
+        <th>国交省の地図</th>
+        <th>Googleマップ</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+    <tr>
+        <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
+        <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
+            {{ e.current.label if e.current else "-" }}
+        </td>
+        <td>
+            {% if e.river_gov_url %}
+            <a href="{{ e.river_gov_url }}" target="_blank" rel="noopener">公式地図で見る</a>
+            {% else %}
+            -
+            {% endif %}
+        </td>
+        <td><a href="{{ e.google_url }}" target="_blank" rel="noopener">Googleマップで見る</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+
+<script>
+(function() {
+    var listBtn = document.getElementById("map-view-list");
+    var dotBtn = document.getElementById("map-view-dots");
+    var listView = document.getElementById("map-list-view");
+    var dotView = document.getElementById("map-dot-view");
+    function show(which) {
+        listView.hidden = which !== "list";
+        dotView.hidden = which !== "dots";
+        listBtn.style.background = which === "list" ? "" : "var(--color-text-muted)";
+        dotBtn.style.background = which === "dots" ? "" : "var(--color-text-muted)";
+    }
+    listBtn.addEventListener("click", function() { show("list"); });
+    dotBtn.addEventListener("click", function() { show("dots"); });
+})();
+</script>
+{% endblock %}

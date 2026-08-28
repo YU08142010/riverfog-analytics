@@ -20,6 +20,7 @@ import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -34,7 +35,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import font_manager
 
-from common import BASE_DIR, DATA_XLSX, JST
+from common import BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST
 import announcements
 import users
 import fog_data
@@ -238,6 +239,42 @@ def _validate_station(name):
     return name
 
 
+def _load_camera_ids():
+    """cameras.csvから {地点名: カメラID} を読む。読めない場合は空dict。"""
+    try:
+        with open(CAMERAS_CSV, encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            return {row["地点名"]: row["カメラID"] for row in reader}
+    except Exception:
+        return {}
+
+
+CAMERA_IDS = _load_camera_ids()
+
+
+def _river_go_jp_map_url(cam_id):
+    """川の防災情報(国交省 river.go.jp)の地点別地図URLを組み立てる。
+    座標データが無いため独自の地図は描けないが、river.go.jpは各カメラIDに対応する
+    地図ページを持っており、緯度経度なしでカメラIDのみから直接リンクできる。
+    以下の導出方法は実カメラID2件(101793163, 101793203)についてriver.go.jp側の
+    インデックス済みURLを目視確認して検証済み(推測ではない):
+    ownCdは自治体コードで、当システムの全33カメラID(先頭"101793"で始まる)に
+    共通の固定値"1793"。sysCamIdはカメラIDから先頭"10"を除いたもの。
+    """
+    sys_cam_id = cam_id[2:]
+    return (
+        "https://www.river.go.jp/kawabou/mb/tm"
+        f"?zm=15&scamId={cam_id}&ownCd=1793&itmkndCd=200&sysCamId={sys_cam_id}"
+    )
+
+
+def _google_maps_search_url(name):
+    """地点名でのGoogleマップ検索URL(座標不要、Google自身のジオコーディングに依存)。
+    橋名等は単独だと曖昧なことがあるため、川名を付けて検索精度を上げる。
+    """
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{name} 只見川")
+
+
 def _sorted_subdirs(base_dir, reverse=True):
     if not base_dir.is_dir():
         return []
@@ -293,6 +330,24 @@ def _record_audit(action, detail=""):
         )
     finally:
         conn.close()
+
+
+VERSION_PATH = BASE_DIR / "VERSION"
+
+
+def _app_version():
+    """VERSIONファイル(gitのpre-commitフックがコミットごとに更新)を読む。
+    無ければ"?"を返す（バージョン表示自体が壊れても他の機能に影響させないため）。
+    """
+    try:
+        return VERSION_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "?"
+
+
+@app.context_processor
+def _inject_app_version():
+    return {"app_version": _app_version()}
 
 
 @app.context_processor
@@ -1293,6 +1348,29 @@ def compare_stations():
         "compare.html", station_names=STATION_NAMES, selected=selected, entries=entries,
         observations_datetime=observations["datetime"] if observations else None,
         current_by_name=current_by_name, active_names=selected,
+    )
+
+
+@app.route("/map")
+def map_page():
+    observations = _latest_observations()
+    current_by_name = {}
+    if observations:
+        current_by_name = {s["name"]: s for s in observations["stations"]}
+
+    entries = []
+    for name in STATION_NAMES:
+        cam_id = CAMERA_IDS.get(name)
+        entries.append({
+            "name": name,
+            "current": current_by_name.get(name),
+            "river_gov_url": _river_go_jp_map_url(cam_id) if cam_id else None,
+            "google_url": _google_maps_search_url(name),
+        })
+
+    return render_template(
+        "map.html", station_names=STATION_NAMES, entries=entries,
+        current_by_name=current_by_name,
     )
 
 
