@@ -575,12 +575,15 @@ def _is_valid_number(v):
 
 
 def _render_model_compare_png(state):
-    """RandomForest単体・XGBoost単体・LightGBM単体・採用中のhybridの霧F1平均を棒グラフで比較する。
-    LightGBMは診断目的の比較用モデルで、採用中のhybrid(RF+XGBブレンド)には含めていない。
+    """RandomForest単体・XGBoost単体・LightGBM単体・RF+LightGBM混合・採用中のhybridの
+    霧F1平均を棒グラフで比較する。LightGBM単体とRF+LightGBM混合はどちらも診断目的の
+    比較用モデルで、採用中のhybrid(RF+XGBブレンド)には含めていない
+    (XGBoostとLightGBMはどちらもブースティング系で傾向が近いため、3モデル混合は
+    追加せず、RFと組み合わせる相手をXGBかLightGBMかで比較できるようにしている)。
     """
-    labels = ["RandomForest単体", "XGBoost単体", "LightGBM単体", "採用中(hybrid)"]
-    keys = ["rf_only", "xgb_only", "lgbm_only", None]
-    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#1a5276"]
+    labels = ["RandomForest単体", "XGBoost単体", "LightGBM単体", "RF+LightGBM混合", "採用中(hybrid)"]
+    keys = ["rf_only", "xgb_only", "lgbm_only", "rf_lgbm_only", None]
+    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#d35400", "#1a5276"]
     values, counts = [], []
     for key in keys:
         vals = []
@@ -595,15 +598,15 @@ def _render_model_compare_png(state):
         values.append(sum(vals) / len(vals) if vals else None)
         counts.append(len(vals))
 
-    fig, ax = plt.subplots(figsize=(6.2, 3.4))
+    fig, ax = plt.subplots(figsize=(7.6, 3.6))
     x = list(range(len(labels)))
     plotted = [v if v is not None else 0 for v in values]
     ax.bar(x, plotted, color=colors, width=0.55)
     for i, (v, n) in enumerate(zip(values, counts)):
         label = f"{v:.1f}%\n(n={n}地点)" if v is not None else "データなし"
-        ax.text(i, (v or 0) + 2, label, ha="center", fontsize=9)
+        ax.text(i, (v or 0) + 2, label, ha="center", fontsize=8.5)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_xticklabels(labels, fontsize=8.5)
     ax.set_ylim(0, 100)
     ax.set_ylabel("霧F1(平均, %)")
     ax.set_title("モデル方式ごとの性能比較(全地点平均)", fontsize=11)

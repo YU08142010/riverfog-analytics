@@ -441,24 +441,28 @@ def _choose_fog_threshold(pipe, X_val, y_val):
 
 def _fit_and_select(kind, X_train, y_train):
     """学習し、検証期間が確保できれば混合比・霧判定しきい値も選ぶ。
-    戻り値: (HybridFogClassifier, tuned:bool, threshold:float, rf_pipe, xgb_pipe)
+    戻り値: (HybridFogClassifier, tuned:bool, threshold:float, rf_pipe, second_pipe)
     """
     X_inner, X_val, y_inner, y_val = _temporal_train_test_split(X_train, y_train)
     have_val = y_inner.nunique() >= 2 and len(X_val) >= 10
 
-    if kind == "hybrid":
+    if kind in ("hybrid", "hybrid_lgbm"):
+        # "hybrid"は採用中の本番モデル(RF+XGB)。"hybrid_lgbm"はXGBの代わりにLightGBMを
+        # 混ぜた比較用モデル(HybridFogClassifier自体はrf/xgbという名前だが中身に依存しない
+        # 汎用ブレンダーなので、そのまま第2成分だけ差し替えて使い回せる)。
+        second_kind = "xgb" if kind == "hybrid" else "lgbm"
         if have_val:
             rf_tmp, rf_params, rf_tuned = _fit_component("rf", X_inner, y_inner)
-            xgb_tmp, xgb_params, xgb_tuned = _fit_component("xgb", X_inner, y_inner)
-            weight = _choose_blend_weight(rf_tmp, xgb_tmp, X_val, y_val)
-            threshold = _choose_fog_threshold(HybridFogClassifier(rf_tmp, xgb_tmp, weight), X_val, y_val)
+            second_tmp, second_params, second_tuned = _fit_component(second_kind, X_inner, y_inner)
+            weight = _choose_blend_weight(rf_tmp, second_tmp, X_val, y_val)
+            threshold = _choose_fog_threshold(HybridFogClassifier(rf_tmp, second_tmp, weight), X_val, y_val)
             rf_pipe = _refit_component("rf", rf_params, X_train, y_train)
-            xgb_pipe = _refit_component("xgb", xgb_params, X_train, y_train)
-            tuned = rf_tuned and xgb_tuned
+            xgb_pipe = _refit_component(second_kind, second_params, X_train, y_train)
+            tuned = rf_tuned and second_tuned
         else:
             rf_pipe, _, rf_tuned = _fit_component("rf", X_train, y_train)
-            xgb_pipe, _, xgb_tuned = _fit_component("xgb", X_train, y_train)
-            weight, tuned, threshold = 0.5, rf_tuned and xgb_tuned, DEFAULT_FOG_THRESHOLD
+            xgb_pipe, _, second_tuned = _fit_component(second_kind, X_train, y_train)
+            weight, tuned, threshold = 0.5, rf_tuned and second_tuned, DEFAULT_FOG_THRESHOLD
     else:
         single_kind = kind
         weight = 1.0 if single_kind == "rf" else 0.0
@@ -582,6 +586,16 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
                 lgbm_only = _evaluate_solo_pipe(lgbm_pipe, X_test, y_test)
             except Exception as e:
                 log.warning("LightGBM training failed for %s: %s", col, e)
+        rf_lgbm_only = None
+        if _HAS_LIGHTGBM:
+            try:
+                # RF+LightGBM混合も比較用に評価する(XGBとLightGBMはどちらもブースティング系で
+                # 傾向が近いため、RF+XGB+LightGBMの3値混合は追加しない。RFと組み合わせる
+                # 相手をXGBかLightGBMかで比べれば、混合方式としての違いは十分見える)。
+                rf_lgbm_pipe, _, _, _, _ = _fit_and_select("hybrid_lgbm", X_train, y_train)
+                rf_lgbm_only = _evaluate_solo_pipe(rf_lgbm_pipe, X_test, y_test)
+            except Exception as e:
+                log.warning("RF+LightGBM hybrid training failed for %s: %s", col, e)
         log.info(
             "%s: n=%d, model=%s, accuracy=%.3f, f1=%.3f, fog_f1=%s, threshold=%.0f%%, tuned=%s",
             col, len(sub), pipe.model_type,
@@ -594,6 +608,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
             "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
+            "rf_lgbm_only": rf_lgbm_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
 
@@ -704,6 +719,12 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
             pooled_lgbm, _, _ = _fit_component("lgbm", Xp_train, yp_train)
         except Exception as e:
             log.warning("LightGBM pooled training failed: %s", e)
+    pooled_rf_lgbm = None
+    if _HAS_LIGHTGBM:
+        try:
+            pooled_rf_lgbm, _, _, _, _ = _fit_and_select("hybrid_lgbm", Xp_train, yp_train)
+        except Exception as e:
+            log.warning("RF+LightGBM pooled hybrid training failed: %s", e)
 
     rescued = 0
     for col in skipped_cols:
@@ -724,6 +745,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
         rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
         xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2)
         lgbm_only2 = _evaluate_solo_pipe(pooled_lgbm, X_test2, y_test2) if pooled_lgbm is not None else None
+        rf_lgbm_only2 = _evaluate_solo_pipe(pooled_rf_lgbm, X_test2, y_test2) if pooled_rf_lgbm is not None else None
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
@@ -731,6 +753,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
+            "rf_lgbm_only": rf_lgbm_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
         rescued += 1

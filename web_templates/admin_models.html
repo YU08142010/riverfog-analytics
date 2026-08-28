@@ -11,7 +11,7 @@
 
 <div class="card">
     <h2>モデル方式ごとの性能比較</h2>
-    <p class="muted">RandomForest単体・XGBoost単体・LightGBM単体(比較用)・実際に採用しているhybridの霧F1を、全地点で平均して比較します。</p>
+    <p class="muted">RandomForest単体・XGBoost単体・LightGBM単体・RF+LightGBM混合(いずれも比較用)・実際に採用しているhybrid(RF+XGB混合)の霧F1を、全地点で平均して比較します。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}"></div>
 </div>
 
