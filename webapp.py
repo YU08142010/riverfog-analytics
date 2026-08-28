@@ -575,10 +575,12 @@ def _is_valid_number(v):
 
 
 def _render_model_compare_png(state):
-    """RandomForest単体・XGBoost単体・採用中のhybridの霧F1平均を棒グラフで比較する。"""
-    labels = ["RandomForest単体", "XGBoost単体", "採用中(hybrid)"]
-    keys = ["rf_only", "xgb_only", None]
-    colors = ["#7f8c8d", "#8e44ad", "#1a5276"]
+    """RandomForest単体・XGBoost単体・LightGBM単体・採用中のhybridの霧F1平均を棒グラフで比較する。
+    LightGBMは診断目的の比較用モデルで、採用中のhybrid(RF+XGBブレンド)には含めていない。
+    """
+    labels = ["RandomForest単体", "XGBoost単体", "LightGBM単体", "採用中(hybrid)"]
+    keys = ["rf_only", "xgb_only", "lgbm_only", None]
+    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#1a5276"]
     values, counts = [], []
     for key in keys:
         vals = []

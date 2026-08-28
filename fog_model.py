@@ -27,6 +27,13 @@ except Exception:
     XGBClassifier = None
     _HAS_XGBOOST = False
 
+try:
+    from lightgbm import LGBMClassifier
+    _HAS_LIGHTGBM = True
+except Exception:
+    LGBMClassifier = None
+    _HAS_LIGHTGBM = False
+
 from fog_features import (
     COL_DEWPOINT,
     COL_HUMIDITY,
@@ -84,8 +91,17 @@ XGB_PARAM_DIST = {
     "model__colsample_bytree": [0.8, 1.0],
     "model__min_child_weight": [1, 3, 5],
 }
+LGBM_PARAM_DIST = {
+    "model__n_estimators": [200, 400],
+    "model__max_depth": [-1, 4, 6, 8],
+    "model__learning_rate": [0.05, 0.1, 0.2],
+    "model__num_leaves": [15, 31, 63],
+    "model__subsample": [0.8, 1.0],
+    "model__colsample_bytree": [0.8, 1.0],
+}
 RF_FALLBACK_PARAMS = dict(model__n_estimators=500, model__max_depth=14, model__min_samples_leaf=2)
 XGB_FALLBACK_PARAMS = dict(model__n_estimators=300, model__max_depth=4, model__learning_rate=0.1)
+LGBM_FALLBACK_PARAMS = dict(model__n_estimators=300, model__max_depth=-1, model__learning_rate=0.1)
 BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 # プーリングモデル専用の追加特徴量：地点ごとの過去の霧発生率（他の特徴量は全地点で同一の
@@ -329,6 +345,23 @@ def _single_component_metrics(component_pipe, is_rf, X_test, y_test):
     }
 
 
+def _evaluate_solo_pipe(pipe, X_test, y_test):
+    """任意の学習済みモデル単体(ここではLightGBM)で予測した場合のaccuracy・霧F1を返す。
+    RF/XGBの_single_component_metrics()はHybridFogClassifier経由で評価するが、
+    LightGBMは採用中のhybridブレンド(RF+XGB)には含めていない独立した比較用モデルのため、
+    直接.predict()を呼ぶだけで同じ指標を計算できる（単に横並び比較を管理画面で見せるための
+    診断用で、モデル選択自体には使わない）。
+    """
+    if pipe is None or len(X_test) == 0:
+        return None
+    y_pred = pipe.predict(X_test)
+    fog_f1 = _fog_class_f1(y_test, y_pred)
+    return {
+        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "fog_f1": None if np.isnan(fog_f1) else float(fog_f1),
+    }
+
+
 FOG_F1_SCORER = make_scorer(_blend_score)
 
 
@@ -343,13 +376,17 @@ def _temporal_train_test_split(X, y, test_ratio=0.2):
 def _make_base_pipe(kind):
     if kind == "rf":
         return Pipeline([("model", RandomForestClassifier(class_weight="balanced_subsample", random_state=42))])
+    if kind == "lgbm":
+        return Pipeline([("model", LGBMClassifier(class_weight="balanced", random_state=42, verbosity=-1, n_jobs=1))])
     return Pipeline([("model", _XGBLabelSafeClassifier())])
 
 
 def _fit_component(kind, X_train, y_train):
-    """RandomForestまたはXGBoostを1つ学習する。TimeSeriesSplitで未来データの混入を防ぐ。"""
-    param_dist = PARAM_DIST if kind == "rf" else XGB_PARAM_DIST
-    fallback_params = RF_FALLBACK_PARAMS if kind == "rf" else XGB_FALLBACK_PARAMS
+    """RandomForest・XGBoost・LightGBMのいずれか1つを学習する。
+    TimeSeriesSplitで未来データの混入を防ぐ。
+    """
+    param_dist = {"rf": PARAM_DIST, "xgb": XGB_PARAM_DIST, "lgbm": LGBM_PARAM_DIST}[kind]
+    fallback_params = {"rf": RF_FALLBACK_PARAMS, "xgb": XGB_FALLBACK_PARAMS, "lgbm": LGBM_FALLBACK_PARAMS}[kind]
     n_iter = 10 if kind == "rf" else 8
 
     cv_splits = min(3, max(2, len(X_train) // 100))
@@ -538,6 +575,13 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
         fog_f1 = _fog_class_f1(y_test, y_pred)
         rf_only = _single_component_metrics(rf_pipe, True, X_test, y_test)
         xgb_only = _single_component_metrics(xgb_pipe, False, X_test, y_test)
+        lgbm_only = None
+        if _HAS_LIGHTGBM:
+            try:
+                lgbm_pipe, _, _ = _fit_component("lgbm", X_train, y_train)
+                lgbm_only = _evaluate_solo_pipe(lgbm_pipe, X_test, y_test)
+            except Exception as e:
+                log.warning("LightGBM training failed for %s: %s", col, e)
         log.info(
             "%s: n=%d, model=%s, accuracy=%.3f, f1=%.3f, fog_f1=%s, threshold=%.0f%%, tuned=%s",
             col, len(sub), pipe.model_type,
@@ -549,7 +593,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "model_type": pipe.model_type, "blend_weight": pipe.weight,
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
-            "rf_only": rf_only, "xgb_only": xgb_only,
+            "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
 
@@ -654,6 +698,12 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
 
     log.info("Training pooled model to rescue %d location(s) (%d total rows)", len(skipped_cols), len(pooled))
     pooled_pipe, pooled_tuned, pooled_threshold, pooled_rf, pooled_xgb = _fit_and_select(kind, Xp_train, yp_train)
+    pooled_lgbm = None
+    if _HAS_LIGHTGBM:
+        try:
+            pooled_lgbm, _, _ = _fit_component("lgbm", Xp_train, yp_train)
+        except Exception as e:
+            log.warning("LightGBM pooled training failed: %s", e)
 
     rescued = 0
     for col in skipped_cols:
@@ -673,13 +723,14 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
         fog_f12 = _fog_class_f1(y_test2, y_pred2)
         rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
         xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2)
+        lgbm_only2 = _evaluate_solo_pipe(pooled_lgbm, X_test2, y_test2) if pooled_lgbm is not None else None
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
             "model_type": f"pooled({pooled_pipe.model_type})", "blend_weight": pooled_pipe.weight,
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
-            "rf_only": rf_only2, "xgb_only": xgb_only2,
+            "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
         }
         rescued += 1
