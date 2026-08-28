@@ -9,8 +9,9 @@
         取り消しにくい管理操作を誰がいつ行ったかを記録しています。
     </p>
     {% if entries %}
+    <p><button type="button" class="button" data-csv-export="audit-log-table" data-csv-name="操作ログ">CSVでダウンロード</button></p>
     <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
+    <table class="obs-table" style="width:100%;" id="audit-log-table">
         <thead><tr><th>日時</th><th>実行者</th><th>操作</th><th>詳細</th></tr></thead>
         <tbody>
         {% for e in entries %}

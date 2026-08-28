@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ name }}{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -18,7 +19,18 @@
         現在の現象: {{ current.label }}
     </div>
     {% else %}
-    <p class="muted">観測データがまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
+    {% endif %}
+
+    {% if ai_station_summary %}
+    <div style="margin-top:1rem; padding-top:0.8rem; border-top:1px solid var(--color-border);">
+        <p style="display:flex; align-items:flex-start; gap:0.4rem; margin:0; white-space:pre-wrap;">
+            {{ icon("gemini") }}<span>{{ ai_station_summary }}</span>
+        </p>
+        <p class="muted" style="font-size:0.76rem; margin:0.3rem 0 0;">
+            {{ ai_summary_generated_at }} 時点のGemini生成の要約です。内容は必ずしも正確とは限りません。
+        </p>
+    </div>
     {% endif %}
 </div>
 
@@ -28,7 +40,7 @@
     <p class="muted">{{ latest_pred_date }}</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}"></div>
     {% else %}
-    <p class="muted">この地点の予測グラフはまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>この地点の予測グラフはまだありません。</span></div>
     {% endif %}
 </div>
 
@@ -56,6 +68,7 @@
         {% endif %}
         <img id="tl-img" class="full-graph" style="max-height:480px;" src="">
         <p class="muted" id="tl-caption"></p>
+        <input type="range" id="tl-scrubber" min="0" value="0" style="width:100%; max-width:480px; margin:0.4rem 0;">
         <button type="button" class="button" id="tl-prev">&laquo; 前</button>
         <button type="button" class="button" id="tl-play">再生</button>
         <button type="button" class="button" id="tl-next">次 &raquo;</button>
@@ -73,6 +86,7 @@
         var img = document.getElementById("tl-img");
         var cap = document.getElementById("tl-caption");
         var playBtn = document.getElementById("tl-play");
+        var scrubber = document.getElementById("tl-scrubber");
         var monthSelect = document.getElementById("tl-month-select");
         var daySelect = document.getElementById("tl-day-select");
 
@@ -89,10 +103,16 @@
             idx = (i + items.length) % items.length;
             img.src = items[idx].url;
             cap.textContent = items[idx].caption + " (" + (idx + 1) + "/" + items.length + ")";
+            scrubber.max = String(items.length - 1);
+            scrubber.value = String(idx);
         }
 
         document.getElementById("tl-prev").addEventListener("click", function() { show(idx - 1); });
         document.getElementById("tl-next").addEventListener("click", function() { show(idx + 1); });
+        scrubber.addEventListener("input", function() {
+            stopPlaying();
+            show(parseInt(scrubber.value, 10));
+        });
         playBtn.addEventListener("click", function() {
             if (timer) {
                 stopPlaying();
@@ -144,7 +164,7 @@
     })();
     </script>
     {% else %}
-    <p class="muted">この地点の画像がまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>この地点の画像がまだありません。</span></div>
     {% endif %}
 </div>
 
@@ -168,7 +188,7 @@
         {% endfor %}
     </div>
     {% else %}
-    <p class="muted">まだコメントはありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>まだコメントはありません。</span></div>
     {% endif %}
     <form action="{{ url_for('station_comment_add', name=name) }}" method="post">
         <textarea name="body" rows="2" maxlength="1000" placeholder="この地点についてコメントを残す..." style="width:100%; max-width:480px; padding:0.5rem; font-family:inherit;"></textarea><br>

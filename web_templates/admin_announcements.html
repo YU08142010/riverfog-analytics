@@ -83,7 +83,7 @@
                     <button type="submit" class="button">{{ "無効化" if item.active else "有効化" }}</button>
                 </form>
                 <form method="post" action="{{ url_for('admin_announcements_delete', announcement_id=item.id) }}" style="display:inline;"
-                      onsubmit="return confirm('削除しますか？回答データも消えます。');">
+                      data-confirm="削除しますか？回答データも消えます。">
                     <button type="submit" class="button" style="background:#c0392b;">削除</button>
                 </form>
             </td>

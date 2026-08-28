@@ -30,7 +30,7 @@
 <div class="card">
     <h2>webappサービス</h2>
     <form method="post" action="{{ url_for('admin_restart') }}"
-          onsubmit="return confirm('webappサービスを再起動します。よろしいですか？');">
+          data-confirm="webappサービスを再起動します。よろしいですか？">
         <button type="submit" class="button">webappを再起動</button>
     </form>
     <p class="muted">再起動中の数秒間、サイトに一時的にアクセスできなくなります。</p>

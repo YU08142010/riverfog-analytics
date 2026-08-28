@@ -1,36 +1,40 @@
+{% from "_icons.html" import icon %}
 {% set pending_count = pending_signup_count() %}
 {% set admin_groups = [
     {"label": "モニタリング", "links": [
-        {"name": "ログ", "endpoint": "admin_home", "extra_prefix": "/admin/logs"},
-        {"name": "エラー/警告", "endpoint": "admin_errors"},
-        {"name": "サービス状態", "endpoint": "admin_status"},
-        {"name": "操作ログ", "endpoint": "admin_audit_log"},
+        {"name": "ログ", "endpoint": "admin_home", "extra_prefix": "/admin/logs", "icon": "log"},
+        {"name": "エラー/警告", "endpoint": "admin_errors", "icon": "error"},
+        {"name": "サービス状態", "endpoint": "admin_status", "icon": "status"},
+        {"name": "操作ログ", "endpoint": "admin_audit_log", "icon": "audit"},
     ]},
     {"label": "モデル/精度", "links": [
-        {"name": "モデル状況", "endpoint": "admin_models"},
-        {"name": "精度レポート", "endpoint": "admin_accuracy_report"},
-        {"name": "カメラ稼働率", "endpoint": "admin_camera_health"},
-        {"name": "Gemini状況", "endpoint": "admin_gemini"},
+        {"name": "モデル状況", "endpoint": "admin_models", "icon": "model"},
+        {"name": "精度レポート", "endpoint": "admin_accuracy_report", "icon": "accuracy"},
+        {"name": "カメラ稼働率", "endpoint": "admin_camera_health", "icon": "camera-health"},
+        {"name": "Gemini状況", "endpoint": "admin_gemini", "icon": "gemini"},
     ]},
     {"label": "コンテンツ", "links": [
-        {"name": "お知らせ/アンケート", "endpoint": "admin_announcements", "extra_prefix": "/admin/announcements/"},
-        {"name": "アカウント管理", "endpoint": "admin_accounts", "badge": pending_count},
+        {"name": "お知らせ/アンケート", "endpoint": "admin_announcements", "extra_prefix": "/admin/announcements/", "icon": "announcement"},
+        {"name": "アカウント管理", "endpoint": "admin_accounts", "badge": pending_count, "icon": "account"},
     ]},
     {"label": "システム", "links": [
-        {"name": "ディスク使用量", "endpoint": "admin_disk"},
-        {"name": "DB管理", "endpoint": "admin_db"},
-        {"name": "環境変数", "endpoint": "admin_env"},
-        {"name": "設定", "endpoint": "admin_settings"},
-        {"name": "メンテナンス", "endpoint": "admin_maintenance"},
-        {"name": "ターミナル", "endpoint": "admin_terminal"},
+        {"name": "ディスク使用量", "endpoint": "admin_disk", "icon": "disk"},
+        {"name": "DB管理", "endpoint": "admin_db", "icon": "db"},
+        {"name": "環境変数", "endpoint": "admin_env", "icon": "env"},
+        {"name": "設定", "endpoint": "admin_settings", "icon": "settings"},
+        {"name": "メンテナンス", "endpoint": "admin_maintenance", "icon": "maintenance"},
+        {"name": "ターミナル", "endpoint": "admin_terminal", "icon": "terminal"},
     ]},
 ] %}
 <div class="sidebar-panel">
     <input type="text" class="sidebar-search" id="admin-sidebar-search" placeholder="メニューを検索...">
     <div id="admin-sidebar-groups">
         {% for group in admin_groups %}
-        <div class="sidebar-group" data-group>
-            <p class="sidebar-group-label">{{ group.label }}</p>
+        <div class="sidebar-group" data-group data-group-id="{{ loop.index0 }}">
+            <button type="button" class="sidebar-group-label" data-toggle>
+                {{ group.label }}
+                {{ icon("chevron", size=14) }}
+            </button>
             <ul class="sidebar-list">
                 {% for item in group.links %}
                 {% set item_path = url_for(item.endpoint) %}
@@ -39,6 +43,7 @@
                     <a href="{{ item_path }}"
                        class="{{ 'active' if is_active else '' }}"
                        data-name="{{ item.name }}">
+                        {{ icon(item.icon) }}
                         <span class="sidebar-label">{{ item.name }}</span>
                         {% if item.badge %}<span class="badge">{{ item.badge }}</span>{% endif %}
                     </a>
@@ -52,13 +57,36 @@
 </div>
 <script>
 (function() {
-    var input = document.getElementById("admin-sidebar-search");
+    var STORAGE_KEY = "admin-sidebar-collapsed";
     var groups = Array.prototype.slice.call(document.querySelectorAll("#admin-sidebar-groups > [data-group]"));
+
+    function loadCollapsed() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch (e) { return []; }
+    }
+    function saveCollapsed(ids) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch (e) {}
+    }
+
+    var collapsed = loadCollapsed();
+    groups.forEach(function(group) {
+        if (collapsed.indexOf(group.dataset.groupId) !== -1) {
+            group.classList.add("collapsed");
+        }
+        group.querySelector("[data-toggle]").addEventListener("click", function() {
+            group.classList.toggle("collapsed");
+            var ids = groups.filter(function(g) { return g.classList.contains("collapsed"); })
+                             .map(function(g) { return g.dataset.groupId; });
+            saveCollapsed(ids);
+        });
+    });
+
+    var input = document.getElementById("admin-sidebar-search");
     var emptyLabel = document.getElementById("admin-sidebar-empty");
     if (!input) { return; }
     input.addEventListener("input", function() {
         var q = input.value.trim();
         var shownTotal = 0;
+        var searching = q.length > 0;
         groups.forEach(function(group) {
             var items = Array.prototype.slice.call(group.querySelectorAll("li"));
             var shown = 0;
@@ -68,6 +96,10 @@
                 if (match) { shown++; }
             });
             group.style.display = shown ? "" : "none";
+            // 検索中はグループの折りたたみ状態を無視して中身を見せる
+            group.querySelector(".sidebar-list").style.display = searching ? "" : "";
+            if (searching) { group.classList.remove("collapsed"); }
+            else if (collapsed.indexOf(group.dataset.groupId) !== -1) { group.classList.add("collapsed"); }
             shownTotal += shown;
         });
         if (emptyLabel) { emptyLabel.hidden = shownTotal !== 0; }

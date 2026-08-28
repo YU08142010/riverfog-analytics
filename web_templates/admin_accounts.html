@@ -9,7 +9,7 @@
         <p>
             <button type="submit" name="bulk_action" value="approve" class="button">選択した申請を承認</button>
             <button type="submit" name="bulk_action" value="reject" class="button" style="background:#c0392b;"
-                    onclick="return confirm('選択した申請を拒否しますか？');">選択した申請を拒否</button>
+                    data-confirm-click="選択した申請を拒否しますか？">選択した申請を拒否</button>
         </p>
         <div class="table-scroll">
         <table class="obs-table" style="width:100%;">
@@ -27,7 +27,7 @@
                 <td style="white-space:nowrap;">
                     <button type="submit" formaction="{{ url_for('admin_accounts_approve', request_id=r.id) }}" class="button" formnovalidate>承認</button>
                     <button type="submit" formaction="{{ url_for('admin_accounts_reject', request_id=r.id) }}" class="button" style="background:#c0392b;" formnovalidate
-                            onclick="return confirm('この申請を拒否しますか？');">拒否</button>
+                            data-confirm-click="この申請を拒否しますか？">拒否</button>
                 </td>
             </tr>
             {% endfor %}
@@ -77,7 +77,7 @@
             <td>{{ a.created_at }}</td>
             <td>
                 <form method="post" action="{{ url_for('admin_accounts_delete', user_id=a.id) }}" style="display:inline;"
-                      onsubmit="return confirm('{{ a.name }}さんのアカウントを削除しますか？');">
+                      data-confirm="{{ a.name }}さんのアカウントを削除しますか？">
                     <button type="submit" class="button" style="background:#c0392b;">削除</button>
                 </form>
             </td>

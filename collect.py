@@ -4,6 +4,7 @@
 サーバー1単独運用。データは /opt/river-fog/data にローカル保存し、Samba共有で公開する。
 """
 import csv
+import json
 import logging
 import logging.handlers
 import os
@@ -476,6 +477,147 @@ def append_confidence_log(confidence_by_name, run_time):
         log.warning("Failed to append confidence log: %s", e)
 
 
+class StationSummaryItem(BaseModel):
+    name: str
+    summary: str
+
+
+class AiSummaryResult(BaseModel):
+    overall: str
+    stations: list[StationSummaryItem]
+
+
+AI_SUMMARY_PATH = BASE_DIR / "data" / "ai_summary.json"
+# 画像分類(毎時、confidence:low時は再判定でさらに1回)に加えてのAPI呼び出しになるため、
+# 無料枠を圧迫しないよう要約生成は間隔を空ける(観測時間帯4〜19時の毎時実行のうち、
+# 実際にはこの間隔以上経過している回だけ生成する)。
+AI_SUMMARY_MIN_INTERVAL_HOURS = 3
+
+AI_SUMMARY_SYSTEM_INSTRUCTION = (
+    "あなたは只見川流域の霧観測ダッシュボードの解説者です。以下に渡す気象情報と、"
+    "各観測地点の現在の現象を踏まえて、日本語で要約を書いてください。\n"
+    "- overallには、流域全体の状況を2〜3文程度で簡潔にまとめてください"
+    "（霧が出ている地点が多いか少ないか、天候の傾向、注意すべき点など）。\n"
+    "- stationsには、渡された各地点について1つずつ、1〜2文程度の短い説明を書いてください。"
+    "現象がない地点についても「現在、目立った現象は見られません」のように簡潔に触れてください。\n"
+    "- 数値を断定的に予測したり、渡されていない情報を推測で付け加えたりしないでください。"
+)
+
+
+def _build_summary_prompt(cameras, phenom_by_name, weather, run_time):
+    lines = [f"観測時刻: {run_time.strftime('%Y-%m-%d %H:%M')}"]
+    if weather:
+        w = weather
+        lines.append(
+            "気象(代表地点): 気温{temp}℃ 降水量{precip}mm 風速{wind}m/s 湿度{humidity}%".format(
+                temp=w.get("temperature", "-"), precip=w.get("precipitation", "-"),
+                wind=w.get("wind_speed", "-"), humidity=w.get("humidity", "-"),
+            )
+        )
+    lines.append("各地点の現在の現象:")
+    for name, _cam_id in cameras:
+        code = phenom_by_name.get(name)
+        if code is None:
+            label = "不明(取得失敗)"
+        elif code == 0:
+            label = "現象なし"
+        else:
+            label = PHENOM_LABELS.get(code, f"コード{code}")
+        lines.append(f"- {name}: {label}")
+    return "\n".join(lines)
+
+
+def generate_ai_summaries(cameras, phenom_by_name, weather, run_time):
+    """流域全体+地点ごとのAI要約をGeminiで生成し、AI_SUMMARY_PATHにJSONで保存する。
+    画像分類と同じくGEMINI_API_KEYS(カンマ区切り)を順に試し、メインキーが枯渇/失敗した
+    場合はサブキーにフォールバックする(get_api_keys()・GEMINI_RETRY_PASSESを流用)。
+    失敗しても収集全体は止めない(前回分のJSONが残るだけで、表示側は古い要約のまま)。
+    """
+    try:
+        if AI_SUMMARY_PATH.exists():
+            try:
+                with open(AI_SUMMARY_PATH, encoding="utf-8") as f:
+                    prev_generated_at = datetime.strptime(
+                        json.load(f)["generated_at"], "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=JST)
+                elapsed_hours = (run_time - prev_generated_at).total_seconds() / 3600
+                if elapsed_hours < AI_SUMMARY_MIN_INTERVAL_HOURS:
+                    log.info(
+                        "Skipping AI summary generation (last one was %.1fh ago, min interval is %dh)",
+                        elapsed_hours, AI_SUMMARY_MIN_INTERVAL_HOURS,
+                    )
+                    return
+            except Exception as e:
+                log.warning("Failed to check previous AI summary timestamp, generating anyway: %s", e)
+
+        from google import genai
+        from google.genai import types
+
+        api_keys = get_api_keys()
+        if not api_keys:
+            log.warning("GEMINI_API_KEY is not set, skipping AI summary generation")
+            return
+
+        prompt = _build_summary_prompt(cameras, phenom_by_name, weather, run_time)
+        model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+
+        def try_all_keys():
+            for key_idx, api_key in enumerate(api_keys, start=1):
+                try:
+                    client = genai.Client(api_key=api_key)
+                    resp = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=AI_SUMMARY_SYSTEM_INSTRUCTION,
+                            response_mime_type="application/json",
+                            response_schema=AiSummaryResult,
+                            temperature=0.3,
+                            http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                        ),
+                    )
+                except Exception as e:
+                    log.warning("AI summary API call failed (model=%s, key %d/%d): %s",
+                                model, key_idx, len(api_keys), e)
+                    continue
+                if key_idx > 1:
+                    log.info("Main API key unavailable, fell back to sub key %d for AI summary", key_idx)
+                return resp
+            return None
+
+        response = None
+        for pass_idx in range(1, GEMINI_RETRY_PASSES + 1):
+            response = try_all_keys()
+            if response is not None:
+                break
+            if pass_idx < GEMINI_RETRY_PASSES:
+                log.warning("All Gemini API keys failed for AI summary (pass %d/%d), retrying in %ds",
+                            pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC)
+                time.sleep(GEMINI_RETRY_DELAY_SEC)
+
+        if response is None:
+            log.error("AI summary generation failed with all configured keys")
+            return
+
+        parsed: AiSummaryResult = response.parsed
+        if parsed is None:
+            log.error("AI summary response could not be parsed")
+            return
+
+        payload = {
+            "generated_at": run_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "overall": parsed.overall,
+            "stations": {item.name: item.summary for item in parsed.stations},
+        }
+        AI_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(AI_SUMMARY_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        log.info("Saved AI summary (%d station note(s))", len(payload["stations"]))
+    except Exception:
+        log.exception("Failed to generate AI summary")
+
+
 WEATHER_HOURLY_VARS = [
     "temperature_2m",
     "precipitation",
@@ -740,6 +882,7 @@ def main():
     append_row(cameras, phenom_by_name, weather, run_time)
 
     record_station_weather(run_time)
+    generate_ai_summaries(cameras, phenom_by_name, weather, run_time)
     log.info("=== Collection finished ===")
 
 

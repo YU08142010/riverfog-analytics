@@ -9,8 +9,9 @@
         （{{ "%.1f"|format(100.0 * overall.correct / overall.n) }}%）</p>
     {% endif %}
     {% if by_station %}
+    <p><button type="button" class="button" data-csv-export="accuracy-table" data-csv-name="予測精度レポート">CSVでダウンロード</button></p>
     <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
+    <table class="obs-table" style="width:100%;" id="accuracy-table">
         <thead><tr><th>地点</th><th>的中率</th><th>件数</th></tr></thead>
         <tbody>
         {% for r in by_station %}

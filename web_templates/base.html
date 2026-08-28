@@ -1,9 +1,11 @@
+{% from "_icons.html" import icon %}
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}只見川霧観測{% endblock %} - 只見川霧観測</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script>
 (function() {
@@ -20,25 +22,28 @@
 <header>
     <h1>只見川霧観測・予測</h1>
     <span style="color:rgba(255,255,255,0.6); font-size:0.72rem; align-self:flex-end; margin-bottom:0.15rem;">v{{ app_version }}</span>
-    <nav>
-        <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">ダッシュボード</a>
-        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) or request.path.startswith('/compare') else '' }}">地点別</a>
-        <a href="{{ url_for('map_page') }}" class="{{ 'active' if request.path.startswith(url_for('map_page')) else '' }}">地図</a>
-        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">観測データ</a>
-        <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">カメラ画像</a>
-        <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">予測結果</a>
-        <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">予測精度</a>
+    <button type="button" class="nav-toggle" id="nav-toggle-btn" aria-label="メニュー" aria-expanded="false">
+        {{ icon("menu", size=20) }}
+    </button>
+    <nav id="main-nav">
+        <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
+        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) or request.path.startswith('/compare') else '' }}">{{ icon("stations") }}地点別</a>
+        <a href="{{ url_for('map_page') }}" class="{{ 'active' if request.path.startswith(url_for('map_page')) else '' }}">{{ icon("map") }}地図</a>
+        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">{{ icon("data") }}観測データ</a>
+        <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">{{ icon("camera") }}カメラ画像</a>
+        <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">{{ icon("forecast") }}予測結果</a>
+        <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">{{ icon("accuracy") }}予測精度</a>
         {% if session.get('user_id') %}
-        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">メンバー</a>
+        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">{{ icon("members") }}メンバー</a>
         {% endif %}
         {% if session.get('role') == 'admin' %}
-        <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">管理者</a>
+        <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
         {% endif %}
     </nav>
     <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
     {% if session.get('user_id') %}
     {% set my_avatar = member_avatar_url(session.get('user_id')) %}
-    <span style="color:rgba(255,255,255,0.85); font-size:0.85rem; white-space:nowrap; display:flex; align-items:center; gap:0.5rem;">
+    <span class="header-user" style="color:rgba(255,255,255,0.85); font-size:0.85rem; white-space:nowrap; display:flex; align-items:center; gap:0.5rem;">
         <a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}" style="display:inline-flex; align-items:center; gap:0.4rem; color:inherit; text-decoration:none;">
             {% if my_avatar %}
             <img src="{{ my_avatar }}" style="width:1.6rem; height:1.6rem; border-radius:50%; object-fit:cover;">
@@ -54,7 +59,12 @@
     {% endif %}
 </header>
 <main>
-{% block breadcrumb %}{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    {% if request.path != url_for('dashboard') %}<li>{{ self.title() }}</li>{% endif %}
+</ul>
+{% endblock %}
 {% with messages = get_flashed_messages() %}
 {% if messages %}
 <div class="card" style="border-left: 4px solid var(--color-primary); background: var(--color-primary-light);">
@@ -69,7 +79,17 @@
 </div>
 </div>
 </main>
+<button type="button" class="back-to-top" id="back-to-top-btn">{{ icon("up", size=14) }} トップへ</button>
 <div class="toast-container" id="toast-container"></div>
+<div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal-dialog" role="alertdialog" aria-modal="true">
+        <p id="modal-message"></p>
+        <div class="modal-actions">
+            <button type="button" class="button cancel" id="modal-cancel-btn">キャンセル</button>
+            <button type="button" class="button" id="modal-confirm-btn">OK</button>
+        </div>
+    </div>
+</div>
 <script>
 document.getElementById("theme-toggle-btn").addEventListener("click", function() {
     var current = document.documentElement.getAttribute("data-theme");
@@ -81,18 +101,163 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
     try { localStorage.setItem("theme", next); } catch (e) {}
 });
 
+// ハンバーガーメニュー(狭い画面でナビを折りたたむ)。
+(function() {
+    var btn = document.getElementById("nav-toggle-btn");
+    var nav = document.getElementById("main-nav");
+    btn.addEventListener("click", function() {
+        var open = nav.classList.toggle("open");
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    nav.querySelectorAll("a").forEach(function(a) {
+        a.addEventListener("click", function() {
+            nav.classList.remove("open");
+            btn.setAttribute("aria-expanded", "false");
+        });
+    });
+})();
+
+// トップに戻るボタン(一定量スクロールしたら表示)。
+(function() {
+    var btn = document.getElementById("back-to-top-btn");
+    window.addEventListener("scroll", function() {
+        btn.classList.toggle("show", window.scrollY > 600);
+    }, {passive: true});
+    btn.addEventListener("click", function() {
+        window.scrollTo({top: 0, behavior: "smooth"});
+    });
+})();
+
+// トースト。閉じるボタン付き、指定秒数後に自動で消える。
 function showToast(message, isError) {
     var container = document.getElementById("toast-container");
     var toast = document.createElement("div");
     toast.className = "toast" + (isError ? " toast-error" : "");
-    toast.textContent = message;
-    container.appendChild(toast);
-    requestAnimationFrame(function() { toast.classList.add("show"); });
-    setTimeout(function() {
+    var msg = document.createElement("span");
+    msg.className = "toast-message";
+    msg.textContent = message;
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "toast-close";
+    closeBtn.setAttribute("aria-label", "閉じる");
+    closeBtn.textContent = "×";
+    var dismissTimer = null;
+    function dismiss() {
+        if (dismissTimer) { clearTimeout(dismissTimer); }
         toast.classList.remove("show");
         setTimeout(function() { toast.remove(); }, 300);
-    }, 3500);
+    }
+    closeBtn.addEventListener("click", dismiss);
+    toast.appendChild(msg);
+    toast.appendChild(closeBtn);
+    container.appendChild(toast);
+    requestAnimationFrame(function() { toast.classList.add("show"); });
+    dismissTimer = setTimeout(dismiss, 5000);
 }
+
+// confirm()の代わりのモーダル。confirmModal(message).then(function(ok) { ... })のように使う。
+function confirmModal(message) {
+    return new Promise(function(resolve) {
+        var overlay = document.getElementById("modal-overlay");
+        var msgEl = document.getElementById("modal-message");
+        var okBtn = document.getElementById("modal-confirm-btn");
+        var cancelBtn = document.getElementById("modal-cancel-btn");
+        msgEl.textContent = message;
+        overlay.hidden = false;
+        function cleanup(result) {
+            overlay.hidden = true;
+            okBtn.removeEventListener("click", onOk);
+            cancelBtn.removeEventListener("click", onCancel);
+            overlay.removeEventListener("click", onOverlay);
+            document.removeEventListener("keydown", onKey);
+            resolve(result);
+        }
+        function onOk() { cleanup(true); }
+        function onCancel() { cleanup(false); }
+        function onOverlay(e) { if (e.target === overlay) { cleanup(false); } }
+        function onKey(e) {
+            if (e.key === "Escape") { cleanup(false); return; }
+            if (e.key !== "Tab") { return; }
+            // 2つのボタンだけの簡易フォーカストラップ(Tabでモーダルの外に出さない)。
+            e.preventDefault();
+            if (document.activeElement === okBtn) { cancelBtn.focus(); } else { okBtn.focus(); }
+        }
+        okBtn.addEventListener("click", onOk);
+        cancelBtn.addEventListener("click", onCancel);
+        overlay.addEventListener("click", onOverlay);
+        document.addEventListener("keydown", onKey);
+        okBtn.focus();
+    });
+}
+
+// data-confirm="メッセージ" を持つform/buttonは、確認モーダルを通してから送信する
+// (これまでonsubmit/onclickでbrowser標準confirm()を呼んでいた箇所の置き換え用)。
+document.addEventListener("submit", function(e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-confirm")) { return; }
+    if (form.dataset.confirmed === "1") { return; }
+    e.preventDefault();
+    confirmModal(form.getAttribute("data-confirm")).then(function(ok) {
+        if (ok) {
+            form.dataset.confirmed = "1";
+            if (typeof form.requestSubmit === "function") { form.requestSubmit(e.submitter || undefined); }
+            else { form.submit(); }
+        }
+    });
+});
+document.addEventListener("click", function(e) {
+    var btn = e.target.closest("[data-confirm-click]");
+    if (!btn) { return; }
+    e.preventDefault();
+    confirmModal(btn.getAttribute("data-confirm-click")).then(function(ok) {
+        if (ok && btn.form) {
+            btn.form.dataset.confirmed = "1";
+            if (typeof btn.form.requestSubmit === "function") { btn.form.requestSubmit(btn); }
+            else { btn.form.submit(); }
+        } else if (ok) {
+            btn.click();
+        }
+    });
+});
+
+// コピー用ボタン(data-copy="コピーする文字列")。
+document.addEventListener("click", function(e) {
+    var btn = e.target.closest(".copy-btn");
+    if (!btn) { return; }
+    var text = btn.getAttribute("data-copy") || "";
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            showToast("コピーしました。");
+        }).catch(function() {
+            showToast("コピーできませんでした。", true);
+        });
+    }
+});
+
+// テーブルをCSVとしてダウンロードするボタン(data-csv-export="対象tableのid"、
+// data-csv-name="ファイル名(拡張子抜き)")。サーバー側にエクスポート用ルートを
+// 個別に用意しなくても、画面に表示済みの表をそのままCSV化できる。
+document.addEventListener("click", function(e) {
+    var btn = e.target.closest("[data-csv-export]");
+    if (!btn) { return; }
+    var table = document.getElementById(btn.getAttribute("data-csv-export"));
+    if (!table) { return; }
+    var rows = Array.prototype.map.call(table.querySelectorAll("tr"), function(tr) {
+        return Array.prototype.map.call(tr.querySelectorAll("th,td"), function(cell) {
+            return '"' + cell.textContent.trim().replace(/"/g, '""') + '"';
+        }).join(",");
+    });
+    var csv = "\uFEFF" + rows.join("\r\n");
+    var blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = (btn.getAttribute("data-csv-name") || "export") + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+});
 
 document.addEventListener("DOMContentLoaded", function() {
     document.querySelectorAll(".chart-wrap img").forEach(function(img) {
@@ -106,6 +271,21 @@ document.addEventListener("DOMContentLoaded", function() {
         };
         img.addEventListener("load", stop);
         img.addEventListener("error", stop);
+    });
+
+    // table.obs-tableのth文字列を各tdのdata-labelに自動反映する
+    // (狭い画面でのカード表示用。style.cssの@media (max-width: 640px)参照)。
+    document.querySelectorAll("table.obs-table").forEach(function(table) {
+        var headers = Array.prototype.map.call(
+            table.querySelectorAll("thead tr:last-child th"),
+            function(th) { return th.textContent.trim(); }
+        );
+        if (!headers.length) { return; }
+        table.querySelectorAll("tbody tr").forEach(function(tr) {
+            Array.prototype.forEach.call(tr.children, function(td, i) {
+                if (headers[i] && !td.hasAttribute("data-label")) { td.setAttribute("data-label", headers[i]); }
+            });
+        });
     });
 });
 
@@ -162,6 +342,28 @@ document.addEventListener("input", function(e) {
     if (bar) { bar.style.width = result.pct + "%"; bar.style.background = result.color || "transparent"; }
     if (label) { label.textContent = input.value ? "強度: " + result.label : ""; }
 });
+
+// 保留中の登録申請があれば、管理者にはfaviconにも赤いバッジを出す(気づきやすくするため)。
+{% if session.get('role') == 'admin' %}
+(function() {
+    var pending = {{ pending_signup_count()|tojson }};
+    if (!pending) { return; }
+    var link = document.getElementById("favicon-link");
+    var img = new Image();
+    img.onload = function() {
+        var canvas = document.createElement("canvas");
+        canvas.width = 32; canvas.height = 32;
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, 32, 32);
+        ctx.beginPath();
+        ctx.arc(25, 8, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#c0392b";
+        ctx.fill();
+        link.href = canvas.toDataURL("image/png");
+    };
+    img.src = link.href;
+})();
+{% endif %}
 </script>
 </body>
 </html>

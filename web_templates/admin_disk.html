@@ -36,7 +36,7 @@
     </p>
     {% if image_archive.day_count %}
     <form method="post" action="{{ url_for('admin_disk_images_cleanup') }}"
-          onsubmit="return confirm('指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？');">
+          data-confirm="指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？">
         <label>
             <input type="number" name="days" value="{{ image_cleanup_default_days }}" min="1" style="width:5em; padding:0.3rem;">
             日より前の画像を削除
@@ -57,7 +57,7 @@
         (復元前のデータは自動的に退避されますが、通常時に使う機能ではありません)。
     </p>
     <form method="post" action="{{ url_for('admin_backup_restore') }}" enctype="multipart/form-data"
-          onsubmit="return confirm('本当にdata/一式を、アップロードしたZIPの内容で置き換えますか？アカウント情報も含めて全て置き換わります。');">
+          data-confirm="本当にdata/一式を、アップロードしたZIPの内容で置き換えますか？アカウント情報も含めて全て置き換わります。">
         <p>
             <input type="file" name="backup_zip" accept=".zip" required>
         </p>

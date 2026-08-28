@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}地図{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
@@ -31,6 +32,7 @@
     <tr>
         <th>地点</th>
         <th>現在の現象</th>
+        <th>座標</th>
         <th>埋め込み地図</th>
         <th>国交省の地図</th>
         <th>Googleマップ</th>
@@ -42,6 +44,14 @@
         <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
         <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
             {{ e.current.label if e.current else "-" }}
+        </td>
+        <td>
+            {% if e.lat is not none and e.lon is not none %}
+            <span style="font-family:monospace; font-size:0.82rem;">{{ "%.6f, %.6f"|format(e.lat, e.lon) }}</span>
+            <button type="button" class="copy-btn" data-copy="{{ "%.6f, %.6f"|format(e.lat, e.lon) }}" title="座標をコピー">{{ icon("copy") }}</button>
+            {% else %}
+            -
+            {% endif %}
         </td>
         <td><button type="button" class="button map-show-btn" data-name="{{ e.name }}">上に表示</button></td>
         <td>

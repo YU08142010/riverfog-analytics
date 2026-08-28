@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}ターミナル{% endblock %}
 {% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
@@ -7,6 +8,9 @@
     <p class="muted">
         サーバー上のシェル(sshuser権限)にブラウザからアクセスできます。初回表示時にBasic認証を
         求められます(サイトのログインとは別の認証です)。
+        <br>
+        <code>{{ terminal_url }}</code>
+        <button type="button" class="copy-btn" data-copy="{{ terminal_url }}" title="URLをコピー">{{ icon("copy") }}</button>
     </p>
     <iframe src="{{ terminal_url }}" style="width:100%; height:600px; border:0; border-radius: var(--radius-sm);"></iframe>
 </div>

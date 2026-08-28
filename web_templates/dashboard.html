@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}ダッシュボード{% endblock %}
 {% block content %}
 
@@ -156,6 +157,16 @@
 </div>
 {% endif %}
 
+{% if ai_overall_summary %}
+<div class="card" style="border-left: 4px solid var(--color-primary);">
+    <h2 style="display:flex; align-items:center; gap:0.4rem;">{{ icon("gemini") }}AI要約</h2>
+    <p style="white-space:pre-wrap;">{{ ai_overall_summary }}</p>
+    <p class="muted" style="font-size:0.78rem; margin:0;">
+        {{ ai_summary_generated_at }} 時点の観測に基づくGemini生成の要約です。内容は必ずしも正確とは限りません。
+    </p>
+</div>
+{% endif %}
+
 <div class="card">
     <h2>現在の状況</h2>
     {% if observations %}
@@ -193,7 +204,7 @@
     </div>
     <p style="margin-top:0.8rem;"><a class="button" href="{{ url_for('download_xlsx') }}">観測データ全体(Excel)をダウンロード</a></p>
     {% else %}
-    <p class="muted">観測データがまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
     {% endif %}
 </div>
 
@@ -214,7 +225,7 @@
         <a class="button" href="{{ url_for('images_hour_zip', date=latest_image_date, hhmm=latest_image_hour) }}">この時刻の画像をZIPでダウンロード</a>
     </p>
     {% else %}
-    <p class="muted">画像がまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>画像がまだありません。</span></div>
     {% endif %}
 </div>
 
@@ -225,7 +236,7 @@
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}"></div>
     <p><a class="button" href="{{ url_for('predictions_date', date=latest_pred_date) }}">地点ごとのグラフを見る</a></p>
     {% else %}
-    <p class="muted">予測結果がまだありません。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>予測結果がまだありません。</span></div>
     {% endif %}
     <p><a class="button" href="{{ url_for('predictions_dates') }}">過去の予測を見る</a></p>
 </div>

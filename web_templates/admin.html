@@ -3,6 +3,44 @@
 {% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
+    <h2>概要</h2>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">webappサービス</div>
+            <div class="stat-value" style="font-size:1.1rem; color: {{ 'var(--color-success)' if overview.web_active else 'var(--color-danger)' }};">
+                {{ "稼働中" if overview.web_active else "停止中" }}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">毎時収集タイマー</div>
+            <div class="stat-value" style="font-size:1.1rem; color: {{ 'var(--color-success)' if overview.collect_timer_active else 'var(--color-danger)' }};">
+                {{ "有効" if overview.collect_timer_active else "無効" }}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">ディスク使用率</div>
+            <div class="stat-value">{{ overview.disk_used_pct if overview.disk_used_pct is not none else "-" }}<span class="stat-unit">%</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">保留中の登録申請</div>
+            <div class="stat-value" style="{{ 'color: var(--color-danger);' if overview.pending_signups else '' }}">{{ overview.pending_signups }}<span class="stat-unit">件</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">DNS/ネットワーク障害(24h)</div>
+            <div class="stat-value" style="{{ 'color: var(--color-warning);' if overview.network_failures_24h else '' }}">{{ overview.network_failures_24h }}<span class="stat-unit">件</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">学習済みモデル数</div>
+            <div class="stat-value">{{ overview.model_count }}<span class="stat-unit">地点</span></div>
+        </div>
+    </div>
+    <p class="muted" style="margin-top:0.8rem;">
+        最終学習日時: {{ overview.last_trained_at if overview.last_trained_at else "-" }}
+    </p>
+    <p class="muted">詳細はサイドバーの各メニューから確認できます。</p>
+</div>
+
+<div class="card">
     <h2>ログ一覧</h2>
     <table class="obs-table" style="width:auto;">
         <thead><tr><th>ログ</th><th>サイズ</th><th></th></tr></thead>

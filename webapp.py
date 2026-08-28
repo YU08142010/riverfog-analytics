@@ -766,6 +766,23 @@ def _recent_log_issues(max_per_log=LOG_ISSUE_SCAN_LINES, max_total=LOG_ISSUE_MAX
     return issues[:max_total]
 
 
+AI_SUMMARY_PATH = BASE_DIR / "data" / "ai_summary.json"
+
+
+def _load_ai_summary():
+    """collect.py(generate_ai_summaries)が毎時保存するAI要約を読む。
+    無い/壊れている場合はNoneを返す(テンプレート側は要約カードごと出さない)。
+    """
+    if not AI_SUMMARY_PATH.exists():
+        return None
+    try:
+        with open(AI_SUMMARY_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log.warning("Failed to read AI summary: %s", e)
+        return None
+
+
 def _network_failure_summary(recent_n=30):
     """common.record_network_failure()が記録したDNS/ネットワーク障害を集計する。
     このサーバーの名前解決はTailscale MagicDNS経由で、断続的に外部ドメインの解決が
@@ -1194,6 +1211,7 @@ def dashboard():
         if conn:
             conn.close()
 
+    ai_summary = _load_ai_summary()
     return render_template(
         "dashboard.html",
         observations=_latest_observations(),
@@ -1206,6 +1224,8 @@ def dashboard():
         summary_file=summary_file,
         station_names=STATION_NAMES,
         announcements_list=active_announcements,
+        ai_overall_summary=ai_summary.get("overall") if ai_summary else None,
+        ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
     )
 
 
@@ -1449,6 +1469,8 @@ def map_page():
             "current": current_by_name.get(name),
             "river_gov_url": _river_go_jp_map_url(cam_id) if cam_id else None,
             "google_url": google_url,
+            "lat": lat,
+            "lon": lon,
         })
 
     return render_template(
@@ -1483,6 +1505,11 @@ def station_detail(name):
         for c in raw_comments
     ]
 
+    ai_summary = _load_ai_summary()
+    ai_station_summary = None
+    if ai_summary:
+        ai_station_summary = ai_summary.get("stations", {}).get(name)
+
     return render_template(
         "station_detail.html",
         name=name,
@@ -1496,6 +1523,8 @@ def station_detail(name):
         current_by_name=current_by_name,
         active_names=[name],
         comments=comments,
+        ai_station_summary=ai_station_summary,
+        ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
     )
 
 
@@ -1797,13 +1826,52 @@ def signup():
     return render_template("signup.html", error=error, submitted=False)
 
 
+def _admin_overview():
+    """管理者トップページ用の要約(サービス状態・ディスク・保留申請・DNS障害・最終学習日時)。
+    個々の詳細ページ(サービス状態/ディスク使用量等)のロジックは変えず、表示用に軽くまとめるだけ。
+    取得できない項目はNoneのままにし、テンプレート側で「-」表示にする。
+    """
+    web_state = _systemctl_show("river-fog-web.service", ["ActiveState"]).get("ActiveState")
+    collect_timer_state = _systemctl_show("river-fog-collect.timer", ["ActiveState"]).get("ActiveState")
+    try:
+        total, used, _free = shutil.disk_usage(BASE_DIR)
+        disk_used_pct = round(100.0 * used / total, 1) if total else None
+    except Exception:
+        disk_used_pct = None
+    network_failures = _network_failure_summary()
+    model_state = fog_model.load_model_state()
+    last_trained_at = None
+    if model_state:
+        trained_ats = [info.get("trained_at") for info in model_state.values() if info.get("trained_at")]
+        if trained_ats:
+            last_trained_at = max(trained_ats)
+    try:
+        conn = _users_conn()
+        try:
+            pending_signups = len(users.list_signup_requests(conn, status="pending"))
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to count pending signup requests: %s", e)
+        pending_signups = 0
+    return {
+        "web_active": web_state == "active",
+        "collect_timer_active": collect_timer_state == "active",
+        "disk_used_pct": disk_used_pct,
+        "pending_signups": pending_signups,
+        "network_failures_24h": network_failures["count_24h"],
+        "last_trained_at": last_trained_at,
+        "model_count": len(model_state),
+    }
+
+
 @app.route("/admin")
 @requires_admin
 def admin_home():
     logs = [{"key": k, "path": str(p), "exists": p.exists(),
              "size_kb": round(p.stat().st_size / 1024, 1) if p.exists() else 0}
             for k, p in ALLOWED_LOGS.items()]
-    return render_template("admin.html", logs=logs)
+    return render_template("admin.html", logs=logs, overview=_admin_overview())
 
 
 @app.route("/admin/audit_log")
