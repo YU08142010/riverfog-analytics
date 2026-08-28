@@ -72,6 +72,7 @@ LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ
 TTYD_PORT = 7681
 
 ALERT_HOURS_AHEAD = 24
+ALERT_MIN_FOG_PROB = 0.85
 TIMELAPSE_MAX_ITEMS = 48
 
 ALLOWED_LOGS = {
@@ -689,9 +690,13 @@ def _upcoming_fog_alerts_safe():
     try:
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
-            return prediction_log.upcoming_fog_alerts(conn, from_str, to_str, SUMMARY_FOG_CODES)
+            alerts = prediction_log.upcoming_fog_alerts(conn, from_str, to_str, SUMMARY_FOG_CODES)
         finally:
             conn.close()
+        return [
+            a for a in alerts
+            if a["predicted_fog_prob"] is not None and a["predicted_fog_prob"] >= ALERT_MIN_FOG_PROB
+        ]
     except Exception as e:
         log.warning("Failed to read upcoming fog alerts: %s", e)
         return []
