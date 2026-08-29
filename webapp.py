@@ -898,7 +898,7 @@ def _render_model_compare_png(state):
         values.append(sum(vals) / len(vals) if vals else None)
         counts.append(len(vals))
 
-    fig, ax = plt.subplots(figsize=(7.6, 3.6))
+    fig, ax = plt.subplots(figsize=(10.5, 4.2))
     x = list(range(len(labels)))
     plotted = [v if v is not None else 0 for v in values]
     ax.bar(x, plotted, color=colors, width=0.55)
@@ -906,7 +906,9 @@ def _render_model_compare_png(state):
         label = f"{v:.1f}%\n(n={n}地点)" if v is not None else "データなし"
         ax.text(i, (v or 0) + 2, label, ha="center", fontsize=8.5)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=8.5)
+    # 7方式分のラベル(特に"RF+XGBoost+LightGBM"のような長いもの)が横並びだと重なるため、
+    # 斜めにして間隔を確保する。
+    ax.set_xticklabels(labels, fontsize=8.5, rotation=20, ha="right")
     ax.set_ylim(0, 100)
     ax.set_ylabel("霧F1(平均, %)")
     ax.set_title("モデル方式ごとの性能比較(全地点平均)", fontsize=11)

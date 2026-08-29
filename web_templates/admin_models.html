@@ -10,7 +10,12 @@
 
 <div class="card">
     <h2>モデル方式ごとの性能比較</h2>
-    <p class="muted">RandomForest単体・XGBoost単体・LightGBM単体・RF+LightGBM混合(いずれも比較用)・実際に採用しているhybrid(RF+XGB混合)の霧F1を、全地点で平均して比較します。</p>
+    <p class="muted">
+        RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・RF+LightGBM・RF+XGBoost+LightGBMの
+        霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
+        正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります。
+        地点ごとの内訳は下の「地点ごとのモデル状況」表を参照してください)。
+    </p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
 </div>
 
@@ -22,7 +27,7 @@
 
 <div class="card">
     <h2>特徴量の重要度(全地点)</h2>
-    <p class="muted">どの気象要素が霧予測に効いているか(RandomForest/XGBoostのfeature_importances_をhybridの混合比で加重平均)。</p>
+    <p class="muted">どの気象要素が霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
 </div>
 
@@ -46,7 +51,7 @@
     <table class="obs-table" style="width:100%;">
         <thead><tr>
             <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
-            <th>accuracy</th><th>霧F1(hybrid)</th>
+            <th>accuracy</th><th>霧F1(採用中)</th>
             <th>霧F1(RF単体)</th><th>霧F1(XGB単体)</th>
             <th>学習日時</th>
         </tr></thead>
