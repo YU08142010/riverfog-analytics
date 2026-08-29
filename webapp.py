@@ -1130,6 +1130,7 @@ def _load_station_feature_snapshot(name):
     station_data = data.get("stations", {}).get(name)
     if not station_data:
         return None
+    station_data = {**station_data, "model_type": fog_model.normalize_model_type_label(station_data.get("model_type"))}
     return {"generated_at": data.get("generated_at"), **station_data}
 
 
@@ -3232,7 +3233,7 @@ def admin_models():
         info = state[col]
         rows.append({
             "station": col,
-            "model_type": info.get("model_type"),
+            "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
             "n": info.get("n"),
             "accuracy": info.get("accuracy"),
             "fog_f1": info.get("fog_f1"),

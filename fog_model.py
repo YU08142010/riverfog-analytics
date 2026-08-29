@@ -200,6 +200,16 @@ class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
 _SECOND_MODEL_LABELS = {"xgb": "XGBoost", "lgbm": "LightGBM"}
 
 
+def normalize_model_type_label(model_type):
+    """モデル退行防止ロールバック(apply_regression_guard)で以前のモデル状態がそのまま
+    温存された地点は、コード更新前の旧称"hybrid"(RF+XGBoostブレンドの旧名)がmodel_type
+    (延いてはfeature_snapshot等の保存データ)に残ったままになる。表示・保存のたびに
+    ここで新しい名称へ読み替える。"""
+    if not model_type:
+        return model_type
+    return model_type.replace("hybrid", "RF+XGBoost")
+
+
 def _align_proba(model, X, classes):
     """model.predict_proba(X)の列を目的のclasses順に並べ替える（学習データに無かった
     クラスがある場合は該当列を0で埋める）。ブレンド系分類器で共通して使う。"""
@@ -1269,6 +1279,6 @@ def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
                 col, _effective_score(info), _effective_score(prev),
                 prob_not_worse, 1.0 - REGRESSION_CONFIDENCE,
             )
-            models[col] = prev
+            models[col] = {**prev, "model_type": normalize_model_type_label(prev.get("model_type"))}
             rolled_back.append(col)
     return rolled_back
