@@ -1333,6 +1333,38 @@ def _build_chat_context():
     return "\n".join(lines)
 
 
+def _generate_chat_title(question, answer, api_keys):
+    """新しい会話の最初のやり取りから、一覧に出す短い題名を生成する(Gemini/Claude等の
+    チャットUIと同じ挙動)。失敗しても会話自体は使えるべきなので、生成できなければ
+    質問文の先頭を代わりに使う。この呼び出しは利用者の1日あたりの質問回数には数えない
+    (レート制限はchat_messagesの行数で数えており、この呼び出しはそこに記録しないため)。"""
+    fallback = question.strip()[:20] or "新しいチャット"
+    if not api_keys:
+        return fallback
+    try:
+        from google.genai import types
+        model = os.environ.get("GEMINI_MODEL", collect.DEFAULT_GEMINI_MODEL)
+        config = types.GenerateContentConfig(
+            system_instruction=(
+                "次の質問と回答の内容を表す、15文字以内の簡潔な日本語の題名だけを"
+                "出力してください。句読点・記号・引用符・「題名:」等の前置きは付けないでください。"
+            ),
+            temperature=0.2,
+            max_output_tokens=30,
+        )
+        content = f"質問: {question}\n回答: {(answer or '')[:300]}"
+        response = collect._gemini_generate_with_fallback(
+            model, content, config, api_keys, label="chat_title"
+        )
+        if response and getattr(response, "text", None):
+            title = response.text.strip().strip('「」"\'').splitlines()[0].strip()[:20]
+            if title:
+                return title
+    except Exception as e:
+        log.warning("Chat title generation failed: %s", e)
+    return fallback
+
+
 def _chat_rate_limit_status(user_id):
     """(利用者ごとの残り回数, サイト全体の残り回数)を返す。0以下なら制限に達している。"""
     today_start = now_jst_naive().strftime("%Y-%m-%d 00:00:00")
@@ -1347,12 +1379,25 @@ def _chat_rate_limit_status(user_id):
 
 @app.route("/chat")
 def chat_page():
+    user_id = session.get("user_id")
     conn = chat_log.connect(CHAT_DB_PATH)
     try:
-        history = chat_log.get_recent_messages(conn, session.get("user_id"), limit=30)
+        conversations = chat_log.list_conversations(conn, user_id)
+        conversation = None
+        history = []
+        if request.args.get("new") != "1":
+            conv_id = request.args.get("c", type=int)
+            if conv_id is None and conversations:
+                conv_id = conversations[0]["id"]
+            if conv_id is not None:
+                conversation = chat_log.get_conversation(conn, conv_id, user_id)
+                if conversation:
+                    history = chat_log.get_conversation_messages(conn, conversation["id"])
     finally:
         conn.close()
-    return render_template("chat.html", history=history)
+    return render_template(
+        "chat.html", conversations=conversations, conversation=conversation, history=history,
+    )
 
 
 @app.route("/chat/status")
@@ -1399,18 +1444,35 @@ def chat_ask():
     )
     conn = chat_log.connect(CHAT_DB_PATH)
     try:
+        conversation_id = request.form.get("conversation_id", type=int)
+        conversation = None
+        if conversation_id is not None:
+            conversation = chat_log.get_conversation(conn, conversation_id, user_id)
+        is_new_conversation = conversation is None
+        if is_new_conversation:
+            conversation_id = chat_log.create_conversation(conn, user_id, asked_at)
+
         response = collect._gemini_generate_with_fallback(model, question, config, api_keys, label="chat")
         if response is None or not getattr(response, "text", None):
-            chat_log.record_message(conn, user_id, asked_at, question, error="no response")
+            chat_log.record_message(conn, conversation_id, user_id, asked_at, question, error="no response")
+            chat_log.touch_conversation(conn, conversation_id, asked_at)
             return jsonify({"message": "回答の生成に失敗しました。しばらくしてから再度お試しください。", "success": False}), 502
         answer = response.text.strip()
-        chat_log.record_message(conn, user_id, asked_at, question, answer=answer)
+        chat_log.record_message(conn, conversation_id, user_id, asked_at, question, answer=answer)
+        chat_log.touch_conversation(conn, conversation_id, asked_at)
+
+        title = None
+        if is_new_conversation:
+            title = _generate_chat_title(question, answer, api_keys)
+            chat_log.set_conversation_title(conn, conversation_id, title)
     finally:
         conn.close()
     remaining_user, remaining_total = _chat_rate_limit_status(user_id)
     return jsonify({
         "success": True, "answer": answer,
         "remaining_today": max(0, min(remaining_user, remaining_total)),
+        "conversation_id": conversation_id,
+        "title": title,
     })
 
 

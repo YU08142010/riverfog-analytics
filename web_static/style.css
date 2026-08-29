@@ -461,6 +461,10 @@ main {
     opacity: 1;
     transition: max-height 0.25s ease, opacity 0.2s ease;
 }
+/* チャットの会話一覧は折りたたみグループが無く、会話数だけ際限なく増えるため、
+   600pxで打ち切られると古い会話にアクセスできなくなってしまう。上限を外し、
+   親の.sidebar-panel自体のスクロールに任せる。 */
+.chat-sidebar-list { max-height: none; overflow: visible; }
 .sidebar-list a {
     display: flex;
     align-items: center;

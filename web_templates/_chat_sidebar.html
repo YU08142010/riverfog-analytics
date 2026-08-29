@@ -1,0 +1,16 @@
+<div class="sidebar-panel">
+    <a href="{{ url_for('chat_page', new=1) }}" class="button" style="display:block; width:100%; text-align:center; box-sizing:border-box; margin-bottom:0.6rem;">+ 新規チャット</a>
+    <ul class="sidebar-list chat-sidebar-list">
+        {% for c in conversations %}
+        <li>
+            <a href="{{ url_for('chat_page', c=c.id) }}"
+               class="{{ 'active' if conversation and conversation.id == c.id else '' }}"
+               id="chat-sidebar-item-{{ c.id }}">
+                <span class="sidebar-label">{{ c.title or "新しいチャット" }}</span>
+            </a>
+        </li>
+        {% else %}
+        <li class="muted" style="padding:0.6rem 0.6rem; font-size:0.82rem;">まだ会話はありません。</li>
+        {% endfor %}
+    </ul>
+</div>

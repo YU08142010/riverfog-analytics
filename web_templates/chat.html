@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}AIチャット{% endblock %}
+{% block sidebar %}{% include "_chat_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card chat-card">
     <div class="chat-card-header">
-        <h2>AIチャット</h2>
+        <h2 id="chat-title-display">{{ conversation.title if conversation and conversation.title else "新しいチャット" }}</h2>
         <span class="muted" style="font-size:0.75rem;" id="chat-remaining"></span>
     </div>
     <div id="chat-messages" class="chat-messages">
@@ -22,6 +23,7 @@
     </div>
     <form id="chat-form" class="chat-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="conversation_id" id="chat-conversation-id" value="{{ conversation.id if conversation else '' }}">
         <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は霧が出そうですか？" required></textarea>
         <button type="submit" class="button" id="chat-send-btn">送信</button>
     </form>
@@ -34,6 +36,9 @@
     var input = document.getElementById("chat-input");
     var sendBtn = document.getElementById("chat-send-btn");
     var remainingLabel = document.getElementById("chat-remaining");
+    var conversationIdField = document.getElementById("chat-conversation-id");
+    var titleDisplay = document.getElementById("chat-title-display");
+    var sidebarList = document.querySelector(".chat-sidebar-list");
 
     function refreshRemaining() {
         fetch("{{ url_for('chat_status') }}")
@@ -54,6 +59,34 @@
         messages.appendChild(wrap);
         messages.scrollTop = messages.scrollHeight;
         return wrap;
+    }
+
+    // 新規会話への最初の回答が返ってきた時、ページ再読み込み無しで
+    // (1)URLを?c=<id>に更新 (2)ヘッダーの題名を差し替え (3)サイドバー一覧の先頭に追加する。
+    function onNewConversation(conversationId, title) {
+        conversationIdField.value = conversationId;
+        var url = new URL(window.location.href);
+        url.searchParams.delete("new");
+        url.searchParams.set("c", conversationId);
+        window.history.replaceState(null, "", url.toString());
+        if (title) { titleDisplay.textContent = title; }
+        if (sidebarList) {
+            var empty = sidebarList.querySelector("li.muted");
+            if (empty) { empty.remove(); }
+            var current = sidebarList.querySelector("a.active");
+            if (current) { current.classList.remove("active"); }
+            var li = document.createElement("li");
+            var a = document.createElement("a");
+            a.href = "{{ url_for('chat_page') }}?c=" + conversationId;
+            a.className = "active";
+            a.id = "chat-sidebar-item-" + conversationId;
+            var label = document.createElement("span");
+            label.className = "sidebar-label";
+            label.textContent = title || "新しいチャット";
+            a.appendChild(label);
+            li.appendChild(a);
+            sidebarList.insertBefore(li, sidebarList.firstChild);
+        }
     }
 
     form.addEventListener("submit", function(e) {
@@ -79,6 +112,9 @@
                 addMessage(result.data.answer, "ai");
                 if (typeof result.data.remaining_today === "number") {
                     remainingLabel.textContent = "本日の残り" + result.data.remaining_today + "回";
+                }
+                if (!conversationIdField.value && result.data.conversation_id) {
+                    onNewConversation(result.data.conversation_id, result.data.title);
                 }
             } else {
                 addMessage(result.data.message || "エラーが発生しました。", "error");
