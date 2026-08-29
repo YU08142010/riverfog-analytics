@@ -8,18 +8,73 @@
 </ul>
 {% endblock %}
 {% block content %}
-{% if ranking %}
+{% macro render_ranking(items, count_key) %}
+<ol class="ranking-list">
+    {% for m in items %}
+    <li class="ranking-item rank-{{ loop.index }}">
+        <span class="ranking-badge">{{ loop.index }}</span>
+        {% set avatar_url = member_avatar_url(m.id) %}
+        {% if avatar_url %}
+        <img class="ranking-avatar" src="{{ avatar_url }}" alt="">
+        {% else %}
+        <span class="ranking-avatar-fallback">{{ m.name[0] }}</span>
+        {% endif %}
+        <div class="ranking-info">
+            <a href="{{ url_for('member_detail', user_id=m.id) }}" class="ranking-name">{{ m.name }}</a>
+            <div class="ranking-bar-track">
+                <div class="ranking-bar-fill" style="width: {{ (100.0 * m[count_key] / items[0][count_key]) | round(1) }}%;"></div>
+            </div>
+        </div>
+        <div class="ranking-stats">
+            <span class="ranking-count">{{ m[count_key] }}回</span>
+            {% if m.streak > 1 %}
+            <span class="ranking-streak">連続{{ m.streak }}日</span>
+            {% endif %}
+        </div>
+    </li>
+    {% endfor %}
+</ol>
+{% endmacro %}
+{% if ranking or month_ranking %}
 <div class="card">
-    <h2>ログイン回数ランキング</h2>
-    <ol style="margin:0; padding-left:1.4rem;">
-        {% for m in ranking %}
-        <li style="margin-bottom:0.3rem;">
-            <a href="{{ url_for('member_detail', user_id=m.id) }}">{{ m.name }}</a>
-            <span class="muted">— {{ m.login_count }}回{% if m.streak > 1 %}(連続{{ m.streak }}日){% endif %}</span>
-        </li>
-        {% endfor %}
-    </ol>
+    <h2>
+        ログイン回数ランキング
+        <span style="font-weight:normal; margin-left:0.6rem;">
+            <button type="button" class="ranking-toggle-btn active" id="ranking-toggle-all">全期間</button>
+            <button type="button" class="ranking-toggle-btn" id="ranking-toggle-month">今月</button>
+        </span>
+    </h2>
+    <div id="ranking-view-all">
+        {% if ranking %}
+        {{ render_ranking(ranking, "login_count") }}
+        {% else %}
+        <p class="muted">まだログイン記録がありません。</p>
+        {% endif %}
+    </div>
+    <div id="ranking-view-month" hidden>
+        {% if month_ranking %}
+        {{ render_ranking(month_ranking, "month_login_count") }}
+        {% else %}
+        <p class="muted">今月はまだログイン記録がありません。</p>
+        {% endif %}
+    </div>
 </div>
+<script>
+(function() {
+    var btnAll = document.getElementById("ranking-toggle-all");
+    var btnMonth = document.getElementById("ranking-toggle-month");
+    var viewAll = document.getElementById("ranking-view-all");
+    var viewMonth = document.getElementById("ranking-view-month");
+    function show(which) {
+        viewAll.hidden = which !== "all";
+        viewMonth.hidden = which !== "month";
+        btnAll.classList.toggle("active", which === "all");
+        btnMonth.classList.toggle("active", which === "month");
+    }
+    btnAll.addEventListener("click", function() { show("all"); });
+    btnMonth.addEventListener("click", function() { show("month"); });
+})();
+</script>
 {% endif %}
 <div class="card">
     <h2>メンバー一覧({{ members|length }}人)</h2>

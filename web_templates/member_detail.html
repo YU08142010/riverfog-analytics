@@ -234,6 +234,21 @@
     </div>
 </div>
 
+{% if badges %}
+<div class="card">
+    <h2>実績({{ badges|selectattr("achieved")|list|length }}/{{ badges|length }})</h2>
+    <div class="badge-grid">
+        {% for b in badges %}
+        <div class="badge-tile{{ '' if b.achieved else ' locked' }}" title="{{ b.desc }}">
+            <span class="badge-icon">{{ b.label[0] }}</span>
+            <div class="badge-label">{{ b.label }}</div>
+            <div class="badge-desc">{{ b.desc }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <h2>ログイン頻度(直近1年)</h2>
     <div class="heatmap-wrap">

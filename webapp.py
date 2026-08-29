@@ -2540,15 +2540,53 @@ def _inject_avatar_url():
     return {"member_avatar_url": member_avatar_url}
 
 
+# メンバーページの実績バッジ。未達成のものもロック表示するため、達成条件を関数として
+# 持たせ、達成/未達成の両方をテンプレート側で判定できるようにしている。
+BADGE_DEFINITIONS = [
+    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした",
+     "check": lambda s: s["login_count"] >= 1},
+    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成",
+     "check": lambda s: s["login_count"] >= 10},
+    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成",
+     "check": lambda s: s["login_count"] >= 100},
+    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン",
+     "check": lambda s: s["streak"] >= 3},
+    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン",
+     "check": lambda s: s["streak"] >= 7},
+    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン",
+     "check": lambda s: s["streak"] >= 30},
+    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した",
+     "check": lambda s: s["comment_count"] >= 1},
+    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した",
+     "check": lambda s: s["comment_count"] >= 10},
+    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した",
+     "check": lambda s: s["chat_count"] >= 1},
+    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した",
+     "check": lambda s: s["favorite_count"] >= 3},
+]
+
+
+def _compute_badges(stats):
+    """statsは{login_count, streak, comment_count, chat_count, favorite_count}。
+    定義済みの実績すべてについて、達成済みかどうかを付けたリストを返す
+    (未達成もロック表示するため、達成したものだけに絞り込まない)。"""
+    return [
+        {"id": b["id"], "label": b["label"], "desc": b["desc"], "achieved": b["check"](stats)}
+        for b in BADGE_DEFINITIONS
+    ]
+
+
 @app.route("/members")
 def members_list():
     """ログイン中の全ユーザーが見られるメンバー一覧。個々のログイン履歴・
     ヒートマップはメンバー詳細ページ(member_detail)で確認する。"""
     today = datetime.now(JST).date()
+    month_start = today.replace(day=1).strftime("%Y-%m-%d 00:00:00")
     conn = _users_conn()
     try:
         all_users = users.list_users(conn)
         login_counts = users.login_counts_all(conn)
+        month_login_counts = users.login_counts_since(conn, month_start)
         last_logins = users.last_logins_all(conn)
         streaks = users.login_streaks_all(conn, today)
     finally:
@@ -2558,6 +2596,7 @@ def members_list():
             "id": u["id"], "name": u["name"], "role": u["role"],
             "has_avatar": _avatar_path(u["id"]).exists(),
             "login_count": login_counts.get(u["id"], 0),
+            "month_login_count": month_login_counts.get(u["id"], 0),
             "last_login": last_logins.get(u["id"]),
             "streak": streaks.get(u["id"], 0),
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
@@ -2567,7 +2606,12 @@ def members_list():
     ranking = sorted(
         [m for m in members if m["login_count"] > 0], key=lambda m: -m["login_count"]
     )[:5]
-    return render_template("members_list.html", members=members, ranking=ranking)
+    month_ranking = sorted(
+        [m for m in members if m["month_login_count"] > 0], key=lambda m: -m["month_login_count"]
+    )[:5]
+    return render_template(
+        "members_list.html", members=members, ranking=ranking, month_ranking=month_ranking,
+    )
 
 
 @app.route("/members/<int:user_id>")
@@ -2581,9 +2625,19 @@ def member_detail(user_id):
         counts_by_day = users.login_counts_by_day(conn, user_id)
         total_logins = users.login_count(conn, user_id)
         streak = users.login_streak(conn, user_id, datetime.now(JST).date())
+        comment_count = users.comment_count(conn, user_id)
     finally:
         conn.close()
     favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
+    chat_conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        chat_count = chat_log.count_user_messages_since(chat_conn, user_id, "0000-01-01 00:00:00")
+    finally:
+        chat_conn.close()
+    badges = _compute_badges({
+        "login_count": total_logins, "streak": streak, "comment_count": comment_count,
+        "chat_count": chat_count, "favorite_count": len(favorite_stations),
+    })
     return render_template(
         "member_detail.html",
         member=target,
@@ -2600,6 +2654,7 @@ def member_detail(user_id):
         heatmap_days=LOGIN_HEATMAP_DAYS,
         avatar_size=AVATAR_SIZE,
         bio_max_length=BIO_MAX_LENGTH,
+        badges=badges,
     )
 
 

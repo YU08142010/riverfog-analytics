@@ -360,6 +360,16 @@ def login_counts_all(conn):
     return {uid: c for uid, c in rows}
 
 
+def login_counts_since(conn, since_str):
+    """指定日時以降のログイン回数を1クエリでまとめて返す({user_id: count})。
+    「今月のランキング」等、期間を区切ったランキング表示に使う。"""
+    rows = conn.execute(
+        "SELECT user_id, COUNT(*) FROM login_events WHERE logged_in_at >= ? GROUP BY user_id",
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
 def last_login(conn, user_id):
     row = conn.execute(
         "SELECT MAX(logged_in_at) FROM login_events WHERE user_id = ?", (user_id,)
@@ -463,6 +473,14 @@ def _comment_row_to_dict(row):
     }
 
 
+def comment_count(conn, user_id):
+    """そのユーザーが投稿したコメントの総数(実績バッジの判定に使う)。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM station_comments WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row else 0
+
+
 def list_station_comments(conn, station_name):
     """指定地点のコメントを古い順で返す(掲示板表示用)。"""
     rows = conn.execute(
@@ -493,9 +511,9 @@ __all__ = [
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
     "record_login", "login_history", "login_counts_by_day", "login_count",
-    "login_counts_all", "last_login", "last_logins_all", "login_streak",
+    "login_counts_all", "login_counts_since", "last_login", "last_logins_all", "login_streak",
     "login_dates_all", "login_streaks_all",
     "record_audit", "list_audit_log",
     "add_station_comment", "list_station_comments", "get_station_comment",
-    "delete_station_comment",
+    "delete_station_comment", "comment_count",
 ]
