@@ -19,6 +19,7 @@
     ]},
     {"label": "システム", "links": [
         {"name": "ディスク使用量", "endpoint": "admin_disk", "icon": "disk"},
+        {"name": "SMB共有", "endpoint": "admin_smb", "icon": "share"},
         {"name": "DB管理", "endpoint": "admin_db", "icon": "db"},
         {"name": "環境変数", "endpoint": "admin_env", "icon": "env"},
         {"name": "設定", "endpoint": "admin_settings", "icon": "settings"},
@@ -27,7 +28,7 @@
     ]},
 ] %}
 <div class="sidebar-panel">
-    <input type="text" class="sidebar-search" id="admin-sidebar-search" placeholder="メニューを検索...">
+    <input type="text" class="sidebar-search" id="admin-sidebar-search" placeholder="メニューを検索..." aria-label="メニューを検索">
     <div id="admin-sidebar-groups">
         {% for group in admin_groups %}
         <div class="sidebar-group" data-group data-group-id="{{ loop.index0 }}">
@@ -83,26 +84,29 @@
     var input = document.getElementById("admin-sidebar-search");
     var emptyLabel = document.getElementById("admin-sidebar-empty");
     if (!input) { return; }
-    input.addEventListener("input", function() {
-        var q = input.value.trim();
-        var shownTotal = 0;
-        var searching = q.length > 0;
-        groups.forEach(function(group) {
-            var items = Array.prototype.slice.call(group.querySelectorAll("li"));
-            var shown = 0;
-            items.forEach(function(li) {
-                var match = li.querySelector("a").dataset.name.indexOf(q) !== -1;
-                li.style.display = match ? "" : "none";
-                if (match) { shown++; }
-            });
-            group.style.display = shown ? "" : "none";
-            // 検索中はグループの折りたたみ状態を無視して中身を見せる
-            group.querySelector(".sidebar-list").style.display = searching ? "" : "";
-            if (searching) { group.classList.remove("collapsed"); }
-            else if (collapsed.indexOf(group.dataset.groupId) !== -1) { group.classList.add("collapsed"); }
-            shownTotal += shown;
-        });
-        if (emptyLabel) { emptyLabel.hidden = shownTotal !== 0; }
+    // グループごとにwireListFilterを1回ずつ適用し、各グループの表示件数を集計して
+    // 全体の空表示(0件時)を切り替える。
+    var shownByGroup = groups.map(function() { return 0; });
+    function updateEmptyLabel() {
+        var total = shownByGroup.reduce(function(a, b) { return a + b; }, 0);
+        if (emptyLabel) { emptyLabel.hidden = total !== 0; }
+    }
+    groups.forEach(function(group, groupIndex) {
+        wireListFilter(
+            input,
+            group.querySelectorAll("li"),
+            function(li) { return li.querySelector("a").dataset.name; },
+            function(shown) {
+                shownByGroup[groupIndex] = shown;
+                group.hidden = shown === 0;
+                var searching = input.value.trim().length > 0;
+                // 検索中はグループの折りたたみ状態を無視して中身を見せる
+                // (.sidebar-group.collapsed .sidebar-list は CSS 側で display:none になる)。
+                if (searching) { group.classList.remove("collapsed"); }
+                else if (collapsed.indexOf(group.dataset.groupId) !== -1) { group.classList.add("collapsed"); }
+                updateEmptyLabel();
+            }
+        );
     });
 })();
 </script>

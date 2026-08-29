@@ -6,9 +6,10 @@
     <h2>登録申請(未処理: {{ pending|length }}件)</h2>
     {% if pending %}
     <form id="bulk-signup-form" method="post" action="{{ url_for('admin_accounts_requests_bulk') }}" data-ajax>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
             <button type="submit" name="bulk_action" value="approve" class="button">選択した申請を承認</button>
-            <button type="submit" name="bulk_action" value="reject" class="button" style="background:#c0392b;"
+            <button type="submit" name="bulk_action" value="reject" class="button button-danger"
                     data-confirm-click="選択した申請を拒否しますか？">選択した申請を拒否</button>
         </p>
         <div class="table-scroll">
@@ -26,7 +27,7 @@
                 <td>{{ r.requested_at }}</td>
                 <td style="white-space:nowrap;">
                     <button type="submit" formaction="{{ url_for('admin_accounts_approve', request_id=r.id) }}" class="button" formnovalidate>承認</button>
-                    <button type="submit" formaction="{{ url_for('admin_accounts_reject', request_id=r.id) }}" class="button" style="background:#c0392b;" formnovalidate
+                    <button type="submit" formaction="{{ url_for('admin_accounts_reject', request_id=r.id) }}" class="button button-danger" formnovalidate
                             data-confirm-click="この申請を拒否しますか？">拒否</button>
                 </td>
             </tr>
@@ -38,9 +39,24 @@
     <script>
     (function() {
         var selectAll = document.getElementById("pending-select-all");
-        if (!selectAll) { return; }
+        var form = document.getElementById("bulk-signup-form");
+        if (!selectAll || !form) { return; }
         selectAll.addEventListener("change", function() {
             document.querySelectorAll(".pending-checkbox").forEach(function(cb) { cb.checked = selectAll.checked; });
+        });
+        // 「選択した申請を承認/拒否」ボタンは、1件もチェックしていない状態では送信させない
+        // (以前は空のまま送信できてしまい、サーバー側で何も起きないだけで分かりにくかった)。
+        form.addEventListener("submit", function(e) {
+            var anyChecked = Array.prototype.some.call(
+                document.querySelectorAll(".pending-checkbox"), function(cb) { return cb.checked; }
+            );
+            if (!anyChecked) {
+                // stopPropagation()も必要: preventDefault()だけだとbase.htmlのdata-ajax
+                // ハンドラ(document側でsubmitを購読)まで伝播してfetch()が実行されてしまう。
+                e.preventDefault();
+                e.stopPropagation();
+                showToast("申請を1件以上選択してください。", true);
+            }
         });
     })();
     </script>
@@ -68,6 +84,7 @@
             <td><button type="submit" form="edit-form-{{ a.id }}" class="button">更新</button></td>
             <td>
                 <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;" data-ajax>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="role" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:0.3rem;">
                         <option value="general" {{ "selected" if a.role == "general" }}>一般</option>
                         <option value="admin" {{ "selected" if a.role == "admin" }}>管理者</option>
@@ -78,7 +95,8 @@
             <td>
                 <form method="post" action="{{ url_for('admin_accounts_delete', user_id=a.id) }}" style="display:inline;"
                       data-confirm="{{ a.name }}さんのアカウントを削除しますか？">
-                    <button type="submit" class="button" style="background:#c0392b;">削除</button>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button button-danger">削除</button>
                 </form>
             </td>
         </tr>
@@ -87,7 +105,23 @@
     </table>
     </div>
     {% for a in accounts %}
-    <form id="edit-form-{{ a.id }}" method="post" action="{{ url_for('admin_accounts_edit', user_id=a.id) }}" data-ajax></form>
+    <form id="edit-form-{{ a.id }}" method="post" action="{{ url_for('admin_accounts_edit', user_id=a.id) }}" data-ajax>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    </form>
     {% endfor %}
+    <script>
+    // お名前・メールアドレス・パスワード欄はform属性で外部の空フォーム(edit-form-*)に
+    // 紐づいており、Enterキーでの暗黙送信は本来その紐づいた更新フォームに向くはずだが、
+    // 同じ行に削除フォーム等も並んでいて紛らわしいため、明示的にEnterで更新フォームだけを
+    // 送信するようにしておく(誤って他のフォームが反応する余地を無くす)。
+    document.querySelectorAll('input[form^="edit-form-"]').forEach(function(input) {
+        input.addEventListener("keydown", function(e) {
+            if (e.key !== "Enter") { return; }
+            e.preventDefault();
+            var form = document.getElementById(input.getAttribute("form"));
+            if (form) { form.requestSubmit(); }
+        });
+    });
+    </script>
 </div>
 {% endblock %}

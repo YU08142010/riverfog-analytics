@@ -5,6 +5,7 @@
 <div class="card">
     <h2>新規作成</h2>
     <form method="post" action="{{ url_for('admin_announcements_new') }}" id="announcement-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
             <label>種類<br>
                 <select name="kind" id="announcement-kind" style="padding:0.5rem;">
@@ -80,11 +81,13 @@
             </td>
             <td style="white-space:nowrap;">
                 <form method="post" action="{{ url_for('admin_announcements_toggle', announcement_id=item.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">{{ "無効化" if item.active else "有効化" }}</button>
                 </form>
                 <form method="post" action="{{ url_for('admin_announcements_delete', announcement_id=item.id) }}" style="display:inline;"
                       data-confirm="削除しますか？回答データも消えます。">
-                    <button type="submit" class="button" style="background:#c0392b;">削除</button>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button button-danger">削除</button>
                 </form>
             </td>
         </tr>

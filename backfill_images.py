@@ -38,9 +38,12 @@ from common import (
     COL_DATETIME,
     COL_PHENOM_START,
     DATA_XLSX,
+    DEFAULT_GEMINI_MODEL,
     JST,
+    XlsxLockTimeout,
     record_network_failure,
     request_with_dns_fallback,
+    xlsx_write_lock,
 )
 
 HISTORY_URL = "https://cam.river.go.jp/cam/history/{ts}/{cam_id}.jpg"
@@ -110,8 +113,18 @@ def fetch_history_image(cam_id, target_dt, station_name=None):
     return None, None
 
 
+# collect.pyは"_unavailable.jpg"を2種類の理由で書く: (1)取得自体に失敗した場合の
+# 灰色プレースホルダー画像、(2)取得・分類には成功したが、Geminiが「実際の写真ではない」
+# (-1)と判定した実写真そのもの。(2)は既に実物の写真をGeminiが見た上での判定であり、
+# history APIから同時刻の別スナップショットを取り直しても同じ判定になる可能性が高いため、
+# (1)の灰色プレースホルダーだけを再取得対象にする(でないと無駄なAPI呼び出しが延々続く)。
+# 判別は、collect.pyが書く灰色プレースホルダーの中身が常に同一バイト列であることを利用する。
+_FETCH_FAILED_PLACEHOLDER_BYTES = collect._fetch_failed_placeholder_bytes()
+
+
 def find_missing_slots():
-    """data/images配下の_unavailable.jpgを走査し、(date_str, hhmm, station_name)のリストを返す。
+    """data/images配下の_unavailable.jpgのうち、取得自体に失敗した(灰色プレースホルダーの)
+    ものだけを走査し、(date_str, hhmm, station_name)のリストを返す。
     観測時間帯(4-19時)のみを対象にする。
     """
     slots = []
@@ -131,6 +144,12 @@ def find_missing_slots():
             if not (collect.OBSERVATION_START_HOUR <= hour <= collect.OBSERVATION_END_HOUR):
                 continue
             for f in hour_dir.glob("*_unavailable.jpg"):
+                try:
+                    is_fetch_failure = f.read_bytes() == _FETCH_FAILED_PLACEHOLDER_BYTES
+                except OSError:
+                    continue
+                if not is_fetch_failure:
+                    continue  # Gemini判定済みの実写真。再取得しても無駄なのでスキップ
                 name = f.name[: -len("_unavailable.jpg")]
                 slots.append((day_dir.name, hour_dir.name, name))
     return slots
@@ -151,6 +170,19 @@ def main():
     dry_run = "--dry-run" in sys.argv[1:]
     log.info("=== Backfill started%s ===", " (dry-run)" if dry_run else "")
 
+    # xlsxへの書き込み(load_workbook〜save)はcollect.py・backfill_weather.pyとも競合しうるため
+    # 排他ロックを取る(common.xlsx_write_lock参照)。この関数は画像取得・Gemini分類など
+    # xlsxに触れない処理も多いが、途中で書き込みが発生するかどうかは事前に分からないため、
+    # 実行全体を通してロックを保持する(バックグラウンドバッチ処理なので多少長く保持しても
+    # 実害は小さいと判断)。
+    try:
+        with xlsx_write_lock():
+            _run_backfill(dry_run)
+    except XlsxLockTimeout as e:
+        log.error("%s; skipping this run (collect.py or backfill_weather.py is likely writing)", e)
+
+
+def _run_backfill(dry_run):
     cameras = collect.load_cameras()
     cam_id_by_name = dict(cameras)
     col_by_name = {name: COL_PHENOM_START + i for i, (name, _cam_id) in enumerate(cameras)}
@@ -216,7 +248,7 @@ def main():
                     log.warning("Resize failed for recovered image: %s %s %s: %s", date_str, hhmm, name, e)
             if resized_by_name:
                 contents, index_to_name = collect._build_contents(list(resized_by_name.items()))
-                model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
                 parsed = collect._classify_with_model(contents, model, api_keys)
                 if parsed is not None:
                     phenom_by_name, invalid_stations, _low, confidence_by_name = (

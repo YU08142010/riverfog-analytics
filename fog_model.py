@@ -5,6 +5,8 @@
 """
 import csv
 import logging
+import shutil
+import time
 from datetime import datetime
 
 import joblib
@@ -18,7 +20,7 @@ from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_sample_weight
 
-from common import BASE_DIR, JST
+from common import BASE_DIR, JST, request_with_dns_fallback
 import station_weather
 
 try:
@@ -55,6 +57,10 @@ from fog_features import (
 log = logging.getLogger("fog_model")
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+# 予報取得は1回失敗しただけでその日の予測・グラフ・記録が丸ごとスキップされてしまうため、
+# collect.pyの実況取得と同様に短いリトライを入れる。
+FORECAST_FETCH_RETRIES = 2
+FORECAST_FETCH_RETRY_DELAY_SEC = 3
 
 # collect.pyが実況値取得に使っているOpen-Meteoの変数名 -> 学習データと同じ列名・単位への変換
 _FORECAST_VARS = {
@@ -69,7 +75,10 @@ _FORECAST_VARS = {
     "visibility": (COL_VISIBILITY, lambda v: v / 1000.0),
 }
 
-# 地点ごとにモデルを学習するための最低条件（満たさない地点は共通モデルで補う）
+# 地点ごとにモデルを学習するための最低条件（満たさない地点は共通モデルで補う）。
+# いずれも実験的に精密検証された値ではなく、初期運用時の経験則(サンプル数が少なすぎる
+# 状態で個別学習すると明らかに不安定だった)から暫定的に決めた値。地点数・データ蓄積量が
+# 増えてきたら、実際の学習ログ(精度履歴CSV)を見ながら見直すことを想定している。
 MIN_ROWS_PER_LOCATION = 200
 MIN_CLASSES_PER_LOCATION = 2
 MIN_TOTAL_ROWS_FOR_POOLING = 500
@@ -573,7 +582,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
     merged = merged.sort_values("datetime").reset_index(drop=True)
     cross_rates = _compute_cross_station_fog_rates(merged, phenom_cols)
 
-    merged, feature_names = prepare_features(merged, lat, lon)
+    merged, feature_names, shared_medians = prepare_features(merged, lat, lon)
     # 短い欠測は時間方向に補間して活かす（視程・降水量が単発で欠けているだけで行ごと
     # 丸ごと捨てるのは勿体ないため）。それでも埋まらない大きな欠測は従来通り除外する。
     merged[feature_names] = merged[feature_names].interpolate(
@@ -602,18 +611,18 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             s_merged = pd.merge(station_main_df, targets, on="datetime", how="inner")
             s_merged = s_merged.sort_values("datetime").reset_index(drop=True)
             s_lat, s_lon = coords
-            s_merged, s_features = prepare_features(s_merged, s_lat, s_lon)
+            s_merged, s_features, s_medians = prepare_features(s_merged, s_lat, s_lon)
             s_merged[s_features] = s_merged[s_features].interpolate(
                 method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
             )
             s_merged = s_merged.dropna(subset=s_features)
-            station_frames[col] = (s_merged, s_features + [CROSS_STATION_FOG_FEATURE])
+            station_frames[col] = (s_merged, s_features + [CROSS_STATION_FOG_FEATURE], s_medians)
         if station_frames:
             log.info("Using per-station weather for %d/%d station(s)", len(station_frames), len(phenom_cols))
 
     models = {}
     for col in phenom_cols:
-        col_merged, col_features = station_frames.get(col, (merged, feature_names))
+        col_merged, col_features, col_medians = station_frames.get(col, (merged, feature_names, shared_medians))
         col_merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(col_merged.index).to_numpy()
         sub, X, y = _collect_location_xy(col_merged, col, col_features)
         if len(sub) < MIN_ROWS_PER_LOCATION:
@@ -663,10 +672,11 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
             "rf_lgbm_only": rf_lgbm_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
+            "measure_medians": col_medians,
         }
 
     n_individual = len(models)
-    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates)
+    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates, shared_medians)
 
     n_pooled = len(models) - n_individual
     n_unmodeled = len(phenom_cols) - len(models)
@@ -717,7 +727,7 @@ def _last_valid_value(series, default=0.0):
     return float(s.iloc[-1]) if len(s) else default
 
 
-def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates):
+def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates, shared_medians):
     """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
 
     気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
@@ -745,7 +755,13 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
     pool_frames = []
     station_rates = {}
     for col, (sub, X, y) in per_station_xy.items():
-        rate = _station_fog_rate(y, global_rate)
+        # rateは学習期間(train側)のyだけから計算する。以前は全期間(sub全体)のyから
+        # 計算していたため、この後の_temporal_train_test_splitで作られるテスト期間の
+        # ラベル情報がrate経由で特徴量に混入していた(リーク)。個々の地点を後で
+        # 救済評価する際も同じ_temporal_train_test_split(既定test_ratio=0.2)を使うため、
+        # ここで先に同じ分割をしてtrain側だけを使えば、評価時の分割と整合する。
+        _, _, y_train_only, _ = _temporal_train_test_split(X, y)
+        rate = _station_fog_rate(y_train_only, global_rate)
         station_rates[col] = rate
         part = X.copy()
         part[STATION_FOG_RATE_FEATURE] = rate
@@ -808,6 +824,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
             "rf_lgbm_only": rf_lgbm_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
+            "measure_medians": shared_medians,
         }
         rescued += 1
     log.info("Pooled model rescued %d/%d location(s)", rescued, len(skipped_cols))
@@ -824,11 +841,40 @@ def _forecast_payload_to_df(hourly):
     if COL_PRECIP in df.columns:
         df[COL_PRECIP] = df[COL_PRECIP].fillna(0.0)
     numeric_cols = [c for c in df.columns if c != "datetime"]
-    df[numeric_cols] = df[numeric_cols].interpolate(limit_direction="both")
+    # 学習側(_prepare_weather_for_training等)のWEATHER_INTERPOLATE_LIMITと揃える。
+    # 以前はlimit指定が無く、Open-Meteoの応答が長時間欠落した場合に任意の長さの区間が
+    # 直線補間で埋まってしまっていた。
+    df[numeric_cols] = df[numeric_cols].interpolate(
+        method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
+    )
     df = df.dropna(subset=[COL_TEMP, COL_HUMIDITY, COL_DEWPOINT, COL_WIND_SPEED]).reset_index(drop=True)
     if df.empty:
         raise ValueError("Open-Meteoから有効な予報値を取得できませんでした。")
     return df
+
+
+def _get_forecast_with_retry(params, timeout):
+    """Open-Meteo予報APIをリトライ付きで呼ぶ。1回の失敗でその日の予測が丸ごと
+    スキップされていた問題への対応(collect.pyの実況取得と同様のリトライ)。
+    DNS解決の一時的失敗にも common.request_with_dns_fallback でフォールバックする。
+    """
+    last_exc = None
+    for attempt in range(1, FORECAST_FETCH_RETRIES + 2):
+        try:
+            resp = request_with_dns_fallback(
+                "GET", OPEN_METEO_FORECAST_URL, params=params, timeout=timeout, log=log,
+            )
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            last_exc = e
+            log.warning(
+                "Open-Meteo forecast fetch failed (attempt %d/%d): %s",
+                attempt, FORECAST_FETCH_RETRIES + 1, e,
+            )
+            if attempt < FORECAST_FETCH_RETRIES + 1:
+                time.sleep(FORECAST_FETCH_RETRY_DELAY_SEC)
+    raise last_exc
 
 
 def fetch_forecast_range(lat, lon, forecast_days):
@@ -843,8 +889,7 @@ def fetch_forecast_range(lat, lon, forecast_days):
         "precipitation_unit": "mm",
         "temperature_unit": "celsius",
     }
-    resp = requests.get(OPEN_METEO_FORECAST_URL, params=params, timeout=20)
-    resp.raise_for_status()
+    resp = _get_forecast_with_retry(params, timeout=20)
     payload = resp.json()
     if "hourly" not in payload:
         raise ValueError(f"Open-Meteoの応答にhourlyが含まれていません: {payload}")
@@ -868,8 +913,7 @@ def fetch_forecast_range_multi(camera_coords, forecast_days):
         "precipitation_unit": "mm",
         "temperature_unit": "celsius",
     }
-    resp = requests.get(OPEN_METEO_FORECAST_URL, params=params, timeout=30)
-    resp.raise_for_status()
+    resp = _get_forecast_with_retry(params, timeout=30)
     payload = resp.json()
     if isinstance(payload, dict):
         payload = [payload]  # 地点が1件だけの時は単一オブジェクトで返ってくるため揃える
@@ -903,7 +947,10 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
             # 地点別の予報が無い/行数が代表地点と食い違う(取得の一部失敗等)場合は
             # 共通の代表地点予報にフォールバックする。
             f_raw, f_lat, f_lon = forecast_raw, lat, lon
-        df, _ = prepare_features(f_raw, f_lat, f_lon, feature_names)
+        # 任意項目(視程・日照・日射)の中央値埋めは、学習時にfit済みの中央値(measure_medians)
+        # をそのまま使う。以前は予報データ(16日分だけ)から都度中央値を計算し直しており、
+        # 学習時と全く異なる母集団の中央値で埋めることになっていた(train/inference不整合)。
+        df, _, _ = prepare_features(f_raw, f_lat, f_lon, feature_names, medians=info.get("measure_medians"))
         X = df[feature_names].copy()
         if info.get("pooled") and "station_fog_rate" in info:
             X[STATION_FOG_RATE_FEATURE] = info["station_fog_rate"]
@@ -968,7 +1015,18 @@ def save_model_state(models, path=MODEL_STATE_PATH):
     path.parent.mkdir(parents=True, exist_ok=True)
     trained_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
     state = {col: {**info, "trained_at": trained_at} for col, info in models.items()}
-    joblib.dump(state, path)
+    # 前世代を1つだけ.bakとして残す(このファイルが破損した場合のフォールバック用。
+    # 歴代全部は保持しない。精度の推移自体はappend_metrics_historyの履歴CSVで追える)。
+    if path.exists():
+        try:
+            shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+        except Exception as e:
+            log.warning("Failed to back up previous model state: %s", e)
+    # 書き込み中にプロセスが落ちても壊れたファイルが残らないよう、一時ファイルに書いてから
+    # 置き換える(os.replaceは同一ファイルシステム内であれば原子的)。
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    joblib.dump(state, tmp_path)
+    tmp_path.replace(path)
     append_metrics_history(models, trained_at)
 
 

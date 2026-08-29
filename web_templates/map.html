@@ -11,7 +11,10 @@
     {% if has_alert %}
     <p class="muted">点滅している地点は霧アラート(今後24時間以内に霧の予測あり)が発生しています。</p>
     {% endif %}
-    <div id="station-map" style="height:560px; border-radius: var(--radius-sm); overflow:hidden;"></div>
+    <p class="muted" style="font-size:0.82rem;">
+        地図上の個々の地点はマウス操作向けです。キーボードでの操作は下の一覧表からご利用ください。
+    </p>
+    <div id="station-map" role="application" aria-label="地点マップ(詳細は下の一覧表を参照)" style="height:560px; border-radius: var(--radius-sm); overflow:hidden;"></div>
 </div>
 
 <div class="table-scroll">
@@ -63,12 +66,48 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 (function() {
+    var mapDiv = document.getElementById("station-map");
+    if (typeof L === "undefined") {
+        // LeafletをCDNから読み込めなかった場合(通信障害等)。地図は諦め、下の一覧表に
+        // 誘導するメッセージだけ出す(表自体は地図と無関係にレンダリング済みで使える)。
+        mapDiv.textContent = "地図の読み込みに失敗しました。下の一覧表からリンクを確認してください。";
+        mapDiv.style.display = "flex";
+        mapDiv.style.alignItems = "center";
+        mapDiv.style.justifyContent = "center";
+        mapDiv.style.color = "var(--color-text-muted)";
+        return;
+    }
     var points = {{ map_points|tojson }};
     var map = L.map("station-map");
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
         attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
+
+    // ポップアップの中身はDOM APIで組み立てる(地点名等を文字列連結でHTML化すると、
+    // 万一データにHTML特殊文字が混ざった場合にXSSになりうるため、textContentで確実に
+    // エスケープする)。
+    function buildPopupContent(p) {
+        var wrap = document.createElement("div");
+        var strong = document.createElement("strong");
+        strong.textContent = p.name;
+        wrap.appendChild(strong);
+        wrap.appendChild(document.createElement("br"));
+        wrap.appendChild(document.createTextNode(p.label));
+        if (p.alert) {
+            wrap.appendChild(document.createElement("br"));
+            var alertSpan = document.createElement("span");
+            alertSpan.style.color = "#c0392b";
+            alertSpan.textContent = "霧アラート発生中";
+            wrap.appendChild(alertSpan);
+        }
+        wrap.appendChild(document.createElement("br"));
+        var link = document.createElement("a");
+        link.href = p.detail_url;
+        link.textContent = "地点の詳細を見る";
+        wrap.appendChild(link);
+        return wrap;
+    }
 
     var bounds = [];
     points.forEach(function(p) {
@@ -82,10 +121,7 @@
             fillOpacity: 0.9,
             className: p.alert ? "map-marker-alert" : ""
         }).addTo(map);
-        var html = "<strong>" + p.name + "</strong><br>" + p.label;
-        if (p.alert) { html += "<br><span style=\"color:#c0392b;\">霧アラート発生中</span>"; }
-        html += "<br><a href=\"" + p.detail_url + "\">地点の詳細を見る</a>";
-        marker.bindPopup(html);
+        marker.bindPopup(buildPopupContent(p));
     });
     if (bounds.length) {
         map.fitBounds(bounds, {padding: [24, 24]});

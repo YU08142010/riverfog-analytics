@@ -18,7 +18,7 @@
     <div class="image-grid">
         {% for f in files %}
         <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
-            <img src="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" loading="lazy">
+            <img src="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" loading="lazy" alt="{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}のカメラ画像">
             <figcaption>
                 {{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}{% if '_unavailable' in f %} (取得失敗){% endif %}
                 <br><a href="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" download>ダウンロード</a>

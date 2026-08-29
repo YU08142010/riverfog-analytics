@@ -11,6 +11,7 @@
     <p class="muted">回答済みです。ご協力ありがとうございました。</p>
     {% elif ann.kind == "choice" %}
     <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% for choice in ann.choices %}
         <label style="display:block; margin:0.3rem 0;">
             <input type="radio" name="choice_index" value="{{ loop.index0 }}" required> {{ choice }}
@@ -20,6 +21,7 @@
     </form>
     {% elif ann.kind == "text" %}
     <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <textarea name="answer_text" rows="2" required style="width:100%; max-width:500px; padding:0.5rem;"></textarea>
         <br><button type="submit" class="button" style="margin-top:0.5rem;">送信する</button>
     </form>
@@ -30,7 +32,7 @@
 <div class="card">
     <h2>サイト内検索</h2>
     <p class="muted">地点名、日付(例: 2026-08-27 / 20260827)、または機能名(例: 精度、アカウント管理)を入力すると、関連ページへのリンクが表示されます。</p>
-    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名・日付・機能名で検索...">
+    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名・日付・機能名で検索..." aria-label="サイト内検索">
     <div id="global-search-results" style="margin-top:0.7rem; display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
 </div>
 <script>
@@ -215,8 +217,11 @@
     <div class="image-grid">
         {% for f in latest_images %}
         <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
-            <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy">
-            <figcaption>{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}</figcaption>
+            <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy" alt="{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}のカメラ画像">
+            <figcaption>
+                {{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}
+                <br><a href="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" download>ダウンロード</a>
+            </figcaption>
         </figure>
         {% endfor %}
     </div>
@@ -233,7 +238,7 @@
     <h2>本日の予測サマリー</h2>
     {% if summary_file %}
     <p class="muted">{{ latest_pred_date }}</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}" alt="全地点の予測サマリーグラフ"></div>
     <p><a class="button" href="{{ url_for('predictions_date', date=latest_pred_date) }}">地点ごとのグラフを見る</a></p>
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>予測結果がまだありません。</span></div>

@@ -7,26 +7,28 @@
     <p><a href="{{ url_for('login') }}">ログイン画面に戻る</a></p>
     {% else %}
     {% if error %}
-    <p style="color: var(--color-danger);">{{ error }}</p>
+    <p style="color: var(--color-danger);" role="alert">{{ error }}</p>
     {% endif %}
     <p class="muted">申請後、管理者の承認が必要です。承認されるとログインできるようになります。</p>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
             <label for="name">お名前</label><br>
-            <input type="text" id="name" name="name" required autofocus
+            <input type="text" id="name" name="name" required autofocus autocomplete="name"
                    style="width:100%; padding:0.5rem; margin-top:0.3rem; box-sizing:border-box;">
         </p>
         <p>
             <label for="email">メールアドレス</label><br>
-            <input type="email" id="email" name="email" required
+            <input type="email" id="email" name="email" required autocomplete="email"
                    style="width:100%; padding:0.5rem; margin-top:0.3rem; box-sizing:border-box;">
         </p>
         <p class="pw-strength-wrap">
             <label for="password">パスワード(8文字以上)</label><br>
-            <input type="password" id="password" name="password" required minlength="8" class="js-pw-strength"
+            <input type="password" id="password" name="password" required minlength="8" class="js-pw-strength" autocomplete="new-password"
                    style="width:100%; padding:0.5rem; margin-top:0.3rem; box-sizing:border-box;">
             <div class="strength-meter"><div class="strength-meter-bar"></div></div>
             <div class="strength-label"></div>
+            <span class="muted" style="font-size:0.78rem;">12文字以上、英大文字・小文字・数字・記号を混ぜるほど強くなります。</span>
         </p>
         <button type="submit" class="button">申請する</button>
     </form>

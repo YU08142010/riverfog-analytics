@@ -4,4 +4,8 @@ __pycache__/
 .env
 data/
 logs/
+backups/
 data_before_restore_*/
+.DS_Store
+.vscode/
+.idea/

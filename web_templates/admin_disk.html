@@ -12,7 +12,8 @@
 
 <div class="card">
     <h2>river-fogデータの内訳</h2>
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <thead><tr><th>項目</th><th>サイズ</th></tr></thead>
         <tbody>
         {% for r in rows %}
@@ -20,6 +21,7 @@
         {% endfor %}
         </tbody>
     </table>
+</div>
 </div>
 
 <div class="card">
@@ -37,11 +39,12 @@
     {% if image_archive.day_count %}
     <form method="post" action="{{ url_for('admin_disk_images_cleanup') }}"
           data-confirm="指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>
             <input type="number" name="days" value="{{ image_cleanup_default_days }}" min="1" style="width:5em; padding:0.3rem;">
             日より前の画像を削除
         </label>
-        <button type="submit" class="button" style="background:#c0392b;">削除する</button>
+        <button type="submit" class="button button-danger">削除する</button>
     </form>
     {% endif %}
 </div>
@@ -58,8 +61,10 @@
     </p>
     <form method="post" action="{{ url_for('admin_backup_restore') }}" enctype="multipart/form-data"
           data-confirm="本当にdata/一式を、アップロードしたZIPの内容で置き換えますか？アカウント情報も含めて全て置き換わります。">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
-            <input type="file" name="backup_zip" accept=".zip" required>
+            <label for="backup_zip">復元するバックアップZIPファイル</label><br>
+            <input type="file" id="backup_zip" name="backup_zip" accept=".zip" required>
         </p>
         <p>
             <label class="muted" style="font-size:0.85rem;">
@@ -67,7 +72,7 @@
                 <input type="text" name="confirm" required autocomplete="off" style="padding:0.4rem; margin-top:0.3rem; max-width:200px;">
             </label>
         </p>
-        <button type="submit" class="button" style="background: var(--color-danger);">復元を実行する</button>
+        <button type="submit" class="button button-danger">復元を実行する</button>
     </form>
 </div>
 

@@ -1,0 +1,19 @@
+{# observations_dates.html/predictions_dates.html/images_dates.htmlで共通の、月ごとに
+   折りたたまれた日付一覧(<details>)を描画するマクロ。以前はこの3ファイルにほぼ同じ
+   マークアップが個別にコピーされていた。 #}
+{% macro date_month_groups(date_groups, endpoint, empty_message) %}
+{% if date_groups %}
+{% for g in date_groups %}
+<details class="date-month-group" {{ "open" if loop.first }}>
+    <summary>{{ g.label }}<span class="muted">({{ g.days|length }}日分)</span></summary>
+    <ul class="date-list compact">
+        {% for d in g.days %}
+        <li><a href="{{ url_for(endpoint, date=d.date) }}" title="{{ d.date }}">{{ d.day }}日</a></li>
+        {% endfor %}
+    </ul>
+</details>
+{% endfor %}
+{% else %}
+<p class="muted">{{ empty_message }}</p>
+{% endif %}
+{% endmacro %}

@@ -1,7 +1,10 @@
-"""只見川流域32地点の川霧観測・自動収集（毎時実行）。
+"""只見川流域33地点の川霧観測・自動収集（毎時実行）。
 
 画像取得 -> Gemini分類（現象コード + 画像自体の有効性判定） -> Open-Meteo気象取得 -> xlsx追記 を1回分行う。
 サーバー1単独運用。データは /opt/river-fog/data にローカル保存し、Samba共有で公開する。
+
+スケジューリングはsystemdタイマー(river-fog-collect.timer/.service)で行っており、
+crontabではない(predict.py/backfill_weather.py/backfill_images.pyはcrontab管理)。
 """
 import csv
 import json
@@ -29,6 +32,7 @@ from common import (
     COL_DATETIME,
     COL_PHENOM_START,
     DATA_XLSX,
+    DEFAULT_GEMINI_MODEL,
     JST,
     STATION_WEATHER_DB_PATH,
     TEMPLATE_XLSX,
@@ -36,7 +40,9 @@ from common import (
     record_network_failure,
     representative_coords,
     request_with_dns_fallback,
+    send_alert,
     set_weather_measures,
+    xlsx_write_lock,
 )
 import station_weather
 
@@ -128,6 +134,16 @@ def load_cameras():
     with open(CAMERAS_CSV, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         return [(row["地点名"], row["カメラID"]) for row in reader]
+
+
+def _lens_fog_station_names():
+    """レンズ自体が常時わずかに曇っているカメラの地点名(cameras.csvの「レンズ曇り」列が
+    truthyな行)を返す。以前は該当4地点をSYSTEM_INSTRUCTION内に直接書いていたが、
+    cameras.csv側で地点が増減・変更されても追従しないため、CSVの列から動的に組み立てる。
+    """
+    with open(CAMERAS_CSV, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        return [row["地点名"] for row in reader if row.get("レンズ曇り")]
 
 
 def fetch_one_image(name, cam_id):
@@ -242,6 +258,17 @@ def get_api_keys():
     return [single] if single else []
 
 
+_LENS_FOG_STATION_NAMES = _lens_fog_station_names()
+_LENS_FOG_NOTE = (
+    "注意（特定カメラの恒常的な曇り）: {names}の{count}地点は"
+    "レンズ自体が常時わずかに曇っており、天候に関わらずいつも少し霞んで見えます。"
+    "この{count}地点については、その常時の軽い霞みだけを根拠に霧・層雲と判定せず、"
+    "普段のその地点の見え方と比べて明らかに視界が悪化している場合のみ現象ありと判定してください。\n"
+).format(
+    names="".join(f"「{n}」" for n in _LENS_FOG_STATION_NAMES),
+    count=len(_LENS_FOG_STATION_NAMES),
+) if _LENS_FOG_STATION_NAMES else ""
+
 SYSTEM_INSTRUCTION = (
     "あなたは河川監視カメラの画像から気象現象を分類する専門家です。\n"
     "各画像を、以下の現象コード表に従って-1〜10の整数のいずれか1つに分類してください。\n"
@@ -266,10 +293,7 @@ SYSTEM_INSTRUCTION = (
     "水滴の付着だけを根拠に9（霧雨）や10（雨）と判定せず、背景に見える降雨の様子"
     "（路面や川面の波紋、視界不良の均一な広がり方など）から総合的に判断してください。\n"
     "\n"
-    "注意（特定カメラの恒常的な曇り）: 「三島大橋」「西谷橋」「鹿島橋」「麻生大橋」の4地点は"
-    "レンズ自体が常時わずかに曇っており、天候に関わらずいつも少し霞んで見えます。"
-    "この4地点については、その常時の軽い霞みだけを根拠に霧・層雲と判定せず、"
-    "普段のその地点の見え方と比べて明らかに視界が悪化している場合のみ現象ありと判定してください。\n"
+    + _LENS_FOG_NOTE +
     "各画像の直前に「地点N: 地点名」というラベルがテキストで付与されています。"
     "station_index には、このラベルのNの数字をそのまま入れてください。"
     "画像とラベルの対応を取り違えないよう、慎重に対応させてください。\n"
@@ -294,53 +318,80 @@ def _build_contents(name_bytes_pairs):
     return contents, index_to_name
 
 
-def _classify_with_model(contents, model, api_keys):
-    """指定モデルで1回分類を試みる（APIキーのフォールバック・複数パスのリトライ込み）。
+def _gemini_generate_with_fallback(model, contents, config, api_keys, label):
+    """指定モデル・contents・configでGemini APIを呼ぶ共通ロジック。api_keysを順に試し
+    (フォールバック)、全滅した場合はGEMINI_RETRY_PASSES回までリトライする。
+    ただし全キーがクォータ超過(429/RESOURCE_EXHAUSTED)だった場合は、日次クォータが
+    数秒待っても回復することはないため、それ以上のリトライはせず即座に諦める
+    (以前は一時的なネットワーク障害と同じ扱いで無駄なリトライ・待機をしていた)。
+    labelはログ用の呼び出し元名("classification"/"escalation"/"ai_summary"等)。
     失敗時はNoneを返す。
     """
     from google import genai
-    from google.genai import types
 
     def try_all_keys():
+        quota_hits = 0
         for key_idx, api_key in enumerate(api_keys, start=1):
             try:
                 client = genai.Client(api_key=api_key)
-                resp = client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
-                        response_mime_type="application/json",
-                        response_schema=list[StationClassification],
-                        temperature=0,
-                        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    ),
-                )
+                resp = client.models.generate_content(model=model, contents=contents, config=config)
             except Exception as e:
-                log.warning("Gemini API call failed (model=%s, key %d/%d): %s", model, key_idx, len(api_keys), e)
+                # クォータ超過(恒久的に失敗する)と一時的なネットワーク障害を、
+                # ログ上で区別できるようにする(原因調査をしやすくするため)。
+                is_quota = "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e)
+                if is_quota:
+                    quota_hits += 1
+                log.warning(
+                    "Gemini API call failed [%s] (%s, model=%s, key %d/%d, %s): %s",
+                    "QUOTA" if is_quota else "ERROR", label, model, key_idx, len(api_keys), type(e).__name__, e,
+                )
                 continue
             if key_idx > 1:
-                log.info("Main API key unavailable, fell back to sub key %d (model=%s)", key_idx, model)
-            return resp
-        return None
+                log.info("Main API key unavailable, fell back to sub key %d (%s, model=%s)", key_idx, label, model)
+            return resp, False
+        return None, quota_hits == len(api_keys)
 
     response = None
     for pass_idx in range(1, GEMINI_RETRY_PASSES + 1):
-        response = try_all_keys()
+        response, all_quota_exhausted = try_all_keys()
         if response is not None:
+            break
+        if all_quota_exhausted:
+            log.error(
+                "All Gemini API keys report quota exhaustion (%s, model=%s); giving up without further "
+                "retries this run (daily quota won't recover within seconds)",
+                label, model,
+            )
             break
         if pass_idx < GEMINI_RETRY_PASSES:
             log.warning(
-                "All Gemini API keys failed (model=%s, pass %d/%d), retrying in %ds",
-                model, pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC,
+                "All Gemini API keys failed (%s, model=%s, pass %d/%d), retrying in %ds",
+                label, model, pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC,
             )
             time.sleep(GEMINI_RETRY_DELAY_SEC)
 
     if response is None:
-        log.error("Gemini API call failed with all configured keys (model=%s)", model)
-        return None
+        log.error("Gemini API call failed with all configured keys (%s, model=%s)", label, model)
+    return response
 
+
+def _classify_with_model(contents, model, api_keys, label="classification"):
+    """指定モデルで1回分類を試みる（APIキーのフォールバック・クォータ考慮リトライ込み）。
+    失敗時はNoneを返す。
+    """
+    from google.genai import types
+
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+        response_mime_type="application/json",
+        response_schema=list[StationClassification],
+        temperature=0,
+        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+    response = _gemini_generate_with_fallback(model, contents, config, api_keys, label)
+    if response is None:
+        return None
     try:
         parsed: list[StationClassification] = response.parsed
         if parsed is None:
@@ -407,7 +458,7 @@ def classify_images(cameras, images_by_name):
         return {}, set(), {}
 
     contents, index_to_name = _build_contents(list(resized_by_name.items()))
-    primary_model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     parsed = _classify_with_model(contents, primary_model, api_keys)
     if parsed is None:
         return {}, set(), {}
@@ -423,37 +474,83 @@ def classify_images(cameras, images_by_name):
     )
 
     if low_confidence:
-        log.info(
-            "Low-confidence classification: %d station(s), retrying with escalation model: %s",
-            len(low_confidence), ", ".join(low_confidence),
-        )
-        escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-2.5-pro")
-        sub_contents, sub_index_to_name = _build_contents(
-            [(name, resized_by_name[name]) for name in low_confidence]
-        )
-        sub_parsed = _classify_with_model(sub_contents, escalation_model, api_keys)
-        if sub_parsed is None:
-            log.warning(
-                "Escalation classification failed; keeping first-pass result for: %s",
-                ", ".join(low_confidence),
+        escalation_state = _load_escalation_state()
+        skip_until = escalation_state.get("skip_until")
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        if skip_until and now_str < skip_until:
+            log.info(
+                "Skipping escalation for %d station(s) (escalation model failed repeatedly; "
+                "cooling down until %s): %s",
+                len(low_confidence), skip_until, ", ".join(low_confidence),
             )
         else:
-            sub_result, sub_invalid, sub_low, sub_confidence = _parse_classifications(sub_parsed, sub_index_to_name)
-            for name in low_confidence:
-                if name in sub_invalid:
-                    invalid_stations.add(name)
-                    result.pop(name, None)
-                    confidence_by_name.pop(name, None)
-                elif name in sub_result:
-                    result[name] = sub_result[name]
-                    confidence_by_name[name] = sub_confidence.get(name, "low")
-            if sub_low:
+            log.info(
+                "Low-confidence classification: %d station(s), retrying with escalation model: %s",
+                len(low_confidence), ", ".join(low_confidence),
+            )
+            escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-2.5-pro")
+            sub_contents, sub_index_to_name = _build_contents(
+                [(name, resized_by_name[name]) for name in low_confidence]
+            )
+            sub_parsed = _classify_with_model(sub_contents, escalation_model, api_keys, label="escalation")
+            if sub_parsed is None:
                 log.warning(
-                    "Still low-confidence after escalation (kept escalation result anyway): %s",
-                    ", ".join(sub_low),
+                    "Escalation classification failed; keeping first-pass result for: %s",
+                    ", ".join(low_confidence),
                 )
+                escalation_state["consecutive_failures"] = escalation_state.get("consecutive_failures", 0) + 1
+                if escalation_state["consecutive_failures"] >= ESCALATION_FAILURE_THRESHOLD:
+                    cooldown_until = (datetime.now(JST) + timedelta(hours=ESCALATION_COOLDOWN_HOURS))
+                    escalation_state["skip_until"] = cooldown_until.strftime("%Y-%m-%d %H:%M:%S")
+                    log.warning(
+                        "Escalation failed %d time(s) in a row; pausing escalation attempts until %s",
+                        escalation_state["consecutive_failures"], escalation_state["skip_until"],
+                    )
+                _save_escalation_state(escalation_state)
+            else:
+                if escalation_state.get("consecutive_failures") or escalation_state.get("skip_until"):
+                    _save_escalation_state({"consecutive_failures": 0, "skip_until": None})
+                sub_result, sub_invalid, sub_low, sub_confidence = _parse_classifications(sub_parsed, sub_index_to_name)
+                for name in low_confidence:
+                    if name in sub_invalid:
+                        invalid_stations.add(name)
+                        result.pop(name, None)
+                        confidence_by_name.pop(name, None)
+                    elif name in sub_result:
+                        result[name] = sub_result[name]
+                        confidence_by_name[name] = sub_confidence.get(name, "low")
+                if sub_low:
+                    log.warning(
+                        "Still low-confidence after escalation (kept escalation result anyway): %s",
+                        ", ".join(sub_low),
+                    )
 
     return result, invalid_stations, confidence_by_name
+
+
+# エスカレーション(上位モデルでの再判定)が連続で失敗する場合のサーキットブレーカー。
+# pro系モデルは無料枠のクォータが厳しいことが多く、枯渇していると毎時律儀に呼び続けて
+# 無駄になるため、連続失敗が閾値を超えたら一定時間エスカレーションそのものをスキップする。
+ESCALATION_STATE_PATH = BASE_DIR / "data" / "models" / ".escalation_state.json"
+ESCALATION_FAILURE_THRESHOLD = 3
+ESCALATION_COOLDOWN_HOURS = 6
+
+
+def _load_escalation_state():
+    try:
+        with open(ESCALATION_STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"consecutive_failures": 0, "skip_until": None}
+
+
+def _save_escalation_state(state):
+    try:
+        ESCALATION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(ESCALATION_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception as e:
+        log.warning("Failed to save escalation circuit-breaker state: %s", e)
 
 
 CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
@@ -551,7 +648,6 @@ def generate_ai_summaries(cameras, phenom_by_name, weather, run_time):
             except Exception as e:
                 log.warning("Failed to check previous AI summary timestamp, generating anyway: %s", e)
 
-        from google import genai
         from google.genai import types
 
         api_keys = get_api_keys()
@@ -560,45 +656,17 @@ def generate_ai_summaries(cameras, phenom_by_name, weather, run_time):
             return
 
         prompt = _build_summary_prompt(cameras, phenom_by_name, weather, run_time)
-        model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
-
-        def try_all_keys():
-            for key_idx, api_key in enumerate(api_keys, start=1):
-                try:
-                    client = genai.Client(api_key=api_key)
-                    resp = client.models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=AI_SUMMARY_SYSTEM_INSTRUCTION,
-                            response_mime_type="application/json",
-                            response_schema=AiSummaryResult,
-                            temperature=0.3,
-                            http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
-                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                        ),
-                    )
-                except Exception as e:
-                    log.warning("AI summary API call failed (model=%s, key %d/%d): %s",
-                                model, key_idx, len(api_keys), e)
-                    continue
-                if key_idx > 1:
-                    log.info("Main API key unavailable, fell back to sub key %d for AI summary", key_idx)
-                return resp
-            return None
-
-        response = None
-        for pass_idx in range(1, GEMINI_RETRY_PASSES + 1):
-            response = try_all_keys()
-            if response is not None:
-                break
-            if pass_idx < GEMINI_RETRY_PASSES:
-                log.warning("All Gemini API keys failed for AI summary (pass %d/%d), retrying in %ds",
-                            pass_idx, GEMINI_RETRY_PASSES, GEMINI_RETRY_DELAY_SEC)
-                time.sleep(GEMINI_RETRY_DELAY_SEC)
-
+        model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        config = types.GenerateContentConfig(
+            system_instruction=AI_SUMMARY_SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+            response_schema=AiSummaryResult,
+            temperature=0.3,
+            http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+        response = _gemini_generate_with_fallback(model, prompt, config, api_keys, label="ai_summary")
         if response is None:
-            log.error("AI summary generation failed with all configured keys")
             return
 
         parsed: AiSummaryResult = response.parsed
@@ -649,6 +717,10 @@ def _extract_weather_at_target_hour(hourly):
         if not past:
             return None
         idx = times.index(past[-1])
+        log.warning(
+            "No exact weather data for %s; falling back to nearest past hour %s",
+            target, past[-1],
+        )
 
     def at(key):
         vals = hourly.get(key, [])
@@ -796,10 +868,16 @@ def ensure_workbook():
         log.info("Created new workbook from template: %s", DATA_XLSX)
 
 
+# 直近何行を重複チェック対象にするか。backfill_weather.pyが欠測行を途中に挿入することが
+# あり、末尾付近の行順が通常のhourly実行だけの場合より前後することがあるため、
+# 以前の5行では見逃す余地があった。48行(2日分)あれば十分な余裕がある。
+FIND_EXISTING_ROW_LOOKBACK = 48
+
+
 def find_existing_row(ws, run_time_naive):
     """同じ日時の行が既に存在すればその行番号を返す（直近数行のみ確認、無ければNone）。"""
     max_row = ws.max_row
-    for row in range(max_row, max(max_row - 5, 1), -1):
+    for row in range(max_row, max(max_row - FIND_EXISTING_ROW_LOOKBACK, 1), -1):
         if ws.cell(row=row, column=COL_DATETIME).value == run_time_naive:
             return row
     return None
@@ -807,32 +885,35 @@ def find_existing_row(ws, run_time_naive):
 
 def append_row(cameras, phenom_by_name, weather, run_time):
     ensure_workbook()
-    wb = openpyxl.load_workbook(DATA_XLSX)
-    ws = wb.active
-    # Excelはtzinfoつきのdatetimeを書き込めないため、ローカル時刻の値のまま外す
-    run_time_naive = run_time.replace(tzinfo=None)
+    # backfill_weather.py・backfill_images.pyと同じxlsxを読み書きするため、
+    # load_workbook〜saveの間は排他ロックを取る(common.xlsx_write_lock参照)。
+    with xlsx_write_lock():
+        wb = openpyxl.load_workbook(DATA_XLSX)
+        ws = wb.active
+        # Excelはtzinfoつきのdatetimeを書き込めないため、ローカル時刻の値のまま外す
+        run_time_naive = run_time.replace(tzinfo=None)
 
-    existing_row = find_existing_row(ws, run_time_naive)
-    if existing_row is not None:
-        row = existing_row
-        log.warning("Row for %s already exists (row %d); overwriting instead of appending", run_time_naive, row)
-    else:
-        row = ws.max_row + 1
-
-    ws.cell(row=row, column=COL_DATETIME).value = run_time_naive
-    set_weather_measures(ws, row, weather)
-
-    for i, (name, _cam_id) in enumerate(cameras):
-        col = COL_PHENOM_START + i
-        code = phenom_by_name.get(name)
-        if code is None:
-            ws.cell(row=row, column=col).value = None
-        elif code == 0:
-            ws.cell(row=row, column=col).value = "/"
+        existing_row = find_existing_row(ws, run_time_naive)
+        if existing_row is not None:
+            row = existing_row
+            log.warning("Row for %s already exists (row %d); overwriting instead of appending", run_time_naive, row)
         else:
-            ws.cell(row=row, column=col).value = code
+            row = ws.max_row + 1
 
-    wb.save(DATA_XLSX)
+        ws.cell(row=row, column=COL_DATETIME).value = run_time_naive
+        set_weather_measures(ws, row, weather)
+
+        for i, (name, _cam_id) in enumerate(cameras):
+            col = COL_PHENOM_START + i
+            code = phenom_by_name.get(name)
+            if code is None:
+                ws.cell(row=row, column=col).value = None
+            elif code == 0:
+                ws.cell(row=row, column=col).value = "/"
+            else:
+                ws.cell(row=row, column=col).value = code
+
+        wb.save(DATA_XLSX)
     action = "Overwrote" if existing_row is not None else "Appended"
     log.info("%s row in xlsx: row %d (%s)", action, row, run_time_naive)
 
@@ -867,11 +948,15 @@ def main():
     usable_count = ok_count - len(invalid_stations)
     problem_ratio = (1.0 - usable_count / len(cameras)) if cameras else 0.0
     if problem_ratio >= IMAGE_FAILURE_ALERT_RATIO:
-        log.error(
-            "Many stations have no usable photo this run: %d/%d (%.0f%%) -- possible outage on "
-            "the camera source site (cam.river.go.jp) or a transient network issue",
-            len(cameras) - usable_count, len(cameras), problem_ratio * 100,
+        message = (
+            f"Many stations have no usable photo this run: "
+            f"{len(cameras) - usable_count}/{len(cameras)} ({problem_ratio * 100:.0f}%) -- possible "
+            "outage on the camera source site (cam.river.go.jp) or a transient network issue"
         )
+        log.error(message)
+        # ALERT_WEBHOOK_URLが設定されていれば通知する(未設定なら何もしない)。
+        # 以前は管理画面のログを見に行かないと気付けなかった。
+        send_alert(message, source="collect.py")
 
     save_images(cameras, images_by_name, invalid_stations, run_time)
     prune_old_images()

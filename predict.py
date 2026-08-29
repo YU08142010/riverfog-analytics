@@ -13,12 +13,15 @@ import argparse
 import logging
 import logging.handlers
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from dotenv import load_dotenv
 
-from common import BASE_DIR, DATA_XLSX, JST, STATION_WEATHER_DB_PATH, load_camera_coords, representative_coords
+from common import (
+    BASE_DIR, DATA_XLSX, STATION_WEATHER_DB_PATH,
+    load_camera_coords, now_jst_naive, representative_coords,
+)
 import fog_data
 import fog_graphs
 import fog_model
@@ -69,11 +72,11 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
         actual_by_station[name] = s
 
     results = []
-    verified_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    verified_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
     n_no_data = 0
-    for pred_id, station, target_dt_str in pending:
-        target_dt = datetime.strptime(target_dt_str, "%Y-%m-%d %H:%M:%S")
-        series = actual_by_station.get(station)
+    for p in pending:
+        target_dt = datetime.strptime(p["target_datetime"], "%Y-%m-%d %H:%M:%S")
+        series = actual_by_station.get(p["station"])
         if series is None or target_dt not in series.index:
             n_no_data += 1
             continue
@@ -81,7 +84,7 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
         if pd.isna(actual):
             n_no_data += 1
             continue
-        results.append((pred_id, int(actual)))
+        results.append((p["id"], int(actual)))
 
     if results:
         prediction_log.verify_predictions(conn, verified_at, results)
@@ -102,6 +105,8 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
     """今回の予測を答え合わせ用に記録する（観測時間帯のみ）。"""
     run_at_dt = datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
     rows = []
+    n_past = 0
+    n_total = 0
     obs_mask = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)
     sub_pred = pred_df[obs_mask]
     sub_prob = prob_df[obs_mask]
@@ -110,10 +115,21 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
             continue
         model_type = models[col].get("model_type", "")
         for dt, code, prob in zip(sub_pred["datetime"], sub_pred[col], sub_prob[col]):
+            n_total += 1
             lead_hours = (dt.to_pydatetime() - run_at_dt).total_seconds() / 3600.0
             if lead_hours < 0:
+                n_past += 1
                 continue
             rows.append((col, dt.strftime("%Y-%m-%d %H:%M:%S"), lead_hours, int(code), float(prob), model_type))
+    if n_total and n_past / n_total > 0.5:
+        # 予報時刻がJSTのnaive値である前提が崩れる(API仕様変更でタイムゾーンがズレる等)と、
+        # ほぼ全行がlead_hours<0で捨てられ「0件記録」という分かりにくい結果になる。
+        # 原因調査の手がかりとして、その兆候(半数以上が過去扱い)を明示的に警告する。
+        log.warning(
+            "%d/%d forecast row(s) were treated as being in the past (lead_hours < 0); "
+            "the forecast timestamps may not be JST as expected",
+            n_past, n_total,
+        )
     prediction_log.record_predictions(conn, run_at_str, rows)
     log.info("Recorded %d new prediction row(s) for future verification", len(rows))
 
@@ -128,7 +144,7 @@ def main():
     load_dotenv(BASE_DIR / ".env")
     lat, lon = representative_coords()
 
-    now_naive = datetime.now(JST).replace(tzinfo=None)
+    now_naive = now_jst_naive()
     run_at_str = now_naive.strftime("%Y-%m-%d %H:%M:%S")
     log.info("=== Predict run started%s ===", " (dry-run)" if args.dry_run else "")
 
@@ -167,6 +183,19 @@ def main():
         return
     log.info("Fetched forecast: %d hour(s), %s - %s",
              len(forecast_raw), forecast_raw["datetime"].min(), forecast_raw["datetime"].max())
+
+    # Open-MeteoにはtimezoneとしてAsia/Tokyoを明示指定しているが(fog_model.fetch_forecast_range)、
+    # API仕様変更等でUTC等に戻った場合、9時間ズレたままlead_hoursが計算され静かに記録されて
+    # しまう。Open-Meteoは常に「今日のローカル日付の00:00」から返す仕様のため、時刻ではなく
+    # 日付だけを見て確認する(時刻で見ると、真夜中以外に実行するたびに「nowから離れている」
+    # 判定になってしまい、正常時でも毎回誤検知してしまうため)。
+    first_forecast_date = forecast_raw["datetime"].min().to_pydatetime().date()
+    if first_forecast_date not in (now_naive.date(), now_naive.date() - timedelta(days=1)):
+        log.warning(
+            "Forecast start date looks suspicious (now=%s, forecast_start_date=%s); "
+            "check whether Open-Meteo is still returning Asia/Tokyo local time",
+            now_naive, first_forecast_date,
+        )
 
     try:
         forecast_by_station = fog_model.fetch_forecast_range_multi(camera_coords, args.forecast_days)

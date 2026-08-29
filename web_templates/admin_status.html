@@ -3,35 +3,78 @@
 {% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>サーバーリソース</h2>
-    <div class="stat-grid">
+    <h2>
+        サーバーリソース
+        <span class="live-indicator" id="resources-live-indicator" style="font-size:0.72rem; font-weight:normal; margin-left:0.6rem;">
+            <span class="live-dot"></span>自動更新中
+        </span>
+    </h2>
+    <div class="stat-grid" id="resources-stat-grid">
         <div class="stat-card">
             <div class="stat-label">CPU負荷(1分)</div>
-            <div class="stat-value">{{ "%.2f"|format(resources.load1) if resources.load1 is not none else "-" }}</div>
+            <div class="stat-value" id="stat-load1">{{ "%.2f"|format(resources.load1) if resources.load1 is not none else "-" }}</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">CPU負荷(5分/15分)</div>
-            <div class="stat-value" style="font-size:1.1rem;">
+            <div class="stat-value" id="stat-load5-15" style="font-size:1.1rem;">
                 {{ "%.2f"|format(resources.load5) if resources.load5 is not none else "-" }}
                 / {{ "%.2f"|format(resources.load15) if resources.load15 is not none else "-" }}
             </div>
         </div>
         <div class="stat-card">
             <div class="stat-label">メモリ使用率</div>
-            <div class="stat-value">{{ resources.mem_used_pct if resources.mem_used_pct is not none else "-" }}<span class="stat-unit">%</span></div>
+            <div class="stat-value"><span id="stat-mem-pct">{{ resources.mem_used_pct if resources.mem_used_pct is not none else "-" }}</span><span class="stat-unit">%</span></div>
+            <div class="stat-bar"><div class="stat-bar-fill" id="stat-mem-bar" style="width:{{ resources.mem_used_pct or 0 }}%;"></div></div>
         </div>
         <div class="stat-card">
             <div class="stat-label">温度</div>
-            <div class="stat-value">{{ "%.1f"|format(resources.temp_c) if resources.temp_c is not none else "-" }}<span class="stat-unit">℃</span></div>
+            <div class="stat-value"><span id="stat-temp">{{ "%.1f"|format(resources.temp_c) if resources.temp_c is not none else "-" }}</span><span class="stat-unit">℃</span></div>
         </div>
     </div>
+    <p class="muted" style="font-size:0.8rem; margin-top:0.6rem;">
+        より詳しい状況(ネットワーク・ストレージ・プロセス一覧等)は
+        <a href="https://{{ request.host.split(':')[0] }}:{{ cockpit_port }}/" target="_blank" rel="noopener">Cockpit</a>
+        で確認できます(別タブで開きます。このサーバー自身のログイン情報でサインインしてください。
+        初回アクセス時は自己署名証明書の警告が出るので、承認して進んでください)。
+    </p>
 </div>
+<script>
+(function() {
+    var loadingFailed = false;
+    function fmt(v, digits) {
+        return (v === null || v === undefined) ? "-" : Number(v).toFixed(digits);
+    }
+    function poll() {
+        fetch("{{ url_for('admin_status_resources_json') }}")
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                document.getElementById("stat-load1").textContent = fmt(d.load1, 2);
+                document.getElementById("stat-load5-15").textContent = fmt(d.load5, 2) + " / " + fmt(d.load15, 2);
+                document.getElementById("stat-mem-pct").textContent = d.mem_used_pct === null ? "-" : d.mem_used_pct;
+                document.getElementById("stat-mem-bar").style.width = (d.mem_used_pct || 0) + "%";
+                document.getElementById("stat-temp").textContent = fmt(d.temp_c, 1);
+                if (loadingFailed) {
+                    loadingFailed = false;
+                    document.getElementById("resources-live-indicator").hidden = false;
+                }
+            })
+            .catch(function() {
+                // 通信エラー時は自動更新中の表示を隠す(手動リロードすれば普通に見える)。
+                loadingFailed = true;
+                document.getElementById("resources-live-indicator").hidden = true;
+            });
+    }
+    poll();
+    setInterval(poll, 3000);
+})();
+</script>
 
 <div class="card">
     <h2>webappサービス</h2>
     <form method="post" action="{{ url_for('admin_restart') }}"
           data-confirm="webappサービスを再起動します。よろしいですか？">
-        <button type="submit" class="button">webappを再起動</button>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button button-danger">webappを再起動</button>
     </form>
     <p class="muted">再起動中の数秒間、サイトに一時的にアクセスできなくなります。</p>
 </div>
@@ -40,7 +83,8 @@
     <h2>手動実行</h2>
     <p class="muted">通常はsystemdタイマー(収集、毎時4〜19時)・cron(予測、毎日19:30)が自動実行します。
         ここからは動作確認等のために任意のタイミングで実行できます。</p>
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <tbody>
         <tr>
             <td>画像収集(collect.py)</td>
@@ -49,6 +93,7 @@
                 <span class="muted">実行中...</span>
                 {% else %}
                 <form method="post" action="{{ url_for('admin_run', key='collect') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>
                 {% endif %}
@@ -62,6 +107,7 @@
                 <span class="muted">実行中...</span>
                 {% else %}
                 <form method="post" action="{{ url_for('admin_run', key='predict') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>
                 {% endif %}
@@ -75,6 +121,7 @@
                 <span class="muted">実行中...</span>
                 {% else %}
                 <form method="post" action="{{ url_for('admin_run', key='backfill_weather') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>
                 {% endif %}
@@ -83,17 +130,20 @@
         </tr>
         </tbody>
     </table>
+</div>
     <p class="muted">予測の実行は再学習を含むため数分かかります。実行後はログで完了を確認してください。</p>
 </div>
 
 <div class="card">
     <h2>収集タイマー</h2>
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <tbody>
         <tr><td>次回実行予定</td><td>{{ timer_info.get("NextElapseUSecRealtime", "-") }}</td></tr>
         <tr><td>前回実行</td><td>{{ timer_info.get("LastTriggerUSec", "-") }}</td></tr>
         </tbody>
     </table>
+</div>
 </div>
 
 <div class="card">
@@ -120,7 +170,7 @@
 <div class="card">
     <h2>cron(sshuser)</h2>
     <div class="table-scroll">
-    <pre style="background:#1c2733; color:#e8edf1; padding:1rem; border-radius:6px; font-size:0.8rem;">{{ crontab or "(crontabが空か取得できませんでした)" }}</pre>
+    <pre class="log-viewer">{{ crontab or "(crontabが空か取得できませんでした)" }}</pre>
     </div>
 </div>
 {% endblock %}

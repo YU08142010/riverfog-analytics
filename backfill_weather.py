@@ -37,10 +37,12 @@ from common import (
     COL_TEMP,
     DATA_XLSX,
     JST,
+    XlsxLockTimeout,
     record_network_failure,
     representative_coords,
     request_with_dns_fallback,
     set_weather_measures,
+    xlsx_write_lock,
 )
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
@@ -259,6 +261,14 @@ def main():
 
     log.info("=== Backfill started%s ===", " (dry-run)" if dry_run else "")
 
+    try:
+        with xlsx_write_lock():
+            _run_backfill(dry_run, lat, lon)
+    except XlsxLockTimeout as e:
+        log.error("%s; skipping this run (collect.py or another backfill is likely writing)", e)
+
+
+def _run_backfill(dry_run, lat, lon):
     wb = openpyxl.load_workbook(DATA_XLSX)
     ws = wb.active
 

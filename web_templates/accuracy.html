@@ -4,7 +4,7 @@
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('accuracy_chart') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('accuracy_chart') }}" alt="全地点の的中率推移グラフ"></div>
     <p class="muted">累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
         （{{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
     {% else %}
@@ -15,7 +15,8 @@
 {% if summary and summary.by_lead_day %}
 <div class="card">
     <h2>リードタイム別の的中率</h2>
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <thead><tr><th>予測から何日後</th><th>件数</th><th>正解数</th><th>的中率</th></tr></thead>
         <tbody>
         {% for row in summary.by_lead_day %}
@@ -29,13 +30,15 @@
         </tbody>
     </table>
 </div>
+</div>
 {% endif %}
 
 {% if summary and summary.by_station %}
 <div class="card">
     <h2>地点別の的中率</h2>
     <div class="table-scroll">
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <thead><tr><th>地点</th><th>件数</th><th>正解数</th><th>的中率</th></tr></thead>
         <tbody>
         {% for row in summary.by_station %}
@@ -48,6 +51,7 @@
         {% endfor %}
         </tbody>
     </table>
+</div>
     </div>
 </div>
 {% endif %}

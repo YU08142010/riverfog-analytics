@@ -4,9 +4,11 @@
 {% block content %}
 <div class="card">
     <h2>環境変数(.env)の設定状況</h2>
-    <p class="muted">値そのものは表示しません。設定済みかどうかだけを確認できます。</p>
+    <p class="muted">値そのものは表示しません。設定済みかどうかだけを確認できます。
+        GeminiモデルなどAPIキー以外の項目は<a href="{{ url_for('admin_settings') }}">設定のページ</a>から変更できます。</p>
     {% if env_status %}
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <thead><tr><th>変数名</th><th>状態</th></tr></thead>
         <tbody>
         {% for e in env_status %}
@@ -19,6 +21,7 @@
         {% endfor %}
         </tbody>
     </table>
+</div>
     {% else %}
     <p class="muted">.env.exampleが見つかりませんでした。</p>
     {% endif %}

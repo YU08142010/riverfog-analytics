@@ -5,25 +5,25 @@
 <div class="card">
     <h2>学習精度の推移(全地点平均)</h2>
     <p class="muted">毎日の再学習ごとに記録したaccuracy・霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_chart') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_chart') }}" alt="学習精度の推移グラフ(全地点平均)"></div>
 </div>
 
 <div class="card">
     <h2>モデル方式ごとの性能比較</h2>
     <p class="muted">RandomForest単体・XGBoost単体・LightGBM単体・RF+LightGBM混合(いずれも比較用)・実際に採用しているhybrid(RF+XGB混合)の霧F1を、全地点で平均して比較します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
 </div>
 
 <div class="card">
     <h2>混同行列(全地点合算)</h2>
     <p class="muted">実際の現象(縦軸)と予測(横軸)を突き合わせた集計です。対角線上が多いほど的中していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_confusion_matrix') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_confusion_matrix') }}" alt="混同行列(全地点合算)"></div>
 </div>
 
 <div class="card">
     <h2>特徴量の重要度(全地点)</h2>
     <p class="muted">どの気象要素が霧予測に効いているか(RandomForest/XGBoostのfeature_importances_をhybridの混合比で加重平均)。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_chart') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
 </div>
 
 <div class="card">
@@ -33,7 +33,7 @@
         に限定した特徴量重要度です。全地点の傾向と比較すると、精度が伸び悩む要因が見えることがあります。
     </p>
     {% if low_accuracy_stations %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_low_accuracy_chart') }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_low_accuracy_chart') }}" alt="特徴量の重要度グラフ(精度が低い地点のみ)"></div>
     {% else %}
     <p class="muted">accuracyを算出できた地点がまだありません。</p>
     {% endif %}
@@ -76,7 +76,7 @@
     <h2>ロールバック履歴(predict.logより、最新50件)</h2>
     {% if rollback_lines %}
     <div class="table-scroll">
-    <pre style="background:#1c2733; color:#e8edf1; padding:1rem; border-radius:6px; font-size:0.78rem; line-height:1.4;">{{ rollback_lines|join('\n') }}</pre>
+    <pre class="log-viewer">{{ rollback_lines|join('\n') }}</pre>
     </div>
     {% else %}
     <p class="muted">ロールバックが発生したことはありません。</p>

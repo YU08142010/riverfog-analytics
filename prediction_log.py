@@ -49,13 +49,16 @@ def record_predictions(conn, run_at, rows):
 
 
 def fetch_pending(conn, up_to_datetime):
-    """target_datetime <= up_to_datetime で、まだ答え合わせしていない予測を返す。"""
+    """target_datetime <= up_to_datetime で、まだ答え合わせしていない予測を返す。
+    戻り値: [{"id":, "station":, "target_datetime":}, ...]（他の集計関数と同じくdictのリスト）。
+    """
     with closing(conn.execute(
         """SELECT id, station, target_datetime FROM predictions
            WHERE actual_code IS NULL AND target_datetime <= ?""",
         (up_to_datetime,),
     )) as cur:
-        return cur.fetchall()
+        rows = cur.fetchall()
+    return [{"id": r[0], "station": r[1], "target_datetime": r[2]} for r in rows]
 
 
 def verify_predictions(conn, verified_at, results):

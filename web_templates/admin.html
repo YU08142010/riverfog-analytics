@@ -42,7 +42,8 @@
 
 <div class="card">
     <h2>ログ一覧</h2>
-    <table class="obs-table" style="width:auto;">
+    <div class="table-scroll">
+<table class="obs-table" style="width:auto;">
         <thead><tr><th>ログ</th><th>サイズ</th><th></th></tr></thead>
         <tbody>
         {% for l in logs %}
@@ -54,5 +55,6 @@
         {% endfor %}
         </tbody>
     </table>
+</div>
 </div>
 {% endblock %}

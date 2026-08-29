@@ -1,0 +1,15 @@
+{# stations_list.html(比較地点選択)とmember_detail.html(お気に入り地点選択)で共通の
+   チェックボックス付き地点グリッドを描画するマクロ。以前はこの2ファイルにほぼ同じ
+   マークアップが個別にコピーされていた。
+   checkbox_name: 各チェックボックスのname属性
+   checked_names: 初期状態でチェックしておく地点名の集合/リスト(無ければ空でよい) #}
+{% macro station_checkboxes(station_names, checkbox_name, checked_names=[]) %}
+<div class="station-grid">
+    {% for name in station_names %}
+    <label class="station-chip station-chip-checkbox">
+        <input type="checkbox" name="{{ checkbox_name }}" value="{{ name }}" {{ "checked" if name in checked_names }}>
+        <span>{{ name }}</span>
+    </label>
+    {% endfor %}
+</div>
+{% endmacro %}

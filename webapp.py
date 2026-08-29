@@ -1,9 +1,11 @@
 """SMB共有(data/以下)と同じ内容をブラウザから見られるようにするダッシュボード。
 
-LAN/Tailscale内からのみアクセスされる想定で、認証は行わない
-（既存のSamba共有・Cockpitと同じセキュリティモデル）。外部公開はしないこと。
+LAN/Tailscale内からのみアクセスされる想定。全ページログイン必須(_require_login参照)で、
+管理者専用の操作にはさらにロールチェック(requires_admin)がかかる。外部公開はしないこと。
 """
+import configparser
 import csv
+import hmac
 import io
 import json
 import logging
@@ -15,6 +17,8 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -25,7 +29,7 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from PIL import Image
 from flask import (
-    Flask, Response, abort, flash, jsonify, redirect, render_template,
+    Flask, Response, abort, flash, g, jsonify, redirect, render_template,
     request, send_file, send_from_directory, session, url_for,
 )
 
@@ -35,7 +39,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import font_manager
 
-from common import BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH
+from common import (
+    BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH,
+    build_data_backup_zip, now_jst_naive, send_alert,
+)
 import announcements
 import users
 import fog_data
@@ -56,6 +63,32 @@ ADMIN_SESSION_LIFETIME = timedelta(hours=2)
 
 USERS_DB_PATH = BASE_DIR / "data" / "users.db"
 MIN_PASSWORD_LENGTH = 8
+BIO_MAX_LENGTH = 300
+STATION_COMMENT_MAX_LENGTH = 1000
+
+# ログイン試行のレート制限(総当たり・アカウント列挙対策)。プロセス内メモリで管理する
+# シンプルな実装(waitressは単一プロセスで動かしているため、これで十分機能する)。
+LOGIN_ATTEMPT_WINDOW = timedelta(minutes=15)
+LOGIN_ATTEMPT_MAX = 10
+_login_attempts_lock = threading.Lock()
+_login_attempts_by_ip = {}
+
+
+def _client_ip():
+    return request.remote_addr or "unknown"
+
+
+def _login_rate_limited(ip):
+    now = datetime.now(JST)
+    with _login_attempts_lock:
+        attempts = [t for t in _login_attempts_by_ip.get(ip, []) if now - t < LOGIN_ATTEMPT_WINDOW]
+        _login_attempts_by_ip[ip] = attempts
+        return len(attempts) >= LOGIN_ATTEMPT_MAX
+
+
+def _record_login_failure(ip):
+    with _login_attempts_lock:
+        _login_attempts_by_ip.setdefault(ip, []).append(datetime.now(JST))
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
@@ -64,12 +97,22 @@ DB_PATH = BASE_DIR / "data" / "predictions.db"
 AVATAR_DIR = BASE_DIR / "data" / "avatars"
 AVATAR_SIZE = 256
 AVATAR_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+# デコンプレッションボム対策: 高圧縮率の画像(小さいファイルサイズで巨大な解像度)による
+# メモリ枯渇を防ぐため、Pillowの展開後ピクセル数の上限を明示的に指定する
+# (アバターとして必要なサイズよりかなり余裕を持たせた値)。
+Image.MAX_IMAGE_PIXELS = 40_000_000
 LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ)と同じく約53週間分
 
 # ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている
 # (river-fog-terminal.service)。Tailscale/LANどちらからアクセスしても繋がるよう、iframeのURLは
 # 固定せずリクエストのホスト名(request.host)に合わせて組み立てる（admin_terminal()参照）。
 TTYD_PORT = 7681
+
+# CockpitはOS標準でインストール済み(HTTPSのみ、自己署名証明書)。iframe埋め込みは
+# 自己署名証明書のせいでブラウザに無言でブロックされることがあるため、埋め込みはせず
+# 新しいタブで開くリンクだけをadmin_status.htmlに置く(admin_status_resources_jsonで
+# 自前のCPU/メモリ表示はリアルタイム更新している)。
+COCKPIT_PORT = 9090
 
 ALERT_HOURS_AHEAD = 24
 ALERT_MIN_FOG_PROB = 0.95
@@ -103,8 +146,13 @@ DISK_USAGE_PARTS = [
     ("観測データ (只見川.xlsx)", DATA_XLSX),
     ("モデル (models/)", BASE_DIR / "data" / "models"),
 ]
-BACKUP_ZIP_ROOT = BASE_DIR / "data"
 RESTORE_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
+# 復元のたびにdata_before_restore_*/.env_before_restore_*が増え続けディスクを圧迫しないよう、
+# 直近何世代分だけ残すか(古いものは復元成功時に自動削除する)。
+RESTORE_BACKUP_KEEP_GENERATIONS = 3
+# 展開後の合計サイズの上限(zip爆弾対策)。カメラ画像は既に圧縮済みで圧縮率が低いため、
+# アップロード上限(2GB)よりかなり大きめに取っても正常なバックアップなら十分収まる。
+RESTORE_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024 * 1024  # 50GB
 RESTORE_CONFIRM_PHRASE = "restore"
 
 # 検証済み(答え合わせ済み)の予測レコードのうち、これより古いものは管理画面から削除できる。
@@ -144,13 +192,33 @@ logging.basicConfig(
 )
 log = logging.getLogger("webapp")
 
+def _load_or_create_secret_key():
+    """SECRET_KEYを.envから読む。無ければ生成して.envに書き込み、以後は固定する。
+    以前は毎回ランダム生成していたが、webappの再起動(手動再起動・クラッシュ双方)のたびに
+    全ユーザーが強制ログアウトされてしまっていたため、永続化する。"""
+    existing = os.environ.get("SECRET_KEY")
+    if existing:
+        return existing
+    new_key = secrets.token_hex(32)
+    try:
+        with open(ENV_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\nSECRET_KEY={new_key}\n")
+        os.environ["SECRET_KEY"] = new_key
+    except Exception:
+        log.exception("Failed to persist SECRET_KEY to .env; using an in-memory key for this run")
+    return new_key
+
+
 app = Flask(__name__, template_folder="web_templates", static_folder="web_static")
-# 再起動のたびに変わってよい（管理者セッションが全員ログアウトされるだけ）ため、.envには
-# 保存せずプロセス起動時に毎回生成する。
-app.secret_key = secrets.token_hex(32)
+app.secret_key = _load_or_create_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = ADMIN_SESSION_LIFETIME
 app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# TailscaleのIP直打ちでHTTP配信されており、Secureを付けるとブラウザがCookie自体を
+# 送らなくなりログインできなくなる。HTTPS化した場合はFORCE_HTTPS_COOKIES=1を.envに
+# 設定すること。
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FORCE_HTTPS_COOKIES") == "1"
 
 try:
     STATION_NAMES = fog_data.load_station_names()
@@ -177,11 +245,64 @@ def _check_maintenance():
 @app.before_request
 def _require_login():
     """サイト全体をログイン必須にする（ログイン・登録申請そのものと静的ファイルは除く）。
-    メンテナンスモードのチェックが先に走るため、メンテナンス中はここに到達しない。"""
+    メンテナンスモードのチェックが先に走るため、メンテナンス中はここに到達しない。
+
+    ロール(session["role"])はDBの最新状態と毎回照合する。session.get("role")だけを
+    信用すると、管理者がロールを剥奪・アカウント削除しても、対象者は既存セッションが
+    切れるまで(最大ADMIN_SESSION_LIFETIME)そのまま操作を続けられてしまうため。
+    """
     if request.path.startswith(LOGIN_EXEMPT_PREFIXES):
         return None
-    if not session.get("user_id"):
+    user_id = session.get("user_id")
+    if not user_id:
         return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        user = users.get_user_by_id(conn, user_id)
+    finally:
+        conn.close()
+    if user is None:
+        session.clear()
+        flash("アカウントが削除されたため、ログアウトしました。")
+        return redirect(url_for("login", next=request.path))
+    session["role"] = user["role"]
+    return None
+
+
+CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# CSRFチェックの対象外にするパス。/web_staticは静的ファイルの配信のみでフォーム送信はない。
+CSRF_EXEMPT_PREFIXES = ("/web_static",)
+
+
+def _get_or_create_csrf_token():
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(16)
+        session["csrf_token"] = token
+    return token
+
+
+@app.context_processor
+def _inject_csrf_token():
+    return {"csrf_token": _get_or_create_csrf_token}
+
+
+@app.before_request
+def _check_csrf():
+    """状態変更を伴うリクエスト(GET/HEAD/OPTIONS以外)には、直前にレンダリングされた
+    ページ由来のCSRFトークン(セッションに保存)と一致するトークンの送信を必須にする。
+    ログイン中の利用者に別サイトから意図しないリクエストを踏ませるCSRF攻撃を防ぐ。
+    フォームには{{ csrf_token() }}を隠しフィールドとして埋め込む(data-ajaxフォームは
+    FormData(form)経由で自動的に含まれる)。"""
+    if request.method in CSRF_SAFE_METHODS:
+        return None
+    if request.path.startswith(CSRF_EXEMPT_PREFIXES):
+        return None
+    token = session.get("csrf_token")
+    submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    if not token or not submitted or not hmac.compare_digest(token, submitted):
+        log.warning("CSRF token mismatch for %s %s", request.method, request.path)
+        abort(400)
     return None
 
 
@@ -332,7 +453,7 @@ def _finish(endpoint, message, success=True, **url_kwargs):
     """
     if _wants_json():
         return jsonify({"message": message, "success": success}), (200 if success else 400)
-    flash(message)
+    flash(message, "success" if success else "error")
     return redirect(url_for(endpoint, **url_kwargs))
 
 
@@ -344,7 +465,7 @@ def _record_audit(action, detail=""):
     try:
         users.record_audit(
             conn, session.get("user_id"), session.get("name"), action, detail,
-            datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
         )
     finally:
         conn.close()
@@ -368,6 +489,26 @@ def _inject_app_version():
     return {"app_version": _app_version()}
 
 
+def _count_pending_signups():
+    """保留中の登録申請件数。1リクエスト内でpending_signup_count()(サイドバー等)と
+    _admin_overview()(管理者トップ)の両方から呼ばれることがあるため、flask.gで
+    リクエスト単位にキャッシュし、同じ内容のDB問い合わせが重複しないようにする。
+    """
+    if "pending_signup_count" in g:
+        return g.pending_signup_count
+    try:
+        conn = _users_conn()
+        try:
+            count = len(users.list_signup_requests(conn, status="pending"))
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to count pending signup requests: %s", e)
+        count = 0
+    g.pending_signup_count = count
+    return count
+
+
 @app.context_processor
 def _inject_pending_signup_count():
     """管理者タブの「アカウント管理」に未処理件数のバッジを出すため、admin_nav.htmlから
@@ -378,15 +519,7 @@ def _inject_pending_signup_count():
     def pending_signup_count():
         if session.get("role") != "admin":
             return 0
-        try:
-            conn = _users_conn()
-            try:
-                return len(users.list_signup_requests(conn, status="pending"))
-            finally:
-                conn.close()
-        except Exception as e:
-            log.warning("Failed to count pending signup requests: %s", e)
-            return 0
+        return _count_pending_signups()
     return {"pending_signup_count": pending_signup_count}
 
 
@@ -412,7 +545,7 @@ def _current_notifications():
         })
 
     if session.get("role") == "admin":
-        overview = _admin_overview()
+        overview = _admin_overview_cached()
         if overview["disk_used_pct"] is not None and overview["disk_used_pct"] >= 85:
             notifications.append({
                 "id": "sys:disk",
@@ -441,6 +574,16 @@ def _current_notifications():
                 "message": f"保留中の登録申請が{overview['pending_signups']}件あります",
                 "url": url_for("admin_accounts"),
             })
+        if overview["recent_restart_count"] >= RESTART_ALERT_THRESHOLD:
+            notifications.append({
+                "id": "sys:frequent_restarts",
+                "level": "danger",
+                "message": (
+                    f"直近{RESTART_ALERT_WINDOW_HOURS}時間でwebappが{overview['recent_restart_count']}回"
+                    "起動しています(クラッシュループの可能性があります)"
+                ),
+                "url": url_for("admin_log", key="webapp"),
+            })
     return notifications
 
 
@@ -455,16 +598,6 @@ def _inject_notifications():
     return {"notifications_data": notifications_data}
 
 
-def requires_login(view):
-    """ログイン必須（ロールは問わない）。未ログイン/期限切れなら/loginへリダイレクトする。"""
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("user_id"):
-            return redirect(url_for("login", next=request.path))
-        return view(*args, **kwargs)
-    return wrapped
-
-
 def requires_admin(view):
     """管理者ロールのアカウントでのログインを必須にする。
     HTTP Basic認証にすると、ブラウザがパスワードを覚えて自動送信し続けてしまい
@@ -475,7 +608,7 @@ def requires_admin(view):
         if not session.get("user_id"):
             return redirect(url_for("login", next=request.path))
         if session.get("role") != "admin":
-            flash("この操作には管理者権限が必要です。")
+            flash("この操作には管理者権限が必要です。", "error")
             return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
     return wrapped
@@ -749,7 +882,7 @@ def _low_accuracy_stations(state, n=5):
 def _upcoming_fog_alerts_safe():
     if not DB_PATH.exists():
         return []
-    now_naive = datetime.now(JST).replace(tzinfo=None)
+    now_naive = now_jst_naive()
     from_str = now_naive.strftime("%Y-%m-%d %H:%M:%S")
     to_str = (now_naive + timedelta(hours=ALERT_HOURS_AHEAD)).strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -823,6 +956,37 @@ def _recent_log_issues(max_per_log=LOG_ISSUE_SCAN_LINES, max_total=LOG_ISSUE_MAX
     return issues[:max_total]
 
 
+# このログメッセージが短時間に何度も出る場合、クラッシュループか頻繁な手動再起動が
+# 起きている兆候(以前、実際に約1.5日で65回起動していたことがあった)。
+RESTART_LOG_MARKER = "Starting river-fog webapp"
+RESTART_ALERT_WINDOW_HOURS = 24
+RESTART_ALERT_THRESHOLD = 10
+
+
+def _recent_restart_count(hours=RESTART_ALERT_WINDOW_HOURS):
+    """webapp.logの起動ログを直近hours時間分だけ数える(頻繁な再起動・クラッシュループの検知用)。"""
+    if not LOG_FILE.exists():
+        return 0
+    cutoff = now_jst_naive() - timedelta(hours=hours)
+    count = 0
+    try:
+        with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()[-LOG_ISSUE_SCAN_LINES:]
+    except Exception as e:
+        log.warning("Failed to read webapp log for restart count: %s", e)
+        return 0
+    for line in lines:
+        if RESTART_LOG_MARKER not in line:
+            continue
+        try:
+            ts = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        if ts >= cutoff:
+            count += 1
+    return count
+
+
 AI_SUMMARY_PATH = BASE_DIR / "data" / "ai_summary.json"
 
 
@@ -865,7 +1029,7 @@ def _network_failure_summary(recent_n=30):
         log.warning("Failed to read network failure log: %s", e)
         return empty
 
-    now = datetime.now(JST).replace(tzinfo=None)
+    now = now_jst_naive()
     count_24h = sum(1 for r in rows if now - r["datetime"] <= timedelta(hours=24))
     count_7d = sum(1 for r in rows if now - r["datetime"] <= timedelta(days=7))
     rows.sort(key=lambda r: r["datetime"], reverse=True)
@@ -895,6 +1059,44 @@ def _systemctl_show(unit, properties):
             k, v = line.split("=", 1)
             info[k] = v
     return info
+
+
+SMB_CONF_PATH = Path("/etc/samba/smb.conf")
+SMB_SHARE_NAME = "river-fog"
+
+
+def _read_smb_share_config(share_name=SMB_SHARE_NAME, path=SMB_CONF_PATH):
+    """smb.confから指定共有(既定: river-fog)の設定を読み取り専用で読む。
+    Sambaの設定ファイルはINI形式に近いためconfigparserで解析する
+    (`;`/`#`によるコメント記法がconfigparserの既定と一致する)。
+    値に含まれるSamba独自のマクロ(%h, %m, %u等)をconfigparserの補間機能が
+    誤って解釈しないよう、interpolation=Noneで無効化している。
+    ファイルが無い/読めない/該当セクションが無い場合はNoneを返す
+    (書き込みは行わない。設定変更はサーバー上で直接smb.confを編集する運用のまま)。
+    """
+    if not path.exists():
+        return None
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    try:
+        parser.read(path, encoding="utf-8")
+    except Exception as e:
+        log.warning("Failed to parse smb.conf: %s", e)
+        return None
+    if share_name not in parser:
+        return None
+    section = parser[share_name]
+
+    def _yn(key, default=False):
+        return section.get(key, "yes" if default else "no").strip().lower() in ("yes", "true", "1")
+
+    return {
+        "path": section.get("path", "-"),
+        "read_only": _yn("read only", default=True),
+        "guest_ok": _yn("guest ok", default=False),
+        "browseable": _yn("browseable", default=True),
+        "valid_users": section.get("valid users", "").strip(),
+        "comment": section.get("comment", "").strip(),
+    }
 
 
 def _crontab_safe():
@@ -1077,8 +1279,12 @@ def _read_editable_env_values():
 def _write_editable_env_values(updates):
     """updates: {key: value}。EDITABLE_ENV_KEYSに含まれるものだけを.envに書き戻す。
     既存の行は値だけ置き換え、無ければ末尾に追記する。他の行(APIキー等)には触れない。
+    値に改行が含まれていると、意図しない環境変数行が追記されてしまうため拒否する。
     """
     updates = {k: v for k, v in updates.items() if k in EDITABLE_ENV_KEYS}
+    for key, val in updates.items():
+        if "\n" in val or "\r" in val:
+            raise ValueError(f"{key} の値に改行を含めることはできません")
     lines = _read_env_file_lines()
     seen = set()
     new_lines = []
@@ -1128,11 +1334,17 @@ _GEMINI_LINE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _GEMINI_FALLBACK_RE = re.compile(r"fell back to sub key")
 _GEMINI_QUOTA_RE = re.compile(r"RESOURCE_EXHAUSTED|429")
 _GEMINI_CONFIDENCE_RE = re.compile(r"Confidence distribution: high=(\d+), medium=(\d+), low=(\d+)")
+# 分類・エスカレーション・AI要約それぞれの呼び出し回数を数えるためのパターン。
+# 「本当に2キーで足りているか」を実際の呼び出し量から判断できるようにする。
+_GEMINI_CLASSIFICATION_CALL_RE = _GEMINI_CONFIDENCE_RE  # 分類成功のたびに必ず1回出るログ
+_GEMINI_ESCALATION_CALL_RE = re.compile(r"retrying with escalation model")
+_GEMINI_ESCALATION_SKIPPED_RE = re.compile(r"Skipping escalation for \d+ station")
+_GEMINI_SUMMARY_CALL_RE = re.compile(r"Saved AI summary")
 
 
 def _gemini_log_stats(days=GEMINI_LOG_DAYS):
     """collect.logからGeminiまわりの状況(APIキーのフォールバック回数・クォータ超過回数・
-    confidence分布)を日付ごとに集計する。"""
+    confidence分布・呼び出し回数)を日付ごとに集計する。"""
     path = ALLOWED_LOGS.get("collect")
     by_date = {}
     if not path or not path.exists():
@@ -1146,6 +1358,8 @@ def _gemini_log_stats(days=GEMINI_LOG_DAYS):
                 date = m.group(1)
                 entry = by_date.setdefault(date, {
                     "fallback": 0, "quota_error": 0, "high": 0, "medium": 0, "low": 0,
+                    "classification_calls": 0, "escalation_calls": 0,
+                    "escalation_skipped": 0, "summary_calls": 0,
                 })
                 if _GEMINI_FALLBACK_RE.search(line):
                     entry["fallback"] += 1
@@ -1156,6 +1370,13 @@ def _gemini_log_stats(days=GEMINI_LOG_DAYS):
                     entry["high"] += int(cm.group(1))
                     entry["medium"] += int(cm.group(2))
                     entry["low"] += int(cm.group(3))
+                    entry["classification_calls"] += 1
+                if _GEMINI_ESCALATION_CALL_RE.search(line):
+                    entry["escalation_calls"] += 1
+                if _GEMINI_ESCALATION_SKIPPED_RE.search(line):
+                    entry["escalation_skipped"] += 1
+                if _GEMINI_SUMMARY_CALL_RE.search(line):
+                    entry["summary_calls"] += 1
     except Exception as e:
         log.warning("Failed to scan collect.log for Gemini stats: %s", e)
         return []
@@ -1180,7 +1401,7 @@ def _active_announcements_safe():
     try:
         conn = _announcements_conn()
         try:
-            now_str = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+            now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
             return announcements.get_active_announcements(conn, now_str)
         finally:
             conn.close()
@@ -1189,19 +1410,36 @@ def _active_announcements_safe():
         return []
 
 
+# ダッシュボード等、複数のページから毎リクエスト呼ばれる集計(predictionsテーブル全体を
+# GROUP BYで走査する)。データが更新されるのはpredict.py実行時(1日1回程度)だけなので、
+# 短いTTLでキャッシュして無駄な全表走査を減らす。
+ACCURACY_SUMMARY_CACHE_SECONDS = 60
+_accuracy_summary_cache = {"data": None, "at": 0.0}
+_accuracy_summary_cache_lock = threading.Lock()
+
+
 def _accuracy_summary_safe():
     """予測精度サマリーを読み取り専用で取得する。DBが無い/読めない場合はNoneを返す。"""
+    now = time.monotonic()
+    with _accuracy_summary_cache_lock:
+        cached = _accuracy_summary_cache["data"]
+        if cached is not None and now - _accuracy_summary_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+            return cached
     if not DB_PATH.exists():
         return None
     try:
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
-            return prediction_log.accuracy_summary(conn)
+            result = prediction_log.accuracy_summary(conn)
         finally:
             conn.close()
     except Exception as e:
         log.warning("Failed to read accuracy summary: %s", e)
         return None
+    with _accuracy_summary_cache_lock:
+        _accuracy_summary_cache["data"] = result
+        _accuracy_summary_cache["at"] = now
+    return result
 
 
 def _latest_observations():
@@ -1233,6 +1471,14 @@ def _latest_observations():
         "visibility": main_row.get("視程(km)"),
         "stations": stations,
     }
+
+
+# ============================================================================
+# 公開ページ(観測データ・カメラ画像・予測・地点別ページ)
+# 2668行の単一ファイルで見通しが悪いという指摘への対応として、まずは大まかな区分けの
+# コメントを入れている(Blueprint分割は全url_for呼び出し・テンプレートへの影響が大きく、
+# ステージング環境の無いこの構成で一括に行うのはリスクが高いため見送った)。
+# ============================================================================
 
 
 @app.route("/")
@@ -1562,7 +1808,8 @@ def station_detail(name):
     conn = _users_conn()
     try:
         raw_comments = users.list_station_comments(conn, name)
-        author_names = {u["id"]: u["name"] for u in users.list_users(conn)}
+        commenter_ids = {c["user_id"] for c in raw_comments}
+        author_names = {uid: u["name"] for uid, u in users.get_users_by_ids(conn, commenter_ids).items()}
     finally:
         conn.close()
     comments = [
@@ -1588,6 +1835,7 @@ def station_detail(name):
         current_by_name=current_by_name,
         active_names=[name],
         comments=comments,
+        comment_max_length=STATION_COMMENT_MAX_LENGTH,
         ai_station_summary=ai_station_summary,
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
     )
@@ -1596,14 +1844,14 @@ def station_detail(name):
 @app.route("/stations/<name>/comments", methods=["POST"])
 def station_comment_add(name):
     name = _validate_station(name)
-    body = request.form.get("body", "").strip()[:1000]
+    body = request.form.get("body", "").strip()[:STATION_COMMENT_MAX_LENGTH]
     if not body:
         return _finish("station_detail", "コメントを入力してください。", success=False, name=name)
     conn = _users_conn()
     try:
         users.add_station_comment(
             conn, name, session["user_id"], body,
-            datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
         )
     finally:
         conn.close()
@@ -1677,6 +1925,11 @@ def accuracy_chart():
     return Response(png, mimetype="image/png")
 
 
+# ============================================================================
+# 認証・会員ページ(ログイン・サインアップ・メンバー一覧・プロフィール)
+# ============================================================================
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_path = request.values.get("next") or url_for("dashboard")
@@ -1685,6 +1938,10 @@ def login():
 
     error = None
     if request.method == "POST":
+        ip = _client_ip()
+        if _login_rate_limited(ip):
+            error = "ログイン試行の回数が多すぎます。しばらくしてから再度お試しください。"
+            return render_template("login.html", error=error, next=next_path)
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
         conn = _users_conn()
@@ -1698,13 +1955,14 @@ def login():
             session["role"] = user["role"]
             session["name"] = user["name"]
             session.permanent = True
-            login_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+            login_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
             conn = _users_conn()
             try:
                 users.record_login(conn, user["id"], login_at)
             finally:
                 conn.close()
             return redirect(next_path)
+        _record_login_failure(ip)
         error = "メールアドレスまたはパスワードが違います。"
 
     return render_template("login.html", error=error, next=next_path)
@@ -1744,9 +2002,9 @@ def members_list():
     conn = _users_conn()
     try:
         all_users = users.list_users(conn)
-        login_counts = {u["id"]: users.login_count(conn, u["id"]) for u in all_users}
-        last_logins = {u["id"]: users.last_login(conn, u["id"]) for u in all_users}
-        streaks = {u["id"]: users.login_streak(conn, u["id"], today) for u in all_users}
+        login_counts = users.login_counts_all(conn)
+        last_logins = users.last_logins_all(conn)
+        streaks = users.login_streaks_all(conn, today)
     finally:
         conn.close()
     members = [
@@ -1795,6 +2053,7 @@ def member_detail(user_id):
         is_self=(session.get("user_id") == user_id),
         heatmap_days=LOGIN_HEATMAP_DAYS,
         avatar_size=AVATAR_SIZE,
+        bio_max_length=BIO_MAX_LENGTH,
     )
 
 
@@ -1803,7 +2062,7 @@ def member_profile_update(user_id):
     """自己紹介文とお気に入り地点は本人のみが変更できる(アバターと同じ制限)。"""
     if session.get("user_id") != user_id:
         abort(403)
-    bio = request.form.get("bio", "").strip()[:300]
+    bio = request.form.get("bio", "").strip()[:BIO_MAX_LENGTH]
     favorite_stations = [s for s in request.form.getlist("favorite_stations") if s in STATION_NAMES]
     conn = _users_conn()
     try:
@@ -1879,7 +2138,7 @@ def signup():
                 if users.email_taken(conn, email):
                     error = "このメールアドレスは既に登録済み、または申請中です。"
                 else:
-                    requested_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+                    requested_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
                     users.create_signup_request(
                         conn, name, email, users.generate_password_hash(password), requested_at,
                     )
@@ -1889,6 +2148,24 @@ def signup():
                 return render_template("signup.html", submitted=True)
 
     return render_template("signup.html", error=error, submitted=False)
+
+
+# 管理画面を開かなくてもディスク逼迫・頻繁な再起動等に気付けるよう、ALERT_WEBHOOK_URLが
+# 設定されていればプッシュ通知する。_admin_overview()は短いTTLキャッシュ越しとはいえ
+# 頻繁に呼ばれるため、同じ内容を送り続けないよう種類ごとにクールダウンを設ける。
+_ALERT_COOLDOWN_SEC = 3600
+_last_alert_sent_at = {}
+_last_alert_lock = threading.Lock()
+
+
+def _send_alert_throttled(key, message):
+    now = time.monotonic()
+    with _last_alert_lock:
+        last = _last_alert_sent_at.get(key, 0.0)
+        if now - last < _ALERT_COOLDOWN_SEC:
+            return
+        _last_alert_sent_at[key] = now
+    send_alert(message, source="webapp")
 
 
 def _admin_overview():
@@ -1903,6 +2180,10 @@ def _admin_overview():
         disk_used_pct = round(100.0 * used / total, 1) if total else None
     except Exception:
         disk_used_pct = None
+    if disk_used_pct is not None and disk_used_pct >= 85:
+        _send_alert_throttled("disk", f"ディスク使用率が{disk_used_pct}%です")
+    if collect_timer_state != "active":
+        _send_alert_throttled("collect_timer", "毎時収集タイマーが停止しています")
     network_failures = _network_failure_summary()
     model_state = fog_model.load_model_state()
     last_trained_at = None
@@ -1910,24 +2191,49 @@ def _admin_overview():
         trained_ats = [info.get("trained_at") for info in model_state.values() if info.get("trained_at")]
         if trained_ats:
             last_trained_at = max(trained_ats)
-    try:
-        conn = _users_conn()
-        try:
-            pending_signups = len(users.list_signup_requests(conn, status="pending"))
-        finally:
-            conn.close()
-    except Exception as e:
-        log.warning("Failed to count pending signup requests: %s", e)
-        pending_signups = 0
+    restart_count = _recent_restart_count()
+    if restart_count >= RESTART_ALERT_THRESHOLD:
+        _send_alert_throttled(
+            "frequent_restarts",
+            f"直近{RESTART_ALERT_WINDOW_HOURS}時間でwebappが{restart_count}回起動しています",
+        )
     return {
         "web_active": web_state == "active",
         "collect_timer_active": collect_timer_state == "active",
         "disk_used_pct": disk_used_pct,
-        "pending_signups": pending_signups,
+        "pending_signups": _count_pending_signups(),
         "network_failures_24h": network_failures["count_24h"],
         "last_trained_at": last_trained_at,
         "model_count": len(model_state),
+        "recent_restart_count": restart_count,
     }
+
+
+# 通知ベル(base.html)は全ページのヘッダーに出るため、_admin_overview()(systemctl showの
+# subprocess呼び出し2回・ディスク使用量計算・DBクエリを含む)が管理者のページ表示のたびに
+# 毎回走ってしまう。短いTTLでキャッシュし、無駄な外部プロセス起動を減らす
+# (トレードオフとして、管理者トップ画面の表示が最大ADMIN_OVERVIEW_CACHE_SECONDS秒古くなりうる)。
+ADMIN_OVERVIEW_CACHE_SECONDS = 30
+_admin_overview_cache = {"data": None, "at": 0.0}
+_admin_overview_cache_lock = threading.Lock()
+
+
+def _admin_overview_cached():
+    now = time.monotonic()
+    with _admin_overview_cache_lock:
+        cached = _admin_overview_cache["data"]
+        if cached is not None and now - _admin_overview_cache["at"] < ADMIN_OVERVIEW_CACHE_SECONDS:
+            return cached
+    data = _admin_overview()
+    with _admin_overview_cache_lock:
+        _admin_overview_cache["data"] = data
+        _admin_overview_cache["at"] = now
+    return data
+
+
+# ============================================================================
+# 管理者ページ(アカウント管理・ログ・ステータス・モデル・ディスク・バックアップ・設定)
+# ============================================================================
 
 
 @app.route("/admin")
@@ -2044,7 +2350,7 @@ def admin_accounts_delete(user_id):
         session.clear()
         if _wants_json():
             return jsonify({"message": message, "success": True, "redirect": url_for("login")})
-        flash(message)
+        flash(message, "success")
         return redirect(url_for("login"))
     return _finish("admin_accounts", message)
 
@@ -2055,7 +2361,7 @@ def admin_accounts_approve(request_id):
     conn = _users_conn()
     try:
         req = users.get_signup_request(conn, request_id)
-        created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         ok = users.approve_signup_request(conn, request_id, created_at)
     finally:
         conn.close()
@@ -2093,7 +2399,7 @@ def admin_accounts_requests_bulk():
     conn = _users_conn()
     processed = []
     try:
-        created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         n = 0
         for rid in request_ids:
             try:
@@ -2153,6 +2459,37 @@ def admin_status():
         "admin_status.html", units=units, timer_info=timer_info,
         crontab=_crontab_safe(), running=running,
         resources=_read_server_resources(),
+        cockpit_port=COCKPIT_PORT,
+    )
+
+
+@app.route("/admin/status/resources.json")
+@requires_admin
+def admin_status_resources_json():
+    """サーバーリソース(CPU負荷・メモリ・温度)をJSONで返す。admin_status.htmlが
+    数秒おきにポーリングしてCockpit風にリアルタイム更新するために使う。
+    /proc・/sysの読み取りのみでsubprocessを呼ばないため、頻繁に呼んでも軽い。
+    """
+    return jsonify(_read_server_resources())
+
+
+@app.route("/admin/smb")
+@requires_admin
+def admin_smb():
+    """Samba([river-fog]共有)の設定・サービス状態を閲覧専用で表示する。
+    設定の変更やsmbd/nmbdの再起動はここでは行わない(sudoersの追加が必要になり、
+    ネットワーク共有の設定に管理画面から書き込めるようにするリスクが見合わないと
+    判断し、閲覧のみに留めた)。設定を変更したい場合はサーバー上で直接
+    /etc/samba/smb.confを編集し、`sudo systemctl reload smbd`すること。
+    """
+    share = _read_smb_share_config()
+    smbd_state = _systemctl_show("smbd", ["ActiveState", "SubState"])
+    nmbd_state = _systemctl_show("nmbd", ["ActiveState", "SubState"])
+    return render_template(
+        "admin_smb.html",
+        share=share, share_name=SMB_SHARE_NAME,
+        smbd_state=smbd_state, nmbd_state=nmbd_state,
+        smb_conf_path=str(SMB_CONF_PATH),
     )
 
 
@@ -2163,10 +2500,10 @@ def admin_run(key):
     if script is None:
         abort(404)
     if _is_script_running(script):
-        flash(f"{script} は既に実行中のため、開始しませんでした。")
+        flash(f"{script} は既に実行中のため、開始しませんでした。", "error")
     else:
         _run_script_async(script)
-        flash(f"{script} の実行を開始しました。数分後にログを確認してください。")
+        flash(f"{script} の実行を開始しました。数分後にログを確認してください。", "success")
     return redirect(url_for("admin_status"))
 
 
@@ -2181,10 +2518,10 @@ def admin_restart():
             ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
             start_new_session=True,
         )
-        flash("webappサービスを再起動します(数秒後にページを再読み込みしてください)。")
+        flash("webappサービスを再起動します(数秒後にページを再読み込みしてください)。", "success")
     except Exception as e:
         log.exception("Failed to trigger webapp restart")
-        flash(f"再起動の開始に失敗しました: {e}")
+        flash("再起動の開始に失敗しました。詳細はログを確認してください。", "error")
     return redirect(url_for("admin_status"))
 
 
@@ -2327,7 +2664,7 @@ def admin_disk_images_cleanup():
             shutil.rmtree(day_dir)
             deleted += 1
     if deleted:
-        flash(f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。")
+        flash(f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。", "success")
         _record_audit(
             "カメラ画像アーカイブ削除",
             f"{cutoff.strftime('%Y-%m-%d')}より前を{deleted}日分削除(解放: {_human_size(freed_bytes)})",
@@ -2347,10 +2684,10 @@ def admin_backup():
     tmp.close()
     tmp_path = tmp.name
     try:
-        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in BACKUP_ZIP_ROOT.rglob("*"):
-                if f.is_file():
-                    zf.write(f, arcname=str(f.relative_to(BACKUP_ZIP_ROOT)))
+        # .envの内容(APIキー等)を含むが、このエンドポイント自体が管理者限定
+        # (@requires_admin)のため許容する。backup.py(定期自動バックアップ)とも
+        # 共通のロジック(common.build_data_backup_zip)を使う。
+        build_data_backup_zip(tmp_path)
         stamp = datetime.now(JST).strftime("%Y%m%d_%H%M")
         response = send_file(
             tmp_path, mimetype="application/zip", as_attachment=True,
@@ -2364,37 +2701,59 @@ def admin_backup():
         raise
 
 
+def _prune_restore_backups(pattern, keep=RESTORE_BACKUP_KEEP_GENERATIONS):
+    """BASE_DIR直下のdata_before_restore_*/.env_before_restore_*のうち、直近keep件を
+    残して古いものを削除する(復元を繰り返すたびに無期限に溜まっていくのを防ぐ)。
+    """
+    paths = sorted(BASE_DIR.glob(pattern), key=lambda p: p.name, reverse=True)
+    for old in paths[keep:]:
+        try:
+            if old.is_dir():
+                shutil.rmtree(old)
+            else:
+                old.unlink()
+            log.info("Pruned old restore backup: %s", old.name)
+        except Exception as e:
+            log.warning("Failed to prune old restore backup %s: %s", old.name, e)
+
+
 def _safe_extract_zip(zf, dest_dir):
     """zip-slip対策: 各エントリの展開先がdest_dir配下に収まることを、実際に展開する前に
     全件確認する（絶対パスや".."を含むエントリで想定外の場所に書き込まれるのを防ぐ）。
+    また、展開後の合計サイズがRESTORE_MAX_UNCOMPRESSED_BYTESを超えないことも確認する
+    (圧縮率の高いZIPでディスクを枯渇させるzip爆弾対策)。
     """
     dest_dir = dest_dir.resolve()
+    total_size = 0
     for member in zf.infolist():
         member_path = (dest_dir / member.filename).resolve()
         if member_path != dest_dir and dest_dir not in member_path.parents:
             raise ValueError(f"Unsafe path in zip: {member.filename}")
+        total_size += member.file_size
+        if total_size > RESTORE_MAX_UNCOMPRESSED_BYTES:
+            raise ValueError("展開後の合計サイズが上限を超えています")
     zf.extractall(dest_dir)
 
 
 @app.route("/admin/backup/restore", methods=["POST"])
 @requires_admin
 def admin_backup_restore():
-    """アップロードされたバックアップZIPでdata/一式を丸ごと復元する。
+    """アップロードされたバックアップZIPでdata/一式(および含まれていれば.env)を丸ごと復元する。
     アカウント情報を含む全データを置き換える取り消しにくい操作のため、確認フレーズの
-    一致を必須にし、復元前のdata/は削除せず日時付きディレクトリに退避しておく
+    一致を必須にし、復元前のdata/・.envは削除せず日時付きファイル/ディレクトリに退避しておく
     （何か問題があれば手動で戻せるように）。
     """
     confirm = request.form.get("confirm", "").strip().lower()
     if confirm != RESTORE_CONFIRM_PHRASE:
-        flash(f'確認のため、入力欄に半角で "{RESTORE_CONFIRM_PHRASE}" と入力してください。')
+        flash(f'確認のため、入力欄に半角で "{RESTORE_CONFIRM_PHRASE}" と入力してください。', "error")
         return redirect(url_for("admin_disk"))
 
     file = request.files.get("backup_zip")
     if not file or not file.filename:
-        flash("ZIPファイルを選択してください。")
+        flash("ZIPファイルを選択してください。", "error")
         return redirect(url_for("admin_disk"))
     if not file.filename.lower().endswith(".zip"):
-        flash("ZIPファイル(.zip)を選択してください。")
+        flash("ZIPファイル(.zip)を選択してください。", "error")
         return redirect(url_for("admin_disk"))
 
     tmp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
@@ -2404,13 +2763,13 @@ def admin_backup_restore():
     try:
         file.save(tmp_zip_path)
         if tmp_zip_path.stat().st_size > RESTORE_MAX_UPLOAD_BYTES:
-            flash(f"ファイルが大きすぎます({RESTORE_MAX_UPLOAD_BYTES // (1024 ** 3)}GB以下にしてください)。")
+            flash(f"ファイルが大きすぎます({RESTORE_MAX_UPLOAD_BYTES // (1024 ** 3)}GB以下にしてください)。", "error")
             return redirect(url_for("admin_disk"))
 
         try:
             zf = zipfile.ZipFile(tmp_zip_path)
         except zipfile.BadZipFile:
-            flash("有効なZIPファイルではありません。")
+            flash("有効なZIPファイルではありません。", "error")
             return redirect(url_for("admin_disk"))
 
         staging_dir = Path(tempfile.mkdtemp(prefix="river-fog-restore-", dir=str(BASE_DIR)))
@@ -2418,12 +2777,24 @@ def admin_backup_restore():
             _safe_extract_zip(zf, staging_dir)
 
         stamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
+
+        # .envはadmin_backup()がdata/の外(BASE_DIR直下)に別途含めたものなので、
+        # staging_dir(このままdata/になる)の外へ退避してから個別に反映する。
+        # 元の.envもdata/と同様に日時付きでバックアップしておく(何か問題があれば手動で戻せるように)。
+        staged_env = staging_dir / ".env"
+        if staged_env.exists():
+            if ENV_PATH.exists():
+                shutil.copy2(ENV_PATH, BASE_DIR / f".env_before_restore_{stamp}")
+            shutil.move(str(staged_env), str(ENV_PATH))
+
         pre_restore_dir = BASE_DIR / f"data_before_restore_{stamp}"
         data_dir = BASE_DIR / "data"
         if data_dir.exists():
             data_dir.rename(pre_restore_dir)
         staging_dir.rename(data_dir)
         staging_dir = None
+        _prune_restore_backups("data_before_restore_*")
+        _prune_restore_backups(".env_before_restore_*")
 
         _record_audit(
             "バックアップ復元",
@@ -2431,7 +2802,8 @@ def admin_backup_restore():
         )
         flash(
             f"data/一式を復元しました。復元前のデータは {pre_restore_dir.name} "
-            "に退避してあります(問題なければ後で手動削除してください)。サービスを再起動します。"
+            "に退避してあります(問題なければ後で手動削除してください)。サービスを再起動します。",
+            "success",
         )
         subprocess.Popen(
             ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
@@ -2439,7 +2811,7 @@ def admin_backup_restore():
         )
     except Exception as e:
         log.exception("Backup restore failed")
-        flash(f"復元に失敗しました: {e}")
+        flash("復元に失敗しました。詳細はログを確認してください。", "error")
     finally:
         if tmp_zip_path.exists():
             tmp_zip_path.unlink()
@@ -2483,18 +2855,18 @@ def admin_db_cleanup():
     except ValueError:
         days = DB_CLEANUP_DEFAULT_DAYS
     days = max(1, days)
-    before_dt = (datetime.now(JST).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    before_dt = (now_jst_naive() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = sqlite3.connect(str(DB_PATH))
         try:
             deleted = prediction_log.delete_verified_before(conn, before_dt)
         finally:
             conn.close()
-        flash(f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。")
+        flash(f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。", "success")
         _record_audit("予測DBクリーンアップ", f"{before_dt}より前の検証済みレコードを{deleted}件削除")
     except Exception as e:
         log.exception("DB cleanup failed")
-        flash(f"クリーンアップに失敗しました: {e}")
+        flash("クリーンアップに失敗しました。詳細はログを確認してください。", "error")
     return redirect(url_for("admin_db"))
 
 
@@ -2518,10 +2890,10 @@ def admin_settings():
         updates = {key: request.form.get(key, "").strip() for key in EDITABLE_ENV_KEYS}
         try:
             _write_editable_env_values(updates)
-            flash("設定を保存しました。次回のcollect.py/predict.py実行から反映されます。")
+            flash("設定を保存しました。次回のcollect.py/predict.py実行から反映されます。", "success")
         except Exception as e:
             log.exception("Failed to write .env")
-            flash(f"設定の保存に失敗しました: {e}")
+            flash("設定の保存に失敗しました。詳細はログを確認してください。", "error")
         return redirect(url_for("admin_settings"))
     return render_template("admin_settings.html", values=_read_editable_env_values())
 
@@ -2552,7 +2924,7 @@ def admin_maintenance():
         enabled = request.form.get("enabled") == "on"
         message = request.form.get("message", "").strip()
         _set_maintenance_state(enabled, message)
-        flash("メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。")
+        flash("メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。", "success")
         return redirect(url_for("admin_maintenance"))
     return render_template("admin_maintenance.html", state=_maintenance_state())
 
@@ -2581,19 +2953,19 @@ def admin_announcements_new():
     if kind == "choice":
         choices = [c.strip() for c in request.form.get("choices", "").splitlines() if c.strip()]
         if len(choices) < 2:
-            flash("選択式アンケートには選択肢を2つ以上入力してください。")
+            flash("選択式アンケートには選択肢を2つ以上入力してください。", "error")
             return redirect(url_for("admin_announcements"))
     if not message:
-        flash("本文/質問文を入力してください。")
+        flash("本文/質問文を入力してください。", "error")
         return redirect(url_for("admin_announcements"))
 
-    created_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
     conn = _announcements_conn()
     try:
         announcements.create_announcement(conn, kind, message, choices, start_at, end_at, created_at)
     finally:
         conn.close()
-    flash("お知らせ/アンケートを作成しました。")
+    flash("お知らせ/アンケートを作成しました。", "success")
     return redirect(url_for("admin_announcements"))
 
 
@@ -2619,7 +2991,7 @@ def admin_announcements_delete(announcement_id):
         announcements.delete_announcement(conn, announcement_id)
     finally:
         conn.close()
-    flash("削除しました。")
+    flash("削除しました。", "success")
     return redirect(url_for("admin_announcements"))
 
 
@@ -2647,7 +3019,7 @@ def respond_announcement(announcement_id):
         visitor_id, is_new = _get_visitor_id()
         choice_index = request.form.get("choice_index")
         answer_text = request.form.get("answer_text", "").strip() or None
-        submitted_at = datetime.now(JST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        submitted_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         announcements.record_response(
             conn, announcement_id, visitor_id,
             int(choice_index) if choice_index not in (None, "") else None,
@@ -2655,7 +3027,7 @@ def respond_announcement(announcement_id):
         )
     finally:
         conn.close()
-    flash("回答ありがとうございました。")
+    flash("回答ありがとうございました。", "success")
     response = redirect(request.referrer or url_for("dashboard"))
     if is_new:
         response.set_cookie(VISITOR_COOKIE_NAME, visitor_id, max_age=VISITOR_COOKIE_MAX_AGE)

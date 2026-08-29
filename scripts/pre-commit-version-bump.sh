@@ -7,6 +7,10 @@
 # リポジトリ側にも同じ内容を保存しておき、.git/hooks/pre-commit にコピーして使う。
 #   cp scripts/pre-commit-version-bump.sh .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
+#
+# あわせて scripts/post-commit-version-tag.sh も .git/hooks/post-commit に導入すると、
+# コミットのたびに v<VERSION> の軽量タグが自動で付き、`git tag` から直接
+# バージョンとコミットの対応を追えるようになる(任意だが推奨)。
 
 VERSION_FILE="VERSION"
 

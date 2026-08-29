@@ -7,11 +7,15 @@
     --color-surface: #ffffff;
     --color-border: #dde4ea;
     --color-text: #1c2733;
-    --color-text-muted: #71808f;
+    /* WCAG AA(4.5:1)を満たすよう#71808fから調整(白背景で4.05:1、カード外の背景で3.70:1しか
+       なくAA未達だったため)。#606d7aは白背景で5.3:1、背景色で4.84:1。 */
+    --color-text-muted: #606d7a;
     --color-danger: #c0392b;
     --color-danger-bg: #fdecea;
+    --color-danger-dark: #a3291b;
     --color-warning: #b9770e;
     --color-success: #1a7a3c;
+    --color-success-bg: #eaf7ee;
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
@@ -42,8 +46,10 @@
         --color-text-muted: #94a4b3;
         --color-danger: #e5776a;
         --color-danger-bg: #3a2323;
+        --color-danger-dark: #f0968b;
         --color-warning: #e0a751;
         --color-success: #4caf6f;
+        --color-success-bg: #1f3327;
         --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
         --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.3);
     }
@@ -60,8 +66,10 @@
     --color-text-muted: #94a4b3;
     --color-danger: #e5776a;
     --color-danger-bg: #3a2323;
+    --color-danger-dark: #f0968b;
     --color-warning: #e0a751;
     --color-success: #4caf6f;
+    --color-success-bg: #1f3327;
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
     --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.3);
 }
@@ -172,6 +180,24 @@ body {
 .notif-item.notif-level-warning { border-left-color: #b9770e; }
 .notif-item.notif-level-info { border-left-color: var(--color-primary); }
 .notif-empty { padding: 1rem; margin: 0; }
+.notif-footnote {
+    margin: 0;
+    padding: 0.5rem 1rem;
+    font-size: 0.74rem;
+    border-top: 1px solid var(--color-border);
+    position: sticky;
+    bottom: 0;
+    background: var(--color-surface);
+}
+
+/* フラッシュメッセージ。flash()のカテゴリ(success/error/未指定)で見た目を分ける
+   (以前はどのカテゴリも同じ青系の見た目で、成功と失敗の区別がつかなかった)。 */
+.flash-message, .flash-success, .flash-error {
+    border-left: 4px solid var(--color-primary);
+    background: var(--color-primary-light);
+}
+.flash-success { border-left-color: var(--color-success); background: var(--color-success-bg); }
+.flash-error { border-left-color: var(--color-danger); background: var(--color-danger-bg); }
 
 a { color: var(--color-primary); }
 
@@ -374,6 +400,47 @@ a.button, button.button {
 a.button:hover, button.button:hover { background: var(--color-primary-dark); box-shadow: 0 2px 6px rgba(16, 42, 67, 0.22); }
 a.button:active, button.button:active { transform: scale(0.97); }
 
+/* 削除・拒否・再起動など取り消しにくい/影響の大きい操作用の共通ボタン色。
+   以前はページごとにstyle="background:#c0392b;"等を直書きしていて、ダークモード用の
+   var(--color-danger)と食い違う箇所があった。 */
+a.button.button-danger, button.button.button-danger {
+    background: var(--color-danger);
+}
+a.button.button-danger:hover, button.button.button-danger:hover {
+    background: var(--color-danger-dark);
+}
+button.button:disabled {
+    opacity: 0.6;
+    cursor: default;
+    transform: none;
+}
+
+/* ログ・crontab等の等幅テキスト表示。以前はadmin_log/admin_status/admin_models.htmlに
+   それぞれ同じインラインstyleが個別に書かれていた。 */
+.log-viewer {
+    background: #1c2733;
+    color: #e8edf1;
+    padding: 1rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.log-viewer.scrollable { max-height: 70vh; overflow-y: auto; }
+
+/* admin_terminal.htmlのターミナル埋め込み。以前は高さ固定600pxで、スマホ縦画面だと
+   画面の大半を占めて他の要素が見切れる/操作しづらかったため、ビューポート高さに応じて
+   可変にする(狭い画面ほど低く、広い画面では600pxを上限にする)。 */
+.terminal-frame {
+    height: min(600px, 70vh);
+    min-height: 320px;
+}
+@media (max-width: 640px) {
+    .terminal-frame { height: 60vh; min-height: 280px; }
+}
+
 .badge {
     display: inline-block;
     background: var(--color-danger);
@@ -465,7 +532,7 @@ a.button:active, button.button:active { transform: scale(0.97); }
 }
 .modal-dialog p { margin: 0 0 1.2rem; white-space: pre-wrap; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
-.modal-actions .button.cancel { background: var(--color-text-muted); }
+.button.cancel { background: var(--color-text-muted); }
 
 /* トップに戻るボタン(base.html)。 */
 .back-to-top {
@@ -594,7 +661,6 @@ ul.tile-list li a:hover, ul.date-list li a:hover {
     transform: translateY(-1px);
 }
 ul.tile-list li a:active, ul.date-list li a:active { transform: translateY(0); }
-ul.tile-list li.hidden { display: none; }
 ul.tile-list.compact { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 ul.date-list.compact { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 0.4rem; }
 
@@ -642,6 +708,17 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
        境界線は明暗どちらの背景でも見えるよう、黒/白ではなく中間グレーで固定する。 */
     box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.4);
 }
+/* stations_list.html(比較地点選択)・member_detail.html(お気に入り地点選択)で共通の
+   チェックボックス付き地点チップ。以前は両ファイルに同じインラインstyleが重複していた。 */
+.station-chip-checkbox {
+    background: var(--color-primary-light);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+}
+.station-chip-checkbox input[type="checkbox"] { margin: 0; }
 
 .image-grid {
     display: grid;
@@ -695,6 +772,16 @@ table.obs-table th {
 table.obs-table tbody tr:nth-child(even) { background: var(--color-bg); }
 table.obs-table tbody tr:hover { background: var(--color-primary-light); }
 .table-scroll { overflow-x: auto; }
+
+/* 地点数だけ横に伸びる表(observations_date.html等)で、左端の時刻列を横スクロールしても
+   見失わないよう固定する。右にスクロールした状態でも常に時刻が見えるようにするため。 */
+table.obs-table .sticky-col {
+    position: sticky;
+    left: 0;
+    background: var(--color-surface);
+    z-index: 1;
+}
+table.obs-table th.sticky-col { z-index: 3; }
 
 /* 狭い画面ではtable.obs-tableを表ではなくカード(1行=1カード、th見出しをdata-labelとして
    各セルの左側に出す)に切り替える。data-labelはbase.htmlのJSがth文字列から自動で
@@ -768,6 +855,26 @@ table.obs-table tbody tr:hover { background: var(--color-primary-light); }
 .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--color-primary-dark); line-height: 1.2; }
 .stat-card .stat-unit { font-size: 0.85rem; font-weight: 400; color: var(--color-text-muted); margin-left: 0.15rem; }
 .stat-card .stat-sub { font-size: 0.76rem; color: var(--color-text-muted); margin-top: 0.15rem; }
+
+/* admin_status.htmlのサーバーリソースを数秒おきに自動更新している表示。 */
+.live-indicator { color: var(--color-text-muted); display: inline-flex; align-items: center; gap: 0.3rem; }
+.live-dot {
+    width: 0.5rem; height: 0.5rem; border-radius: 50%;
+    background: var(--color-success); display: inline-block;
+    animation: liveDotPulse 1.6s ease-in-out infinite;
+}
+@keyframes liveDotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.stat-bar {
+    margin-top: 0.4rem; height: 0.35rem; border-radius: 999px;
+    background: var(--color-primary-lighter, rgba(0,0,0,0.08)); overflow: hidden;
+}
+.stat-bar-fill {
+    height: 100%; background: var(--color-primary); border-radius: 999px;
+    transition: width 0.4s ease;
+}
 
 /* 旧クラス名（互換用）。stat-gridと同じ見た目にする。 */
 .stat-row { display: flex; flex-wrap: wrap; gap: 1.6rem; }

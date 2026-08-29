@@ -1,6 +1,6 @@
 {% set active = active_names or [] %}
 <div class="sidebar-panel">
-    <input type="text" class="sidebar-search" id="sidebar-station-search" placeholder="地点を検索...">
+    <input type="text" class="sidebar-search" id="sidebar-station-search" placeholder="地点を検索..." aria-label="地点を検索">
     {% if station_names %}
     <ul class="sidebar-list" id="sidebar-station-list">
         {% for name in station_names %}
@@ -25,17 +25,12 @@
     var input = document.getElementById("sidebar-station-search");
     var list = document.getElementById("sidebar-station-list");
     if (!input || !list) { return; }
-    var items = Array.prototype.slice.call(list.querySelectorAll(":scope > li"));
     var emptyLabel = document.getElementById("sidebar-station-empty");
-    input.addEventListener("input", function() {
-        var q = input.value.trim();
-        var shown = 0;
-        items.forEach(function(li) {
-            var match = li.querySelector("a").dataset.name.indexOf(q) !== -1;
-            li.style.display = match ? "" : "none";
-            if (match) { shown++; }
-        });
-        if (emptyLabel) { emptyLabel.hidden = shown !== 0; }
-    });
+    wireListFilter(
+        input,
+        list.querySelectorAll(":scope > li"),
+        function(li) { return li.querySelector("a").dataset.name; },
+        function(shown) { if (emptyLabel) { emptyLabel.hidden = shown !== 0; } }
+    );
 })();
 </script>

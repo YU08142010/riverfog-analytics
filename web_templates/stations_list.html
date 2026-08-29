@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_station_checkboxes.html" import station_checkboxes %}
 {% block title %}地点別{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
     <h2>地点一覧</h2>
     {% if station_names %}
-    <input type="text" id="station-search" class="search-box" placeholder="地点名で絞り込み...">
+    <input type="text" id="station-search" class="search-box" placeholder="地点名で絞り込み..." aria-label="地点名で絞り込み">
     <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
     <ul class="tile-list" id="station-tiles">
         {% for name in station_names %}
@@ -16,25 +17,23 @@
     <script>
     (function() {
         var input = document.getElementById("station-search");
-        var items = Array.prototype.slice.call(document.querySelectorAll("#station-tiles > li"));
+        var items = document.querySelectorAll("#station-tiles > li");
         var countLabel = document.getElementById("station-count");
         var emptyLabel = document.getElementById("station-empty");
         var total = items.length;
-        input.addEventListener("input", function() {
-            var q = input.value.trim();
-            var shown = 0;
-            items.forEach(function(li) {
-                var match = li.dataset.name.indexOf(q) !== -1;
-                li.classList.toggle("hidden", !match);
-                if (match) shown++;
-            });
-            countLabel.textContent = q ? shown + " / " + total + "地点" : total + "地点";
-            emptyLabel.hidden = shown !== 0;
-        });
+        wireListFilter(
+            input,
+            items,
+            function(li) { return li.dataset.name; },
+            function(shown) {
+                countLabel.textContent = input.value.trim() ? shown + " / " + total + "地点" : total + "地点";
+                emptyLabel.hidden = shown !== 0;
+            }
+        );
     })();
     </script>
     {% else %}
-    <p class="muted">地点情報が読み込めませんでした。</p>
+    <p style="color: var(--color-danger);" role="alert">地点情報の読み込みに失敗しました(システム側の問題の可能性があります)。しばらくしてから再度お試しください。</p>
     {% endif %}
 </div>
 
@@ -43,14 +42,7 @@
     <h2>地点を比較する</h2>
     <p class="muted">比較したい地点にチェックを入れて「比較する」を押してください。</p>
     <form action="{{ url_for('compare_stations') }}" method="get" id="compare-form">
-        <div class="station-grid">
-            {% for name in station_names %}
-            <label class="station-chip" style="background: var(--color-primary-light); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.3rem;">
-                <input type="checkbox" name="station_cb" value="{{ name }}" style="margin:0;">
-                <span>{{ name }}</span>
-            </label>
-            {% endfor %}
-        </div>
+        {{ station_checkboxes(station_names, "station_cb") }}
         <input type="hidden" name="stations" id="compare-stations-field">
         <button type="submit" class="button" style="margin-top:1rem;">比較する</button>
     </form>

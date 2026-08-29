@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_station_checkboxes.html" import station_checkboxes %}
 {% block title %}{{ member.name }}(メンバー){% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -12,7 +13,7 @@
     <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
         {% if avatar_url %}
-        <img class="avatar-circle avatar-lg" src="{{ avatar_url }}">
+        <img class="avatar-circle avatar-lg" src="{{ avatar_url }}" alt="">
         {% else %}
         <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
         {% endif %}
@@ -40,9 +41,9 @@
                 <label class="muted" style="font-size:0.8rem; white-space:nowrap;">拡大</label>
                 <input type="range" id="avatar-crop-zoom" min="100" max="300" value="100" style="flex:1;">
             </div>
-            <p class="muted" style="font-size:0.78rem; margin:0.4rem 0;">ドラッグして位置を調整できます。</p>
+            <p class="muted" style="font-size:0.78rem; margin:0.4rem 0;">ドラッグ(スマホでは指でスワイプ)して位置を調整できます。</p>
             <button type="button" class="button" id="avatar-crop-save">この範囲で保存</button>
-            <button type="button" class="button" id="avatar-crop-cancel" style="background:#7f8c8d;">キャンセル</button>
+            <button type="button" class="button cancel" id="avatar-crop-cancel">キャンセル</button>
         </div>
     </div>
     <script>
@@ -162,6 +163,7 @@
             canvas.toBlob(function(blob) {
                 var formData = new FormData();
                 formData.append("avatar", blob, "avatar.jpg");
+                formData.append("csrf_token", "{{ csrf_token() }}");
                 fetch("{{ url_for('member_avatar_upload', user_id=member.id) }}", {
                     method: "POST",
                     body: formData,
@@ -188,16 +190,12 @@
     <h2>プロフィール</h2>
     {% if is_self %}
     <form action="{{ url_for('member_profile_update', user_id=member.id) }}" method="post">
-        <label class="muted" style="font-size:0.85rem;">自己紹介(300文字まで)</label><br>
-        <textarea name="bio" rows="3" maxlength="300" style="width:100%; max-width:480px; margin-top:0.3rem; padding:0.5rem; font-family:inherit;">{{ member.bio }}</textarea>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="muted" style="font-size:0.85rem;">自己紹介({{ bio_max_length }}文字まで)</label><br>
+        <textarea name="bio" rows="3" maxlength="{{ bio_max_length }}" style="width:100%; max-width:480px; margin-top:0.3rem; padding:0.5rem; font-family:inherit;">{{ member.bio }}</textarea>
         <p class="muted" style="font-size:0.85rem; margin-top:1rem; margin-bottom:0.3rem;">お気に入り地点</p>
-        <div class="station-grid" style="max-width:640px;">
-            {% for name in station_names %}
-            <label class="station-chip" style="background: var(--color-primary-light); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.3rem;">
-                <input type="checkbox" name="favorite_stations" value="{{ name }}" style="margin:0;" {{ "checked" if name in favorite_stations }}>
-                <span>{{ name }}</span>
-            </label>
-            {% endfor %}
+        <div style="max-width:640px;">
+        {{ station_checkboxes(station_names, "favorite_stations", favorite_stations) }}
         </div>
         <button type="submit" class="button" style="margin-top:1rem;">プロフィールを保存</button>
     </form>

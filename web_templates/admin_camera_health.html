@@ -4,7 +4,8 @@
 {% block content %}
 <div class="card">
     <h2>地点ごとのカメラ稼働率(直近{{ days }}日)</h2>
-    <p class="muted">「使える写真」が撮れた割合です。低い地点はカメラ側の障害や設置状況を確認してください。</p>
+    <p class="muted">「使える写真」が撮れた割合です。低い地点はカメラ側の障害や設置状況を確認してください。
+        70%未満の地点は赤字で強調表示しています(この数値に厳密な根拠があるわけではなく、目安です)。</p>
     {% if rows %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">

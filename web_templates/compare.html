@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}地点比較{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
@@ -12,7 +13,7 @@
 
 {% if not entries %}
 <div class="card">
-    <p class="muted">比較する地点が選択されていません。地点一覧から選び直してください。</p>
+    <div class="empty-state">{{ icon("empty") }}<span>比較する地点が選択されていません。地点一覧から選び直してください。</span></div>
 </div>
 {% else %}
 <div class="table-scroll">
@@ -58,7 +59,7 @@
     {% for e in entries %}
     {% if e.forecast_file %}
     <h3>{{ e.name }}</h3>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;">
+    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;" alt="{{ e.name }}の予測グラフ">
     {% endif %}
     {% endfor %}
 </div>

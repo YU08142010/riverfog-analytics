@@ -4,10 +4,10 @@
 {% block content %}
 <div class="card">
     <h2>{{ key }}.log (末尾{{ lines|length }}行)</h2>
-    <input type="text" id="log-filter" class="search-box" style="max-width:400px;" placeholder="キーワードで絞り込み(例: ERROR, 2026-08-27)...">
+    <input type="text" id="log-filter" class="search-box" style="max-width:400px;" placeholder="キーワードで絞り込み(例: ERROR, 2026-08-27)..." aria-label="ログをキーワードで絞り込み">
     <p class="muted" id="log-filter-count"></p>
     <div class="table-scroll">
-    <pre id="log-content" style="background:#1c2733; color:#e8edf1; padding:1rem; border-radius:6px; font-size:0.78rem; line-height:1.4; max-height:70vh; overflow-y:auto;">{{ lines|join('') }}</pre>
+    <pre id="log-content" class="log-viewer scrollable">{{ lines|join('') }}</pre>
     </div>
 </div>
 <script>

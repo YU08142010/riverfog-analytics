@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}SMB共有{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Samba(SMB)サービスの状態</h2>
+    <p class="muted">閲覧専用です。設定の変更やサービスの再起動はこの画面からはできません
+        (ネットワーク共有の設定を管理画面から書き換えられるようにするリスクを避けています)。
+        変更する場合はサーバー上で <code>{{ smb_conf_path }}</code> を直接編集し、
+        <code>sudo systemctl reload smbd</code> を実行してください。</p>
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>サービス</th><th>状態</th></tr></thead>
+        <tbody>
+        <tr>
+            <td>smbd(ファイル共有本体)</td>
+            <td style="color: {{ 'var(--color-success)' if smbd_state.get('ActiveState') == 'active' else 'var(--color-danger)' }}; font-weight:600;">
+                {{ smbd_state.get("ActiveState", "-") }} ({{ smbd_state.get("SubState", "-") }})
+            </td>
+        </tr>
+        <tr>
+            <td>nmbd(NetBIOS名前解決)</td>
+            <td>{{ nmbd_state.get("ActiveState", "-") }} ({{ nmbd_state.get("SubState", "-") }})</td>
+        </tr>
+        </tbody>
+    </table>
+    <p class="muted" style="font-size:0.82rem; margin-top:0.6rem;">
+        nmbdはこのサーバーの設定では無効化されています(<code>disable netbios = yes</code>)。
+        現代のWindows/Mac/LinuxクライアントはNetBIOSに頼らずSMBに接続できるため、通常は問題ありません。
+    </p>
+</div>
+
+<div class="card">
+    <h2>共有設定: [{{ share_name }}]</h2>
+    {% if share %}
+    <table class="obs-table" style="width:auto;">
+        <tbody>
+        <tr><td>パス</td><td><code>{{ share.path }}</code></td></tr>
+        <tr><td>読み取り専用</td><td>{{ "はい" if share.read_only else "いいえ(書き込み可)" }}</td></tr>
+        <tr><td>ゲストアクセス</td><td>{{ "許可" if share.guest_ok else "不可(要認証)" }}</td></tr>
+        <tr><td>ネットワーク上に表示</td><td>{{ "する" if share.browseable else "しない" }}</td></tr>
+        <tr><td>アクセス許可ユーザー</td><td>{{ share.valid_users or "(制限なし)" }}</td></tr>
+        {% if share.comment %}
+        <tr><td>コメント</td><td>{{ share.comment }}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">共有 [{{ share_name }}] の設定が見つかりませんでした
+        ({{ smb_conf_path }}が読めないか、該当セクションがありません)。</p>
+    {% endif %}
+</div>
+{% endblock %}

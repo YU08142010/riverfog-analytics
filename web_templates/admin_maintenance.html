@@ -12,10 +12,12 @@
         </strong>
     </p>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
             <label>訪問者に表示するメッセージ<br>
                 <textarea name="message" rows="3" style="width:100%; max-width:500px; padding:0.5rem;">{{ state.message }}</textarea>
             </label>
+            <br><span class="muted" style="font-size:0.78rem;">空欄の場合は「しばらくしてから再度アクセスしてください。」と表示されます。</span>
         </p>
         <p>
             <label><input type="checkbox" name="enabled" {{ "checked" if state.enabled else "" }}> メンテナンスモードを有効にする</label>

@@ -162,24 +162,45 @@ def select_feature_names(df):
     return features
 
 
-def _fill_optional_measures(df):
-    """任意項目（視程・日照時間・日射量）の欠測を、有効値割合が十分あれば中央値で埋める。
+def _fill_optional_measures(df, medians=None):
+    """任意項目（視程・日照時間・日射量）の欠測を中央値で埋める。
     割合が低ければNaNのままにし、select_feature_names()に特徴量から外させる。
+
+    medians（{列名: 中央値}）を渡すと、その値で埋める（学習時に確定した中央値を
+    予報時にも一貫して使うため）。渡さなければこのdf自身から中央値を計算する
+    （従来通りの学習時の挙動）。戻り値は(df, 実際に使った{列名: 中央値})。
+    以前は予報時にもdf自身（16日分の予報データだけ）から中央値を計算していたため、
+    学習時とは全く異なる母集団の中央値で欠測を埋めることになり、同じ特徴量が
+    train/inference間で意味的にズレる問題があった。
     """
     df = df.copy()
+    medians = dict(medians) if medians else {}
+    used = {}
     for label in OPTIONAL_MEASURE_KEYWORDS:
         if label not in df.columns:
             continue
         col = pd.to_numeric(df[label], errors="coerce")
+        if label in medians:
+            df[label] = col.fillna(medians[label])
+            used[label] = medians[label]
+            continue
         coverage = col.notna().mean() if len(col) else 0.0
-        df[label] = col.fillna(col.median()) if coverage >= OPTIONAL_MEASURE_MIN_COVERAGE else np.nan
-    return df
+        if coverage >= OPTIONAL_MEASURE_MIN_COVERAGE:
+            m = col.median()
+            df[label] = col.fillna(m)
+            used[label] = m
+        else:
+            df[label] = np.nan
+    return df, used
 
 
-def prepare_features(df, lat, lon, feature_names=None):
-    """特徴量一式を組み立てる。降水量の欠測は0mmとして扱う（無降水時は空欄の記録が多いため）。"""
+def prepare_features(df, lat, lon, feature_names=None, medians=None):
+    """特徴量一式を組み立てる。降水量の欠測は0mmとして扱う（無降水時は空欄の記録が多いため）。
+    戻り値: (df, feature_names, 任意項目の穴埋めに使った中央値のdict)。
+    medians引数の意味は_fill_optional_measures参照（予報時に学習時の中央値を渡すために使う）。
+    """
     out = _add_time_features(df, lat, lon)
-    out = _fill_optional_measures(out)
+    out, medians_used = _fill_optional_measures(out, medians=medians)
     out[COL_PRECIP] = pd.to_numeric(out[COL_PRECIP], errors="coerce").fillna(0.0)
 
     for name in ("気温変化_1h", "気温変化_3h"):
@@ -192,7 +213,7 @@ def prepare_features(df, lat, lon, feature_names=None):
     for name in feature_names:
         if name not in out.columns:
             out[name] = np.nan
-    return out, feature_names
+    return out, feature_names, medians_used
 
 
 def build_location_class_targets(phenom_df, phenom_cols):

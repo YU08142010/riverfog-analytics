@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 CREATE TABLE IF NOT EXISTS announcement_responses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    announcement_id INTEGER NOT NULL,
+    announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
     visitor_id TEXT NOT NULL,
     choice_index INTEGER,
     answer_text TEXT,
@@ -32,9 +32,40 @@ CREATE TABLE IF NOT EXISTS announcement_responses (
 """
 
 
+def _migrate_add_foreign_keys(conn):
+    """2026-08-29より前に作られたDBにはannouncement_responsesにFK制約が無い。
+    SQLiteはALTER TABLEでFK制約を後付けできないため、テーブルを作り直して移行する。"""
+    fk_rows = conn.execute("PRAGMA foreign_key_list(announcement_responses)").fetchall()
+    if fk_rows:
+        return  # 既に移行済み
+    with conn:
+        conn.execute("ALTER TABLE announcement_responses RENAME TO announcement_responses_old_fkmig")
+        conn.execute("""
+            CREATE TABLE announcement_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+                visitor_id TEXT NOT NULL,
+                choice_index INTEGER,
+                answer_text TEXT,
+                submitted_at TEXT NOT NULL,
+                UNIQUE(announcement_id, visitor_id)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO announcement_responses "
+            "(id, announcement_id, visitor_id, choice_index, answer_text, submitted_at) "
+            "SELECT id, announcement_id, visitor_id, choice_index, answer_text, submitted_at "
+            "FROM announcement_responses_old_fkmig"
+        )
+        conn.execute("DROP TABLE announcement_responses_old_fkmig")
+
+
 def connect(db_path):
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(SCHEMA)
+    _migrate_add_foreign_keys(conn)
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 

@@ -1,9 +1,14 @@
 """collect.py と backfill_weather.py で共有する定数・ヘルパー。"""
 import csv
+import fcntl
 import logging
+import os
 import socket
 import threading
-from datetime import timedelta, timezone
+import time
+import zipfile
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,24 +16,56 @@ import requests
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_XLSX = BASE_DIR / "data" / "只見川.xlsx"
+DATA_XLSX_LOCK_PATH = BASE_DIR / "data" / ".只見川.xlsx.lock"
 TEMPLATE_XLSX = BASE_DIR / "template" / "header_template.xlsx"
 CAMERAS_CSV = BASE_DIR / "cameras.csv"
 STATION_WEATHER_DB_PATH = BASE_DIR / "data" / "station_weather.db"
 
 JST = timezone(timedelta(hours=9))
 
+# GEMINI_MODEL環境変数が未設定の場合のフォールバック値。collect.py・backfill_images.pyの
+# 3箇所に別々にハードコードされていたのを1箇所にまとめたもの。
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+
+
+def now_jst_naive():
+    """現在時刻をJSTのnaive datetime(tzinfo無し)で返す。
+    predict.py/collect.py/backfill_weather.py等、xlsxやDBにJSTのnaive値として保存する
+    箇所で共通利用する(各ファイルで`datetime.now(JST).replace(tzinfo=None)`が
+    個別に重複していたのを1箇所にまとめたもの)。
+    """
+    return datetime.now(JST).replace(tzinfo=None)
+
+
+# 日本国内に収まる大まかな範囲(桁間違い・緯度経度の入れ替わり等の異常値を検知する用)。
+# 実際の33地点は北海道・沖縄を含まないもっと狭い範囲だが、将来別地域が増えても
+# 誤検知しないよう日本全体の範囲に留めている。
+_JAPAN_LAT_RANGE = (20.0, 46.0)
+_JAPAN_LON_RANGE = (122.0, 154.0)
+
 
 def load_camera_coords(cameras_csv=CAMERAS_CSV):
     """cameras.csvから {地点名: (緯度, 経度)} を読む。緯度・経度の列が無い/空の行はスキップする
     （2026-08-28にriver.go.jpの公開GeoJSONから実測値を追加した列。それより前のcameras.csvには無い）。
+    日本国内の大まかな範囲から外れる値は、桁間違い等の異常値とみなし警告して除外する
+    （representative_coordsの重心計算等が1地点の異常値で大きく狂うのを防ぐため）。
     """
     coords = {}
     with open(cameras_csv, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             lat, lon = row.get("緯度"), row.get("経度")
-            if lat and lon:
-                coords[row["地点名"]] = (float(lat), float(lon))
+            if not (lat and lon):
+                continue
+            lat, lon = float(lat), float(lon)
+            if not (_JAPAN_LAT_RANGE[0] <= lat <= _JAPAN_LAT_RANGE[1]
+                    and _JAPAN_LON_RANGE[0] <= lon <= _JAPAN_LON_RANGE[1]):
+                logging.getLogger("common").warning(
+                    "Ignoring out-of-range coordinates for %s: (%s, %s)",
+                    row["地点名"], lat, lon,
+                )
+                continue
+            coords[row["地点名"]] = (lat, lon)
     return coords
 
 
@@ -142,6 +179,42 @@ def set_weather_measures(ws, row, weather):
     set_measure(ws, row, COL_VISIBILITY, COL_VISIBILITY_QI, COL_VISIBILITY_HN, weather.get("visibility_km"))
 
 
+class XlsxLockTimeout(Exception):
+    """xlsx書き込みロックを制限時間内に取得できなかった場合に送出する。"""
+
+
+@contextmanager
+def xlsx_write_lock(timeout=120, poll_interval=1.0, lock_path=DATA_XLSX_LOCK_PATH):
+    """只見川.xlsxへの書き込み(load_workbook〜save)を排他制御する。
+
+    collect.py・backfill_weather.py・backfill_images.pyの3スクリプトが同じxlsxを
+    読み書きするが、以前はcrontabの実行時刻をずらすことだけで衝突を避けていた
+    (いずれかの処理が遅延・長時間化すると書き込み競合・データ破損の恐れがあった)。
+    flock()はプロセスが異常終了(kill・OOM等)しても自動的に解放されるため、
+    ロックを取ったまま永久に固まる心配はない。取得自体をtimeout秒までポーリングし、
+    それでも取れなければXlsxLockTimeoutを送出して呼び出し側に委ねる(無限待機はしない)。
+    読み取り専用の箇所(predict.py・webapp.py等)には適用していない
+    (openpyxlの保存は通常ごく短時間で完了し、Webサーバーのリクエスト処理にまで
+    ロック待ちを持ち込むとハングのリスクの方が大きいと判断したため)。
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    fd = open(lock_path, "w")
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise XlsxLockTimeout(f"Could not acquire xlsx write lock within {timeout}s")
+                time.sleep(poll_interval)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
+
+
 # --- DNSフォールバック ---------------------------------------------------------------
 # このサーバーの名前解決はTailscale MagicDNS(100.100.100.100)を経由しており、
 # Tailscale側やホストのネットワークが一瞬不安定になるだけで、天気API・カメラサイトの
@@ -206,22 +279,89 @@ def request_with_dns_fallback(method, url, log=None, **kwargs):
                 hostname, ip,
             )
 
-        with _dns_fallback_lock:
-            original_getaddrinfo = socket.getaddrinfo
+        with _patched_dns_for_hostname(hostname, ip):
+            return requests.request(method, url, **kwargs)
 
-            def _patched_getaddrinfo(host, *args, **kw):
-                if host == hostname:
-                    host = ip
-                return original_getaddrinfo(host, *args, **kw)
 
-            socket.getaddrinfo = _patched_getaddrinfo
-            try:
-                return requests.request(method, url, **kwargs)
-            finally:
-                socket.getaddrinfo = original_getaddrinfo
+@contextmanager
+def _patched_dns_for_hostname(hostname, ip):
+    """socket.getaddrinfoを一時的に差し替え、指定したhostnameだけをipに解決させる。
+    他のホスト名の解決には影響しない(host == hostnameの時だけ書き換える)。
+    _dns_fallback_lockで排他しているため、複数スレッドが同時に差し替え/復元を行い
+    互いのパッチを消し合う競合は起きない。例外時も必ず元に戻す。"""
+    with _dns_fallback_lock:
+        original_getaddrinfo = socket.getaddrinfo
+
+        def _patched_getaddrinfo(host, *args, **kw):
+            if host == hostname:
+                host = ip
+            return original_getaddrinfo(host, *args, **kw)
+
+        socket.getaddrinfo = _patched_getaddrinfo
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
+
+
+def build_data_backup_zip(dest_path, base_dir=BASE_DIR):
+    """data/一式 + .env をZIPにまとめてdest_pathに書き出す。
+    webapp.pyのadmin_backup()(手動ダウンロード)とbackup.py(定期自動バックアップ)の
+    両方から使う共通ロジック(以前はwebapp.py側にだけ書かれていた)。
+    """
+    data_dir = base_dir / "data"
+    env_path = base_dir / ".env"
+    with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        if data_dir.exists():
+            for f in data_dir.rglob("*"):
+                if f.is_file():
+                    zf.write(f, arcname=str(f.relative_to(data_dir)))
+        if env_path.exists():
+            zf.write(env_path, arcname=".env")
 
 
 NETWORK_FAILURE_LOG_PATH = BASE_DIR / "data" / "network_failures.csv"
+
+
+def rotate_csv_if_large(path, max_bytes=5 * 1024 * 1024, keep=3):
+    """CSVが肥大化しすぎないよう、max_bytesを超えたらlogrotate同様に世代交代する
+    (path.1, path.2, ... path.keepまで保持し、古いものから削除する)。
+    network_failures.csv・confidence_log.csvのように追記され続けるだけで
+    ローテーションの仕組みが無かったCSVに使う。
+    """
+    try:
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
+        for i in range(keep - 1, 0, -1):
+            src = Path(f"{path}.{i}")
+            dst = Path(f"{path}.{i + 1}")
+            if src.exists():
+                if dst.exists():
+                    dst.unlink()
+                src.rename(dst)
+        rotated = Path(f"{path}.1")
+        if rotated.exists():
+            rotated.unlink()
+        path.rename(rotated)
+    except Exception:
+        logging.getLogger("common").warning("Failed to rotate %s", path, exc_info=True)
+
+
+def send_alert(message, source="river-fog"):
+    """重大な障害(ディスク逼迫・頻繁な再起動・大量の画像取得失敗等)をプッシュ通知する。
+
+    これまでは管理画面を開かないと気付けなかった。ALERT_WEBHOOK_URL(.env)に
+    Slack等のIncoming Webhook URLを設定すると、そこにテキストをPOSTする。
+    未設定なら何もしない(既定では従来通り管理画面で確認する運用のまま)。
+    通知の送信自体が失敗しても、呼び出し元のバッチ処理を止めないよう例外は握りつぶす。
+    """
+    webhook_url = os.environ.get("ALERT_WEBHOOK_URL")
+    if not webhook_url:
+        return
+    try:
+        requests.post(webhook_url, json={"text": f"[{source}] {message}"}, timeout=10)
+    except Exception as e:
+        logging.getLogger("common").warning("Failed to send alert webhook: %s", e)
 
 
 def record_network_failure(source, detail, when=None, station=None):
@@ -232,11 +372,11 @@ def record_network_failure(source, detail, when=None, station=None):
     地点を問わない障害はNone(空文字)のままでよい。
     """
     import csv
-    from datetime import datetime
 
-    when = when or datetime.now(JST).replace(tzinfo=None)
+    when = when or now_jst_naive()
     try:
         NETWORK_FAILURE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        rotate_csv_if_large(NETWORK_FAILURE_LOG_PATH)
         is_new = not NETWORK_FAILURE_LOG_PATH.exists()
         with open(NETWORK_FAILURE_LOG_PATH, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)

@@ -11,7 +11,7 @@
 <div class="card">
     <h2>{{ date }} の観測値推移</h2>
     <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ(Excel)をダウンロード</a></p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}" alt="{{ date }}の観測値推移グラフ"></div>
 </div>
 
 <div class="card">
@@ -20,7 +20,7 @@
     <table class="obs-table">
         <thead>
         <tr>
-            <th>時刻</th>
+            <th class="sticky-col">時刻</th>
             <th>気温(℃)</th>
             <th>湿度(%)</th>
             <th>降水量(mm)</th>
@@ -33,7 +33,7 @@
         <tbody>
         {% for row in rows %}
         <tr>
-            <td>{{ row.time }}</td>
+            <td class="sticky-col">{{ row.time }}</td>
             <td>{{ "%.1f"|format(row.temp) if row.temp is not none else "-" }}</td>
             <td>{{ "%.0f"|format(row.humidity) if row.humidity is not none else "-" }}</td>
             <td>{{ "%.1f"|format(row.precip) if row.precip is not none else "-" }}</td>

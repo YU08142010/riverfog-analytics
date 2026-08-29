@@ -1,21 +1,9 @@
 {% extends "base.html" %}
+{% from "_date_month_groups.html" import date_month_groups %}
 {% block title %}予測結果{% endblock %}
 {% block content %}
 <div class="card">
     <h2>予測結果(日付一覧)</h2>
-    {% if date_groups %}
-    {% for g in date_groups %}
-    <details class="date-month-group" {{ "open" if loop.first }}>
-        <summary>{{ g.label }}<span class="muted">({{ g.days|length }}日分)</span></summary>
-        <ul class="date-list compact">
-            {% for d in g.days %}
-            <li><a href="{{ url_for(endpoint, date=d.date) }}" title="{{ d.date }}">{{ d.day }}日</a></li>
-            {% endfor %}
-        </ul>
-    </details>
-    {% endfor %}
-    {% else %}
-    <p class="muted">予測結果がまだありません。</p>
-    {% endif %}
+    {{ date_month_groups(date_groups, endpoint, "予測結果がまだありません。") }}
 </div>
 {% endblock %}
