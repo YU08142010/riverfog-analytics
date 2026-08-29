@@ -23,34 +23,36 @@
         var btn = e.target.closest(".chat-delete-btn");
         if (!btn) { return; }
         e.preventDefault();
-        if (!window.confirm("この会話を削除しますか？元に戻せません。")) { return; }
-        var conversationId = btn.getAttribute("data-conversation-id");
-        var formData = new FormData();
-        formData.set("csrf_token", "{{ csrf_token() }}");
-        btn.disabled = true;
-        fetch("/chat/" + conversationId + "/delete", {
-            method: "POST",
-            body: formData,
-            headers: {"X-Requested-With": "XMLHttpRequest"},
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (!data.success) { btn.disabled = false; return; }
-            var li = btn.closest("li");
-            var wasActive = !!li.querySelector("a.active");
-            li.remove();
-            if (wasActive) {
-                window.location.href = "{{ url_for('chat_page') }}";
-            } else if (!sidebarList.querySelector("li:not(.chat-sidebar-empty)")) {
-                var empty = document.createElement("li");
-                empty.className = "muted chat-sidebar-empty";
-                empty.style.padding = "0.6rem 0.6rem";
-                empty.style.fontSize = "0.82rem";
-                empty.textContent = "まだ会話はありません。";
-                sidebarList.appendChild(empty);
-            }
-        })
-        .catch(function() { btn.disabled = false; });
+        confirmModal("この会話を削除しますか？元に戻せません。").then(function(ok) {
+            if (!ok) { return; }
+            var conversationId = btn.getAttribute("data-conversation-id");
+            var formData = new FormData();
+            formData.set("csrf_token", "{{ csrf_token() }}");
+            btn.disabled = true;
+            fetch("/chat/" + conversationId + "/delete", {
+                method: "POST",
+                body: formData,
+                headers: {"X-Requested-With": "XMLHttpRequest"},
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) { btn.disabled = false; return; }
+                var li = btn.closest("li");
+                var wasActive = !!li.querySelector("a.active");
+                li.remove();
+                if (wasActive) {
+                    window.location.href = "{{ url_for('chat_page') }}";
+                } else if (!sidebarList.querySelector("li:not(.chat-sidebar-empty)")) {
+                    var empty = document.createElement("li");
+                    empty.className = "muted chat-sidebar-empty";
+                    empty.style.padding = "0.6rem 0.6rem";
+                    empty.style.fontSize = "0.82rem";
+                    empty.textContent = "まだ会話はありません。";
+                    sidebarList.appendChild(empty);
+                }
+            })
+            .catch(function() { btn.disabled = false; });
+        });
     });
 })();
 </script>

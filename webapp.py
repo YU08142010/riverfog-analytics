@@ -2543,35 +2543,66 @@ def _inject_avatar_url():
 # メンバーページの実績バッジ。未達成のものもロック表示するため、達成条件を関数として
 # 持たせ、達成/未達成の両方をテンプレート側で判定できるようにしている。
 BADGE_DEFINITIONS = [
-    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした",
+    # ログイン回数(易→難、上位はcrownで統一しどのカテゴリでも「頂点」と分かるようにする)
+    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした", "icon": "medal",
      "check": lambda s: s["login_count"] >= 1},
-    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成",
+    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成", "icon": "medal",
      "check": lambda s: s["login_count"] >= 10},
-    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成",
+    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成", "icon": "medal",
      "check": lambda s: s["login_count"] >= 100},
-    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン",
+    {"id": "login_500", "label": "レジェンド", "desc": "ログイン500回達成", "icon": "crown",
+     "check": lambda s: s["login_count"] >= 500},
+    # 連続ログイン日数
+    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン", "icon": "flame",
      "check": lambda s: s["streak"] >= 3},
-    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン",
+    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン", "icon": "flame",
      "check": lambda s: s["streak"] >= 7},
-    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン",
+    {"id": "streak_14", "label": "二週間皆勤", "desc": "14日連続ログイン", "icon": "flame",
+     "check": lambda s: s["streak"] >= 14},
+    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン", "icon": "flame",
      "check": lambda s: s["streak"] >= 30},
-    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した",
+    {"id": "streak_100", "label": "百日修行", "desc": "100日連続ログイン", "icon": "crown",
+     "check": lambda s: s["streak"] >= 100},
+    # コメント投稿数
+    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した", "icon": "comment",
      "check": lambda s: s["comment_count"] >= 1},
-    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した",
+    {"id": "comment_5", "label": "常連コメンター", "desc": "コメントを5件投稿した", "icon": "comment",
+     "check": lambda s: s["comment_count"] >= 5},
+    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した", "icon": "comment",
      "check": lambda s: s["comment_count"] >= 10},
-    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した",
+    {"id": "comment_30", "label": "コメント職人", "desc": "コメントを30件投稿した", "icon": "comment",
+     "check": lambda s: s["comment_count"] >= 30},
+    {"id": "comment_100", "label": "コメントマスター", "desc": "コメントを100件投稿した", "icon": "crown",
+     "check": lambda s: s["comment_count"] >= 100},
+    # AIチャット利用数
+    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した", "icon": "chat",
      "check": lambda s: s["chat_count"] >= 1},
-    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した",
+    {"id": "chat_10", "label": "質問好き", "desc": "AIチャットで10回質問した", "icon": "chat",
+     "check": lambda s: s["chat_count"] >= 10},
+    {"id": "chat_50", "label": "探究者", "desc": "AIチャットで50回質問した", "icon": "crown",
+     "check": lambda s: s["chat_count"] >= 50},
+    # お気に入り地点
+    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star",
      "check": lambda s: s["favorite_count"] >= 3},
+    {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown",
+     "check": lambda s: s["favorite_count"] >= s["station_total"]},
+    # 在籍日数
+    {"id": "veteran_30", "label": "新米卒業", "desc": "登録から30日経過", "icon": "calendar",
+     "check": lambda s: s["account_age_days"] >= 30},
+    {"id": "veteran_180", "label": "半年選手", "desc": "登録から180日経過", "icon": "calendar",
+     "check": lambda s: s["account_age_days"] >= 180},
+    {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown",
+     "check": lambda s: s["account_age_days"] >= 365},
 ]
 
 
 def _compute_badges(stats):
-    """statsは{login_count, streak, comment_count, chat_count, favorite_count}。
-    定義済みの実績すべてについて、達成済みかどうかを付けたリストを返す
-    (未達成もロック表示するため、達成したものだけに絞り込まない)。"""
+    """statsは{login_count, streak, comment_count, chat_count, favorite_count,
+    station_total, account_age_days}。定義済みの実績すべてについて、達成済みかどうかを
+    付けたリストを返す(未達成もロック表示するため、達成したものだけに絞り込まない)。"""
     return [
-        {"id": b["id"], "label": b["label"], "desc": b["desc"], "achieved": b["check"](stats)}
+        {"id": b["id"], "label": b["label"], "desc": b["desc"], "icon": b["icon"],
+         "achieved": b["check"](stats)}
         for b in BADGE_DEFINITIONS
     ]
 
@@ -2634,9 +2665,15 @@ def member_detail(user_id):
         chat_count = chat_log.count_user_messages_since(chat_conn, user_id, "0000-01-01 00:00:00")
     finally:
         chat_conn.close()
+    try:
+        created_at = datetime.strptime(target["created_at"][:19], "%Y-%m-%d %H:%M:%S")
+        account_age_days = (now_jst_naive() - created_at).days
+    except (ValueError, TypeError):
+        account_age_days = 0
     badges = _compute_badges({
         "login_count": total_logins, "streak": streak, "comment_count": comment_count,
         "chat_count": chat_count, "favorite_count": len(favorite_stations),
+        "station_total": len(STATION_NAMES), "account_age_days": account_age_days,
     })
     return render_template(
         "member_detail.html",

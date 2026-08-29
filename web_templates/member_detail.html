@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ member.name }}(メンバー){% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -234,21 +235,6 @@
     </div>
 </div>
 
-{% if badges %}
-<div class="card">
-    <h2>実績({{ badges|selectattr("achieved")|list|length }}/{{ badges|length }})</h2>
-    <div class="badge-grid">
-        {% for b in badges %}
-        <div class="badge-tile{{ '' if b.achieved else ' locked' }}" title="{{ b.desc }}">
-            <span class="badge-icon">{{ b.label[0] }}</span>
-            <div class="badge-label">{{ b.label }}</div>
-            <div class="badge-desc">{{ b.desc }}</div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-
 <div class="card">
     <h2>ログイン頻度(直近1年)</h2>
     <div class="heatmap-wrap">
@@ -327,18 +313,31 @@
 <div class="card">
     <h2>ログイン履歴(全{{ history|length }}件)</h2>
     {% if history %}
-    <div class="table-scroll">
-    <table class="obs-table" style="width:auto;">
-        <thead><tr><th>#</th><th>日時</th></tr></thead>
-        <tbody>
+    <div class="login-history-grid">
         {% for h in history %}
-        <tr><td>{{ loop.index }}</td><td>{{ h }}</td></tr>
+        <div class="login-history-item">
+            <span class="login-history-index">#{{ loop.index }}</span>
+            <span class="login-history-date">{{ h }}</span>
+        </div>
         {% endfor %}
-        </tbody>
-    </table>
     </div>
     {% else %}
     <p class="muted">ログイン履歴がまだありません。</p>
     {% endif %}
 </div>
+
+{% if badges %}
+<div class="card">
+    <h2>実績({{ badges|selectattr("achieved")|list|length }}/{{ badges|length }})</h2>
+    <div class="badge-grid">
+        {% for b in badges %}
+        <div class="badge-tile{{ '' if b.achieved else ' locked' }}" title="{{ b.desc }}">
+            <span class="badge-icon">{{ icon(b.icon, size=22) }}</span>
+            <div class="badge-label">{{ b.label }}</div>
+            <div class="badge-desc">{{ b.desc }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}

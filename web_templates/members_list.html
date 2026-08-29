@@ -40,18 +40,18 @@
     <h2>
         ログイン回数ランキング
         <span style="font-weight:normal; margin-left:0.6rem;">
-            <button type="button" class="ranking-toggle-btn active" id="ranking-toggle-all">全期間</button>
-            <button type="button" class="ranking-toggle-btn" id="ranking-toggle-month">今月</button>
+            <button type="button" class="ranking-toggle-btn" id="ranking-toggle-all">全期間</button>
+            <button type="button" class="ranking-toggle-btn active" id="ranking-toggle-month">今月</button>
         </span>
     </h2>
-    <div id="ranking-view-all">
+    <div id="ranking-view-all" hidden>
         {% if ranking %}
         {{ render_ranking(ranking, "login_count") }}
         {% else %}
         <p class="muted">まだログイン記録がありません。</p>
         {% endif %}
     </div>
-    <div id="ranking-view-month" hidden>
+    <div id="ranking-view-month">
         {% if month_ranking %}
         {{ render_ranking(month_ranking, "month_login_count") }}
         {% else %}
