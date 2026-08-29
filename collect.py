@@ -488,7 +488,7 @@ def classify_images(cameras, images_by_name):
                 "Low-confidence classification: %d station(s), retrying with escalation model: %s",
                 len(low_confidence), ", ".join(low_confidence),
             )
-            escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-2.5-pro")
+            escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-3.1-pro-preview")
             sub_contents, sub_index_to_name = _build_contents(
                 [(name, resized_by_name[name]) for name in low_confidence]
             )
@@ -943,6 +943,18 @@ def main():
         "Gemini classification succeeded: %d / %d (invalid/placeholder: %d)",
         len(phenom_by_name), len(cameras), len(invalid_stations),
     )
+    if ok_count > 0 and not phenom_by_name:
+        # 画像取得自体は成功しているのにGemini分類が1件も返ってこない場合、
+        # (usable_countはimages_by_nameベースで計算されるため)既存の
+        # IMAGE_FAILURE_ALERT_RATIOのチェックでは検知できない、分類パイプライン全体の
+        # 障害(モデル名の廃止等)を示している可能性が高いため、別途警告する。
+        message = (
+            "Gemini classification returned 0 result(s) despite successfully fetching "
+            f"{ok_count} image(s); the classification pipeline itself may be broken "
+            "(e.g. a deprecated model name)"
+        )
+        log.error(message)
+        send_alert(message, source="collect.py")
     append_confidence_log(confidence_by_name, run_time)
 
     usable_count = ok_count - len(invalid_stations)

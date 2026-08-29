@@ -199,6 +199,67 @@ body {
     background: var(--color-surface);
 }
 
+/* AIチャットパネル(notif-panelと基本構造は同じだが、会話ログ表示のため縦に長く広めにする)。 */
+.chat-panel {
+    width: 380px;
+    max-height: 520px;
+    display: flex;
+    flex-direction: column;
+}
+.chat-messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 0.7rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 120px;
+    max-height: 280px;
+}
+.chat-message {
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    max-width: 90%;
+}
+.chat-message-user {
+    align-self: flex-end;
+    background: var(--color-primary);
+    color: #fff;
+}
+.chat-message-ai {
+    align-self: flex-start;
+    background: var(--color-primary-light);
+    color: var(--color-text);
+}
+.chat-message-error {
+    align-self: flex-start;
+    background: var(--color-danger);
+    color: #fff;
+}
+.chat-form {
+    display: flex;
+    gap: 0.4rem;
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--color-border);
+}
+.chat-form textarea {
+    flex: 1 1 auto;
+    resize: none;
+    padding: 0.4rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+}
+.chat-form button {
+    align-self: flex-end;
+    margin: 0;
+}
+
 /* フラッシュメッセージ。flash()のカテゴリ(success/error/未指定)で見た目を分ける
    (以前はどのカテゴリも同じ青系の見た目で、成功と失敗の区別がつかなかった)。 */
 .flash-message, .flash-success, .flash-error {

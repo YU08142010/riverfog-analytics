@@ -58,6 +58,27 @@
         </div>
     </div>
     {% if session.get('user_id') %}
+    <div class="notif-bell-wrap">
+        <button type="button" class="notif-bell" id="chat-toggle-btn" aria-label="AIチャット" aria-expanded="false">
+            {{ icon("chat", size=18) }}
+            <span class="notif-badge" id="chat-badge" hidden></span>
+        </button>
+        <div class="notif-panel chat-panel" id="chat-panel" tabindex="-1" hidden>
+            <div class="notif-panel-header">
+                AIチャット
+                <span class="muted" style="font-weight:normal; font-size:0.75rem;" id="chat-remaining"></span>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+                <p class="muted" style="font-size:0.82rem;">只見川の霧の現在の状況や見通しについて質問できます(Geminiによる自動応答です)。</p>
+            </div>
+            <form id="chat-form" class="chat-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は霧が出そうですか？" required></textarea>
+                <button type="submit" class="button" id="chat-send-btn">送信</button>
+            </form>
+            <p class="notif-footnote muted">無料枠のクォータ保護のため、1日あたりの質問回数に上限があります。回答はAIによる自動生成のため誤りを含むことがあります。</p>
+        </div>
+    </div>
     {% set my_avatar = member_avatar_url(session.get('user_id')) %}
     <span class="header-user" style="color:rgba(255,255,255,0.85); font-size:0.85rem; white-space:nowrap; display:flex; align-items:center; gap:0.5rem;">
         <a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}" style="display:inline-flex; align-items:center; gap:0.4rem; color:inherit; text-decoration:none;">
@@ -465,6 +486,109 @@ document.addEventListener("submit", function(e) {
     });
     renderList();
     updateBadge();
+})();
+
+// AIチャットパネル。会話履歴はページ内(メモリ)のみで、リロードすると消える
+// (サーバー側でのトークン消費・保存コストを避けるため)。
+(function() {
+    var toggleBtn = document.getElementById("chat-toggle-btn");
+    var panel = document.getElementById("chat-panel");
+    var messages = document.getElementById("chat-messages");
+    var form = document.getElementById("chat-form");
+    var input = document.getElementById("chat-input");
+    var sendBtn = document.getElementById("chat-send-btn");
+    var remainingLabel = document.getElementById("chat-remaining");
+    if (!toggleBtn || !panel || !form) { return; }
+
+    function panelFocusable() {
+        return Array.prototype.slice.call(panel.querySelectorAll("a, button, textarea"));
+    }
+    function trapFocus(e) {
+        if (e.key !== "Tab") { return; }
+        var focusable = panelFocusable();
+        if (!focusable.length) { return; }
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    }
+    function refreshRemaining() {
+        fetch("{{ url_for('chat_status') }}")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                remainingLabel.textContent = "本日の残り" + data.remaining_today + "/" + data.daily_limit + "回";
+            })
+            .catch(function() {});
+    }
+    function openPanel() {
+        panel.hidden = false;
+        toggleBtn.setAttribute("aria-expanded", "true");
+        refreshRemaining();
+        input.focus();
+        document.addEventListener("keydown", trapFocus);
+    }
+    function closePanel() {
+        panel.hidden = true;
+        toggleBtn.setAttribute("aria-expanded", "false");
+        document.removeEventListener("keydown", trapFocus);
+    }
+    toggleBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        if (panel.hidden) { openPanel(); } else { closePanel(); }
+    });
+    document.addEventListener("click", function(e) {
+        if (!panel.hidden && !panel.contains(e.target) && e.target !== toggleBtn) { closePanel(); }
+    });
+    document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape" && !panel.hidden) { closePanel(); }
+    });
+
+    function addMessage(text, who) {
+        var wrap = document.createElement("div");
+        wrap.className = "chat-message chat-message-" + who;
+        wrap.textContent = text;
+        messages.appendChild(wrap);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    form.addEventListener("submit", function(e) {
+        e.preventDefault();
+        var question = input.value.trim();
+        if (!question) { return; }
+        addMessage(question, "user");
+        input.value = "";
+        input.disabled = true;
+        sendBtn.disabled = true;
+        var formData = new FormData(form);
+        fetch("{{ url_for('chat_ask') }}", {
+            method: "POST",
+            body: formData,
+            headers: {"X-Requested-With": "XMLHttpRequest"},
+        })
+        .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
+        .then(function(result) {
+            if (result.ok && result.data.success) {
+                addMessage(result.data.answer, "ai");
+                if (typeof result.data.remaining_today === "number") {
+                    remainingLabel.textContent = "本日の残り" + result.data.remaining_today + "回";
+                }
+            } else {
+                addMessage(result.data.message || "エラーが発生しました。", "error");
+            }
+        })
+        .catch(function() {
+            addMessage("通信エラーが発生しました。", "error");
+        })
+        .finally(function() {
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        });
+    });
 })();
 </script>
 </body>

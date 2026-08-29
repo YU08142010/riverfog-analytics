@@ -176,6 +176,13 @@ VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2年
 CAMERA_HEALTH_DAYS = 7
 GEMINI_LOG_DAYS = 14
 
+CHAT_DB_PATH = BASE_DIR / "data" / "chat.db"
+# 無料枠のクォータを画像分類・AI要約・エスカレーションと共有しているため、チャット単体に
+# 使いすぎないよう1日あたりの上限を設ける(.envで調整可能。詳しくはGemini状況ページ参照)。
+CHAT_DAILY_LIMIT_PER_USER = int(os.environ.get("AI_CHAT_DAILY_LIMIT_PER_USER", "10"))
+CHAT_DAILY_LIMIT_TOTAL = int(os.environ.get("AI_CHAT_DAILY_LIMIT_TOTAL", "50"))
+CHAT_QUESTION_MAX_LENGTH = 300
+
 LOG_FILE = BASE_DIR / "logs" / "webapp.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -191,6 +198,13 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("webapp")
+
+# collect.pyはimportされるとモジュール読み込み時にlogging.basicConfig()を自前で呼ぶため、
+# webapp.py側のbasicConfig()より先にimportしてしまうと、そちら(collect.log向け設定)が
+# 先に適用されてしまいwebapp.log側の設定が無視される(basicConfigは最初の1回しか効かない)。
+# 必ずここ(webapp.py自身のbasicConfig呼び出しの後)でimportする。
+import chat_log
+import collect
 
 def _load_or_create_secret_key():
     """SECRET_KEYを.envから読む。無ければ生成して.envに書き込み、以後は固定する。
@@ -1111,6 +1125,135 @@ def _load_station_feature_snapshot(name):
     if not station_data:
         return None
     return {"generated_at": data.get("generated_at"), **station_data}
+
+
+# ============================================================================
+# AIチャット(Gemini)。無料枠のクォータを画像分類・AI要約と共有しているため、
+# CHAT_DAILY_LIMIT_PER_USER/CHAT_DAILY_LIMIT_TOTALで1日あたりの質問数を制限する。
+# 会話履歴はサーバー側に保持せず(トークン消費を抑えるため)、直近の状況を含む
+# システムプロンプトのみを毎回組み立てて単発の質問として送る。
+# ============================================================================
+
+CHAT_SYSTEM_INSTRUCTION = (
+    "あなたは只見川流域の川霧観測・予測システム「只見川霧観測」のAIアシスタントです。"
+    "以下に渡す現在の観測状況・予測状況をもとに、利用者からの質問に日本語で簡潔に答えてください。\n"
+    "- 渡されていない情報(渡された時刻より先の詳細な天気予報、渡されていない地点の状況等)は"
+    "推測で答えず、「その情報は分かりません」と正直に伝えてください。\n"
+    "- 観測・予測はいずれもAIやセンサーによる自動判定であり、100%正確とは限らないことを"
+    "必要に応じて伝えてください。\n"
+    "- 安全に関わる最終判断(通行止め・避難等)を促す必要がある場合は、必ず自治体や河川管理者の"
+    "公式情報も確認するよう案内してください。\n"
+    "- 与えられた文脈と関係のない質問(システムの使い方以外の一般的な質問等)には、"
+    "「この機能は只見川の霧観測に関する質問向けです」と丁寧に答えてください。"
+)
+
+
+def _build_chat_context():
+    """現在の観測・予測状況をテキストにまとめる(チャットのシステムプロンプトに含める)。"""
+    lines = []
+    observations = _latest_observations()
+    if observations:
+        lines.append(f"【現在の観測】{observations['datetime']} 時点")
+        if observations.get("temp") is not None:
+            lines.append(
+                f"代表地点の気象: 気温{observations.get('temp')}℃ "
+                f"湿度{observations.get('humidity')}% 降水量{observations.get('precip')}mm "
+                f"視程{observations.get('visibility')}km"
+            )
+        notable = [s for s in observations["stations"] if s["label"] not in ("現象なし", "-")]
+        if notable:
+            lines.append("現在なんらかの現象が出ている地点: " + "、".join(
+                f"{s['name']}({s['label']})" for s in notable
+            ))
+        else:
+            lines.append("現在、霧・層雲等の現象が出ている地点はありません。")
+    else:
+        lines.append("現在の観測データは取得できていません。")
+
+    ai_summary = _load_ai_summary()
+    if ai_summary and ai_summary.get("overall"):
+        lines.append(f"【AIによる状況要約】({ai_summary.get('generated_at')}生成) {ai_summary['overall']}")
+
+    alerts = _upcoming_fog_alerts_safe()
+    if alerts:
+        lines.append("【今後24時間以内の霧アラート(予測確率95%以上)】")
+        for a in alerts[:10]:
+            prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
+            lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")
+    else:
+        lines.append("現在、今後24時間以内の霧アラートは出ていません。")
+    return "\n".join(lines)
+
+
+def _chat_rate_limit_status(user_id):
+    """(利用者ごとの残り回数, サイト全体の残り回数)を返す。0以下なら制限に達している。"""
+    today_start = now_jst_naive().strftime("%Y-%m-%d 00:00:00")
+    conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        used_by_user = chat_log.count_user_messages_since(conn, user_id, today_start)
+        used_total = chat_log.count_all_messages_since(conn, today_start)
+    finally:
+        conn.close()
+    return CHAT_DAILY_LIMIT_PER_USER - used_by_user, CHAT_DAILY_LIMIT_TOTAL - used_total
+
+
+@app.route("/chat/status")
+def chat_status():
+    """チャットパネルを開いた時にだけ残り質問数を取得する(全ページで毎回DBを
+    引かずに済むよう、必要になった時だけ読む)。"""
+    remaining_user, remaining_total = _chat_rate_limit_status(session.get("user_id"))
+    return jsonify({
+        "remaining_today": max(0, min(remaining_user, remaining_total)),
+        "daily_limit": CHAT_DAILY_LIMIT_PER_USER,
+    })
+
+
+@app.route("/chat/ask", methods=["POST"])
+def chat_ask():
+    user_id = session.get("user_id")
+    question = request.form.get("question", "").strip()[:CHAT_QUESTION_MAX_LENGTH]
+    if not question:
+        return jsonify({"message": "質問を入力してください。", "success": False}), 400
+
+    remaining_user, remaining_total = _chat_rate_limit_status(user_id)
+    if remaining_total <= 0:
+        return jsonify({
+            "message": "本日のサイト全体での質問回数の上限に達しました。日付が変わってからお試しください。",
+            "success": False,
+        }), 429
+    if remaining_user <= 0:
+        return jsonify({
+            "message": f"本日の質問回数の上限({CHAT_DAILY_LIMIT_PER_USER}回)に達しました。日付が変わってからお試しください。",
+            "success": False,
+        }), 429
+
+    api_keys = collect.get_api_keys()
+    asked_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    if not api_keys:
+        return jsonify({"message": "AIチャットは現在利用できません(APIキー未設定)。", "success": False}), 503
+
+    from google.genai import types
+
+    model = os.environ.get("GEMINI_MODEL", collect.DEFAULT_GEMINI_MODEL)
+    config = types.GenerateContentConfig(
+        system_instruction=CHAT_SYSTEM_INSTRUCTION + "\n\n" + _build_chat_context(),
+        temperature=0.3,
+    )
+    conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        response = collect._gemini_generate_with_fallback(model, question, config, api_keys, label="chat")
+        if response is None or not getattr(response, "text", None):
+            chat_log.record_message(conn, user_id, asked_at, question, error="no response")
+            return jsonify({"message": "回答の生成に失敗しました。しばらくしてから再度お試しください。", "success": False}), 502
+        answer = response.text.strip()
+        chat_log.record_message(conn, user_id, asked_at, question, answer=answer)
+    finally:
+        conn.close()
+    remaining_user, remaining_total = _chat_rate_limit_status(user_id)
+    return jsonify({
+        "success": True, "answer": answer,
+        "remaining_today": max(0, min(remaining_user, remaining_total)),
+    })
 
 
 def _network_failure_summary(recent_n=30):
@@ -3168,7 +3311,18 @@ def admin_report():
 @app.route("/admin/gemini")
 @requires_admin
 def admin_gemini():
-    return render_template("admin_gemini.html", rows=_gemini_log_stats())
+    conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        chat_rows = {r["date"]: r["count"] for r in chat_log.daily_message_counts(conn, days=GEMINI_LOG_DAYS)}
+    finally:
+        conn.close()
+    rows = _gemini_log_stats()
+    for r in rows:
+        r["chat_calls"] = chat_rows.get(r["date"], 0)
+    return render_template(
+        "admin_gemini.html", rows=rows,
+        chat_daily_limit_per_user=CHAT_DAILY_LIMIT_PER_USER, chat_daily_limit_total=CHAT_DAILY_LIMIT_TOTAL,
+    )
 
 
 @app.route("/admin/maintenance", methods=["GET", "POST"])

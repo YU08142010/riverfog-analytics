@@ -6,14 +6,15 @@
     <h2>Gemini API利用状況(直近{{ rows|length }}日分)</h2>
     <p class="muted">collect.logから集計しています。「フォールバック」はメインAPIキーが使えずサブキーに切り替わった回数、
         「クォータエラー」は429/RESOURCE_EXHAUSTED系のエラー行数です。
-        「分類/エスカレーション/要約 呼び出し」は実際にGeminiへリクエストを送った回数の目安で、
-        APIキーが足りているかを実際の利用量から判断する材料になります。</p>
+        「分類/エスカレーション/要約/チャット 呼び出し」は実際にGeminiへリクエストを送った回数の目安で、
+        APIキーが足りているかを実際の利用量から判断する材料になります。
+        チャットは利用者1人あたり1日{{ chat_daily_limit_per_user }}回、サイト全体で1日{{ chat_daily_limit_total }}回までに制限しています(.envで変更可能)。</p>
     {% if rows %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
         <thead><tr>
             <th>日付</th><th>フォールバック回数</th><th>クォータエラー回数</th>
-            <th>分類呼び出し</th><th>エスカレーション呼び出し</th><th>エスカレーションskip</th><th>要約呼び出し</th>
+            <th>分類呼び出し</th><th>エスカレーション呼び出し</th><th>エスカレーションskip</th><th>要約呼び出し</th><th>チャット呼び出し</th>
             <th>high</th><th>medium</th><th>low</th>
         </tr></thead>
         <tbody>
@@ -26,6 +27,7 @@
             <td>{{ r.escalation_calls }}</td>
             <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.escalation_skipped > 0 else '' }}">{{ r.escalation_skipped }}</td>
             <td>{{ r.summary_calls }}</td>
+            <td style="{{ 'color:var(--color-danger); font-weight:600;' if r.chat_calls >= chat_daily_limit_total else '' }}">{{ r.chat_calls }}</td>
             <td>{{ r.high }}</td>
             <td>{{ r.medium }}</td>
             <td>{{ r.low }}</td>
