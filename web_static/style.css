@@ -909,6 +909,24 @@ img.full-graph {
     border-radius: var(--radius-sm);
 }
 
+/* station_detail.htmlのタイムラプス画像。カメラごとに元画像の解像度がまちまちで、
+   幅・高さの上限だけ(max-width/max-height)しか指定していないと、解像度が低い
+   カメラ(伊南川合流地点・三島大橋等)の画像だけ他より小さく表示されてしまっていた。
+   幅いっぱい・固定の高さで表示し、object-fit:containで比率を保ったまま
+   レターボックス表示することで、どのカメラでも同じ大きさで見えるようにする。 */
+.timelapse-img {
+    display: block;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 720px;
+    height: 480px;
+    object-fit: contain;
+    background: var(--color-bg);
+}
+@media (max-width: 640px) {
+    .timelapse-img { height: 320px; }
+}
+
 table.obs-table {
     border-collapse: collapse;
     width: 100%;
