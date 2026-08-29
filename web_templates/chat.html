@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}AIチャット{% endblock %}
+{% block content %}
+<div class="card chat-card">
+    <div class="chat-card-header">
+        <h2>AIチャット</h2>
+        <span class="muted" style="font-size:0.75rem;" id="chat-remaining"></span>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+        {% if history %}
+        {% for m in history %}
+        <div class="chat-message chat-message-user">{{ m.question }}</div>
+        {% if m.answer %}
+        <div class="chat-message chat-message-ai">{{ m.answer }}</div>
+        {% else %}
+        <div class="chat-message chat-message-error">{{ m.error or "エラーが発生しました。" }}</div>
+        {% endif %}
+        {% endfor %}
+        {% else %}
+        <p class="muted" style="font-size:0.82rem;">只見川の霧の現在の状況や見通しについて質問できます(Geminiによる自動応答です)。</p>
+        {% endif %}
+    </div>
+    <form id="chat-form" class="chat-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は霧が出そうですか？" required></textarea>
+        <button type="submit" class="button" id="chat-send-btn">送信</button>
+    </form>
+    <p class="muted chat-footnote">無料枠のクォータ保護のため、1日あたりの質問回数に上限があります。回答はAIによる自動生成のため誤りを含むことがあります。</p>
+</div>
+<script>
+(function() {
+    var messages = document.getElementById("chat-messages");
+    var form = document.getElementById("chat-form");
+    var input = document.getElementById("chat-input");
+    var sendBtn = document.getElementById("chat-send-btn");
+    var remainingLabel = document.getElementById("chat-remaining");
+
+    function refreshRemaining() {
+        fetch("{{ url_for('chat_status') }}")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                remainingLabel.textContent = "本日の残り" + data.remaining_today + "/" + data.daily_limit + "回";
+            })
+            .catch(function() {});
+    }
+    refreshRemaining();
+    input.focus();
+    messages.scrollTop = messages.scrollHeight;
+
+    function addMessage(text, who) {
+        var wrap = document.createElement("div");
+        wrap.className = "chat-message chat-message-" + who;
+        wrap.textContent = text;
+        messages.appendChild(wrap);
+        messages.scrollTop = messages.scrollHeight;
+        return wrap;
+    }
+
+    form.addEventListener("submit", function(e) {
+        e.preventDefault();
+        var question = input.value.trim();
+        if (!question) { return; }
+        var formData = new FormData(form);
+        formData.set("question", question);
+        addMessage(question, "user");
+        input.value = "";
+        input.disabled = true;
+        sendBtn.disabled = true;
+        var thinking = addMessage("考え中...", "thinking");
+        fetch("{{ url_for('chat_ask') }}", {
+            method: "POST",
+            body: formData,
+            headers: {"X-Requested-With": "XMLHttpRequest"},
+        })
+        .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
+        .then(function(result) {
+            thinking.remove();
+            if (result.ok && result.data.success) {
+                addMessage(result.data.answer, "ai");
+                if (typeof result.data.remaining_today === "number") {
+                    remainingLabel.textContent = "本日の残り" + result.data.remaining_today + "回";
+                }
+            } else {
+                addMessage(result.data.message || "エラーが発生しました。", "error");
+            }
+        })
+        .catch(function() {
+            thinking.remove();
+            addMessage("通信エラーが発生しました。", "error");
+        })
+        .finally(function() {
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        });
+    });
+})();
+</script>
+{% endblock %}

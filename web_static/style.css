@@ -199,22 +199,32 @@ body {
     background: var(--color-surface);
 }
 
-/* AIチャットパネル(notif-panelと基本構造は同じだが、会話ログ表示のため縦に長く広めにする)。 */
-.chat-panel {
-    width: 380px;
-    max-height: 520px;
+/* AIチャットページ(/chat)。他のナビ項目(地点別・メンバー等)と同じく専用ページとして
+   表示する(通知ベルのようなオーバーレイパネルにはしない)。 */
+.chat-card {
     display: flex;
     flex-direction: column;
+    height: 70vh;
+    min-height: 420px;
+    padding: 0;
+    overflow: hidden;
 }
+.chat-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.9rem 1.2rem;
+    border-bottom: 1px solid var(--color-border);
+}
+.chat-card-header h2 { margin: 0; font-size: 1.1rem; }
 .chat-messages {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 0.7rem 1rem;
+    padding: 0.9rem 1.2rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    min-height: 120px;
-    max-height: 280px;
+    min-height: 0;
 }
 .chat-message {
     padding: 0.5rem 0.7rem;
@@ -238,10 +248,30 @@ body {
     background: var(--color-danger);
     color: #fff;
 }
+.chat-message-thinking {
+    align-self: flex-start;
+    background: var(--color-primary-light);
+    color: var(--color-text-muted);
+    font-style: italic;
+    animation: chatThinkingPulse 1.4s ease-in-out infinite;
+}
+@keyframes chatThinkingPulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .chat-message-thinking { animation: none; }
+}
 .chat-form {
     display: flex;
     gap: 0.4rem;
-    padding: 0.6rem 1rem;
+    padding: 0.7rem 1.2rem;
+    border-top: 1px solid var(--color-border);
+}
+.chat-footnote {
+    margin: 0;
+    padding: 0.5rem 1.2rem;
+    font-size: 0.74rem;
     border-top: 1px solid var(--color-border);
 }
 .chat-form textarea {
@@ -298,13 +328,24 @@ header h1 {
 }
 header nav {
     display: flex;
-    flex-wrap: wrap;
+    /* flex-basisを0にする: flex-wrap:wrapの折り返し判定はshrink後ではなく本来サイズ
+       (flex-basis)で行われるため、auto(=リンク全部を並べた本来の幅)のままだと
+       navの中身が多いだけでheader自体が2段に折り返されてしまう。0にすることで
+       navは常に1行に収まる扱いになり、はみ出た分はoverflow-xで横スクロールする。 */
+    flex: 1 1 0;
+    min-width: 0;
+    flex-wrap: nowrap;
     gap: 0.2rem;
     overflow-x: auto;
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+    /* トラックパッドの横スワイプが無い環境(マウス+キーボードのみ)でも、はみ出た項目に
+       アクセスできるよう、スクロールバーは隠さず細く表示する(base.htmlのJSでマウス
+       ホイールでの横スクロールにも対応)。 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
 }
-header nav::-webkit-scrollbar { display: none; }
+header nav::-webkit-scrollbar { height: 6px; }
+header nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.35); border-radius: 3px; }
+header nav::-webkit-scrollbar-track { background: transparent; }
 header nav a {
     color: rgba(255, 255, 255, 0.82);
     text-decoration: none;
@@ -363,7 +404,7 @@ main {
 .sidebar {
     flex: 0 0 240px;
     position: sticky;
-    top: 4.6rem;
+    top: var(--header-h, 4.6rem);
 }
 .sidebar:empty { display: none; }
 .layout-content { flex: 1 1 0%; min-width: 0; }
@@ -523,6 +564,16 @@ button.button:disabled {
 }
 @media (max-width: 640px) {
     .terminal-frame { height: 60vh; min-height: 280px; }
+}
+
+/* admin_cockpit.htmlのCockpit埋め込み。項目一覧・グラフ等が多く縦に長いため、
+   ターミナルより高さに余裕を持たせる。 */
+.cockpit-frame {
+    height: min(900px, 82vh);
+    min-height: 420px;
+}
+@media (max-width: 640px) {
+    .cockpit-frame { height: 70vh; min-height: 320px; }
 }
 
 .badge {
@@ -855,9 +906,9 @@ table.obs-table th {
     background: var(--color-primary-light);
     color: var(--color-primary-dark);
     font-weight: 600;
-    position: sticky;
-    top: 4.6rem; /* headerが同じくposition:stickyで高さ約4.6rem分場所を取るため、その下に固定する */
-    z-index: 2;
+    /* 以前はposition:stickyで見出し行をスクロール中も表示していたが、ヘッダー高さの
+       測定値とずれると見出しがテーブル途中に浮いて表示される不具合が繰り返し発生したため、
+       信頼性を優先し通常のテーブル見出し(スクロールで流れる)に戻した。 */
 }
 table.obs-table tbody tr:nth-child(even) { background: var(--color-bg); }
 table.obs-table tbody tr:hover { background: var(--color-primary-light); }

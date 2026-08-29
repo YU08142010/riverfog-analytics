@@ -108,11 +108,11 @@ LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ
 # 固定せずリクエストのホスト名(request.host)に合わせて組み立てる（admin_terminal()参照）。
 TTYD_PORT = 7681
 
-# CockpitはOS標準でインストール済み(HTTPSのみ、自己署名証明書)。iframe埋め込みは
-# 自己署名証明書のせいでブラウザに無言でブロックされることがあるため、埋め込みはせず
-# 新しいタブで開くリンクだけをadmin_status.htmlに置く(admin_status_resources_jsonで
-# 自前のCPU/メモリ表示はリアルタイム更新している)。
-COCKPIT_PORT = 9090
+# CockpitはOS標準でインストール済み(HTTPSのみ、自己署名証明書)。9090番は別オリジンかつ
+# X-Frame-Options: sameoriginを送るため、他オリジンからのiframe埋め込みができない
+# (自己署名証明書とは別の、ブラウザが強制するより根本的な制約)。nginx(8080番)がCockpitを
+# /cockpit/配下に本アプリと同一オリジンでリバースプロキシし、admin_status.htmlはその
+# 相対パスをiframeで埋め込んでいる(cockpit.conf側もUrlRoot=/cockpitに設定済み)。
 
 ALERT_HOURS_AHEAD = 24
 ALERT_MIN_FOG_PROB = 0.95
@@ -1136,21 +1136,40 @@ def _load_station_feature_snapshot(name):
 
 CHAT_SYSTEM_INSTRUCTION = (
     "あなたは只見川流域の川霧観測・予測システム「只見川霧観測」のAIアシスタントです。"
-    "以下に渡す現在の観測状況・予測状況をもとに、利用者からの質問に日本語で簡潔に答えてください。\n"
-    "- 渡されていない情報(渡された時刻より先の詳細な天気予報、渡されていない地点の状況等)は"
-    "推測で答えず、「その情報は分かりません」と正直に伝えてください。\n"
+    "以下に渡す現在の観測状況・今後数日の予測・予測精度・モデルやサーバーの状態・"
+    "システムの仕組みをもとに、"
+    "利用者からの質問に日本語で簡潔に答えてください。\n"
+    "\n"
+    "【このシステムの仕組み(常に正しい前提知識として使ってよい)】\n"
+    "- 地点ごとにRandomForestとXGBoostを組み合わせたハイブリッドモデルで霧の発生を予測している。"
+    "2つのモデルの混合比(ブレンド重み)は地点ごとに検証データから自動選択される。\n"
+    "- 観測データが少ない地点は、単独では十分な精度のモデルを学習できないため、複数地点をまとめた"
+    "「pooled」モデル(地点別霧発生率などの特徴量を加えた共通モデル)で代替している。\n"
+    "- 霧と判定するしきい値(fog_threshold)は0.5固定ではなく、地点ごとに検証データでF1が"
+    "最良になる値を自動選択している。\n"
+    "- 特徴量には気温・湿度・降水量・視程などの気象観測値に加え、その地点の過去の霧発生率や、"
+    "他地点も含めた広域の霧の出やすさを示す指数なども使っている。\n"
+    "- 定期的な再学習のたびに、新モデルが統計的に有意に前のモデルより良いと確認できない場合は、"
+    "自動的に前のモデルへロールバックする安全機構がある(精度低下を防ぐため)。\n"
+    "- 予測精度がなぜ変動するか(季節性、学習データの偏り、直近の異常な気象、モデルの再学習・"
+    "自動ロールバック等)といった、システムの仕組みや機械学習全般に関する質問には、"
+    "上記の前提知識・渡された数値データ・一般的な機械学習の知識をもとに答えて構わない。\n"
+    "\n"
+    "【回答の際の注意】\n"
+    "- 渡されていない具体的な情報(渡された時刻より先の詳細な天気予報、渡されていない地点の状況、"
+    "ソースコードの正確な行数等)は推測で答えず、「その情報は分かりません」と正直に伝える。\n"
     "- 観測・予測はいずれもAIやセンサーによる自動判定であり、100%正確とは限らないことを"
-    "必要に応じて伝えてください。\n"
+    "必要に応じて伝える。\n"
     "- 安全に関わる最終判断(通行止め・避難等)を促す必要がある場合は、必ず自治体や河川管理者の"
-    "公式情報も確認するよう案内してください。\n"
-    "- 与えられた文脈と関係のない質問(システムの使い方以外の一般的な質問等)には、"
-    "「この機能は只見川の霧観測に関する質問向けです」と丁寧に答えてください。"
+    "公式情報も確認するよう案内する。\n"
+    "- 只見川の霧やこのシステムの仕組みと全く関係のない質問(一般雑学等)には、"
+    "「この機能は只見川の霧観測に関する質問向けです」と丁寧に答える。"
 )
 
 
 def _build_chat_context():
-    """現在の観測・予測状況をテキストにまとめる(チャットのシステムプロンプトに含める)。"""
-    lines = []
+    """現在の観測・予測状況・サーバー状態をテキストにまとめる(チャットのシステムプロンプトに含める)。"""
+    lines = [f"【バージョン】v{_app_version()}"]
     observations = _latest_observations()
     if observations:
         lines.append(f"【現在の観測】{observations['datetime']} 時点")
@@ -1182,6 +1201,135 @@ def _build_chat_context():
             lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")
     else:
         lines.append("現在、今後24時間以内の霧アラートは出ていません。")
+
+    if DB_PATH.exists():
+        try:
+            now_naive = now_jst_naive()
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            try:
+                wider_alerts = prediction_log.upcoming_fog_alerts(
+                    conn,
+                    now_naive.strftime("%Y-%m-%d %H:%M:%S"),
+                    (now_naive + timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S"),
+                    SUMMARY_FOG_CODES,
+                )
+            finally:
+                conn.close()
+            wider_alerts = sorted(
+                (a for a in wider_alerts if a["predicted_fog_prob"] is not None),
+                key=lambda a: a["predicted_fog_prob"], reverse=True,
+            )
+            if wider_alerts:
+                lines.append("【今後72時間以内の霧予測(確率が高い順、上位10件)】")
+                for a in wider_alerts[:10]:
+                    prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
+                    lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")
+        except Exception as e:
+            log.warning("Failed to read wider forecast for chat context: %s", e)
+
+    accuracy = _accuracy_summary_safe()
+    overall = accuracy.get("overall") if accuracy else None
+    if overall and overall.get("n"):
+        overall_pct = round(100.0 * overall["correct"] / overall["n"], 1)
+        lines.append(f"【予測精度(全期間累計)】{overall['correct']}/{overall['n']}件 正解率{overall_pct}%")
+        by_lead = [r for r in (accuracy.get("by_lead_day") or []) if r.get("n")]
+        if by_lead:
+            lead_parts = [
+                f"{r['lead_day']}日後:{round(100.0 * r['correct'] / r['n'], 1)}%"
+                for r in by_lead[:5]
+            ]
+            lines.append("リードタイム別の正解率: " + "、".join(lead_parts))
+        by_station = [r for r in (accuracy.get("by_station") or []) if r.get("n")]
+        if by_station:
+            worst = sorted(by_station, key=lambda r: r["correct"] / r["n"])[:3]
+            worst_parts = [
+                f"{r['station']}({round(100.0 * r['correct'] / r['n'], 1)}%)" for r in worst
+            ]
+            lines.append("正解率が低い地点(下位3件): " + "、".join(worst_parts))
+        trend = [r for r in _accuracy_trend_safe() if r.get("n")]
+        if len(trend) >= 7:
+            recent = trend[-7:]
+            recent_n = sum(r["n"] for r in recent)
+            recent_correct = sum(r["correct"] for r in recent)
+            if recent_n:
+                recent_pct = round(100.0 * recent_correct / recent_n, 1)
+                lines.append(
+                    f"直近7日間の正解率: {recent_pct}%(全期間累計{overall_pct}%との比較用)"
+                )
+    else:
+        lines.append("予測精度の集計データはまだありません。")
+
+    try:
+        model_state = fog_model.load_model_state()
+    except Exception:
+        model_state = {}
+    if model_state:
+        n_total = len(model_state)
+        n_pooled = sum(1 for info in model_state.values() if info.get("pooled"))
+        accs = [info["accuracy"] for info in model_state.values() if _is_valid_number(info.get("accuracy"))]
+        avg_acc_part = ""
+        if accs:
+            avg_acc_part = f"、検証accuracy平均{round(100.0 * sum(accs) / len(accs), 1)}%"
+        lines.append(f"【モデル状況】学習済み{n_total}地点(うちpooledモデル{n_pooled}地点){avg_acc_part}")
+        low_acc = _low_accuracy_stations(model_state, n=3)
+        if low_acc:
+            lines.append("検証accuracyが低い地点(下位3件): " + "、".join(low_acc))
+
+    predict_log_path = ALLOWED_LOGS.get("predict")
+    if predict_log_path and predict_log_path.exists():
+        try:
+            with open(predict_log_path, encoding="utf-8", errors="replace") as f:
+                rollback_lines = [ln.rstrip("\n") for ln in f if "Rolled back to previous model" in ln]
+            if rollback_lines:
+                lines.append(
+                    "【直近のモデル自動ロールバック】(新モデルが有意に改善しなかったため元に戻した記録)"
+                )
+                for ln in rollback_lines[-5:]:
+                    lines.append("- " + ln)
+        except Exception:
+            pass
+
+    resources = _read_server_resources()
+    if resources.get("load1") is not None or resources.get("mem_used_pct") is not None:
+        parts = []
+        if resources.get("load1") is not None:
+            parts.append(
+                f"CPU負荷(1/5/15分平均) {resources['load1']:.2f}/{resources['load5']:.2f}/"
+                f"{resources['load15']:.2f}"
+            )
+        if resources.get("mem_used_pct") is not None:
+            parts.append(f"メモリ使用率{resources['mem_used_pct']}%")
+        if resources.get("temp_c") is not None:
+            parts.append(f"CPU温度{resources['temp_c']:.1f}℃")
+        lines.append("【サーバーの状態】" + "、".join(parts))
+
+    unit_states = []
+    for unit in SYSTEMD_UNITS:
+        info = _systemctl_show(unit, ["ActiveState"])
+        unit_states.append(f"{unit}:{info.get('ActiveState', '不明')}")
+    if unit_states:
+        lines.append("【主要サービスの稼働状況】" + "、".join(unit_states))
+
+    camera_rows = [r for r in _camera_uptime_stats_cached() if r.get("total")]
+    if camera_rows:
+        worst_cameras = camera_rows[:3]
+        camera_parts = [
+            f"{r['station']}({round(r['rate'], 1)}%)" for r in worst_cameras if r.get("rate") is not None
+        ]
+        if camera_parts:
+            lines.append(
+                f"【カメラ画像取得の稼働率(直近{CAMERA_HEALTH_DAYS}日間、低い順)】"
+                + "、".join(camera_parts)
+            )
+
+    net = _network_failure_summary()
+    if net["count_24h"] or net["count_7d"]:
+        lines.append(
+            f"【DNS/ネットワーク障害】過去24時間{net['count_24h']}件、過去7日間{net['count_7d']}件"
+            "(このサーバーの名前解決はTailscale経由のため、断続的に外部サイトへのアクセスが"
+            "一時的に失敗することがある既知の症状)"
+        )
+
     return "\n".join(lines)
 
 
@@ -1195,6 +1343,16 @@ def _chat_rate_limit_status(user_id):
     finally:
         conn.close()
     return CHAT_DAILY_LIMIT_PER_USER - used_by_user, CHAT_DAILY_LIMIT_TOTAL - used_total
+
+
+@app.route("/chat")
+def chat_page():
+    conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        history = chat_log.get_recent_messages(conn, session.get("user_id"), limit=30)
+    finally:
+        conn.close()
+    return render_template("chat.html", history=history)
 
 
 @app.route("/chat/status")
@@ -1610,6 +1768,25 @@ def _camera_uptime_stats(days=CAMERA_HEALTH_DAYS):
         rows.append({"station": name, "ok": ok_counts[name], "total": total, "rate": rate})
     rows.sort(key=lambda r: (r["rate"] is None, r["rate"]))
     return rows
+
+
+_camera_uptime_cache = {"data": None, "at": 0.0}
+_camera_uptime_cache_lock = threading.Lock()
+
+
+def _camera_uptime_stats_cached():
+    """_camera_uptime_stats()はファイルシステムを日数分走査するため、AIチャット等
+    高頻度に呼ばれる場所からはキャッシュ経由で使う(CAMERA_HEALTH_CACHE_SECONDSと同じ間隔)。"""
+    now = time.monotonic()
+    with _camera_uptime_cache_lock:
+        cached = _camera_uptime_cache["data"]
+        if cached is not None and now - _camera_uptime_cache["at"] < CAMERA_HEALTH_CACHE_SECONDS:
+            return cached
+    data = _camera_uptime_stats()
+    with _camera_uptime_cache_lock:
+        _camera_uptime_cache["data"] = data
+        _camera_uptime_cache["at"] = now
+    return data
 
 
 _GEMINI_LINE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
@@ -2753,8 +2930,13 @@ def admin_status():
         "admin_status.html", units=units, timer_info=timer_info,
         crontab=_crontab_safe(), running=running,
         resources=_read_server_resources(),
-        cockpit_port=COCKPIT_PORT,
     )
+
+
+@app.route("/admin/cockpit")
+@requires_admin
+def admin_cockpit():
+    return render_template("admin_cockpit.html")
 
 
 @app.route("/admin/status/resources.json")
@@ -3450,5 +3632,7 @@ def respond_announcement(announcement_id):
 
 if __name__ == "__main__":
     from waitress import serve
-    log.info("Starting river-fog webapp on 0.0.0.0:8080")
-    serve(app, host="0.0.0.0", port=8080)
+    # 8080番は外部公開用にnginxが受け、Cockpit(9090番、別オリジン)と同一オリジンで
+    # リバースプロキシするために127.0.0.1:8081をローカル専用で使う(直接の外部公開はしない)。
+    log.info("Starting river-fog webapp on 127.0.0.1:8081 (behind nginx on :8080)")
+    serve(app, host="127.0.0.1", port=8081)

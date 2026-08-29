@@ -33,9 +33,7 @@
     </div>
     <p class="muted" style="font-size:0.8rem; margin-top:0.6rem;">
         より詳しい状況(ネットワーク・ストレージ・プロセス一覧等)は
-        <a href="https://{{ request.host.split(':')[0] }}:{{ cockpit_port }}/" target="_blank" rel="noopener">Cockpit</a>
-        で確認できます(別タブで開きます。このサーバー自身のログイン情報でサインインしてください。
-        初回アクセス時は自己署名証明書の警告が出るので、承認して進んでください)。
+        <a href="{{ url_for('admin_cockpit') }}">Cockpit</a>で確認できます。
     </p>
 </div>
 <script>

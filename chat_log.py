@@ -54,6 +54,18 @@ def count_all_messages_since(conn, since_str):
     return row[0] if row else 0
 
 
+def get_recent_messages(conn, user_id, limit=30):
+    """そのユーザーの直近のやり取りを古い順で返す(チャットページ再訪問時の履歴表示用)。"""
+    with closing(conn.execute(
+        """SELECT question, answer, error FROM chat_messages
+           WHERE user_id = ? ORDER BY id DESC LIMIT ?""",
+        (user_id, limit),
+    )) as cur:
+        rows = cur.fetchall()
+    rows.reverse()
+    return [{"question": q, "answer": a, "error": e} for q, a, e in rows]
+
+
 def daily_message_counts(conn, days=14):
     """直近days日分の、日付ごとの質問数(全体)を返す(管理画面のGemini状況表示用)。"""
     with closing(conn.execute(

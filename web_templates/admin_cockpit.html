@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Cockpit{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Cockpit</h2>
+    <p class="muted">
+        CPU/メモリの詳細・ネットワーク・ストレージ・プロセス一覧等を確認できます。
+        このサーバー自身のログイン情報でサインインしてください。
+    </p>
+    <iframe src="/cockpit-ui/" class="cockpit-frame" style="width:100%; border:0; border-radius: var(--radius-sm);" title="Cockpit"></iframe>
+</div>
+{% endblock %}

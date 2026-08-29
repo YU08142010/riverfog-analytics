@@ -57,7 +57,10 @@ FETCH_RETRIES = 2
 FETCH_RETRY_DELAY = 1.5
 
 GEMINI_TIMEOUT_MS = 30_000
-GEMINI_RETRY_PASSES = 2
+# Tailscale経由の名前解決が断続的に失敗することがあり(DNS一時障害)、クォータ切れとは
+# 別の一過性エラーとして数秒〜十数秒後には回復することが多いため、パス数を3に増やして
+# 回復を待てるようにしている(AIチャット機能で「たまに失敗する」という報告があったため)。
+GEMINI_RETRY_PASSES = 3
 GEMINI_RETRY_DELAY_SEC = 5
 
 WEATHER_FETCH_RETRIES = 2
