@@ -1259,6 +1259,21 @@ table.obs-table th.sticky-col { z-index: 3; }
 .login-history-index { color: var(--color-text-muted); flex: 0 0 auto; }
 .login-history-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* station_detail.htmlの「最新の気象情報」。項目数が少ない縦長テーブルのままだと
+   カード幅の大半が余白になるため、login-history-gridと同様に折り返すタイル状にする。 */
+.weather-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.6rem;
+}
+.weather-info-item {
+    padding: 0.5rem 0.8rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+}
+.weather-info-label { font-size: 0.76rem; color: var(--color-text-muted); }
+.weather-info-value { font-size: 1.05rem; font-weight: 600; margin-top: 0.15rem; }
+
 .heatmap-wrap { overflow-x: auto; padding-bottom: 0.2rem; }
 .heatmap-months {
     display: flex;

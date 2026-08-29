@@ -43,27 +43,47 @@
         ({{ name }}固有の実測データがまだ無いため、代表地点の値を表示しています)
         {% endif %}
     </p>
-    <div class="table-scroll">
-    <table class="obs-table" style="width:auto;">
-        <tbody>
-        <tr><td>気温</td><td>{{ "%.1f℃"|format(station_weather_latest.temp) if station_weather_latest.temp is not none else "-" }}</td></tr>
-        <tr><td>湿度</td><td>{{ "%.0f%%"|format(station_weather_latest.humidity) if station_weather_latest.humidity is not none else "-" }}</td></tr>
-        <tr><td>降水量</td><td>{{ "%.1fmm"|format(station_weather_latest.precip) if station_weather_latest.precip is not none else "-" }}</td></tr>
-        <tr><td>視程</td><td>{{ "%.1fkm"|format(station_weather_latest.visibility) if station_weather_latest.visibility is not none else "-" }}</td></tr>
+    <div class="weather-info-grid">
+        <div class="weather-info-item">
+            <div class="weather-info-label">気温</div>
+            <div class="weather-info-value">{{ "%.1f℃"|format(station_weather_latest.temp) if station_weather_latest.temp is not none else "-" }}</div>
+        </div>
+        <div class="weather-info-item">
+            <div class="weather-info-label">湿度</div>
+            <div class="weather-info-value">{{ "%.0f%%"|format(station_weather_latest.humidity) if station_weather_latest.humidity is not none else "-" }}</div>
+        </div>
+        <div class="weather-info-item">
+            <div class="weather-info-label">降水量</div>
+            <div class="weather-info-value">{{ "%.1fmm"|format(station_weather_latest.precip) if station_weather_latest.precip is not none else "-" }}</div>
+        </div>
+        <div class="weather-info-item">
+            <div class="weather-info-label">視程</div>
+            <div class="weather-info-value">{{ "%.1fkm"|format(station_weather_latest.visibility) if station_weather_latest.visibility is not none else "-" }}</div>
+        </div>
         {% if station_weather_latest.wind_speed is not none %}
-        <tr><td>風速・風向</td><td>{{ "%.1fm/s"|format(station_weather_latest.wind_speed) }}{{ " " ~ station_weather_latest.wind_dir_label if station_weather_latest.wind_dir_label else "" }}</td></tr>
+        <div class="weather-info-item">
+            <div class="weather-info-label">風速・風向</div>
+            <div class="weather-info-value">{{ "%.1fm/s"|format(station_weather_latest.wind_speed) }}{{ " " ~ station_weather_latest.wind_dir_label if station_weather_latest.wind_dir_label else "" }}</div>
+        </div>
         {% endif %}
         {% if station_weather_latest.dew_point is not none %}
-        <tr><td>露点温度</td><td>{{ "%.1f℃"|format(station_weather_latest.dew_point) }}</td></tr>
+        <div class="weather-info-item">
+            <div class="weather-info-label">露点温度</div>
+            <div class="weather-info-value">{{ "%.1f℃"|format(station_weather_latest.dew_point) }}</div>
+        </div>
         {% endif %}
         {% if station_weather_latest.sunshine is not none %}
-        <tr><td>日照時間</td><td>{{ "%.2f時間"|format(station_weather_latest.sunshine) }}</td></tr>
+        <div class="weather-info-item">
+            <div class="weather-info-label">日照時間</div>
+            <div class="weather-info-value">{{ "%.2f時間"|format(station_weather_latest.sunshine) }}</div>
+        </div>
         {% endif %}
         {% if station_weather_latest.solar is not none %}
-        <tr><td>日射量</td><td>{{ "%.2fMJ/m²"|format(station_weather_latest.solar) }}</td></tr>
+        <div class="weather-info-item">
+            <div class="weather-info-label">日射量</div>
+            <div class="weather-info-value">{{ "%.2fMJ/m²"|format(station_weather_latest.solar) }}</div>
+        </div>
         {% endif %}
-        </tbody>
-    </table>
     </div>
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>気象データがまだありません。</span></div>
