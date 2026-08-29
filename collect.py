@@ -89,8 +89,13 @@ OBSERVATION_END_HOUR = 19
 # (cam.river.go.jp)側の障害等の可能性が高いとみなしERRORで警告する（/admin/errorsに出る）。
 IMAGE_FAILURE_ALERT_RATIO = 0.3
 
-RESIZE_MAX_SIDE = 768
+RESIZE_MAX_SIDE = 1024  # 遠景の対岸のわずかな霞み等、微妙な階調を判定しやすくするため768から引き上げ
 JPEG_QUALITY = 80
+
+# 自己申告のconfidenceだけに頼らず、既知の判定困難な条件下ではmedium(自信ありと申告されても)を
+# low相当としてエスカレーション対象に含める(機械的な補助基準)。LLMの自己申告確信度は必ずしも
+# 較正されておらず「自信満々に間違える」ことがあるため。
+DAWN_DUSK_HOURS = {4, 5, 6, 17, 18, 19}  # 観測時間帯(4-19時)の両端＝逆光になりやすい時間帯の目安
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -129,6 +134,11 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 class StationClassification(BaseModel):
     station_index: int
+    # 先にreasoningを言語化させてからcode/confidenceを決めさせることで、いきなり
+    # 結論だけを出すより主観的な視覚判定の精度が上がりやすい（フィールド順が生成順に
+    # 影響するため、reasoningをcodeより前に置いている）。reasoning自体は保存・表示せず
+    # ログ出力のみに使う診断用の項目。
+    reasoning: str
     code: int
     confidence: Literal["high", "medium", "low"]
 
@@ -272,6 +282,17 @@ _LENS_FOG_NOTE = (
     count=len(_LENS_FOG_STATION_NAMES),
 ) if _LENS_FOG_STATION_NAMES else ""
 
+
+def _should_treat_medium_as_low(name, run_time):
+    """confidence:mediumだった地点を、low相当としてエスカレーション対象に含めるべきかを返す。
+    薄暮・夜明け前後(逆光になりやすい)か、レンズが常時わずかに曇っている地点は、
+    自己申告のconfidenceが実態より高く出やすいと考えられるため、機械的に上乗せする。
+    """
+    if run_time is not None and run_time.hour in DAWN_DUSK_HOURS:
+        return True
+    return name in _LENS_FOG_STATION_NAMES
+
+
 SYSTEM_INSTRUCTION = (
     "あなたは河川監視カメラの画像から気象現象を分類する専門家です。\n"
     "各画像を、以下の現象コード表に従って-1〜10の整数のいずれか1つに分類してください。\n"
@@ -282,6 +303,18 @@ SYSTEM_INSTRUCTION = (
     "1: 薄い川霧\n2: 川霧\n3: 濃い川霧\n"
     "4: 薄い全体霧\n5: 全体霧\n6: 全体濃い霧\n"
     "7: 薄い層雲\n8: 濃い層雲\n9: 霧雨\n10: 雨\n"
+    "\n"
+    "判定基準の目安（カテゴリ名だけでは境界が曖昧なため、具体的な見え方で判断してください）:\n"
+    "- 現象なし(0)と薄い現象(1・4・7)の境界: 対岸や空の輪郭がわずかでも明確に見分けられる場合は"
+    "現象なし(0)とし、肉眼で視程の低下がはっきり分かる場合のみ薄い現象とする。\n"
+    "- 薄い/普通/濃いの目安: 対岸の輪郭がはっきり見える→薄い、輪郭はぼやけるが判別できる→普通、"
+    "対岸がほとんど見えない→濃い。\n"
+    "- 川霧(1〜3) vs 全体霧(4〜6): 川面付近だけが白く霞み対岸・空はある程度見える場合は川霧、"
+    "川面だけでなく対岸・空まで含めて画面全体が一様に白く霞んでいる場合は全体霧とする。\n"
+    "- 全体霧(4〜6) vs 層雲(7・8): 地表・川面付近の視界も悪化している場合は霧(1〜6)、"
+    "地表付近の視界は保たれていて空だけが厚い雲に覆われている場合は層雲(7・8)とする。\n"
+    "- 薄暮・夜間の暗さと霧を混同しない: 画面全体が暗いだけでは霧・層雲と判定しない。"
+    "暗さの中でも光がにじむ・輪郭が霞む等、視程の低下がはっきり認められる場合のみ現象ありとする。\n"
     "\n"
     "注意（レンズ付着物との区別）: 屋外設置のカメラのため、レンズに雨滴・水滴や泥・砂埃が"
     "付着していることがあります。これらは画面の一部がにじむ・水玉状に歪む・茶色く汚れた斑点や"
@@ -301,6 +334,10 @@ SYSTEM_INSTRUCTION = (
     "station_index には、このラベルのNの数字をそのまま入れてください。"
     "画像とラベルの対応を取り違えないよう、慎重に対応させてください。\n"
     "\n"
+    "reasoningには、判定の決め手になった視覚的な根拠を1文程度で簡潔に記述してください"
+    "（例:「対岸の輪郭が薄く霞んで見えるため」「川面付近にのみ白い帯状の霞みがあるため」）。"
+    "必ずreasoningで見えている根拠を整理してから、それに基づいてcodeとconfidenceを決めてください。\n"
+    "\n"
     "confidenceには、その判定の確信度をhigh/medium/lowのいずれかで入れてください。\n"
     "- high: 画像が明瞭で、該当コードであることに疑いがない\n"
     "- medium: おおむね妥当だが、画質・逆光・時間帯（薄暮など）により多少の不確実性がある\n"
@@ -308,17 +345,63 @@ SYSTEM_INSTRUCTION = (
 )
 
 
-def _build_contents(name_bytes_pairs):
-    """[(地点名, 縮小済み画像bytes), ...] からGeminiに渡すcontentsとindex->地点名の対応を作る。"""
+def _phenom_label_for_prompt(code):
+    return "現象なし" if code == 0 else PHENOM_LABELS.get(code, f"コード{code}")
+
+
+def _build_contents(name_bytes_pairs, weather_context=None, first_pass_by_name=None):
+    """[(地点名, 縮小済み画像bytes), ...] からGeminiに渡すcontentsとindex->地点名の対応を作る。
+
+    weather_context: 冒頭に添える気象状況の説明文（Noneまたは空文字なら付けない）。
+    first_pass_by_name: {地点名: 1回目の判定コード}。エスカレーション(再判定)呼び出し時に
+    渡すと、各地点のラベルに1回目の結果を添えて「特に隣接コードとの境界でないか」の
+    再確認を促す（画像だけを渡してゼロから判定させるより、着目点を絞り込める）。
+    """
     from google.genai import types
 
     contents = []
+    if weather_context:
+        contents.append(weather_context)
     index_to_name = {}
     for i, (name, resized) in enumerate(name_bytes_pairs, start=1):
-        contents.append(f"地点{i}: {name}")
+        label = f"地点{i}: {name}"
+        if first_pass_by_name and name in first_pass_by_name:
+            prev_code = first_pass_by_name[name]
+            label += (
+                f"（1回目の判定: コード{prev_code}「{_phenom_label_for_prompt(prev_code)}」・"
+                "確信度low。特に隣接するコードとの境界でないか、画像を慎重に見直してください）"
+            )
+        contents.append(label)
         contents.append(types.Part.from_bytes(data=resized, mime_type="image/jpeg"))
         index_to_name[i] = name
     return contents, index_to_name
+
+
+def _weather_context_text(weather):
+    """撮影時刻の周辺気象を、判定の補助材料としてGeminiに渡すためのテキストを作る。
+    放射霧は高湿度・低風速・無降水の条件で発生しやすいという傾向を判定のヒントにする
+    （あくまで補助情報で、実際に画像に写っている見た目を優先させる）。
+    データが無ければ空文字を返す(呼び出し側はcontentsに追加しない)。
+    """
+    if not weather:
+        return ""
+    parts = []
+    if weather.get("temperature") is not None:
+        parts.append(f"気温{weather['temperature']:.1f}℃")
+    if weather.get("humidity") is not None:
+        parts.append(f"湿度{weather['humidity']:.0f}%")
+    if weather.get("wind_speed") is not None:
+        parts.append(f"風速{weather['wind_speed']:.1f}m/s")
+    if weather.get("precipitation") is not None:
+        parts.append(f"降水量{weather['precipitation']:.1f}mm")
+    if not parts:
+        return ""
+    return (
+        "参考情報（この時刻の周辺気象）: " + "・".join(parts) + "。"
+        "高湿度・低風速・無降水の条件は霧が発生しやすく、逆に低湿度の条件で白っぽく写っている"
+        "場合は霧ではなく逆光・もや・排気等の可能性も考慮してください"
+        "（あくまで補助的な参考情報であり、実際に画像に写っている見た目を優先して判定してください）。"
+    )
 
 
 def _gemini_generate_with_fallback(model, contents, config, api_keys, label):
@@ -407,17 +490,20 @@ def _classify_with_model(contents, model, api_keys, label="classification"):
 
 def _parse_classifications(parsed, index_to_name):
     """Geminiのレスポンスを (地点名->code の辞書, 無効画像と判定された地点名のset,
-    confidence:lowだった地点名のlist, 地点名->confidenceの辞書) に変換する。
+    confidence:lowだった地点名のlist, 地点名->confidenceの辞書, 地点名->reasoningの辞書)
+    に変換する。
     """
     result = {}
     invalid_stations = set()
     low_confidence = []
     confidence_by_name = {}
+    reasoning_by_name = {}
     for item in parsed:
         name = index_to_name.get(item.station_index)
         if name is None:
             log.warning("Unknown station_index in Gemini response: %s", item.station_index)
             continue
+        reasoning_by_name[name] = item.reasoning
         if item.code == CODE_INVALID_IMAGE:
             invalid_stations.add(name)
             log.info("Gemini judged image as non-photo/placeholder: %s", name)
@@ -429,14 +515,19 @@ def _parse_classifications(parsed, index_to_name):
         confidence_by_name[name] = item.confidence
         if item.confidence == "low":
             low_confidence.append(name)
-    return result, invalid_stations, low_confidence, confidence_by_name
+    return result, invalid_stations, low_confidence, confidence_by_name, reasoning_by_name
 
 
-def classify_images(cameras, images_by_name):
+def classify_images(cameras, images_by_name, weather=None, run_time=None):
     """Gemini APIで一括分類する。confidence:low（判定に自信が持てない）と申告された地点は、
     より上位のモデル(GEMINI_ESCALATION_MODEL)で自動的に再判定する（自動修正）。
     再判定でも低confidenceのままだった地点はログに残した上で、その再判定結果
     （1回目より確度が高いはず）を採用する。
+    confidence:mediumの地点でも、薄暮・夜明け前後やレンズが常時わずかに曇っている地点
+    （_should_treat_medium_as_low参照）は自己申告confidenceを信用しきらず、機械的に
+    エスカレーション対象へ追加する(run_timeを渡した場合のみ時間帯判定が有効になる)。
+    weatherを渡すと、撮影時刻の周辺気象(気温・湿度・風速等)を判定の補助材料として
+    プロンプトに含める（霧の発生しやすさの参考情報。Noneなら付けない）。
     戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset,
     地点名 -> 最終的に採用したconfidenceの辞書)。confidenceは学習時に低confidenceラベルを
     除外できるよう、collect.py側でCSVに記録するために返している。
@@ -460,13 +551,16 @@ def classify_images(cameras, images_by_name):
     if not resized_by_name:
         return {}, set(), {}
 
-    contents, index_to_name = _build_contents(list(resized_by_name.items()))
+    weather_context = _weather_context_text(weather)
+    contents, index_to_name = _build_contents(list(resized_by_name.items()), weather_context=weather_context)
     primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     parsed = _classify_with_model(contents, primary_model, api_keys)
     if parsed is None:
         return {}, set(), {}
 
-    result, invalid_stations, low_confidence, confidence_by_name = _parse_classifications(parsed, index_to_name)
+    result, invalid_stations, low_confidence, confidence_by_name, reasoning_by_name = _parse_classifications(
+        parsed, index_to_name,
+    )
 
     confidence_counts = {"high": 0, "medium": 0, "low": 0}
     for item in parsed:
@@ -476,7 +570,22 @@ def classify_images(cameras, images_by_name):
         confidence_counts["high"], confidence_counts["medium"], confidence_counts["low"],
     )
 
+    extra_escalation = [
+        name for name, conf in confidence_by_name.items()
+        if conf == "medium" and name not in low_confidence and _should_treat_medium_as_low(name, run_time)
+    ]
+    if extra_escalation:
+        log.info(
+            "Escalating %d additional medium-confidence station(s) due to known-difficult conditions "
+            "(dawn/dusk hour or persistently misty lens): %s",
+            len(extra_escalation), ", ".join(extra_escalation),
+        )
+        low_confidence = low_confidence + extra_escalation
+
     if low_confidence:
+        for name in low_confidence:
+            log.info("Low-confidence reasoning: %s -> %s", name, reasoning_by_name.get(name, ""))
+
         escalation_state = _load_escalation_state()
         skip_until = escalation_state.get("skip_until")
         now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
@@ -492,8 +601,13 @@ def classify_images(cameras, images_by_name):
                 len(low_confidence), ", ".join(low_confidence),
             )
             escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-3.1-pro-preview")
+            # 1回目の判定結果(コード)を各地点のラベルに添えて、上位モデルには
+            # 「ゼロから判定」ではなく「特にこの境界を再確認する」形で見直させる。
+            first_pass_by_name = {name: result[name] for name in low_confidence if name in result}
             sub_contents, sub_index_to_name = _build_contents(
-                [(name, resized_by_name[name]) for name in low_confidence]
+                [(name, resized_by_name[name]) for name in low_confidence],
+                weather_context=weather_context,
+                first_pass_by_name=first_pass_by_name,
             )
             sub_parsed = _classify_with_model(sub_contents, escalation_model, api_keys, label="escalation")
             if sub_parsed is None:
@@ -513,8 +627,11 @@ def classify_images(cameras, images_by_name):
             else:
                 if escalation_state.get("consecutive_failures") or escalation_state.get("skip_until"):
                     _save_escalation_state({"consecutive_failures": 0, "skip_until": None})
-                sub_result, sub_invalid, sub_low, sub_confidence = _parse_classifications(sub_parsed, sub_index_to_name)
+                sub_result, sub_invalid, sub_low, sub_confidence, sub_reasoning = _parse_classifications(
+                    sub_parsed, sub_index_to_name,
+                )
                 for name in low_confidence:
+                    log.info("Escalation reasoning: %s -> %s", name, sub_reasoning.get(name, ""))
                     if name in sub_invalid:
                         invalid_stations.add(name)
                         result.pop(name, None)
@@ -941,7 +1058,15 @@ def main():
     ok_count = sum(1 for v in images_by_name.values() if v)
     log.info("Image fetch succeeded: %d / %d", ok_count, len(cameras))
 
-    phenom_by_name, invalid_stations, confidence_by_name = classify_images(cameras, images_by_name)
+    # 気象データをGemini分類より先に取得する（分類プロンプトに補助情報として渡すため。
+    # 以前はxlsx記録の直前、分類の後で取得していた）。
+    weather = fetch_weather()
+    if weather is None:
+        log.warning("Failed to fetch weather data (all fields treated as missing)")
+
+    phenom_by_name, invalid_stations, confidence_by_name = classify_images(
+        cameras, images_by_name, weather=weather, run_time=run_time,
+    )
     log.info(
         "Gemini classification succeeded: %d / %d (invalid/placeholder: %d)",
         len(phenom_by_name), len(cameras), len(invalid_stations),
@@ -975,10 +1100,6 @@ def main():
 
     save_images(cameras, images_by_name, invalid_stations, run_time)
     prune_old_images()
-
-    weather = fetch_weather()
-    if weather is None:
-        log.warning("Failed to fetch weather data (all fields treated as missing)")
 
     append_row(cameras, phenom_by_name, weather, run_time)
 
