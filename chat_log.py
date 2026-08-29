@@ -111,6 +111,21 @@ def list_conversations(conn, user_id, limit=100):
     return [{"id": r[0], "title": r[1], "updated_at": r[2]} for r in rows]
 
 
+def delete_conversation(conn, conversation_id, user_id):
+    """指定の会話とその中の全メッセージを削除する。他人の会話は
+    user_id条件に一致しないため削除されない(0件削除=Falseを返す)。"""
+    with conn:
+        conn.execute(
+            "DELETE FROM chat_messages WHERE conversation_id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
+        cur = conn.execute(
+            "DELETE FROM chat_conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
+    return cur.rowcount > 0
+
+
 def set_conversation_title(conn, conversation_id, title):
     with conn:
         conn.execute("UPDATE chat_conversations SET title = ? WHERE id = ?", (title, conversation_id))

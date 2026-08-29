@@ -465,6 +465,20 @@ main {
    600pxで打ち切られると古い会話にアクセスできなくなってしまう。上限を外し、
    親の.sidebar-panel自体のスクロールに任せる。 */
 .chat-sidebar-list { max-height: none; overflow: visible; }
+.chat-sidebar-list li { display: flex; align-items: center; gap: 0.1rem; }
+.chat-sidebar-list li a { flex: 1 1 auto; min-width: 0; }
+.chat-delete-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0.3rem 0.5rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.chat-delete-btn:hover { background: var(--color-danger); color: #fff; }
 .sidebar-list a {
     display: flex;
     align-items: center;

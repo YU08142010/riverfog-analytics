@@ -85,6 +85,14 @@
             label.textContent = title || "新しいチャット";
             a.appendChild(label);
             li.appendChild(a);
+            var delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "chat-delete-btn";
+            delBtn.setAttribute("data-conversation-id", conversationId);
+            delBtn.setAttribute("aria-label", "この会話を削除");
+            delBtn.title = "削除";
+            delBtn.textContent = "×";
+            li.appendChild(delBtn);
             sidebarList.insertBefore(li, sidebarList.firstChild);
         }
     }

@@ -1400,6 +1400,19 @@ def chat_page():
     )
 
 
+@app.route("/chat/<int:conversation_id>/delete", methods=["POST"])
+def chat_delete(conversation_id):
+    conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        deleted = chat_log.delete_conversation(conn, conversation_id, session.get("user_id"))
+    finally:
+        conn.close()
+    if _wants_json():
+        return jsonify({"success": deleted})
+    flash("会話を削除しました。" if deleted else "会話が見つかりませんでした。", "success" if deleted else "error")
+    return redirect(url_for("chat_page"))
+
+
 @app.route("/chat/status")
 def chat_status():
     """チャットパネルを開いた時にだけ残り質問数を取得する(全ページで毎回DBを
