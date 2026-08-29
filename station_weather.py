@@ -70,6 +70,22 @@ def record_weather(conn, station_name, dt_str, weather):
         )
 
 
+def load_latest_station_weather(conn, station_name):
+    """指定地点の最新1件の気象実測を辞書で返す(記録が無ければNone)。
+    station_detail.htmlの「最新の気象情報」表示に使う。"""
+    row = conn.execute(
+        "SELECT datetime, temperature, precipitation, wind_speed, wind_direction_deg, "
+        "solar_radiation_mj, sunshine_hours, dew_point, humidity, visibility_km "
+        "FROM station_weather WHERE station_name = ? ORDER BY datetime DESC LIMIT 1",
+        (station_name,),
+    ).fetchone()
+    if row is None:
+        return None
+    cols = ["datetime", "temperature", "precipitation", "wind_speed", "wind_direction_deg",
+            "solar_radiation_mj", "sunshine_hours", "dew_point", "humidity", "visibility_km"]
+    return dict(zip(cols, row))
+
+
 def load_station_weather_df(conn, station_name):
     """指定地点の気象実測をdatetime昇順のDataFrameで返す(記録が無ければ空のDataFrame)。
     列名はOpen-Meteo由来のキー名のまま(fog_features.py列名への変換は呼び出し側で行う)。
@@ -85,4 +101,4 @@ def load_station_weather_df(conn, station_name):
     return df
 
 
-__all__ = ["connect", "record_weather", "load_station_weather_df"]
+__all__ = ["connect", "record_weather", "load_station_weather_df", "load_latest_station_weather"]

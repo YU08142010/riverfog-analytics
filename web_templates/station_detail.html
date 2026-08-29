@@ -34,6 +34,42 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <h2>最新の気象情報</h2>
+    {% if station_weather_latest %}
+    <p class="muted">
+        {{ station_weather_latest.datetime_label }} 時点
+        {% if not station_weather_latest.is_station_specific %}
+        ({{ name }}固有の実測データがまだ無いため、代表地点の値を表示しています)
+        {% endif %}
+    </p>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <tbody>
+        <tr><td>気温</td><td>{{ "%.1f℃"|format(station_weather_latest.temp) if station_weather_latest.temp is not none else "-" }}</td></tr>
+        <tr><td>湿度</td><td>{{ "%.0f%%"|format(station_weather_latest.humidity) if station_weather_latest.humidity is not none else "-" }}</td></tr>
+        <tr><td>降水量</td><td>{{ "%.1fmm"|format(station_weather_latest.precip) if station_weather_latest.precip is not none else "-" }}</td></tr>
+        <tr><td>視程</td><td>{{ "%.1fkm"|format(station_weather_latest.visibility) if station_weather_latest.visibility is not none else "-" }}</td></tr>
+        {% if station_weather_latest.wind_speed is not none %}
+        <tr><td>風速・風向</td><td>{{ "%.1fm/s"|format(station_weather_latest.wind_speed) }}{{ " " ~ station_weather_latest.wind_dir_label if station_weather_latest.wind_dir_label else "" }}</td></tr>
+        {% endif %}
+        {% if station_weather_latest.dew_point is not none %}
+        <tr><td>露点温度</td><td>{{ "%.1f℃"|format(station_weather_latest.dew_point) }}</td></tr>
+        {% endif %}
+        {% if station_weather_latest.sunshine is not none %}
+        <tr><td>日照時間</td><td>{{ "%.2f時間"|format(station_weather_latest.sunshine) }}</td></tr>
+        {% endif %}
+        {% if station_weather_latest.solar is not none %}
+        <tr><td>日射量</td><td>{{ "%.2fMJ/m²"|format(station_weather_latest.solar) }}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">{{ icon("empty") }}<span>気象データがまだありません。</span></div>
+    {% endif %}
+</div>
+
 <div class="content-grid-2">
 <div class="card">
     <h2>今後の予測グラフ</h2>
@@ -58,8 +94,9 @@
         <div style="margin-top:0.8rem;">
             <p class="muted">
                 {{ feature_snapshot.target_datetime }} 時点の予測({{ feature_snapshot.generated_at }}生成)に
-                実際に使われた入力値です。モデルはRandomForestとXGBoostの予測確率を重み付けして
-                ブレンドする方式(hybrid)で、下の「霧確率」がその結果です。
+                実際に使われた入力値です。この地点では下記「モデル種別」の方式(検証データでの
+                正答率が最も高かったものを地点ごとに自動選択しています)で予測しており、
+                下の「霧確率」がその結果です。
             </p>
             <table class="obs-table" style="width:auto;">
                 <tbody>

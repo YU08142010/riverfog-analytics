@@ -41,13 +41,14 @@ from matplotlib import font_manager
 
 from common import (
     BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH,
-    build_data_backup_zip, now_jst_naive, send_alert,
+    STATION_WEATHER_DB_PATH, build_data_backup_zip, now_jst_naive, send_alert,
 )
 import announcements
 import users
 import fog_data
 import fog_model
 import prediction_log
+import station_weather
 from fog_features import PHENOM_COLORS, PHENOM_LABELS, SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell
 
 # collect.py・fog_graphs.py と同じ日本語フォント設定（無ければグラフの日本語が文字化けするだけで、
@@ -871,15 +872,18 @@ def _is_valid_number(v):
 
 
 def _render_model_compare_png(state):
-    """RandomForest単体・XGBoost単体・LightGBM単体・RF+LightGBM混合・採用中のhybridの
-    霧F1平均を棒グラフで比較する。LightGBM単体とRF+LightGBM混合はどちらも診断目的の
-    比較用モデルで、採用中のhybrid(RF+XGBブレンド)には含めていない
-    (XGBoostとLightGBMはどちらもブースティング系で傾向が近いため、3モデル混合は
-    追加せず、RFと組み合わせる相手をXGBかLightGBMかで比較できるようにしている)。
+    """RandomForest単体・XGBoost単体・LightGBM単体・RF+XGBoost・RF+LightGBM・
+    RF+XGBoost+LightGBMの霧F1平均を棒グラフで比較する。地点ごとに実際に採用される
+    モデル方式はこのうち検証データでの正答率が最も高かったものが自動選択されるため
+    (fog_model._fit_best_model参照)、「採用中」バーは方式が地点によって異なる
+    ものの平均を示す。
     """
-    labels = ["RandomForest単体", "XGBoost単体", "LightGBM単体", "RF+LightGBM混合", "採用中(hybrid)"]
-    keys = ["rf_only", "xgb_only", "lgbm_only", "rf_lgbm_only", None]
-    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#d35400", "#1a5276"]
+    labels = [
+        "RandomForest単体", "XGBoost単体", "LightGBM単体",
+        "RF+XGBoost", "RF+LightGBM", "RF+XGBoost+LightGBM", "採用中(自動選択)",
+    ]
+    keys = ["rf_only", "xgb_only", "lgbm_only", "hybrid_only", "rf_lgbm_only", "triple_only", None]
+    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#c0392b", "#d35400", "#16a085", "#1a5276"]
     values, counts = [], []
     for key in keys:
         vals = []
@@ -1141,8 +1145,11 @@ CHAT_SYSTEM_INSTRUCTION = (
     "利用者からの質問に日本語で簡潔に答えてください。\n"
     "\n"
     "【このシステムの仕組み(常に正しい前提知識として使ってよい)】\n"
-    "- 地点ごとにRandomForestとXGBoostを組み合わせたハイブリッドモデルで霧の発生を予測している。"
-    "2つのモデルの混合比(ブレンド重み)は地点ごとに検証データから自動選択される。\n"
+    "- 霧の発生予測には、RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・"
+    "RF+LightGBM・RF+XGBoost+LightGBMのブレンドという複数のモデル方式を候補として地点ごとに"
+    "学習し、検証データでの正答率が最も高かった方式を地点ごとに自動選択して使っている"
+    "(地点によって採用される方式は異なる)。ブレンド方式が採用された場合の混合比"
+    "(ブレンド重み)も地点ごとに検証データから自動選択される。\n"
     "- 観測データが少ない地点は、単独では十分な精度のモデルを学習できないため、複数地点をまとめた"
     "「pooled」モデル(地点別霧発生率などの特徴量を加えた共通モデル)で代替している。\n"
     "- 霧と判定するしきい値(fog_threshold)は0.5固定ではなく、地点ごとに検証データでF1が"
@@ -2007,6 +2014,52 @@ def _latest_observations():
     }
 
 
+_WIND_COMPASS_POINTS = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"]
+
+
+def _wind_compass_label(deg):
+    """風向(度)を8方位の日本語ラベルに変換する。"""
+    if deg is None or deg != deg:  # None/NaN
+        return None
+    idx = int((float(deg) % 360) / 45 + 0.5) % 8
+    return _WIND_COMPASS_POINTS[idx]
+
+
+def _latest_station_weather(name, observations):
+    """地点別ページ(station_detail.html)用の、その地点固有の最新気象情報。
+    station_weather.db(地点固有の実測、2026-08-28以降蓄積分)に記録があればそれを使い、
+    無ければ全地点共通の代表値(_latest_observations()、只見川.xlsx由来)にフォールバックする。
+    観測データが全く無ければNoneを返す。
+    """
+    conn = station_weather.connect(STATION_WEATHER_DB_PATH)
+    try:
+        row = station_weather.load_latest_station_weather(conn, name)
+    finally:
+        conn.close()
+    if row is not None:
+        try:
+            dt_label = datetime.strptime(row["datetime"][:19], "%Y-%m-%d %H:%M:%S").strftime("%Y/%m/%d %H:%M")
+        except Exception:
+            dt_label = row["datetime"]
+        return {
+            "datetime_label": dt_label,
+            "temp": row["temperature"], "humidity": row["humidity"],
+            "precip": row["precipitation"], "visibility": row["visibility_km"],
+            "wind_speed": row["wind_speed"], "wind_dir_label": _wind_compass_label(row["wind_direction_deg"]),
+            "solar": row["solar_radiation_mj"], "sunshine": row["sunshine_hours"], "dew_point": row["dew_point"],
+            "is_station_specific": True,
+        }
+    if observations is None:
+        return None
+    return {
+        "datetime_label": observations["datetime"].strftime("%Y/%m/%d %H:%M"),
+        "temp": observations.get("temp"), "humidity": observations.get("humidity"),
+        "precip": observations.get("precip"), "visibility": observations.get("visibility"),
+        "wind_speed": None, "wind_dir_label": None, "solar": None, "sunshine": None, "dew_point": None,
+        "is_station_specific": False,
+    }
+
+
 # ============================================================================
 # 公開ページ(観測データ・カメラ画像・予測・地点別ページ)
 # 2668行の単一ファイルで見通しが悪いという指摘への対応として、まずは大まかな区分けの
@@ -2356,10 +2409,13 @@ def station_detail(name):
     if ai_summary:
         ai_station_summary = ai_summary.get("stations", {}).get(name)
 
+    station_weather_latest = _latest_station_weather(name, observations)
+
     return render_template(
         "station_detail.html",
         name=name,
         current=current,
+        station_weather_latest=station_weather_latest,
         observations_datetime=observations["datetime"] if observations else None,
         latest_pred_date=latest_pred_date,
         forecast_file=forecast_file,

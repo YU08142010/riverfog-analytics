@@ -1,4 +1,9 @@
-"""地点ごとの霧予測モデル（RandomForest + XGBoostハイブリッド）の学習・予測。
+"""地点ごとの霧予測モデルの学習・予測。
+
+RandomForest・XGBoost・LightGBM単体、およびRF+XGBoost・RF+LightGBM・
+RF+XGBoost+LightGBMのブレンドを候補として地点ごとに学習し、検証データでの正答率(accuracy)が最も高い方式を
+採用する（地点によって気象条件やデータの蓄積量が異なり、最適なモデル方式も
+一様ではないため。以前は全地点でRF+XGBoostブレンド固定だった）。
 
 ~/Desktop/fog-prediction/weather_visualizer.py のモデル設計をそのまま踏襲している
 （アルゴリズム自体はそちらで検証済みのものを流用し、Colab専用の周辺機能だけを外した）。
@@ -192,10 +197,29 @@ class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
         return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
 
 
-class HybridFogClassifier:
-    """確率 = weight * RandomForest + (1 - weight) * XGBoost。weightは地点ごとに自動決定する。"""
+_SECOND_MODEL_LABELS = {"xgb": "XGBoost", "lgbm": "LightGBM"}
 
-    def __init__(self, rf=None, xgb=None, weight=1.0):
+
+def _align_proba(model, X, classes):
+    """model.predict_proba(X)の列を目的のclasses順に並べ替える（学習データに無かった
+    クラスがある場合は該当列を0で埋める）。ブレンド系分類器で共通して使う。"""
+    proba = np.asarray(model.predict_proba(X), dtype="float64")
+    model_classes = list(np.asarray(model.classes_))
+    if model_classes == list(classes):
+        return proba
+    index = {c: i for i, c in enumerate(classes)}
+    out = np.zeros((proba.shape[0], len(classes)), dtype="float64")
+    for j, c in enumerate(model_classes):
+        if c in index:
+            out[:, index[c]] = proba[:, j]
+    return out
+
+
+class HybridFogClassifier:
+    """確率 = weight * RandomForest + (1 - weight) * 第2モデル。weight・第2モデルの
+    種類(XGBoostかLightGBMか)は地点ごとに、実測の正答率に基づいて自動決定する。"""
+
+    def __init__(self, rf=None, xgb=None, weight=1.0, second_kind="xgb"):
         if rf is None and xgb is None:
             raise ValueError("rf と xgb の少なくとも一方が必要です")
         if rf is None:
@@ -205,38 +229,69 @@ class HybridFogClassifier:
         self.rf = rf
         self.xgb = xgb
         self.weight = float(weight)
+        self.second_kind = second_kind
         self.classes_ = np.asarray((rf if rf is not None else xgb).classes_)
 
     @property
     def model_type(self):
+        # second_kind属性を持たない旧pickle(joblib保存済みの過去のモデル状態)との
+        # 互換のためgetattrで既定値"xgb"にフォールバックする。
+        second_label = _SECOND_MODEL_LABELS.get(getattr(self, "second_kind", "xgb"), "XGBoost")
         if self.rf is None:
-            return "xgb"
+            return second_label
         if self.xgb is None:
-            return "rf"
-        return "hybrid"
-
-    def _aligned_proba(self, model, X):
-        proba = np.asarray(model.predict_proba(X), dtype="float64")
-        model_classes = list(np.asarray(model.classes_))
-        if model_classes == list(self.classes_):
-            return proba
-        index = {c: i for i, c in enumerate(self.classes_)}
-        out = np.zeros((proba.shape[0], len(self.classes_)), dtype="float64")
-        for j, c in enumerate(model_classes):
-            if c in index:
-                out[:, index[c]] = proba[:, j]
-        return out
+            return "RF"
+        return f"RF+{second_label}"
 
     def predict_proba(self, X):
         if self.xgb is None:
-            return self._aligned_proba(self.rf, X)
+            return _align_proba(self.rf, X, self.classes_)
         if self.rf is None:
-            return self._aligned_proba(self.xgb, X)
-        return (self.weight * self._aligned_proba(self.rf, X)
-                + (1.0 - self.weight) * self._aligned_proba(self.xgb, X))
+            return _align_proba(self.xgb, X, self.classes_)
+        return (self.weight * _align_proba(self.rf, X, self.classes_)
+                + (1.0 - self.weight) * _align_proba(self.xgb, X, self.classes_))
 
     def predict(self, X):
         return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+
+
+class TripleBlendFogClassifier:
+    """確率 = w_rf*RandomForest + w_xgb*XGBoost + w_lgbm*LightGBM（重みの合計は1）。
+    3方式とも学習できた地点でのみ候補になる（fog_model._fit_best_model参照）。"""
+
+    model_type = "RF+XGBoost+LightGBM"
+
+    def __init__(self, rf, xgb, lgbm, w_rf, w_xgb, w_lgbm):
+        self.rf, self.xgb, self.lgbm = rf, xgb, lgbm
+        self.w_rf, self.w_xgb, self.w_lgbm = float(w_rf), float(w_xgb), float(w_lgbm)
+        self.weight = self.w_rf  # 他方式のpipeと同様にpipe.weightで参照できるようにする(RF比率)
+        self.classes_ = np.asarray(rf.classes_)
+
+    def predict_proba(self, X):
+        return (self.w_rf * _align_proba(self.rf, X, self.classes_)
+                + self.w_xgb * _align_proba(self.xgb, X, self.classes_)
+                + self.w_lgbm * _align_proba(self.lgbm, X, self.classes_))
+
+    def predict(self, X):
+        return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+
+
+TRIPLE_BLEND_STEPS = 4  # 0, 0.25, 0.5, 0.75, 1.0刻みの重心座標グリッド(3方式合計15通り)
+
+
+def _choose_triple_blend_weights(rf, xgb, lgbm, X_val, y_val):
+    """RF・XGBoost・LightGBMの3方式ブレンドの重み(w_rf, w_xgb, w_lgbm)を、検証データでの
+    _blend_score(霧F1優先)が最も高くなる組み合わせから選ぶ。"""
+    n = TRIPLE_BLEND_STEPS
+    best_w, best_score = (1.0 / 3, 1.0 / 3, 1.0 / 3), -1.0
+    for i in range(n + 1):
+        for j in range(n + 1 - i):
+            k = n - i - j
+            w = (i / n, j / n, k / n)
+            score = _blend_score(y_val, TripleBlendFogClassifier(rf, xgb, lgbm, *w).predict(X_val))
+            if score > best_score:
+                best_w, best_score = w, score
+    return best_w
 
 
 def compute_fog_probability(pipe, X):
@@ -248,11 +303,23 @@ def compute_fog_probability(pipe, X):
     return proba[:, fog_idx].sum(axis=1)
 
 
+def _estimator_feature_importances(estimator):
+    """RandomForest/LightGBMはfeature_importances_をそのまま持つが、XGBoostは
+    歯抜けラベル対応のため_XGBLabelSafeClassifierでラップしており、実体は
+    .model_.feature_importances_にある。両対応にする。"""
+    if estimator is None:
+        return None
+    inner = getattr(estimator, "model_", None)
+    if inner is not None and hasattr(inner, "feature_importances_"):
+        return inner.feature_importances_
+    return getattr(estimator, "feature_importances_", None)
+
+
 def compute_feature_importance(state, only_stations=None):
     """学習済みモデル一式(model_state.joblibをload_model_stateしたもの)から、
-    特徴量ごとの重要度を計算する。RandomForest/XGBoostのfeature_importances_を
-    hybridの混合比(blend_weight)で重み付けし、複数地点で同一のpipeを共有している
-    場合（プーリングモデル）は1回だけ数える。
+    特徴量ごとの重要度を計算する。RandomForestと第2モデル(XGBoostまたはLightGBM)の
+    feature_importances_をブレンド比(blend_weight)で重み付けし、複数地点で同一のpipeを
+    共有している場合（プーリングモデル）は1回だけ数える。
     only_stationsを指定すると、その地点名の集合に含まれる地点のモデルだけを対象にする
     （精度が低い地点だけに絞って「何が効いていないか」を見る用途）。
     戻り値: [(特徴量名, 重要度), ...] 重要度の降順。計算できなければ空リスト。
@@ -271,27 +338,42 @@ def compute_feature_importance(state, only_stations=None):
         if info.get("pooled") and "station_fog_rate" in info:
             features = features + [STATION_FOG_RATE_FEATURE]
 
-        rf_imp = xgb_imp = None
+        is_triple = hasattr(pipe, "lgbm")  # TripleBlendFogClassifierだけがlgbm属性を持つ
+        rf_imp = xgb_imp = lgbm_imp = None
         try:
             if pipe.rf is not None:
-                rf_imp = pipe.rf.named_steps["model"].feature_importances_
+                rf_imp = _estimator_feature_importances(pipe.rf.named_steps["model"])
         except Exception:
             rf_imp = None
         try:
-            if pipe.xgb is not None:
-                xgb_imp = pipe.xgb.named_steps["model"].model_.feature_importances_
+            if getattr(pipe, "xgb", None) is not None:
+                xgb_imp = _estimator_feature_importances(pipe.xgb.named_steps["model"])
         except Exception:
             xgb_imp = None
+        if is_triple:
+            try:
+                lgbm_imp = _estimator_feature_importances(pipe.lgbm.named_steps["model"])
+            except Exception:
+                lgbm_imp = None
 
-        if rf_imp is not None and xgb_imp is not None \
+        parts = []
+        if is_triple:
+            if rf_imp is not None and len(rf_imp) == len(features):
+                parts.append(pipe.w_rf * rf_imp)
+            if xgb_imp is not None and len(xgb_imp) == len(features):
+                parts.append(pipe.w_xgb * xgb_imp)
+            if lgbm_imp is not None and len(lgbm_imp) == len(features):
+                parts.append(pipe.w_lgbm * lgbm_imp)
+        elif rf_imp is not None and xgb_imp is not None \
                 and len(rf_imp) == len(features) and len(xgb_imp) == len(features):
-            importances = pipe.weight * rf_imp + (1.0 - pipe.weight) * xgb_imp
+            parts = [pipe.weight * rf_imp, (1.0 - pipe.weight) * xgb_imp]
         elif rf_imp is not None and len(rf_imp) == len(features):
-            importances = rf_imp
+            parts = [rf_imp]
         elif xgb_imp is not None and len(xgb_imp) == len(features):
-            importances = xgb_imp
-        else:
+            parts = [xgb_imp]
+        if not parts:
             continue
+        importances = sum(parts)
 
         for name, val in zip(features, importances):
             totals[name] = totals.get(name, 0.0) + float(val)
@@ -449,58 +531,131 @@ def _choose_fog_threshold(pipe, X_val, y_val):
     return best_t
 
 
-def _fit_and_select(kind, X_train, y_train):
-    """学習し、検証期間が確保できれば混合比・霧判定しきい値も選ぶ。
-    戻り値: (HybridFogClassifier, tuned:bool, threshold:float, rf_pipe, second_pipe)
+def _fit_best_model(X_train, y_train):
+    """RandomForest単体・XGBoost単体・LightGBM単体・RF+XGBoost・RF+LightGBM・
+    RF+XGBoost+LightGBMを候補として学習し、検証データでの正答率(accuracy)が
+    最も高い方式を採用する。採用方式が決まったら、その構成要素をX_train全体で
+    再学習して本番用パイプを作る。
+
+    戻り値: dict
+      pipe: 採用したモデル（HybridFogClassifierまたはTripleBlendFogClassifier。本番予測用）
+      tuned: ハイパーパラメータ探索が実行できたか
+      threshold: 霧判定しきい値
+      rf_pipe, xgb_pipe, lgbm_pipe: X_train全体で再学習した各コンポーネント単体
+          （利用不可なライブラリの分はNone。診断用の性能比較に使う）
+      hybrid_weight: RF+XGBoostの比較用ブレンド重み（xgboost無ければNone）
+      hybrid_lgbm_weight: RF+LightGBMの比較用ブレンド重み（lightgbm無ければNone）
+      triple_weights: RF+XGBoost+LightGBMの比較用ブレンド重み(w_rf,w_xgb,w_lgbm)
+          （どちらか無ければNone）
     """
     X_inner, X_val, y_inner, y_val = _temporal_train_test_split(X_train, y_train)
     have_val = y_inner.nunique() >= 2 and len(X_val) >= 10
 
-    if kind in ("hybrid", "hybrid_lgbm"):
-        # "hybrid"は採用中の本番モデル(RF+XGB)。"hybrid_lgbm"はXGBの代わりにLightGBMを
-        # 混ぜた比較用モデル(HybridFogClassifier自体はrf/xgbという名前だが中身に依存しない
-        # 汎用ブレンダーなので、そのまま第2成分だけ差し替えて使い回せる)。
-        second_kind = "xgb" if kind == "hybrid" else "lgbm"
-        if have_val:
-            rf_tmp, rf_params, rf_tuned = _fit_component("rf", X_inner, y_inner)
-            second_tmp, second_params, second_tuned = _fit_component(second_kind, X_inner, y_inner)
-            weight = _choose_blend_weight(rf_tmp, second_tmp, X_val, y_val)
-            threshold = _choose_fog_threshold(HybridFogClassifier(rf_tmp, second_tmp, weight), X_val, y_val)
-            rf_pipe = _refit_component("rf", rf_params, X_train, y_train)
-            xgb_pipe = _refit_component(second_kind, second_params, X_train, y_train)
-            tuned = rf_tuned and second_tuned
+    if not have_val:
+        # 検証データを確保できない極小地点は、方式間の比較ができないため
+        # 従来通りRF+XGBoost(利用不可ならRF単体)を既定重み0.5で学習する。
+        rf_pipe, _, rf_tuned = _fit_component("rf", X_train, y_train)
+        xgb_pipe = lgbm_pipe = None
+        if _HAS_XGBOOST:
+            xgb_pipe, _, xgb_tuned = _fit_component("xgb", X_train, y_train)
+            pipe = HybridFogClassifier(rf_pipe, xgb_pipe, weight=0.5, second_kind="xgb")
+            tuned = rf_tuned and xgb_tuned
         else:
-            rf_pipe, _, rf_tuned = _fit_component("rf", X_train, y_train)
-            xgb_pipe, _, second_tuned = _fit_component(second_kind, X_train, y_train)
-            weight, tuned, threshold = 0.5, rf_tuned and second_tuned, DEFAULT_FOG_THRESHOLD
-    else:
-        single_kind = kind
-        weight = 1.0 if single_kind == "rf" else 0.0
-        rf_pipe = xgb_pipe = None
-        if have_val:
-            tmp, params, s_tuned = _fit_component(single_kind, X_inner, y_inner)
-            tmp_pipe = (HybridFogClassifier(tmp, None, weight=1.0) if single_kind == "rf"
-                       else HybridFogClassifier(None, tmp, weight=0.0))
-            threshold = _choose_fog_threshold(tmp_pipe, X_val, y_val)
-            final_pipe = _refit_component(single_kind, params, X_train, y_train)
-            tuned = s_tuned
-        else:
-            final_pipe, _, tuned = _fit_component(single_kind, X_train, y_train)
-            threshold = DEFAULT_FOG_THRESHOLD
-        if single_kind == "rf":
-            rf_pipe = final_pipe
-        else:
-            xgb_pipe = final_pipe
+            pipe = HybridFogClassifier(rf_pipe, None, weight=1.0)
+            tuned = rf_tuned
+        return {
+            "pipe": pipe, "tuned": tuned, "threshold": DEFAULT_FOG_THRESHOLD,
+            "rf_pipe": rf_pipe, "xgb_pipe": xgb_pipe, "lgbm_pipe": lgbm_pipe,
+            "hybrid_weight": None, "hybrid_lgbm_weight": None, "triple_weights": None,
+        }
 
-    pipe = HybridFogClassifier(rf_pipe, xgb_pipe, weight=weight)
-    return pipe, tuned, threshold, rf_pipe, xgb_pipe
+    rf_tmp, rf_params, rf_tuned = _fit_component("rf", X_inner, y_inner)
+    candidates = [(accuracy_score(y_val, HybridFogClassifier(rf_tmp, None, weight=1.0).predict(X_val)),
+                   "rf", rf_tuned)]
 
+    xgb_tmp = xgb_params = None
+    xgb_tuned = False
+    hybrid_weight = None
+    if _HAS_XGBOOST:
+        xgb_tmp, xgb_params, xgb_tuned = _fit_component("xgb", X_inner, y_inner)
+        candidates.append((
+            accuracy_score(y_val, HybridFogClassifier(None, xgb_tmp, weight=0.0, second_kind="xgb").predict(X_val)),
+            "xgb", xgb_tuned,
+        ))
+        hybrid_weight = _choose_blend_weight(rf_tmp, xgb_tmp, X_val, y_val)
+        candidates.append((
+            accuracy_score(y_val, HybridFogClassifier(rf_tmp, xgb_tmp, weight=hybrid_weight, second_kind="xgb").predict(X_val)),
+            "hybrid", rf_tuned and xgb_tuned,
+        ))
 
-def _resolve_model_kind(kind):
-    if kind in ("hybrid", "xgb") and not _HAS_XGBOOST:
-        log.warning("xgboost not available, falling back to RandomForest only")
-        return "rf"
-    return kind
+    lgbm_tmp = lgbm_params = None
+    lgbm_tuned = False
+    hybrid_lgbm_weight = None
+    if _HAS_LIGHTGBM:
+        lgbm_tmp, lgbm_params, lgbm_tuned = _fit_component("lgbm", X_inner, y_inner)
+        candidates.append((
+            accuracy_score(y_val, HybridFogClassifier(None, lgbm_tmp, weight=0.0, second_kind="lgbm").predict(X_val)),
+            "lgbm", lgbm_tuned,
+        ))
+        hybrid_lgbm_weight = _choose_blend_weight(rf_tmp, lgbm_tmp, X_val, y_val)
+        candidates.append((
+            accuracy_score(y_val, HybridFogClassifier(rf_tmp, lgbm_tmp, weight=hybrid_lgbm_weight, second_kind="lgbm").predict(X_val)),
+            "hybrid_lgbm", rf_tuned and lgbm_tuned,
+        ))
+
+    triple_weights = None
+    if xgb_tmp is not None and lgbm_tmp is not None:
+        # RF・XGBoost・LightGBMは既に検証用に学習済みなので、追加の学習コスト無しで
+        # 3方式ブレンドの重みグリッドを試せる。
+        triple_weights = _choose_triple_blend_weights(rf_tmp, xgb_tmp, lgbm_tmp, X_val, y_val)
+        candidates.append((
+            accuracy_score(y_val, TripleBlendFogClassifier(rf_tmp, xgb_tmp, lgbm_tmp, *triple_weights).predict(X_val)),
+            "triple", rf_tuned and xgb_tuned and lgbm_tuned,
+        ))
+
+    best_acc, best_kind, best_tuned = max(candidates, key=lambda c: c[0])
+    log.debug("Model candidates (val accuracy): %s -> chosen=%s(%.3f)",
+              [(k, round(a, 3)) for a, k, _ in candidates], best_kind, best_acc)
+
+    if best_kind == "triple":
+        threshold_pipe = TripleBlendFogClassifier(rf_tmp, xgb_tmp, lgbm_tmp, *triple_weights)
+    elif best_kind == "rf":
+        threshold_pipe = HybridFogClassifier(rf_tmp, None, weight=1.0)
+    elif best_kind == "xgb":
+        threshold_pipe = HybridFogClassifier(None, xgb_tmp, weight=0.0, second_kind="xgb")
+    elif best_kind == "lgbm":
+        threshold_pipe = HybridFogClassifier(None, lgbm_tmp, weight=0.0, second_kind="lgbm")
+    elif best_kind == "hybrid":
+        threshold_pipe = HybridFogClassifier(rf_tmp, xgb_tmp, weight=hybrid_weight, second_kind="xgb")
+    else:  # hybrid_lgbm
+        threshold_pipe = HybridFogClassifier(rf_tmp, lgbm_tmp, weight=hybrid_lgbm_weight, second_kind="lgbm")
+    threshold = _choose_fog_threshold(threshold_pipe, X_val, y_val)
+
+    # 採用方式が決まったら、比較に使った各コンポーネントをX_train全体で再学習する
+    # （検証用に分けていたX_innerだけでなく全データを使った方が本番用として有利なため）。
+    rf_pipe = _refit_component("rf", rf_params, X_train, y_train)
+    xgb_pipe = _refit_component("xgb", xgb_params, X_train, y_train) if xgb_tmp is not None else None
+    lgbm_pipe = _refit_component("lgbm", lgbm_params, X_train, y_train) if lgbm_tmp is not None else None
+
+    if best_kind == "triple":
+        pipe = TripleBlendFogClassifier(rf_pipe, xgb_pipe, lgbm_pipe, *triple_weights)
+    elif best_kind == "rf":
+        pipe = HybridFogClassifier(rf_pipe, None, weight=1.0)
+    elif best_kind == "xgb":
+        pipe = HybridFogClassifier(None, xgb_pipe, weight=0.0, second_kind="xgb")
+    elif best_kind == "lgbm":
+        pipe = HybridFogClassifier(None, lgbm_pipe, weight=0.0, second_kind="lgbm")
+    elif best_kind == "hybrid":
+        pipe = HybridFogClassifier(rf_pipe, xgb_pipe, weight=hybrid_weight, second_kind="xgb")
+    else:  # hybrid_lgbm
+        pipe = HybridFogClassifier(rf_pipe, lgbm_pipe, weight=hybrid_lgbm_weight, second_kind="lgbm")
+
+    return {
+        "pipe": pipe, "tuned": best_tuned, "threshold": threshold,
+        "rf_pipe": rf_pipe, "xgb_pipe": xgb_pipe, "lgbm_pipe": lgbm_pipe,
+        "hybrid_weight": hybrid_weight, "hybrid_lgbm_weight": hybrid_lgbm_weight,
+        "triple_weights": triple_weights,
+    }
 
 
 def _collect_location_xy(merged, col, feature_names):
@@ -553,7 +708,7 @@ def _apply_station_weather(main_df, station_name, weather_conn):
     return out.reset_index()
 
 
-def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybrid",
+def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
                            camera_coords=None, weather_conn=None):
     """地点それぞれについて独立した多クラス分類モデルを学習する。データ不足の地点は
     全地点共通の「プーリングモデル」で補う。
@@ -591,8 +746,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
     merged = merged.dropna(subset=feature_names)
     feature_names = feature_names + [CROSS_STATION_FOG_FEATURE]
 
-    kind = _resolve_model_kind(model)
-    log.info("Training location models: kind=%s, features=%s", kind, feature_names)
+    log.info("Training location models: per-station best-model auto-selection, features=%s", feature_names)
 
     # 地点固有の気象実測(station_weather.db、2026-08-28以降蓄積分)があれば、個別モデルの
     # 学習だけそれを使う。無い地点・記録がまだ無い日時は、これまで通り共通の代表値
@@ -634,30 +788,34 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
         if y_train.nunique() < 2:
             continue
 
-        pipe, tuned, threshold, rf_pipe, xgb_pipe = _fit_and_select(kind, X_train, y_train)
+        result = _fit_best_model(X_train, y_train)
+        pipe, tuned, threshold = result["pipe"], result["tuned"], result["threshold"]
+        rf_pipe, xgb_pipe, lgbm_pipe = result["rf_pipe"], result["xgb_pipe"], result["lgbm_pipe"]
         y_pred = pipe.predict(X_test)
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
         fog_f1 = _fog_class_f1(y_test, y_pred)
         rf_only = _single_component_metrics(rf_pipe, True, X_test, y_test)
-        xgb_only = _single_component_metrics(xgb_pipe, False, X_test, y_test)
-        lgbm_only = None
-        if _HAS_LIGHTGBM:
-            try:
-                lgbm_pipe, _, _ = _fit_component("lgbm", X_train, y_train)
-                lgbm_only = _evaluate_solo_pipe(lgbm_pipe, X_test, y_test)
-            except Exception as e:
-                log.warning("LightGBM training failed for %s: %s", col, e)
+        xgb_only = _single_component_metrics(xgb_pipe, False, X_test, y_test) if xgb_pipe is not None else None
+        lgbm_only = _evaluate_solo_pipe(lgbm_pipe, X_test, y_test) if lgbm_pipe is not None else None
+        hybrid_only = None
+        if xgb_pipe is not None and result["hybrid_weight"] is not None:
+            hybrid_only = _evaluate_solo_pipe(
+                HybridFogClassifier(rf_pipe, xgb_pipe, weight=result["hybrid_weight"], second_kind="xgb"),
+                X_test, y_test,
+            )
         rf_lgbm_only = None
-        if _HAS_LIGHTGBM:
-            try:
-                # RF+LightGBM混合も比較用に評価する(XGBとLightGBMはどちらもブースティング系で
-                # 傾向が近いため、RF+XGB+LightGBMの3値混合は追加しない。RFと組み合わせる
-                # 相手をXGBかLightGBMかで比べれば、混合方式としての違いは十分見える)。
-                rf_lgbm_pipe, _, _, _, _ = _fit_and_select("hybrid_lgbm", X_train, y_train)
-                rf_lgbm_only = _evaluate_solo_pipe(rf_lgbm_pipe, X_test, y_test)
-            except Exception as e:
-                log.warning("RF+LightGBM hybrid training failed for %s: %s", col, e)
+        if lgbm_pipe is not None and result["hybrid_lgbm_weight"] is not None:
+            rf_lgbm_only = _evaluate_solo_pipe(
+                HybridFogClassifier(rf_pipe, lgbm_pipe, weight=result["hybrid_lgbm_weight"], second_kind="lgbm"),
+                X_test, y_test,
+            )
+        triple_only = None
+        if xgb_pipe is not None and lgbm_pipe is not None and result["triple_weights"] is not None:
+            triple_only = _evaluate_solo_pipe(
+                TripleBlendFogClassifier(rf_pipe, xgb_pipe, lgbm_pipe, *result["triple_weights"]),
+                X_test, y_test,
+            )
         log.info(
             "%s: n=%d, model=%s, accuracy=%.3f, f1=%.3f, fog_f1=%s, threshold=%.0f%%, tuned=%s",
             col, len(sub), pipe.model_type,
@@ -670,13 +828,13 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon, model="hybr
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
             "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
-            "rf_lgbm_only": rf_lgbm_only,
+            "hybrid_only": hybrid_only, "rf_lgbm_only": rf_lgbm_only, "triple_only": triple_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
             "measure_medians": col_medians,
         }
 
     n_individual = len(models)
-    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates, shared_medians)
+    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians)
 
     n_pooled = len(models) - n_individual
     n_unmodeled = len(phenom_cols) - len(models)
@@ -727,7 +885,7 @@ def _last_valid_value(series, default=0.0):
     return float(s.iloc[-1]) if len(s) else default
 
 
-def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, cross_rates, shared_medians):
+def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians):
     """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
 
     気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
@@ -781,19 +939,13 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
         return
 
     log.info("Training pooled model to rescue %d location(s) (%d total rows)", len(skipped_cols), len(pooled))
-    pooled_pipe, pooled_tuned, pooled_threshold, pooled_rf, pooled_xgb = _fit_and_select(kind, Xp_train, yp_train)
-    pooled_lgbm = None
-    if _HAS_LIGHTGBM:
-        try:
-            pooled_lgbm, _, _ = _fit_component("lgbm", Xp_train, yp_train)
-        except Exception as e:
-            log.warning("LightGBM pooled training failed: %s", e)
-    pooled_rf_lgbm = None
-    if _HAS_LIGHTGBM:
-        try:
-            pooled_rf_lgbm, _, _, _, _ = _fit_and_select("hybrid_lgbm", Xp_train, yp_train)
-        except Exception as e:
-            log.warning("RF+LightGBM pooled hybrid training failed: %s", e)
+    pooled_result = _fit_best_model(Xp_train, yp_train)
+    pooled_pipe, pooled_tuned, pooled_threshold = (
+        pooled_result["pipe"], pooled_result["tuned"], pooled_result["threshold"],
+    )
+    pooled_rf, pooled_xgb, pooled_lgbm = (
+        pooled_result["rf_pipe"], pooled_result["xgb_pipe"], pooled_result["lgbm_pipe"],
+    )
 
     rescued = 0
     for col in skipped_cols:
@@ -812,9 +964,26 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
         f12 = f1_score(y_test2, y_pred2, average="weighted", zero_division=0)
         fog_f12 = _fog_class_f1(y_test2, y_pred2)
         rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
-        xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2)
+        xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2) if pooled_xgb is not None else None
         lgbm_only2 = _evaluate_solo_pipe(pooled_lgbm, X_test2, y_test2) if pooled_lgbm is not None else None
-        rf_lgbm_only2 = _evaluate_solo_pipe(pooled_rf_lgbm, X_test2, y_test2) if pooled_rf_lgbm is not None else None
+        hybrid_only2 = None
+        if pooled_xgb is not None and pooled_result["hybrid_weight"] is not None:
+            hybrid_only2 = _evaluate_solo_pipe(
+                HybridFogClassifier(pooled_rf, pooled_xgb, weight=pooled_result["hybrid_weight"], second_kind="xgb"),
+                X_test2, y_test2,
+            )
+        rf_lgbm_only2 = None
+        if pooled_lgbm is not None and pooled_result["hybrid_lgbm_weight"] is not None:
+            rf_lgbm_only2 = _evaluate_solo_pipe(
+                HybridFogClassifier(pooled_rf, pooled_lgbm, weight=pooled_result["hybrid_lgbm_weight"], second_kind="lgbm"),
+                X_test2, y_test2,
+            )
+        triple_only2 = None
+        if pooled_xgb is not None and pooled_lgbm is not None and pooled_result["triple_weights"] is not None:
+            triple_only2 = _evaluate_solo_pipe(
+                TripleBlendFogClassifier(pooled_rf, pooled_xgb, pooled_lgbm, *pooled_result["triple_weights"]),
+                X_test2, y_test2,
+            )
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
@@ -822,7 +991,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, kind, 
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
-            "rf_lgbm_only": rf_lgbm_only2,
+            "hybrid_only": hybrid_only2, "rf_lgbm_only": rf_lgbm_only2, "triple_only": triple_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
             "measure_medians": shared_medians,
         }

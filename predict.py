@@ -206,7 +206,7 @@ def main():
     verify_pending_predictions(conn, phenom_df, station_names, now_naive)
 
     models = fog_model.train_location_models(
-        main_df, phenom_df, station_names, lat, lon, model="hybrid",
+        main_df, phenom_df, station_names, lat, lon,
         camera_coords=camera_coords, weather_conn=weather_conn,
     )
     if not models:
