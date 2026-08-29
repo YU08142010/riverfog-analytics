@@ -334,12 +334,18 @@ document.addEventListener("submit", function(e) {
         showToast(result.data.message || (result.ok ? "完了しました。" : "エラーが発生しました。"), !result.ok);
         if (result.ok) {
             document.dispatchEvent(new CustomEvent("ajaxformsuccess", {detail: {form: form, data: result.data}}));
+            // data-ajax-reload: 表示中のページ自体の状態(サービス状態・メンテナンス設定等)が
+            // 変わる操作は、トーストを一瞬見せてからページを再読み込みして最新状態を映す。
+            if (form.hasAttribute("data-ajax-reload")) {
+                var delay = parseInt(form.getAttribute("data-ajax-reload"), 10) || 900;
+                setTimeout(function() { window.location.reload(); }, delay);
+                return;
+            }
         }
+        controls.forEach(function(el) { el.disabled = false; });
     })
     .catch(function() {
         showToast("通信エラーが発生しました。", true);
-    })
-    .finally(function() {
         controls.forEach(function(el) { el.disabled = false; });
     });
 });

@@ -10,7 +10,7 @@
     {% if ann.already_responded %}
     <p class="muted">回答済みです。ご協力ありがとうございました。</p>
     {% elif ann.kind == "choice" %}
-    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}" class="announcement-respond-form" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% for choice in ann.choices %}
         <label style="display:block; margin:0.3rem 0;">
@@ -20,7 +20,7 @@
         <button type="submit" class="button" style="margin-top:0.5rem;">回答する</button>
     </form>
     {% elif ann.kind == "text" %}
-    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}">
+    <form method="post" action="{{ url_for('respond_announcement', announcement_id=ann.id) }}" class="announcement-respond-form" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <textarea name="answer_text" rows="2" required style="width:100%; max-width:500px; padding:0.5rem;"></textarea>
         <br><button type="submit" class="button" style="margin-top:0.5rem;">送信する</button>
@@ -28,6 +28,16 @@
     {% endif %}
 </div>
 {% endfor %}
+<script>
+document.addEventListener("ajaxformsuccess", function(e) {
+    var form = e.detail.form;
+    if (!form.classList.contains("announcement-respond-form")) { return; }
+    var p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "回答済みです。ご協力ありがとうございました。";
+    form.replaceWith(p);
+});
+</script>
 
 <div class="card">
     <h2>サイト内検索</h2>

@@ -72,11 +72,11 @@
 <div class="card">
     <h2>webappサービス</h2>
     <form method="post" action="{{ url_for('admin_restart') }}"
-          data-confirm="webappサービスを再起動します。よろしいですか？">
+          data-confirm="webappサービスを再起動します。よろしいですか？" data-ajax data-ajax-reload="4000">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="button button-danger">webappを再起動</button>
     </form>
-    <p class="muted">再起動中の数秒間、サイトに一時的にアクセスできなくなります。</p>
+    <p class="muted">再起動中の数秒間、サイトに一時的にアクセスできなくなります。再起動後、自動でページを再読み込みします。</p>
 </div>
 
 <div class="card">
@@ -92,7 +92,7 @@
                 {% if running.collect %}
                 <span class="muted">実行中...</span>
                 {% else %}
-                <form method="post" action="{{ url_for('admin_run', key='collect') }}" style="display:inline;">
+                <form method="post" action="{{ url_for('admin_run', key='collect') }}" style="display:inline;" data-ajax data-ajax-reload>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>
@@ -106,7 +106,7 @@
                 {% if running.predict %}
                 <span class="muted">実行中...</span>
                 {% else %}
-                <form method="post" action="{{ url_for('admin_run', key='predict') }}" style="display:inline;">
+                <form method="post" action="{{ url_for('admin_run', key='predict') }}" style="display:inline;" data-ajax data-ajax-reload>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>
@@ -120,7 +120,7 @@
                 {% if running.backfill_weather %}
                 <span class="muted">実行中...</span>
                 {% else %}
-                <form method="post" action="{{ url_for('admin_run', key='backfill_weather') }}" style="display:inline;">
+                <form method="post" action="{{ url_for('admin_run', key='backfill_weather') }}" style="display:inline;" data-ajax data-ajax-reload>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button">今すぐ実行</button>
                 </form>

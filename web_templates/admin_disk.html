@@ -38,7 +38,8 @@
     </p>
     {% if image_archive.day_count %}
     <form method="post" action="{{ url_for('admin_disk_images_cleanup') }}"
-          data-confirm="指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？">
+          data-confirm="指定した日数より前のカメラ画像アーカイブを削除します。元に戻せません。よろしいですか？"
+          data-ajax data-ajax-reload>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>
             <input type="number" name="days" value="{{ image_cleanup_default_days }}" min="1" style="width:5em; padding:0.3rem;">

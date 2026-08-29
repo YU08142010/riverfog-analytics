@@ -171,11 +171,10 @@
 </div>
 
 <div class="card">
-    <h2>コメント({{ comments|length }}件)</h2>
-    {% if comments %}
-    <div style="display:flex; flex-direction:column; gap:0.7rem; margin-bottom:1rem;">
+    <h2 id="comment-count">コメント({{ comments|length }}件)</h2>
+    <div id="comment-list" style="display:flex; flex-direction:column; gap:0.7rem; margin-bottom:1rem;" {{ "hidden" if not comments }}>
         {% for c in comments %}
-        <div style="border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:0.6rem 0.8rem;">
+        <div class="comment-item" data-comment-id="{{ c.id }}" style="border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:0.6rem 0.8rem;">
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
                 <span style="font-weight:600;">{{ c.author_name }}</span>
                 <span class="muted" style="font-size:0.78rem;">{{ c.created_at }}</span>
@@ -183,7 +182,7 @@
             <p style="white-space:pre-wrap; margin:0.3rem 0 0;">{{ c.body }}</p>
             {% if c.user_id == session.get("user_id") or session.get("role") == "admin" %}
             <form action="{{ url_for('station_comment_delete', name=name, comment_id=c.id) }}" method="post" style="margin-top:0.3rem;"
-                  data-confirm="このコメントを削除しますか？">
+                  data-confirm="このコメントを削除しますか？" data-ajax>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="button button-danger" style="font-size:0.78rem; padding:0.25rem 0.6rem;">削除</button>
             </form>
@@ -191,13 +190,70 @@
         </div>
         {% endfor %}
     </div>
-    {% else %}
-    <div class="empty-state">{{ icon("empty") }}<span>まだコメントはありません。</span></div>
-    {% endif %}
-    <form action="{{ url_for('station_comment_add', name=name) }}" method="post">
+    <div class="empty-state" id="comment-empty" {{ "" if not comments else "hidden" }}>{{ icon("empty") }}<span>まだコメントはありません。</span></div>
+    <form id="comment-add-form" action="{{ url_for('station_comment_add', name=name) }}" method="post" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <textarea name="body" rows="2" maxlength="{{ comment_max_length }}" placeholder="この地点についてコメントを残す..." style="width:100%; max-width:480px; padding:0.5rem; font-family:inherit;"></textarea><br>
+        <textarea name="body" id="comment-add-body" rows="2" maxlength="{{ comment_max_length }}" placeholder="この地点についてコメントを残す..." style="width:100%; max-width:480px; padding:0.5rem; font-family:inherit;"></textarea><br>
         <button type="submit" class="button" style="margin-top:0.5rem;">投稿する</button>
     </form>
 </div>
+<script>
+(function() {
+    var list = document.getElementById("comment-list");
+    var empty = document.getElementById("comment-empty");
+    var countHeading = document.getElementById("comment-count");
+    var addForm = document.getElementById("comment-add-form");
+
+    function setCount(n) {
+        countHeading.textContent = "コメント(" + n + "件)";
+    }
+    function currentCount() {
+        return list.querySelectorAll(".comment-item").length;
+    }
+
+    function buildCommentEl(authorName, body, createdAt, canDelete) {
+        var div = document.createElement("div");
+        div.className = "comment-item comment-item-new";
+        div.style.cssText = "border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:0.6rem 0.8rem;";
+        var head = document.createElement("div");
+        head.style.cssText = "display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;";
+        var name = document.createElement("span");
+        name.style.fontWeight = "600";
+        name.textContent = authorName;
+        var when = document.createElement("span");
+        when.className = "muted";
+        when.style.fontSize = "0.78rem";
+        when.textContent = createdAt;
+        head.appendChild(name);
+        head.appendChild(when);
+        var p = document.createElement("p");
+        p.style.cssText = "white-space:pre-wrap; margin:0.3rem 0 0;";
+        p.textContent = body;
+        div.appendChild(head);
+        div.appendChild(p);
+        return div;
+    }
+
+    document.addEventListener("ajaxformsuccess", function(e) {
+        var form = e.detail.form;
+        var data = e.detail.data || {};
+        if (form === addForm) {
+            var el = buildCommentEl(data.author_name || "", data.body || "", data.created_at || "", true);
+            list.appendChild(el);
+            list.hidden = false;
+            empty.hidden = true;
+            setCount(currentCount());
+            document.getElementById("comment-add-body").value = "";
+        } else if (form.closest && form.closest(".comment-item")) {
+            var item = form.closest(".comment-item");
+            item.remove();
+            setCount(currentCount());
+            if (currentCount() === 0) {
+                list.hidden = true;
+                empty.hidden = false;
+            }
+        }
+    });
+})();
+</script>
 {% endblock %}

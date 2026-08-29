@@ -302,7 +302,11 @@ def _check_csrf():
     submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
     if not token or not submitted or not hmac.compare_digest(token, submitted):
         log.warning("CSRF token mismatch for %s %s", request.method, request.path)
-        abort(400)
+        message = "画面の情報が古くなっています。ページを再読み込みしてからもう一度お試しください。"
+        if _wants_json():
+            return jsonify({"message": message, "success": False}), 400
+        flash(message, "error")
+        return redirect(request.referrer or url_for("dashboard"))
     return None
 
 
@@ -1847,15 +1851,21 @@ def station_comment_add(name):
     body = request.form.get("body", "").strip()[:STATION_COMMENT_MAX_LENGTH]
     if not body:
         return _finish("station_detail", "コメントを入力してください。", success=False, name=name)
+    created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
     conn = _users_conn()
     try:
-        users.add_station_comment(
-            conn, name, session["user_id"], body,
-            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
-        )
+        users.add_station_comment(conn, name, session["user_id"], body, created_at)
     finally:
         conn.close()
-    return _finish("station_detail", "コメントを投稿しました。", name=name)
+    if _wants_json():
+        # data-ajaxのフォームがページ遷移無しで一覧に追加できるよう、投稿内容自体も返す
+        # (通常のflash+redirectでは表示側の情報が無いのでここだけ_finish()を使わない)。
+        return jsonify({
+            "message": "コメントを投稿しました。", "success": True,
+            "author_name": session.get("name", ""), "body": body, "created_at": created_at,
+        })
+    flash("コメントを投稿しました。", "success")
+    return redirect(url_for("station_detail", name=name))
 
 
 @app.route("/stations/<name>/comments/<int:comment_id>/delete", methods=["POST"])
@@ -2500,11 +2510,9 @@ def admin_run(key):
     if script is None:
         abort(404)
     if _is_script_running(script):
-        flash(f"{script} は既に実行中のため、開始しませんでした。", "error")
-    else:
-        _run_script_async(script)
-        flash(f"{script} の実行を開始しました。数分後にログを確認してください。", "success")
-    return redirect(url_for("admin_status"))
+        return _finish("admin_status", f"{script} は既に実行中のため、開始しませんでした。", success=False)
+    _run_script_async(script)
+    return _finish("admin_status", f"{script} の実行を開始しました。数分後にログを確認してください。")
 
 
 @app.route("/admin/restart", methods=["POST"])
@@ -2518,11 +2526,10 @@ def admin_restart():
             ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
             start_new_session=True,
         )
-        flash("webappサービスを再起動します(数秒後にページを再読み込みしてください)。", "success")
-    except Exception as e:
+    except Exception:
         log.exception("Failed to trigger webapp restart")
-        flash("再起動の開始に失敗しました。詳細はログを確認してください。", "error")
-    return redirect(url_for("admin_status"))
+        return _finish("admin_status", "再起動の開始に失敗しました。詳細はログを確認してください。", success=False)
+    return _finish("admin_status", "webappサービスを再起動します(数秒後にページを再読み込みしてください)。")
 
 
 @app.route("/admin/models")
@@ -2664,14 +2671,15 @@ def admin_disk_images_cleanup():
             shutil.rmtree(day_dir)
             deleted += 1
     if deleted:
-        flash(f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。", "success")
         _record_audit(
             "カメラ画像アーカイブ削除",
             f"{cutoff.strftime('%Y-%m-%d')}より前を{deleted}日分削除(解放: {_human_size(freed_bytes)})",
         )
-    else:
-        flash("削除対象の画像アーカイブはありませんでした。")
-    return redirect(url_for("admin_disk"))
+        return _finish(
+            "admin_disk",
+            f"{cutoff.strftime('%Y-%m-%d')} より前のカメラ画像アーカイブを{deleted}日分削除しました(解放: {_human_size(freed_bytes)})。",
+        )
+    return _finish("admin_disk", "削除対象の画像アーカイブはありませんでした。")
 
 
 @app.route("/admin/backup.zip")
@@ -2862,12 +2870,11 @@ def admin_db_cleanup():
             deleted = prediction_log.delete_verified_before(conn, before_dt)
         finally:
             conn.close()
-        flash(f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。", "success")
         _record_audit("予測DBクリーンアップ", f"{before_dt}より前の検証済みレコードを{deleted}件削除")
-    except Exception as e:
+        return _finish("admin_db", f"{before_dt} より前の答え合わせ済みレコードを{deleted}件削除しました。")
+    except Exception:
         log.exception("DB cleanup failed")
-        flash("クリーンアップに失敗しました。詳細はログを確認してください。", "error")
-    return redirect(url_for("admin_db"))
+        return _finish("admin_db", "クリーンアップに失敗しました。詳細はログを確認してください。", success=False)
 
 
 @app.route("/admin/camera_health")
@@ -2924,8 +2931,10 @@ def admin_maintenance():
         enabled = request.form.get("enabled") == "on"
         message = request.form.get("message", "").strip()
         _set_maintenance_state(enabled, message)
-        flash("メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。", "success")
-        return redirect(url_for("admin_maintenance"))
+        return _finish(
+            "admin_maintenance",
+            "メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。",
+        )
     return render_template("admin_maintenance.html", state=_maintenance_state())
 
 
@@ -3027,8 +3036,12 @@ def respond_announcement(announcement_id):
         )
     finally:
         conn.close()
-    flash("回答ありがとうございました。", "success")
-    response = redirect(request.referrer or url_for("dashboard"))
+    message = "回答ありがとうございました。"
+    if _wants_json():
+        response = jsonify({"message": message, "success": True})
+    else:
+        flash(message, "success")
+        response = redirect(request.referrer or url_for("dashboard"))
     if is_new:
         response.set_cookie(VISITOR_COOKIE_NAME, visitor_id, max_age=VISITOR_COOKIE_MAX_AGE)
     return response

@@ -29,7 +29,7 @@
     <h2>古いレコードのクリーンアップ</h2>
     <p class="muted">答え合わせ済み(actual_codeが確定済み)のレコードのうち、指定日数より古いものだけを削除します。未検証のレコードは削除されません。</p>
     <form method="post" action="{{ url_for('admin_db_cleanup') }}"
-          data-confirm="本当に削除しますか？この操作は取り消せません。">
+          data-confirm="本当に削除しますか？この操作は取り消せません。" data-ajax data-ajax-reload>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>これより古い(日数): <input type="number" name="days" value="{{ default_days }}" min="1" style="width:6rem; padding:0.4rem;"></label>
         <button type="submit" class="button button-danger">削除を実行</button>

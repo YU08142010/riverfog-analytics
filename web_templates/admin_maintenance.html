@@ -11,7 +11,7 @@
             {{ "有効(メンテナンス中)" if state.enabled else "無効(通常運用中)" }}
         </strong>
     </p>
-    <form method="post">
+    <form method="post" data-ajax data-ajax-reload>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>
             <label>訪問者に表示するメッセージ<br>

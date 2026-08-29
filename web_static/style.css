@@ -140,6 +140,15 @@ body {
     border-radius: 50%;
     background: var(--color-danger);
     box-shadow: 0 0 0 2px var(--color-primary-dark);
+    animation: badgePop 0.3s ease;
+}
+@keyframes badgePop {
+    0% { transform: scale(0); }
+    70% { transform: scale(1.25); }
+    100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .notif-badge { animation: none; }
 }
 .notif-panel {
     position: absolute;
@@ -298,6 +307,16 @@ main {
 .sidebar:empty { display: none; }
 .layout-content { flex: 1 1 0%; min-width: 0; }
 
+/* ページ読み込み時に本文がふわっと浮かび上がる、控えめな演出。 */
+.layout-content { animation: contentFadeUp 0.35s ease; }
+@keyframes contentFadeUp {
+    0% { opacity: 0; transform: translateY(6px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .layout-content { animation: none; }
+}
+
 @media (max-width: 860px) {
     .layout { flex-direction: column; }
     .sidebar { position: static; flex-basis: auto; width: 100%; }
@@ -335,6 +354,10 @@ main {
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
+    max-height: 600px;
+    overflow: hidden;
+    opacity: 1;
+    transition: max-height 0.25s ease, opacity 0.2s ease;
 }
 .sidebar-list a {
     display: flex;
@@ -573,6 +596,12 @@ button.button:disabled {
 }
 .copy-btn:hover { background: var(--color-bg); color: var(--color-text); }
 .copy-btn svg { width: 0.85rem; height: 0.85rem; }
+
+/* station_detail.htmlでコメントをAjax投稿した直後、新しい要素だけふわっと表示する。 */
+.comment-item-new { animation: contentFadeUp 0.35s ease; }
+@media (prefers-reduced-motion: reduce) {
+    .comment-item-new { animation: none; }
+}
 
 /* 空状態の統一表現(アイコン+説明文)。 */
 .empty-state {
@@ -1076,4 +1105,7 @@ table.obs-table th.sticky-col { z-index: 3; }
 }
 .sidebar-group-label .icon { transition: transform 0.15s ease; }
 .sidebar-group.collapsed .sidebar-group-label .icon { transform: rotate(-90deg); }
-.sidebar-group.collapsed .sidebar-list { display: none; }
+.sidebar-group.collapsed .sidebar-list { max-height: 0; opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-list { transition: none; }
+}
