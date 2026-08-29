@@ -933,10 +933,14 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
     """予報データに対して地点ごとの現象コードと霧確率を予測する。
     forecast_by_station/camera_coordsが与えられ、かつその地点の予報が取得できていれば、
     共通の代表地点予報(forecast_raw/lat/lon)の代わりにその地点自身の予報を使う。
-    戻り値: (pred_df, prob_df)。どちらもdatetime列 + 地点ごとの列。
+    戻り値: (pred_df, prob_df, feature_snapshots)。pred_df/prob_dfはdatetime列 + 地点ごとの列。
+    feature_snapshotsは {地点名: DataFrame(datetime, 各特徴量, predicted_code, predicted_fog_prob)}で、
+    「この予測にどの特徴量の値が使われたか」を後から参照する(station_detail.htmlの表示用)ために
+    予測結果と一緒に返す。
     """
     pred_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
     prob_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
+    feature_snapshots = {}
     for col, info in models.items():
         feature_names = info["features"]
         station_forecast = (forecast_by_station or {}).get(col)
@@ -960,7 +964,12 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
             X[CROSS_STATION_FOG_FEATURE] = info.get("cross_fog_index_last", 0.0)
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X)
-    return pred_df, prob_df
+        snapshot = X.copy()
+        snapshot.insert(0, "datetime", df["datetime"].values)
+        snapshot["predicted_code"] = pred_df[col].values
+        snapshot["predicted_fog_prob"] = prob_df[col].values
+        feature_snapshots[col] = snapshot
+    return pred_df, prob_df, feature_snapshots
 
 
 def _effective_score(info):

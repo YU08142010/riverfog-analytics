@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}更新履歴{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>更新履歴</h2>
+    <p class="muted">gitのバージョンタグから自動生成しています。コミット規約により要約は英語のままです。
+        バージョン管理を始めた時点(v2.6)より前の更新はここには出ません。</p>
+    {% if entries %}
+    <div style="display:flex; flex-direction:column; gap:0.8rem;">
+        {% for e in entries %}
+        <div style="border-left:3px solid var(--color-primary); padding-left:0.8rem;">
+            <div style="display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap;">
+                <strong>{{ e.version }}</strong>
+                <span class="muted" style="font-size:0.82rem;">{{ e.date }}</span>
+            </div>
+            <p style="margin:0.2rem 0 0;">{{ e.summary }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">{{ icon("empty") }}<span>更新履歴がまだありません。</span></div>
+    {% endif %}
+</div>
+{% endblock %}

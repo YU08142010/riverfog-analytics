@@ -10,6 +10,7 @@
 4. 記録: 今回の予測を答え合わせ用に記録する（観測時間帯4〜19時分のみ、翌日以降に検証可能）
 """
 import argparse
+import json
 import logging
 import logging.handlers
 import sys
@@ -39,6 +40,9 @@ HISTORY_DAYS = 5    # 地点別グラフに表示する実測の日数
 
 DB_PATH = BASE_DIR / "data" / "predictions.db"
 OUTPUT_ROOT = BASE_DIR / "data" / "predictions"
+# 各地点の直近の予測に使われた特徴量の値(webapp.pyのstation_detail.htmlで
+# 「なぜこの予測になったか」を数値で示すために読む)。
+FEATURE_SNAPSHOT_PATH = BASE_DIR / "data" / "models" / "feature_snapshot.json"
 
 LOG_FILE = BASE_DIR / "logs" / "predict.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -99,6 +103,45 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
         if row["n"]:
             log.info("  lead day %s: %d/%d (%.1f%%)",
                      row["lead_day"], row["correct"], row["n"], 100.0 * row["correct"] / row["n"])
+
+
+def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SNAPSHOT_PATH):
+    """各地点について、now以降で最も近い時刻の予測に使われた特徴量の値をJSONで保存する。
+    station_detail.htmlで「この予測にどの数値が使われたか」を表示するために使う
+    (SHAP等の本格的な説明可能性の仕組みは導入せず、まずは生の入力値をそのまま見せる)。
+    """
+    payload = {}
+    for station, df in feature_snapshots.items():
+        future = df[df["datetime"] >= now_naive]
+        if future.empty:
+            continue
+        row = future.iloc[0]
+        info = models.get(station, {})
+        features = {
+            col: (None if pd.isna(row[col]) else round(float(row[col]), 3))
+            for col in df.columns
+            if col not in ("datetime", "predicted_code", "predicted_fog_prob")
+        }
+        payload[station] = {
+            "target_datetime": row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
+            "features": features,
+            "predicted_code": int(row["predicted_code"]),
+            "predicted_fog_prob": round(float(row["predicted_fog_prob"]), 4),
+            "fog_threshold": info.get("fog_threshold"),
+            "model_type": info.get("model_type", ""),
+            "blend_weight": info.get("blend_weight"),
+        }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"generated_at": now_naive.strftime("%Y-%m-%d %H:%M:%S"), "stations": payload},
+                f, ensure_ascii=False, indent=2,
+            )
+        tmp_path.replace(path)
+    except Exception as e:
+        log.warning("Failed to save feature snapshot: %s", e)
 
 
 def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
@@ -204,12 +247,13 @@ def main():
         log.warning("Per-station forecast fetch failed, falling back to the shared forecast: %s", e)
         forecast_by_station = {}
 
-    pred_df, prob_df = fog_model.build_location_forecast_codes(
+    pred_df, prob_df, feature_snapshots = fog_model.build_location_forecast_codes(
         models, forecast_raw, lat, lon,
         forecast_by_station=forecast_by_station, camera_coords=camera_coords,
     )
 
     if not args.dry_run:
+        _save_feature_snapshot(feature_snapshots, models, now_naive)
         out_dir = OUTPUT_ROOT / now_naive.strftime("%Y-%m-%d")
         out_dir.mkdir(parents=True, exist_ok=True)
         run_date_str = now_naive.strftime("%Y%m%d")

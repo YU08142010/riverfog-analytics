@@ -266,6 +266,9 @@ def _require_login():
         flash("アカウントが削除されたため、ログアウトしました。")
         return redirect(url_for("login", next=request.path))
     session["role"] = user["role"]
+    # 通知の絞り込み(お気に入り地点)等、同じリクエスト内で再度ユーザー情報が必要になる
+    # 場合に備えてgに載せておく(_current_user_favorite_stations参照、二重問い合わせ防止)。
+    g.current_user = user
     return None
 
 
@@ -527,16 +530,83 @@ def _inject_pending_signup_count():
     return {"pending_signup_count": pending_signup_count}
 
 
-def _current_notifications():
-    """通知ベル(base.html)の一覧。一般利用者には霧アラートのみ、管理者にはシステム状態の
-    通知も加える。通知はDBに記録された履歴ではなく、その時点の状態から毎回計算するだけ
-    （霧アラートは_upcoming_fog_alerts_safe()、システム状態は_admin_overview()を再利用）。
-    既読管理はサーバー側に持たず、base.htmlのJSがlocalStorageで行う。
+def _current_user_favorite_stations():
+    """ログイン中ユーザーのお気に入り地点名のsetを返す(未ログイン/未設定なら空set)。
+    空setは「絞り込み対象なし(=全地点を通知対象にする)」という意味で扱う
+    (お気に入りを1つも設定していない利用者の通知を空にしてしまうと不便なため)。
+    _require_loginがgに載せたユーザー情報を再利用し、二重にDBへ問い合わせない。
     """
+    user = g.get("current_user")
+    if user is None:
+        return set()
+    return {s for s in user["favorite_stations"].split(",") if s}
+
+
+# カメラが直近この回数連続で使える写真を撮れていない場合、故障・レンズ曇り等の兆候として
+# 通知する。観測は毎時(4-19時)なので6回はおよそ半日分に相当する。
+CAMERA_FAILURE_ALERT_CONSECUTIVE = 6
+CAMERA_FAILURE_CHECK_SCAN_DAYS = 3
+
+
+def _stations_with_recent_camera_failures(consecutive=CAMERA_FAILURE_ALERT_CONSECUTIVE):
+    """直近の観測スロットを新しい順にたどり、consecutive回連続で「使える写真」が
+    無かった地点名のリストを返す。ファイル存在チェックのみでsubprocessは使わない。
+    """
+    slots = []
+    for date in _sorted_subdirs(IMAGE_DIR)[:CAMERA_FAILURE_CHECK_SCAN_DAYS]:
+        for hhmm in _sorted_subdirs(IMAGE_DIR / date):
+            slots.append(IMAGE_DIR / date / hhmm)
+    failing = []
+    for name in STATION_NAMES:
+        streak = 0
+        for hour_dir in slots:
+            if (hour_dir / f"{name}.jpg").exists():
+                break
+            if (hour_dir / f"{name}_unavailable.jpg").exists():
+                streak += 1
+                if streak >= consecutive:
+                    break
+            else:
+                break
+        if streak >= consecutive:
+            failing.append(name)
+    return failing
+
+
+CAMERA_HEALTH_CACHE_SECONDS = 300
+_camera_health_cache = {"data": None, "at": 0.0}
+_camera_health_cache_lock = threading.Lock()
+
+
+def _stations_with_recent_camera_failures_cached():
+    now = time.monotonic()
+    with _camera_health_cache_lock:
+        cached = _camera_health_cache["data"]
+        if cached is not None and now - _camera_health_cache["at"] < CAMERA_HEALTH_CACHE_SECONDS:
+            return cached
+    data = _stations_with_recent_camera_failures()
+    with _camera_health_cache_lock:
+        _camera_health_cache["data"] = data
+        _camera_health_cache["at"] = now
+    return data
+
+
+def _current_notifications():
+    """通知ベル(base.html)の一覧。一般利用者には霧アラート+カメラ故障の兆候、管理者には
+    それに加えてシステム状態の通知を加える。通知はDBに記録された履歴ではなく、その時点の
+    状態から毎回計算するだけ（霧アラートは_upcoming_fog_alerts_safe()、システム状態は
+    _admin_overview()を再利用）。既読管理はサーバー側に持たず、base.htmlのJSがlocalStorageで行う。
+
+    お気に入り地点を設定しているユーザーには、霧アラート・カメラ故障通知の両方をお気に入り
+    地点だけに絞る(1件も設定していない場合は絞り込まず全地点分を出す)。
+    """
+    favorites = _current_user_favorite_stations()
     notifications = []
     nearest_by_station = {}
     for a in _upcoming_fog_alerts_safe():
         station = a["station"]
+        if favorites and station not in favorites:
+            continue
         if station not in nearest_by_station or a["target_datetime"] < nearest_by_station[station]["target_datetime"]:
             nearest_by_station[station] = a
     for station, a in sorted(nearest_by_station.items(), key=lambda kv: kv[1]["target_datetime"]):
@@ -545,6 +615,16 @@ def _current_notifications():
             "id": f"fog:{station}:{a['target_datetime']}",
             "level": "warning",
             "message": f"{station}: {a['target_datetime']}頃に霧の予測です（確率{prob_pct}%）",
+            "url": url_for("station_detail", name=station),
+        })
+
+    for station in _stations_with_recent_camera_failures_cached():
+        if favorites and station not in favorites:
+            continue
+        notifications.append({
+            "id": f"camera:{station}",
+            "level": "warning",
+            "message": f"{station}: カメラ画像が直近{CAMERA_FAILURE_ALERT_CONSECUTIVE}回連続で取得できていません",
             "url": url_for("station_detail", name=station),
         })
 
@@ -599,7 +679,10 @@ def _inject_notifications():
         except Exception as e:
             log.warning("Failed to build notifications: %s", e)
             return []
-    return {"notifications_data": notifications_data}
+
+    def notifications_favorites_active():
+        return bool(_current_user_favorite_stations())
+    return {"notifications_data": notifications_data, "notifications_favorites_active": notifications_favorites_active}
 
 
 def requires_admin(view):
@@ -1008,6 +1091,28 @@ def _load_ai_summary():
         return None
 
 
+FEATURE_SNAPSHOT_PATH = BASE_DIR / "data" / "models" / "feature_snapshot.json"
+
+
+def _load_station_feature_snapshot(name):
+    """predict.py(_save_feature_snapshot)が保存した、直近の予測に使われた特徴量の値を
+    指定地点分だけ読む。無い/壊れている/該当地点が無い場合はNoneを返す
+    (station_detail.htmlは「予測の内訳」セクションごと出さない)。
+    """
+    if not FEATURE_SNAPSHOT_PATH.exists():
+        return None
+    try:
+        with open(FEATURE_SNAPSHOT_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        log.warning("Failed to read feature snapshot: %s", e)
+        return None
+    station_data = data.get("stations", {}).get(name)
+    if not station_data:
+        return None
+    return {"generated_at": data.get("generated_at"), **station_data}
+
+
 def _network_failure_summary(recent_n=30):
     """common.record_network_failure()が記録したDNS/ネットワーク障害を集計する。
     このサーバーの名前解決はTailscale MagicDNS経由で、断続的に外部ドメインの解決が
@@ -1101,6 +1206,36 @@ def _read_smb_share_config(share_name=SMB_SHARE_NAME, path=SMB_CONF_PATH):
         "valid_users": section.get("valid users", "").strip(),
         "comment": section.get("comment", "").strip(),
     }
+
+
+CHANGELOG_MAX_ENTRIES = 30
+
+
+def _changelog_entries(limit=CHANGELOG_MAX_ENTRIES):
+    """gitタグ(v<VERSION>、post-commit-version-tag.shが各コミットで自動付与)から
+    更新履歴を作る。コミットメッセージは英語(リポジトリの規約)のため、この一覧も
+    英語の要約のまま表示する(タグは記録用のpost-commit-version-tag.sh導入以降にしか
+    無いため、それより前のバージョンは一覧に出ない)。
+    """
+    try:
+        result = subprocess.run(
+            [
+                "git", "for-each-ref", "refs/tags", "--sort=-creatordate",
+                "--format=%(refname:short)|%(creatordate:short)|%(subject)",
+            ],
+            cwd=str(BASE_DIR), capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        log.warning("Failed to read git tags for changelog: %s", e)
+        return []
+    entries = []
+    for line in result.stdout.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        version, date, summary = parts
+        entries.append({"version": version, "date": date, "summary": summary})
+    return entries[:limit]
 
 
 def _crontab_safe():
@@ -1842,6 +1977,7 @@ def station_detail(name):
         comment_max_length=STATION_COMMENT_MAX_LENGTH,
         ai_station_summary=ai_station_summary,
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
+        feature_snapshot=_load_station_feature_snapshot(name),
     )
 
 
@@ -1933,6 +2069,11 @@ def accuracy_chart():
     rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
     png = _render_line_chart_png(dates, rates, "全地点の的中率推移")
     return Response(png, mimetype="image/png")
+
+
+@app.route("/changelog")
+def changelog_page():
+    return render_template("changelog.html", entries=_changelog_entries())
 
 
 # ============================================================================
@@ -2916,6 +3057,112 @@ def admin_accuracy_report():
             key=lambda r: (r["n"] == 0, r["correct"] / r["n"] if r["n"] else 1.0),
         )
     return render_template("admin_accuracy_report.html", by_station=by_station, overall=summary["overall"] if summary else None)
+
+
+def _generate_report_pdf(start_date, end_date):
+    """指定期間の霧発生状況・予測精度をまとめたPDFレポートを生成し、bytesで返す。
+    matplotlibのPdfPages機能を使う(新規ライブラリの追加は不要)。
+    """
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+    mask = (phenom_df["datetime"] >= start_dt) & (phenom_df["datetime"] <= end_dt)
+    period_df = phenom_df[mask]
+
+    fog_counts = {}
+    for name in station_names:
+        if name not in period_df.columns:
+            fog_counts[name] = 0
+            continue
+        codes = period_df[name].map(encode_phenomena_cell)
+        fog_counts[name] = int(codes.isin(SUMMARY_FOG_CODES).sum())
+    total_slots = len(period_df)
+
+    accuracy = _accuracy_summary_safe()
+    trend = _accuracy_trend_safe()
+    trend_in_range = [r for r in trend if start_date.isoformat() <= r["date"] <= end_date.isoformat() and r["n"] > 0]
+
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        fig = plt.figure(figsize=(8.27, 11.69))
+        fig.text(0.5, 0.62, "只見川霧観測レポート", ha="center", fontsize=24, fontweight="bold")
+        fig.text(0.5, 0.55, f"{start_date} 〜 {end_date}", ha="center", fontsize=14)
+        overall = accuracy["overall"] if accuracy else None
+        if overall and overall["n"]:
+            fig.text(
+                0.5, 0.48,
+                f"この期間の全体的中率(集計期間全体): {100.0 * overall['correct'] / overall['n']:.1f}% "
+                f"({overall['correct']}/{overall['n']}件)",
+                ha="center", fontsize=11,
+            )
+        fig.text(0.5, 0.08, f"生成日時: {now_jst_naive().strftime('%Y-%m-%d %H:%M')}", ha="center", fontsize=9, color="gray")
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        if total_slots:
+            sorted_counts = sorted(fog_counts.items(), key=lambda kv: kv[1])
+            names = [n for n, _ in sorted_counts]
+            counts = [c for _, c in sorted_counts]
+            fig, ax = plt.subplots(figsize=(8.27, 11.69))
+            ax.barh(names, counts, color="#1a5276")
+            ax.set_xlabel(f"霧発生回数(観測コマ数、全{total_slots}コマ中)")
+            ax.set_title("地点別 霧発生回数")
+            ax.tick_params(axis="y", labelsize=7)
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+        else:
+            fig = plt.figure(figsize=(8.27, 4))
+            fig.text(0.5, 0.5, "この期間の観測データがありません。", ha="center", fontsize=12)
+            pdf.savefig(fig)
+            plt.close(fig)
+
+        if trend_in_range:
+            dates = [datetime.strptime(r["date"], "%Y-%m-%d") for r in trend_in_range]
+            rates = [100.0 * r["correct"] / r["n"] for r in trend_in_range]
+            fig, ax = plt.subplots(figsize=(8.27, 5.5))
+            ax.plot(dates, rates, marker="o", markersize=3, color="#1a5276")
+            ax.set_title("予測的中率の推移")
+            ax.set_ylabel("的中率(%)")
+            ax.set_ylim(0, 100)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+            fig.autofmt_xdate()
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    return buf.getvalue()
+
+
+@app.route("/admin/report", methods=["GET", "POST"])
+@requires_admin
+def admin_report():
+    today = now_jst_naive().date()
+    default_start = today - timedelta(days=30)
+    if request.method == "POST":
+        try:
+            start_date = datetime.strptime(request.form.get("start_date", ""), "%Y-%m-%d").date()
+            end_date = datetime.strptime(request.form.get("end_date", ""), "%Y-%m-%d").date()
+        except ValueError:
+            flash("開始日・終了日を正しく指定してください。", "error")
+            return redirect(url_for("admin_report"))
+        if start_date > end_date:
+            flash("開始日は終了日より前の日付にしてください。", "error")
+            return redirect(url_for("admin_report"))
+        try:
+            pdf_bytes = _generate_report_pdf(start_date, end_date)
+        except Exception:
+            log.exception("Report generation failed")
+            flash("レポートの生成に失敗しました。詳細はログを確認してください。", "error")
+            return redirect(url_for("admin_report"))
+        filename = f"river-fog-report_{start_date}_{end_date}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes), mimetype="application/pdf",
+            as_attachment=True, download_name=filename,
+        )
+    return render_template("admin_report.html", default_start=default_start, default_end=today)
 
 
 @app.route("/admin/gemini")

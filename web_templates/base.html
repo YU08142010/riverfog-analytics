@@ -23,7 +23,7 @@
 <body>
 <header>
     <h1>只見川霧観測・予測</h1>
-    <span style="color:rgba(255,255,255,0.8); font-size:0.8rem; align-self:flex-end; margin-bottom:0.2rem;" title="現在のバージョン">v{{ app_version }}</span>
+    <a href="{{ url_for('changelog_page') }}" style="color:rgba(255,255,255,0.8); font-size:0.8rem; align-self:flex-end; margin-bottom:0.2rem; text-decoration:none;" title="更新履歴を見る">v{{ app_version }}</a>
     <button type="button" class="nav-toggle" id="nav-toggle-btn" aria-label="メニュー" aria-expanded="false">
         {{ icon("menu", size=20) }}
     </button>
@@ -51,6 +51,9 @@
         <div class="notif-panel" id="notif-panel" tabindex="-1" hidden>
             <div class="notif-panel-header">通知</div>
             <div id="notif-list"></div>
+            {% if notifications_favorites_active() %}
+            <p class="notif-footnote muted">お気に入り地点(<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で設定)だけに絞り込んで表示しています。</p>
+            {% endif %}
             <p class="notif-footnote muted">既読状態はこの端末のブラウザにのみ保存されます(他の端末では未読のまま表示されます)。</p>
         </div>
     </div>
