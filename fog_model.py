@@ -1196,15 +1196,34 @@ def _effective_score(info):
     return float(info.get("f1", 0.0))
 
 
+_MODEL_STATE_CACHE = {"path": None, "mtime": None, "data": None}
+
+
 def load_model_state(path=MODEL_STATE_PATH):
-    """前回保存したモデル一式を読み込む。無い/壊れている場合は空辞書（比較なしで続行）。"""
+    """前回保存したモデル一式を読み込む。無い/壊れている場合は空辞書（比較なしで続行）。
+
+    webapp.py側の複数ルート(シミュレーター、管理画面など)がリクエストのたびにこの関数を
+    呼ぶため、ファイルの更新日時が前回読み込み時と同じであればプロセス内キャッシュを返す
+    (公開してアクセスが増えた場合に、リクエストごとに数十地点分のjoblibを毎回ディスクから
+    読み直すのを避けるため)。predict.pyは別プロセスで日次実行されるため、再学習後の
+    ファイル更新はmtimeの変化として自然に検知される。
+    """
     if not path.exists():
         return {}
     try:
-        return joblib.load(path)
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = None
+    cache = _MODEL_STATE_CACHE
+    if cache["data"] is not None and cache["path"] == path and cache["mtime"] == mtime:
+        return cache["data"]
+    try:
+        data = joblib.load(path)
     except Exception as e:
         log.warning("Failed to load previous model state (%s), skipping regression check: %s", path, e)
         return {}
+    cache["path"], cache["mtime"], cache["data"] = path, mtime, data
+    return data
 
 
 def append_metrics_history(models, trained_at, path=METRICS_HISTORY_PATH):

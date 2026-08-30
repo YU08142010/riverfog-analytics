@@ -9,11 +9,19 @@
         気象条件と時刻を手動で入力すると、選んだ地点が現在採用しているモデルでその場で
         霧予測を試算します。学習データや実際の予測結果には一切影響しません(閲覧専用の試算機能です)。
     </p>
+    <p class="muted">
+        {% if defaults_are_real %}
+        気象条件の初期値には、この地点固有の直近の実測値を使用しています。
+        {% else %}
+        この地点はまだ固有の実測データが蓄積されていないため、気象条件の初期値には代表的な値を使用しています。
+        {% endif %}
+    </p>
     <form method="get">
         <div class="sim-form-grid">
             <p>
                 <label for="sim-station">地点</label><br>
-                <select name="station" id="sim-station" onchange="this.form.submit()" style="width:100%;">
+                <select name="station" id="sim-station" style="width:100%;"
+                        onchange="location.href='{{ url_for('simulator_page') }}?station=' + encodeURIComponent(this.value)">
                     {% for name in station_names %}
                     <option value="{{ name }}" {{ "selected" if name == station else "" }}>{{ name }}</option>
                     {% endfor %}
@@ -35,16 +43,29 @@
         <div class="sim-form-grid">
             {% for f in fields %}
             <p>
-                <label for="sim-{{ f.key }}">{{ f.label }}({{ f.unit }})</label><br>
+                <label for="sim-{{ f.key }}">
+                    {{ f.label }}({{ f.unit }}){% if f.key == "wind_dir" and wind_dir_label %} <span class="muted">{{ wind_dir_label }}</span>{% endif %}
+                </label><br>
                 <input type="number" id="sim-{{ f.key }}" name="{{ f.key }}"
-                       min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step }}"
+                       min="{{ f.min }}" max="{{ f.max }}" step="any"
                        value="{{ values[f.key] }}" style="width:100%; box-sizing:border-box;">
             </p>
             {% endfor %}
         </div>
         <button type="submit" class="button">シミュレートする</button>
+        {% if station %}
+        <a href="{{ url_for('simulator_page', station=station) }}" class="button" style="background: var(--color-text-muted);">現在の実測値にリセット</a>
+        {% endif %}
     </form>
 </div>
+
+{% if warnings %}
+<div class="card flash-error" role="alert">
+    {% for w in warnings %}
+    <p style="margin:0;">{{ w }}</p>
+    {% endfor %}
+</div>
+{% endif %}
 
 {% if no_model %}
 <div class="card">

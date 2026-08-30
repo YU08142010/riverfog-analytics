@@ -2071,15 +2071,15 @@ def _latest_station_weather(name, observations):
 # col: fog_features.pyの学習時と同じ列名(simulate_stationに渡すweather dictのキーになる)。
 # fallbackは、その地点の実測値がまだ無い(station_weather.dbに記録が無い)場合の初期値。
 SIM_WEATHER_FIELDS = [
-    {"key": "temp", "col": COL_TEMP, "label": "気温", "unit": "℃", "min": -20, "max": 40, "step": 0.5, "fallback": 10.0},
-    {"key": "precip", "col": COL_PRECIP, "label": "降水量", "unit": "mm", "min": 0, "max": 30, "step": 0.5, "fallback": 0.0},
-    {"key": "wind_speed", "col": COL_WIND_SPEED, "label": "風速", "unit": "m/s", "min": 0, "max": 15, "step": 0.1, "fallback": 1.0},
-    {"key": "wind_dir", "col": COL_WIND_DIR_DEG, "label": "風向", "unit": "°", "min": 0, "max": 360, "step": 5, "fallback": 0.0},
-    {"key": "humidity", "col": COL_HUMIDITY, "label": "相対湿度", "unit": "%", "min": 0, "max": 100, "step": 1, "fallback": 80.0},
-    {"key": "dew_point", "col": COL_DEWPOINT, "label": "露点温度", "unit": "℃", "min": -20, "max": 30, "step": 0.5, "fallback": 8.0},
-    {"key": "sunshine", "col": COL_SUNSHINE, "label": "日照時間", "unit": "h", "min": 0, "max": 1, "step": 0.05, "fallback": 0.0},
-    {"key": "solar", "col": COL_SOLAR, "label": "日射量", "unit": "MJ/m2", "min": 0, "max": 4, "step": 0.05, "fallback": 0.0},
-    {"key": "visibility", "col": COL_VISIBILITY, "label": "視程", "unit": "km", "min": 0, "max": 20, "step": 0.5, "fallback": 5.0},
+    {"key": "temp", "col": COL_TEMP, "label": "気温", "unit": "℃", "min": -20, "max": 40, "fallback": 10.0},
+    {"key": "precip", "col": COL_PRECIP, "label": "降水量", "unit": "mm", "min": 0, "max": 30, "fallback": 0.0},
+    {"key": "wind_speed", "col": COL_WIND_SPEED, "label": "風速", "unit": "m/s", "min": 0, "max": 15, "fallback": 1.0},
+    {"key": "wind_dir", "col": COL_WIND_DIR_DEG, "label": "風向", "unit": "°", "min": 0, "max": 360, "fallback": 0.0},
+    {"key": "humidity", "col": COL_HUMIDITY, "label": "相対湿度", "unit": "%", "min": 0, "max": 100, "fallback": 80.0},
+    {"key": "dew_point", "col": COL_DEWPOINT, "label": "露点温度", "unit": "℃", "min": -20, "max": 30, "fallback": 8.0},
+    {"key": "sunshine", "col": COL_SUNSHINE, "label": "日照時間", "unit": "h", "min": 0, "max": 1, "fallback": 0.0},
+    {"key": "solar", "col": COL_SOLAR, "label": "日射量", "unit": "MJ/m2", "min": 0, "max": 4, "fallback": 0.0},
+    {"key": "visibility", "col": COL_VISIBILITY, "label": "視程", "unit": "km", "min": 0, "max": 20, "fallback": 5.0},
 ]
 
 
@@ -2450,12 +2450,23 @@ def simulator_page():
         raw = request.args.get(field["key"])
         if raw not in (None, ""):
             try:
-                values[field["key"]] = float(raw)
+                # URL経由の値は公開時に外部から自由に渡せるため、想定レンジにクランプする
+                # (学習データのレンジを大きく外れた値をモデルにそのまま与えないようにするため)。
+                values[field["key"]] = min(max(float(raw), field["min"]), field["max"])
                 continue
             except ValueError:
                 pass
         default = defaults.get(field["key"])
         values[field["key"]] = float(default) if default is not None else field["fallback"]
+
+    defaults_are_real = bool(defaults)
+    wind_dir_label = _wind_compass_label(values.get("wind_dir"))
+    warnings = []
+    if values["dew_point"] > values["temp"]:
+        warnings.append(
+            "露点温度が気温を上回っています(通常は起こらない組み合わせです)。"
+            "この入力では予測結果の信頼性が下がる可能性があります。"
+        )
 
     result = None
     if info is not None:
@@ -2483,6 +2494,7 @@ def simulator_page():
         station_names=STATION_NAMES, station=station, active_names=[station] if station else [],
         fields=SIM_WEATHER_FIELDS, values=values, hour=hour, date=date_str,
         no_model=(station is not None and info is None), result=result,
+        defaults_are_real=defaults_are_real, wind_dir_label=wind_dir_label, warnings=warnings,
     )
 
 
