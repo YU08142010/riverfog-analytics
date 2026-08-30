@@ -1169,6 +1169,14 @@ CHAT_SYSTEM_INSTRUCTION = (
     "自動ロールバック等)といった、システムの仕組みや機械学習全般に関する質問には、"
     "上記の前提知識・渡された数値データ・一般的な機械学習の知識をもとに答えて構わない。\n"
     "\n"
+    "【このサーバーについて(常に正しい前提知識として使ってよい)】\n"
+    "- 本システムは、学校に設置されている2012年モデルのMacBook Pro(Apple MacBookPro9,2、"
+    "Intel Core i7-3520M @2.90GHz、メモリ約7GB、ストレージ54GB)上でUbuntu Linuxを動かして"
+    "個人で運用している。\n"
+    "- サーバーへのアクセスはTailscale(VPN)経由に限定しており、インターネットには一般公開して"
+    "いない。負荷・メモリ使用率・稼働状況等の実際の数値は、都度渡される「サーバーの状態」"
+    "「主要サービスの稼働状況」を参照する。\n"
+    "\n"
     "【回答の際の注意】\n"
     "- 渡されていない具体的な情報(渡された時刻より先の詳細な天気予報、渡されていない地点の状況、"
     "ソースコードの正確な行数等)は推測で答えず、「その情報は分かりません」と正直に伝える。\n"
@@ -1288,6 +1296,12 @@ def _build_chat_context():
         low_acc = _low_accuracy_stations(model_state, n=3)
         if low_acc:
             lines.append("検証accuracyが低い地点(下位3件): " + "、".join(low_acc))
+        model_type_parts = [
+            f"{name}: {fog_model.normalize_model_type_label(info.get('model_type'))}"
+            for name, info in model_state.items()
+        ]
+        if model_type_parts:
+            lines.append("【地点ごとの採用モデル方式(全地点)】" + "、".join(model_type_parts))
 
     predict_log_path = ALLOWED_LOGS.get("predict")
     if predict_log_path and predict_log_path.exists():
@@ -2761,6 +2775,8 @@ BADGE_DEFINITIONS = [
     # お気に入り地点
     {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star",
      "check": lambda s: s["favorite_count"] >= 3},
+    {"id": "favorite_10", "label": "お気に入り愛好家", "desc": "お気に入り地点を10件以上登録した", "icon": "star",
+     "check": lambda s: s["favorite_count"] >= 10},
     {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown",
      "check": lambda s: s["favorite_count"] >= s["station_total"]},
     # 在籍日数
@@ -2770,12 +2786,29 @@ BADGE_DEFINITIONS = [
      "check": lambda s: s["account_age_days"] >= 180},
     {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown",
      "check": lambda s: s["account_age_days"] >= 365},
+    # プロフィール設定
+    {"id": "avatar_set", "label": "プロフィール画像設定", "desc": "プロフィール画像を設定した", "icon": "camera",
+     "check": lambda s: s["has_avatar"]},
+    {"id": "bio_set", "label": "自己紹介デビュー", "desc": "自己紹介を入力した", "icon": "account",
+     "check": lambda s: s["bio_set"]},
+    # 権限
+    {"id": "role_admin", "label": "運営メンバー", "desc": "管理者権限を持っている", "icon": "admin",
+     "check": lambda s: s["role"] == "admin"},
+    # ログイン時間帯
+    {"id": "night_owl", "label": "深夜の常連", "desc": "深夜0時〜4時台にログインしたことがある", "icon": "moon",
+     "check": lambda s: s["night_owl"]},
+    {"id": "early_bird", "label": "早起きさん", "desc": "早朝5時〜6時台にログインしたことがある", "icon": "sunrise",
+     "check": lambda s: s["early_bird"]},
+    # 週末利用
+    {"id": "weekend_5", "label": "週末も欠かさず", "desc": "土曜日または日曜日にログインした日が5日以上ある", "icon": "calendar",
+     "check": lambda s: s["weekend_days"] >= 5},
 ]
 
 
 def _compute_badges(stats):
     """statsは{login_count, streak, comment_count, chat_count, favorite_count,
-    station_total, account_age_days}。定義済みの実績すべてについて、達成済みかどうかを
+    station_total, account_age_days, has_avatar, bio_set, role, night_owl, early_bird,
+    weekend_days}。定義済みの実績すべてについて、達成済みかどうかを
     付けたリストを返す(未達成もロック表示するため、達成したものだけに絞り込まない)。"""
     return [
         {"id": b["id"], "label": b["label"], "desc": b["desc"], "icon": b["icon"],
@@ -2847,10 +2880,18 @@ def member_detail(user_id):
         account_age_days = (now_jst_naive() - created_at).days
     except (ValueError, TypeError):
         account_age_days = 0
+    has_avatar = _avatar_path(user_id).exists()
+    night_owl = any(len(h) >= 13 and int(h[11:13]) < 4 for h in history)
+    early_bird = any(len(h) >= 13 and 5 <= int(h[11:13]) < 7 for h in history)
+    weekend_days = sum(
+        1 for d in counts_by_day if datetime.strptime(d, "%Y-%m-%d").weekday() >= 5
+    )
     badges = _compute_badges({
         "login_count": total_logins, "streak": streak, "comment_count": comment_count,
         "chat_count": chat_count, "favorite_count": len(favorite_stations),
         "station_total": len(STATION_NAMES), "account_age_days": account_age_days,
+        "has_avatar": has_avatar, "bio_set": bool(target["bio"]), "role": target["role"],
+        "night_owl": night_owl, "early_bird": early_bird, "weekend_days": weekend_days,
     })
     return render_template(
         "member_detail.html",
@@ -2863,7 +2904,7 @@ def member_detail(user_id):
         station_names=STATION_NAMES,
         first_login=history[-1] if history else None,
         last_login=history[0] if history else None,
-        has_avatar=_avatar_path(user_id).exists(),
+        has_avatar=has_avatar,
         is_self=(session.get("user_id") == user_id),
         heatmap_days=LOGIN_HEATMAP_DAYS,
         avatar_size=AVATAR_SIZE,
