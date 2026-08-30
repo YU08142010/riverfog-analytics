@@ -1151,6 +1151,42 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
     return pred_df, prob_df, feature_snapshots
 
 
+def simulate_station(info, lat, lon, weather, dt):
+    """手動入力した1時点分の気象条件から、その地点が採用中のモデルで霧予測をシミュレートする
+    (Whatーifシミュレーター用)。build_location_forecast_codesと同じ特徴量の組み立て方
+    (学習時にfitした中央値・地点別霧発生率・広域霧指数の最終値を使う近似)を、1行分の
+    データに対して行う。
+
+    info: load_model_state()で読んだ、1地点分の辞書(models[地点名])。
+    weather: fog_features.COL_*を主なキーとする値のdict(欠けている項目はNaNのまま扱われ、
+    視程・日照・日射は学習時の中央値(measure_medians)で自動的に埋まる)。
+    dt: この予測を行う日時(時刻依存の特徴量に使う)。
+
+    戻り値: (predicted_code, fog_prob, class_proba)。class_probaは{現象コード: 確率}を
+    確率降順に並べたdict。
+    """
+    raw = pd.DataFrame([{**weather, "datetime": pd.Timestamp(dt)}])
+    feature_names = info["features"]
+    df, _, _ = prepare_features(raw, lat, lon, feature_names, medians=info.get("measure_medians"))
+    X = df[feature_names].copy()
+    if info.get("pooled") and "station_fog_rate" in info:
+        X[STATION_FOG_RATE_FEATURE] = info["station_fog_rate"]
+    if CROSS_STATION_FOG_FEATURE in feature_names:
+        # 予報時(build_location_forecast_codes)と同じく、他地点の実測が無い分は
+        # 直近の実測時点での値を一定値として引き継ぐ近似を使う。
+        X[CROSS_STATION_FOG_FEATURE] = info.get("cross_fog_index_last", 0.0)
+
+    pipe = info["pipe"]
+    proba = np.asarray(pipe.predict_proba(X))[0]
+    predicted_code = int(pipe.classes_[np.argmax(proba)])
+    fog_prob = float(compute_fog_probability(pipe, X)[0])
+    class_proba = dict(sorted(
+        ((int(c), float(p)) for c, p in zip(pipe.classes_, proba)),
+        key=lambda item: -item[1],
+    ))
+    return predicted_code, fog_prob, class_proba
+
+
 def _effective_score(info):
     """モデル比較用のスコア。霧クラスのF1を優先し、無ければ全体F1を使う
     （ハイパーパラメータ選択時の_blend_scoreと同じ考え方）。"""

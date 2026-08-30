@@ -41,7 +41,7 @@ from matplotlib import font_manager
 
 from common import (
     BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH,
-    STATION_WEATHER_DB_PATH, build_data_backup_zip, now_jst_naive, send_alert,
+    STATION_WEATHER_DB_PATH, build_data_backup_zip, now_jst_naive, representative_coords, send_alert,
 )
 import announcements
 import users
@@ -49,7 +49,11 @@ import fog_data
 import fog_model
 import prediction_log
 import station_weather
-from fog_features import PHENOM_COLORS, PHENOM_LABELS, SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell
+from fog_features import (
+    COL_DEWPOINT, COL_HUMIDITY, COL_PRECIP, COL_SOLAR, COL_SUNSHINE, COL_TEMP,
+    COL_VISIBILITY, COL_WIND_DIR_DEG, COL_WIND_SPEED, PHENOM_COLORS, PHENOM_LABELS,
+    SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell,
+)
 
 # collect.py・fog_graphs.py と同じ日本語フォント設定（無ければグラフの日本語が文字化けするだけで、
 # 処理は止めない）。
@@ -2063,6 +2067,43 @@ def _latest_station_weather(name, observations):
     }
 
 
+# シミュレーター(What-ifページ)で調整可能にする気象項目。key: フォームの入力名、
+# col: fog_features.pyの学習時と同じ列名(simulate_stationに渡すweather dictのキーになる)。
+# fallbackは、その地点の実測値がまだ無い(station_weather.dbに記録が無い)場合の初期値。
+SIM_WEATHER_FIELDS = [
+    {"key": "temp", "col": COL_TEMP, "label": "気温", "unit": "℃", "min": -20, "max": 40, "step": 0.5, "fallback": 10.0},
+    {"key": "precip", "col": COL_PRECIP, "label": "降水量", "unit": "mm", "min": 0, "max": 30, "step": 0.5, "fallback": 0.0},
+    {"key": "wind_speed", "col": COL_WIND_SPEED, "label": "風速", "unit": "m/s", "min": 0, "max": 15, "step": 0.1, "fallback": 1.0},
+    {"key": "wind_dir", "col": COL_WIND_DIR_DEG, "label": "風向", "unit": "°", "min": 0, "max": 360, "step": 5, "fallback": 0.0},
+    {"key": "humidity", "col": COL_HUMIDITY, "label": "相対湿度", "unit": "%", "min": 0, "max": 100, "step": 1, "fallback": 80.0},
+    {"key": "dew_point", "col": COL_DEWPOINT, "label": "露点温度", "unit": "℃", "min": -20, "max": 30, "step": 0.5, "fallback": 8.0},
+    {"key": "sunshine", "col": COL_SUNSHINE, "label": "日照時間", "unit": "h", "min": 0, "max": 1, "step": 0.05, "fallback": 0.0},
+    {"key": "solar", "col": COL_SOLAR, "label": "日射量", "unit": "MJ/m2", "min": 0, "max": 4, "step": 0.05, "fallback": 0.0},
+    {"key": "visibility", "col": COL_VISIBILITY, "label": "視程", "unit": "km", "min": 0, "max": 20, "step": 0.5, "fallback": 5.0},
+]
+
+
+def _simulator_defaults(name):
+    """シミュレーター画面の初期値。その地点固有の最新気象実測(station_weather.db、
+    2026-08-28以降蓄積分)があればそれを使い、無ければ各項目のfallback値を使う。"""
+    if not name:
+        return {}
+    conn = station_weather.connect(STATION_WEATHER_DB_PATH)
+    try:
+        row = station_weather.load_latest_station_weather(conn, name)
+    finally:
+        conn.close()
+    if row is None:
+        return {}
+    return {
+        "temp": row["temperature"], "precip": row["precipitation"],
+        "wind_speed": row["wind_speed"], "wind_dir": row["wind_direction_deg"],
+        "humidity": row["humidity"], "dew_point": row["dew_point"],
+        "sunshine": row["sunshine_hours"], "solar": row["solar_radiation_mj"],
+        "visibility": row["visibility_km"],
+    }
+
+
 # ============================================================================
 # 公開ページ(観測データ・カメラ画像・予測・地点別ページ)
 # 2668行の単一ファイルで見通しが悪いという指摘への対応として、まずは大まかな区分けの
@@ -2377,6 +2418,71 @@ def map_page():
         "map.html", station_names=STATION_NAMES, entries=entries,
         current_by_name=current_by_name, map_points=map_points,
         has_alert=bool(alert_stations),
+    )
+
+
+@app.route("/simulator")
+def simulator_page():
+    """What-ifシミュレーター: 地点を選び、気象条件・時刻を手動で入力すると、その地点が
+    現在採用しているモデル(fog_model.simulate_station)でその場で霧予測を試算する。
+    学習・本番の予測パイプラインには一切書き込まない、閲覧専用の推論だけの機能。
+    """
+    station = request.args.get("station") or (STATION_NAMES[0] if STATION_NAMES else None)
+    if station and station not in STATION_NAMES:
+        abort(404)
+
+    state = fog_model.load_model_state()
+    info = state.get(station) if station else None
+
+    defaults = _simulator_defaults(station)
+    now = now_jst_naive()
+    date_str = request.args.get("date") or now.strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        date_str = now.strftime("%Y-%m-%d")
+    hour = request.args.get("hour", type=int)
+    if hour is None or not (0 <= hour <= 23):
+        hour = now.hour
+
+    values = {}
+    for field in SIM_WEATHER_FIELDS:
+        raw = request.args.get(field["key"])
+        if raw not in (None, ""):
+            try:
+                values[field["key"]] = float(raw)
+                continue
+            except ValueError:
+                pass
+        default = defaults.get(field["key"])
+        values[field["key"]] = float(default) if default is not None else field["fallback"]
+
+    result = None
+    if info is not None:
+        cam = CAMERA_INFO.get(station, {})
+        lat, lon = cam.get("lat"), cam.get("lon")
+        if lat is None or lon is None:
+            lat, lon = representative_coords()
+        dt = datetime.strptime(f"{date_str} {hour:02d}:00", "%Y-%m-%d %H:%M")
+        weather = {field["col"]: values[field["key"]] for field in SIM_WEATHER_FIELDS}
+        predicted_code, fog_prob, class_proba = fog_model.simulate_station(info, lat, lon, weather, dt)
+        label, color, text_color = _phenom_label_color(predicted_code)
+        threshold = info.get("fog_threshold") or fog_model.DEFAULT_FOG_THRESHOLD
+        result = {
+            "label": label, "color": color, "text_color": text_color,
+            "fog_prob": fog_prob, "fog_threshold": threshold, "is_fog_alert": fog_prob >= threshold,
+            "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
+            "class_proba": [
+                {"code": c, "label": _phenom_label_color(c)[0], "prob": p}
+                for c, p in class_proba.items() if p >= 0.01
+            ],
+        }
+
+    return render_template(
+        "simulator.html",
+        station_names=STATION_NAMES, station=station, active_names=[station] if station else [],
+        fields=SIM_WEATHER_FIELDS, values=values, hour=hour, date=date_str,
+        no_model=(station is not None and info is None), result=result,
     )
 
 

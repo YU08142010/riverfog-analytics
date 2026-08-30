@@ -31,6 +31,7 @@
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) or request.path.startswith('/compare') else '' }}">{{ icon("stations") }}地点別</a>
         <a href="{{ url_for('map_page') }}" class="{{ 'active' if request.path.startswith(url_for('map_page')) else '' }}">{{ icon("map") }}地図</a>
+        <a href="{{ url_for('simulator_page') }}" class="{{ 'active' if request.path.startswith(url_for('simulator_page')) else '' }}">{{ icon("simulator") }}シミュレーター</a>
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">{{ icon("data") }}観測データ</a>
         <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">{{ icon("camera") }}カメラ画像</a>
         <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">{{ icon("forecast") }}予測結果</a>

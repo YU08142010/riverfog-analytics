@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}シミュレーター{% endblock %}
+{% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>What-ifシミュレーター</h2>
+    <p class="muted">
+        気象条件と時刻を手動で入力すると、選んだ地点が現在採用しているモデルでその場で
+        霧予測を試算します。学習データや実際の予測結果には一切影響しません(閲覧専用の試算機能です)。
+    </p>
+    <form method="get">
+        <div class="sim-form-grid">
+            <p>
+                <label for="sim-station">地点</label><br>
+                <select name="station" id="sim-station" onchange="this.form.submit()" style="width:100%;">
+                    {% for name in station_names %}
+                    <option value="{{ name }}" {{ "selected" if name == station else "" }}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            <p>
+                <label for="sim-date">日付</label><br>
+                <input type="date" id="sim-date" name="date" value="{{ date }}" style="width:100%; box-sizing:border-box;">
+            </p>
+            <p>
+                <label for="sim-hour">時刻</label><br>
+                <select name="hour" id="sim-hour" style="width:100%;">
+                    {% for h in range(24) %}
+                    <option value="{{ h }}" {{ "selected" if h == hour else "" }}>{{ "%02d時"|format(h) }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+        </div>
+        <div class="sim-form-grid">
+            {% for f in fields %}
+            <p>
+                <label for="sim-{{ f.key }}">{{ f.label }}({{ f.unit }})</label><br>
+                <input type="number" id="sim-{{ f.key }}" name="{{ f.key }}"
+                       min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step }}"
+                       value="{{ values[f.key] }}" style="width:100%; box-sizing:border-box;">
+            </p>
+            {% endfor %}
+        </div>
+        <button type="submit" class="button">シミュレートする</button>
+    </form>
+</div>
+
+{% if no_model %}
+<div class="card">
+    <div class="empty-state">{{ icon("empty") }}<span>{{ station }}はまだ学習済みモデルがありません(観測データが十分に蓄積されるとモデルが作られます)。</span></div>
+</div>
+{% elif result %}
+<div class="card">
+    <h2>試算結果</h2>
+    <p>
+        <span style="background:{{ result.color }}; color:{{ result.text_color }}; padding:0.3rem 0.8rem; border-radius: var(--radius-sm); font-weight:600; display:inline-block;">
+            {{ result.label }}
+        </span>
+    </p>
+    <p>
+        霧である確率: <strong>{{ "%.1f"|format(result.fog_prob * 100) }}%</strong>
+        <span class="muted">
+            (この地点の霧アラートしきい値: {{ "%.0f"|format(result.fog_threshold * 100) }}%{{ " ・ しきい値を超えています" if result.is_fog_alert else "" }})
+        </span>
+    </p>
+    <p class="muted">使用モデル: {{ result.model_type }}</p>
+    {% if result.class_proba %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>現象</th><th>確率</th></tr></thead>
+        <tbody>
+        {% for row in result.class_proba %}
+        <tr><td>{{ row.label }}</td><td>{{ "%.1f"|format(row.prob * 100) }}%</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

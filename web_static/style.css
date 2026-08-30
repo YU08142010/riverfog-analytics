@@ -1273,6 +1273,15 @@ table.obs-table th.sticky-col { z-index: 3; }
 }
 .weather-info-label { font-size: 0.76rem; color: var(--color-text-muted); }
 .weather-info-value { font-size: 1.05rem; font-weight: 600; margin-top: 0.15rem; }
+.sim-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+.sim-form-grid p {
+    margin: 0;
+}
 
 .heatmap-wrap { overflow-x: auto; padding-bottom: 0.2rem; }
 .heatmap-months {
