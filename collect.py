@@ -324,7 +324,9 @@ SYSTEM_INSTRUCTION = (
     "場合は、その視認できる範囲の実際の風景の様子から現象を判定してください"
     "（水滴・泥汚れ自体は霧・層雲・雨として数えない）。\n"
     "- レンズの水滴・泥汚れで背景の風景がほとんど視認できない場合は、-1（実際のカメラ写真ではない）"
-    "としてください。\n"
+    "としてください。ただし橋・道路・川面・対岸の一部など、風景の手がかりが少しでも判別できる"
+    "場合は-1にせず、その手がかりから読み取れる現象で判定してください"
+    "（-1は、風景の手がかりが本当に何も読み取れない場合に限定してください）。\n"
     "- レンズに水滴が付着しているだけでは、その時点で実際に降雨中かどうかは判断できません。"
     "水滴の付着だけを根拠に9（霧雨）や10（雨）と判定せず、背景に見える降雨の様子"
     "（路面や川面の波紋、視界不良の均一な広がり方など）から総合的に判断してください。\n"
@@ -349,13 +351,16 @@ def _phenom_label_for_prompt(code):
     return "現象なし" if code == 0 else PHENOM_LABELS.get(code, f"コード{code}")
 
 
-def _build_contents(name_bytes_pairs, weather_context=None, first_pass_by_name=None):
+def _build_contents(name_bytes_pairs, weather_context=None, first_pass_by_name=None, first_pass_invalid=None):
     """[(地点名, 縮小済み画像bytes), ...] からGeminiに渡すcontentsとindex->地点名の対応を作る。
 
     weather_context: 冒頭に添える気象状況の説明文（Noneまたは空文字なら付けない）。
     first_pass_by_name: {地点名: 1回目の判定コード}。エスカレーション(再判定)呼び出し時に
     渡すと、各地点のラベルに1回目の結果を添えて「特に隣接コードとの境界でないか」の
     再確認を促す（画像だけを渡してゼロから判定させるより、着目点を絞り込める）。
+    first_pass_invalid: 1回目に-1（無効画像）と判定され、かつconfidenceが低かった地点名のset。
+    レンズの水滴・泥汚れを実際の霧・無効画像のどちらと見るかは軽量モデルが誤りやすい境界の
+    ひとつなので、上位モデルには「本当に無効画像かどうか」自体を再確認させる。
     """
     from google.genai import types
 
@@ -365,7 +370,14 @@ def _build_contents(name_bytes_pairs, weather_context=None, first_pass_by_name=N
     index_to_name = {}
     for i, (name, resized) in enumerate(name_bytes_pairs, start=1):
         label = f"地点{i}: {name}"
-        if first_pass_by_name and name in first_pass_by_name:
+        if first_pass_invalid and name in first_pass_invalid:
+            label += (
+                "（1回目の判定: -1「実際のカメラ写真ではない」・確信度low。"
+                "レンズの水滴・泥汚れによる歪みと、背景に実際に写っている川面・対岸・空の様子を"
+                "区別し、背景がある程度でも視認できるなら-1にはせず、その視認できる範囲の"
+                "実際の現象で判定し直してください）"
+            )
+        elif first_pass_by_name and name in first_pass_by_name:
             prev_code = first_pass_by_name[name]
             label += (
                 f"（1回目の判定: コード{prev_code}「{_phenom_label_for_prompt(prev_code)}」・"
@@ -492,6 +504,11 @@ def _parse_classifications(parsed, index_to_name):
     """Geminiのレスポンスを (地点名->code の辞書, 無効画像と判定された地点名のset,
     confidence:lowだった地点名のlist, 地点名->confidenceの辞書, 地点名->reasoningの辞書)
     に変換する。
+    confidenceは無効画像(-1)判定についても記録する。レンズの水滴・泥汚れと実際の霧を
+    見分けるのは境界が曖昧な判定であり、この確信度が低い/中程度の場合は
+    classify_images側で通常の現象コードと同様にエスカレーション(上位モデルでの再判定)の
+    対象に含める必要があるため（以前は無効画像と判定された時点でconfidenceを捨てて
+    確定させてしまい、誤って無効判定された画像を訂正する機会が無かった）。
     """
     result = {}
     invalid_stations = set()
@@ -504,17 +521,19 @@ def _parse_classifications(parsed, index_to_name):
             log.warning("Unknown station_index in Gemini response: %s", item.station_index)
             continue
         reasoning_by_name[name] = item.reasoning
+        confidence_by_name[name] = item.confidence
+        if item.confidence == "low":
+            low_confidence.append(name)
         if item.code == CODE_INVALID_IMAGE:
             invalid_stations.add(name)
-            log.info("Gemini judged image as non-photo/placeholder: %s", name)
+            log.info(
+                "Gemini judged image as non-photo/placeholder: %s (confidence=%s)", name, item.confidence,
+            )
             continue
         if not (0 <= item.code <= 10):
             log.warning("Phenomenon code out of range in Gemini response: %s (%s)", item.code, name)
             continue
         result[name] = item.code
-        confidence_by_name[name] = item.confidence
-        if item.confidence == "low":
-            low_confidence.append(name)
     return result, invalid_stations, low_confidence, confidence_by_name, reasoning_by_name
 
 
@@ -526,6 +545,10 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
     confidence:mediumの地点でも、薄暮・夜明け前後やレンズが常時わずかに曇っている地点
     （_should_treat_medium_as_low参照）は自己申告confidenceを信用しきらず、機械的に
     エスカレーション対象へ追加する(run_timeを渡した場合のみ時間帯判定が有効になる)。
+    -1（無効画像）と判定された地点もconfidence:low/medium相当ならエスカレーション対象に
+    含める。レンズの水滴・泥汚れで一部視界が悪いだけの画像を誤って「取得失敗」扱いに
+    してしまうケースがあり、上位モデルによる再確認で背景の実際の現象を拾い直せるように
+    するため（再判定で実際の現象コードが得られれば無効判定は取り消される）。
     weatherを渡すと、撮影時刻の周辺気象(気温・湿度・風速等)を判定の補助材料として
     プロンプトに含める（霧の発生しやすさの参考情報。Noneなら付けない）。
     戻り値は (地点名 -> code(0-10) の辞書（欠測・無効画像は含めない）, 無効画像と判定された地点名のset,
@@ -601,13 +624,15 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
                 len(low_confidence), ", ".join(low_confidence),
             )
             escalation_model = os.environ.get("GEMINI_ESCALATION_MODEL", "gemini-3.1-pro-preview")
-            # 1回目の判定結果(コード)を各地点のラベルに添えて、上位モデルには
+            # 1回目の判定結果(コードまたは-1)を各地点のラベルに添えて、上位モデルには
             # 「ゼロから判定」ではなく「特にこの境界を再確認する」形で見直させる。
             first_pass_by_name = {name: result[name] for name in low_confidence if name in result}
+            first_pass_invalid = {name for name in low_confidence if name in invalid_stations}
             sub_contents, sub_index_to_name = _build_contents(
                 [(name, resized_by_name[name]) for name in low_confidence],
                 weather_context=weather_context,
                 first_pass_by_name=first_pass_by_name,
+                first_pass_invalid=first_pass_invalid,
             )
             sub_parsed = _classify_with_model(sub_contents, escalation_model, api_keys, label="escalation")
             if sub_parsed is None:
@@ -639,6 +664,9 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
                     elif name in sub_result:
                         result[name] = sub_result[name]
                         confidence_by_name[name] = sub_confidence.get(name, "low")
+                        # 1回目は-1(無効画像)判定だったが、上位モデルの再判定で実際の現象
+                        # コードが得られた場合は、無効判定を取り消して正しい現象を採用する。
+                        invalid_stations.discard(name)
                 if sub_low:
                     log.warning(
                         "Still low-confidence after escalation (kept escalation result anyway): %s",
