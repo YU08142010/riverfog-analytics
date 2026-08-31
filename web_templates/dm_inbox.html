@@ -11,27 +11,27 @@
 {% block content %}
 <div class="card">
     <h2 style="margin-top:0;">メッセージ</h2>
-    {% if not threads %}
-    <div class="empty-state">{{ icon("empty") }}<span>まだメッセージのやり取りがありません。下のメンバー一覧から相手を選んで送れます。</span></div>
+    {% if not entries %}
+    <div class="empty-state">{{ icon("empty") }}<span>他のメンバーがいません。</span></div>
     {% else %}
     <ul class="dm-thread-list">
-        {% for t in threads %}
+        {% for e in entries %}
         <li>
-            <a class="dm-thread-item" href="{{ url_for('dm_thread', user_id=t.other.id) }}">
-                {% set avatar_url = member_avatar_url(t.other.id) %}
-                {% call avatar_frame(t.other.equipped_frame) %}
+            <a class="dm-thread-item" href="{{ url_for('dm_thread', user_id=e.other.id) }}">
+                {% set avatar_url = member_avatar_url(e.other.id) %}
+                {% call avatar_frame(e.other.equipped_frame) %}
                 {% if avatar_url %}
                 <img class="avatar-circle" src="{{ avatar_url }}" alt="">
                 {% else %}
-                <span class="avatar-circle-fallback">{{ t.other.name[0] }}</span>
+                <span class="avatar-circle-fallback">{{ e.other.name[0] }}</span>
                 {% endif %}
                 {% endcall %}
                 <div class="dm-thread-info">
-                    <div class="dm-thread-name">{{ t.other.name }}</div>
-                    <div class="dm-thread-snippet">{{ t.last_message_at }}</div>
+                    <div class="dm-thread-name">{{ e.other.name }}</div>
+                    <div class="dm-thread-snippet">{{ e.last_message_at }}</div>
                 </div>
-                {% if t.unread %}
-                <span class="nav-unread-badge">{{ t.unread }}</span>
+                {% if e.unread %}
+                <span class="nav-unread-badge">{{ e.unread }}</span>
                 {% endif %}
             </a>
         </li>
@@ -39,14 +39,4 @@
     </ul>
     {% endif %}
 </div>
-
-{% if other_members %}
-<div class="card">
-    <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-        {% for m in other_members %}
-        <a href="{{ url_for('dm_thread', user_id=m.id) }}" class="button cancel">{{ m.name }}</a>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
 {% endblock %}

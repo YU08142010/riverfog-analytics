@@ -3349,9 +3349,10 @@ def member_frame_equip(user_id):
 
 @app.route("/messages")
 def dm_inbox():
-    """自分が参加している会話の一覧(直近やり取りが新しい順、未読件数付き)に加えて、
-    まだ会話していない他の全メンバーも一覧に出す(わざわざ相手のプロフィールページを
-    経由しなくても、ここから新しい会話を始められるようにするため)。"""
+    """自分が参加している会話(直近やり取りが新しい順、未読件数付き)を先頭に、
+    まだ会話していない他の全メンバーもそのまま同じ並び方で続ける(わざわざ相手の
+    プロフィールページを経由しなくても、ここから新しい会話を始められるように
+    するため)。話したことがある/ないで見た目やセクションを分けたりはしない。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -3363,9 +3364,8 @@ def dm_inbox():
         all_users = users.list_users(conn)
     finally:
         conn.close()
-    threads = [
+    entries = [
         {
-            "conversation_id": c["id"],
             "other": others.get(c["other_id"]),
             "last_message_at": c["last_message_at"],
             "unread": unread.get(c["id"], 0),
@@ -3374,8 +3374,12 @@ def dm_inbox():
         if c["other_id"] in others  # 退会済みの相手は一覧に出さない
     ]
     started_ids = {c["other_id"] for c in conversations}
-    other_members = [u for u in all_users if u["id"] != my_id and u["id"] not in started_ids]
-    return render_template("dm_inbox.html", threads=threads, other_members=other_members)
+    entries += [
+        {"other": u, "last_message_at": "", "unread": 0}
+        for u in all_users
+        if u["id"] != my_id and u["id"] not in started_ids
+    ]
+    return render_template("dm_inbox.html", entries=entries)
 
 
 @app.route("/messages/<int:user_id>")
