@@ -70,6 +70,7 @@ USERS_DB_PATH = BASE_DIR / "data" / "users.db"
 MIN_PASSWORD_LENGTH = 8
 BIO_MAX_LENGTH = 300
 STATION_COMMENT_MAX_LENGTH = 1000
+DM_MESSAGE_MAX_LENGTH = 1000
 
 # ログイン試行のレート制限(総当たり・アカウント列挙対策)。プロセス内メモリで管理する
 # シンプルな実装(waitressは単一プロセスで動かしているため、これで十分機能する)。
@@ -2840,6 +2841,22 @@ def _inject_avatar_url():
     return {"member_avatar_url": member_avatar_url}
 
 
+@app.context_processor
+def _inject_dm_unread_count():
+    """base.htmlのナビに「メッセージ」の未読バッジを出すため。通知ベルと同じく
+    ページ読み込み時に1回計算するだけで、スレッド表示中の反映はポーリング側で行う。"""
+    def dm_unread_count():
+        user_id = session.get("user_id")
+        if not user_id:
+            return 0
+        conn = _users_conn()
+        try:
+            return users.total_dm_unread(conn, user_id)
+        finally:
+            conn.close()
+    return {"dm_unread_count": dm_unread_count}
+
+
 # メンバーページの実績バッジ。未達成のものもロック表示するため、達成条件を関数として
 # 持たせ、達成/未達成の両方をテンプレート側で判定できるようにしている。
 BADGE_DEFINITIONS = [
@@ -3192,6 +3209,120 @@ def member_frame_equip(user_id):
         conn.close()
     message = "フレームを装着しました。" if frame_id else "フレームを外しました。"
     return _finish("member_frames_shop", message, user_id=user_id)
+
+
+@app.route("/messages")
+def dm_inbox():
+    """自分が参加している会話の一覧(直近やり取りが新しい順、未読件数付き)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        conversations = users.list_dm_conversations(conn, my_id)
+        unread = users.dm_unread_counts(conn, my_id)
+        others = users.get_users_by_ids(conn, [c["other_id"] for c in conversations])
+    finally:
+        conn.close()
+    threads = [
+        {
+            "conversation_id": c["id"],
+            "other": others.get(c["other_id"]),
+            "last_message_at": c["last_message_at"],
+            "unread": unread.get(c["id"], 0),
+        }
+        for c in conversations
+        if c["other_id"] in others  # 退会済みの相手は一覧に出さない
+    ]
+    return render_template("dm_inbox.html", threads=threads)
+
+
+@app.route("/messages/<int:user_id>")
+def dm_thread(user_id):
+    """user_idとの1対1会話を開く(存在しなければ最初のメッセージ送信時に作成されるので、
+    ここでは会話が無い＝メッセージ0件として空の状態を表示するだけでよい)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    if user_id == my_id:
+        abort(404)
+    conn = _users_conn()
+    try:
+        other = users.get_user_by_id(conn, user_id)
+        if other is None:
+            abort(404)
+        a, b = sorted((my_id, user_id))
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        messages = []
+        if row is not None:
+            conversation_id = row[0]
+            messages = users.list_dm_messages(conn, conversation_id)
+            if messages:
+                users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
+        else:
+            conversation_id = None
+    finally:
+        conn.close()
+    return render_template(
+        "dm_thread.html", other=other, messages=messages, conversation_id=conversation_id,
+        my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH,
+    )
+
+
+@app.route("/messages/<int:user_id>/send", methods=["POST"])
+def dm_send(user_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    if user_id == my_id:
+        abort(404)
+    body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
+    if not body:
+        return _finish("dm_thread", "メッセージを入力してください。", success=False, user_id=user_id)
+    conn = _users_conn()
+    try:
+        if users.get_user_by_id(conn, user_id) is None:
+            abort(404)
+        created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
+        message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at)
+        users.mark_dm_read(conn, conversation_id, my_id, message_id)
+    finally:
+        conn.close()
+    if _wants_json():
+        return jsonify({
+            "message": "送信しました。", "success": True,
+            "id": message_id, "body": body, "created_at": created_at,
+        })
+    return redirect(url_for("dm_thread", user_id=user_id))
+
+
+@app.route("/messages/<int:user_id>/poll")
+def dm_poll(user_id):
+    """開いているスレッドで新着メッセージをJSで取りに行くためのエンドポイント
+    (このアプリには汎用のリアルタイム配信基盤が無いため、スレッド表示中だけ
+    数秒おきにポーリングする軽量な方式にしている)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    after_id = request.args.get("after", 0, type=int)
+    conn = _users_conn()
+    try:
+        a, b = sorted((my_id, user_id))
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        messages = []
+        if row is not None:
+            conversation_id = row[0]
+            messages = users.list_dm_messages(conn, conversation_id, after_id)
+            if messages:
+                users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
+    finally:
+        conn.close()
+    return jsonify({"messages": messages})
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

@@ -78,6 +78,28 @@ CREATE TABLE IF NOT EXISTS point_events (
     UNIQUE(user_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_point_events_user_id ON point_events(user_id);
+CREATE TABLE IF NOT EXISTS dm_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_message_at TEXT NOT NULL,
+    UNIQUE(user_a_id, user_b_id)
+);
+CREATE TABLE IF NOT EXISTS dm_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation_id ON dm_messages(conversation_id);
+CREATE TABLE IF NOT EXISTS dm_read_state (
+    conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_message_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, user_id)
+);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -612,6 +634,109 @@ def set_equipped_frame(conn, user_id, frame_id):
         conn.execute("UPDATE users SET equipped_frame = ? WHERE id = ?", (frame_id or "", user_id))
 
 
+def _dm_pair(user_a_id, user_b_id):
+    """2人のuser_idを常に同じ順序に正規化する(dm_conversationsのUNIQUE制約が
+    「AさんとBさん」と「BさんとAさん」を別会話として二重作成しないようにするため)。"""
+    return (user_a_id, user_b_id) if user_a_id < user_b_id else (user_b_id, user_a_id)
+
+
+def get_or_create_dm_conversation(conn, user_a_id, user_b_id, created_at):
+    a, b = _dm_pair(user_a_id, user_b_id)
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO dm_conversations (user_a_id, user_b_id, created_at, last_message_at) "
+            "VALUES (?, ?, ?, ?)",
+            (a, b, created_at, created_at),
+        )
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b)
+        ).fetchone()
+    return row[0]
+
+
+def get_dm_conversation(conn, conversation_id):
+    row = conn.execute(
+        "SELECT id, user_a_id, user_b_id, last_message_at FROM dm_conversations WHERE id = ?",
+        (conversation_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "user_a_id": row[1], "user_b_id": row[2], "last_message_at": row[3]}
+
+
+def send_dm_message(conn, conversation_id, sender_id, body, created_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO dm_messages (conversation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)",
+            (conversation_id, sender_id, body, created_at),
+        )
+        conn.execute(
+            "UPDATE dm_conversations SET last_message_at = ? WHERE id = ?", (created_at, conversation_id),
+        )
+        return cur.lastrowid
+
+
+def list_dm_messages(conn, conversation_id, after_id=0):
+    """after_idより新しいメッセージだけを返す(0なら全件。スレッド表示の初回取得と
+    ポーリングでの差分取得の両方に使う)。"""
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at FROM dm_messages "
+        "WHERE conversation_id = ? AND id > ? ORDER BY id",
+        (conversation_id, after_id),
+    ).fetchall()
+    return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
+
+
+def list_dm_conversations(conn, user_id):
+    """user_idが参加している会話一覧を、最新メッセージが新しい順に返す
+    (相手のuser_id・最新メッセージ日時のみ。相手の名前やアバターは呼び出し側で解決する)。"""
+    rows = conn.execute(
+        "SELECT id, user_a_id, user_b_id, last_message_at FROM dm_conversations "
+        "WHERE user_a_id = ? OR user_b_id = ? ORDER BY last_message_at DESC",
+        (user_id, user_id),
+    ).fetchall()
+    result = []
+    for r in rows:
+        other_id = r[2] if r[1] == user_id else r[1]
+        result.append({"id": r[0], "other_id": other_id, "last_message_at": r[3]})
+    return result
+
+
+def mark_dm_read(conn, conversation_id, user_id, last_read_message_id):
+    """last_read_message_idは既読にする最新メッセージid。既存の既読位置より
+    古い値では絶対に後退させない(ポーリングの返答順序が前後しても安全なように)。"""
+    with conn:
+        conn.execute(
+            "INSERT INTO dm_read_state (conversation_id, user_id, last_read_message_id) VALUES (?, ?, ?) "
+            "ON CONFLICT(conversation_id, user_id) DO UPDATE SET last_read_message_id = "
+            "MAX(last_read_message_id, excluded.last_read_message_id)",
+            (conversation_id, user_id, last_read_message_id),
+        )
+
+
+def dm_unread_counts(conn, user_id):
+    """{conversation_id: 未読数} を返す(0件の会話は含めない)。"""
+    rows = conn.execute(
+        """
+        SELECT dc.id,
+               (SELECT COUNT(*) FROM dm_messages dm
+                WHERE dm.conversation_id = dc.id
+                  AND dm.sender_id != ?
+                  AND dm.id > COALESCE(
+                      (SELECT last_read_message_id FROM dm_read_state
+                       WHERE conversation_id = dc.id AND user_id = ?), 0))
+        FROM dm_conversations dc
+        WHERE dc.user_a_id = ? OR dc.user_b_id = ?
+        """,
+        (user_id, user_id, user_id, user_id),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows if r[1] > 0}
+
+
+def total_dm_unread(conn, user_id):
+    return sum(dm_unread_counts(conn, user_id).values())
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "get_users_by_ids", "set_role", "update_user", "update_profile", "delete_user",
@@ -626,4 +751,6 @@ __all__ = [
     "delete_station_comment", "comment_count",
     "award_badge", "grant_points", "total_earned_points", "total_spent_points", "available_points",
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
+    "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
+    "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
 ]

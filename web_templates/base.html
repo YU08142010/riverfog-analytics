@@ -39,6 +39,7 @@
         <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') else '' }}">{{ icon("report") }}気象と川霧</a>
         {% if session.get('user_id') %}
         <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">{{ icon("members") }}メンバー</a>
+        <a href="{{ url_for('dm_inbox') }}" class="{{ 'active' if request.path.startswith('/messages') else '' }}">{{ icon("comment") }}メッセージ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
         {% endif %}
         {% if session.get('role') == 'admin' %}

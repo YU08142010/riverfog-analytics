@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar_frame %}
+{% block title %}{{ other.name }}とのメッセージ{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('dm_inbox') }}">メッセージ</a></li>
+    <li>{{ other.name }}</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem;">
+        {% set avatar_url = member_avatar_url(other.id) %}
+        {% call avatar_frame(other.equipped_frame) %}
+        {% if avatar_url %}
+        <img class="avatar-circle" src="{{ avatar_url }}" alt="">
+        {% else %}
+        <span class="avatar-circle-fallback">{{ other.name[0] }}</span>
+        {% endif %}
+        {% endcall %}
+        <h2 style="margin:0;"><a href="{{ url_for('member_detail', user_id=other.id) }}">{{ other.name }}</a></h2>
+    </div>
+
+    <div class="dm-bubbles" id="dm-bubbles">
+        {% for m in messages %}
+        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}">
+            <div class="dm-bubble">{{ m.body }}<span class="dm-bubble-time">{{ m.created_at }}</span></div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <form id="dm-send-form" class="dm-compose" action="{{ url_for('dm_send', user_id=other.id) }}" method="post" data-ajax>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <textarea name="body" id="dm-send-body" rows="1" maxlength="{{ dm_message_max_length }}" placeholder="メッセージを入力..."></textarea>
+        <button type="submit" class="button">送信</button>
+    </form>
+</div>
+<script>
+(function() {
+    var bubbles = document.getElementById("dm-bubbles");
+    var form = document.getElementById("dm-send-form");
+    var textarea = document.getElementById("dm-send-body");
+    var pollUrl = "{{ url_for('dm_poll', user_id=other.id) }}";
+    var lastId = {{ (messages[-1].id if messages else 0) }};
+
+    function scrollToBottom() {
+        bubbles.scrollTop = bubbles.scrollHeight;
+    }
+    scrollToBottom();
+
+    function appendBubble(body, createdAt, mine) {
+        var row = document.createElement("div");
+        row.className = "dm-bubble-row" + (mine ? " mine" : "");
+        var bubble = document.createElement("div");
+        bubble.className = "dm-bubble";
+        bubble.textContent = body;
+        var time = document.createElement("span");
+        time.className = "dm-bubble-time";
+        time.textContent = createdAt;
+        bubble.appendChild(time);
+        row.appendChild(bubble);
+        bubbles.appendChild(row);
+        scrollToBottom();
+    }
+
+    document.addEventListener("ajaxformsuccess", function(e) {
+        if (e.detail.form !== form) { return; }
+        var data = e.detail.data || {};
+        if (data.id) {
+            appendBubble(data.body || "", data.created_at || "", true);
+            lastId = data.id;
+        }
+        textarea.value = "";
+    });
+
+    // このアプリには汎用のリアルタイム配信基盤が無いため、スレッドを開いている間
+    // だけ数秒おきにポーリングして相手からの新着を拾う(タブが非表示の間は止める)。
+    var pollTimer = setInterval(function() {
+        if (document.visibilityState !== "visible") { return; }
+        fetch(pollUrl + "?after=" + lastId, {headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                (data.messages || []).forEach(function(m) {
+                    appendBubble(m.body, m.created_at, false);
+                    lastId = m.id;
+                });
+            })
+            .catch(function() {});
+    }, 4000);
+    window.addEventListener("beforeunload", function() { clearInterval(pollTimer); });
+})();
+</script>
+{% endblock %}

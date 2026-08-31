@@ -28,6 +28,9 @@
                 <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
             </h2>
             <p class="muted" style="margin:0;">登録日: {{ member.created_at }}</p>
+            {% if not is_self %}
+            <a href="{{ url_for('dm_thread', user_id=member.id) }}" class="button" style="margin-top:0.5rem; display:inline-block;">{{ icon("comment", size=16) }} メッセージを送る</a>
+            {% endif %}
         </div>
     </div>
 

@@ -150,6 +150,80 @@ body {
 @media (prefers-reduced-motion: reduce) {
     .notif-badge { animation: none; }
 }
+.nav-unread-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.3rem;
+    margin-left: 0.35rem;
+    border-radius: 999px;
+    background: var(--color-danger);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+/* メンバー間メッセージ(LINE風の吹き出しチャット)。 */
+.dm-thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.dm-thread-item {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.7rem;
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
+    text-decoration: none;
+    color: var(--color-text);
+}
+.dm-thread-item:hover { box-shadow: var(--shadow-card-hover); }
+.dm-thread-info { flex: 1 1 auto; min-width: 0; }
+.dm-thread-name { font-weight: 600; }
+.dm-thread-snippet { font-size: 0.8rem; color: var(--color-text-muted); }
+.dm-bubbles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+.dm-bubble-row { display: flex; }
+.dm-bubble-row.mine { justify-content: flex-end; }
+.dm-bubble {
+    max-width: 70%;
+    padding: 0.55rem 0.8rem;
+    border-radius: 1rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.dm-bubble-row.mine .dm-bubble {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+}
+.dm-bubble-time {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 0.68rem;
+    opacity: 0.7;
+}
+.dm-compose { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
+.dm-compose textarea {
+    flex: 1 1 auto;
+    resize: vertical;
+    min-height: 2.4rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    font-family: inherit;
+    font-size: 0.9rem;
+}
 .notif-panel {
     position: absolute;
     top: calc(100% + 0.5rem);
