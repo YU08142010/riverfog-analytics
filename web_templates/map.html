@@ -9,7 +9,7 @@
 <div class="card">
     <h2>地点マップ</h2>
     {% if has_alert %}
-    <p class="muted">点滅している地点は霧アラート(今後24時間以内に霧の予測あり)が発生しています。</p>
+    <p class="muted">点滅している地点は川霧アラート(今後24時間以内に川霧の予測あり)が発生しています。</p>
     {% endif %}
     <p class="muted" style="font-size:0.82rem;">
         地図上の個々の地点はマウス操作向けです。キーボードでの操作は下の一覧表からご利用ください。
@@ -98,7 +98,7 @@
             wrap.appendChild(document.createElement("br"));
             var alertSpan = document.createElement("span");
             alertSpan.style.color = "#c0392b";
-            alertSpan.textContent = "霧アラート発生中";
+            alertSpan.textContent = "川霧アラート発生中";
             wrap.appendChild(alertSpan);
         }
         wrap.appendChild(document.createElement("br"));

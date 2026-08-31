@@ -633,7 +633,7 @@ def _current_notifications():
         notifications.append({
             "id": f"fog:{station}:{a['target_datetime']}",
             "level": "warning",
-            "message": f"{station}: {a['target_datetime']}頃に霧の予測です（確率{prob_pct}%）",
+            "message": f"{station}: {a['target_datetime']}頃に川霧の予測です（確率{prob_pct}%）",
             "url": url_for("station_detail", name=station),
         })
 
@@ -813,33 +813,40 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
     return buf.getvalue()
 
 
+# 1日分の観測値推移グラフの項目(列名, 表示ラベル, 色, プロット種別)。
+# 以前は気温・視程を左軸、湿度・降水量を右軸(twinx)にまとめた2軸グラフだったが、
+# 軸を読み違えやすいため、項目ごとに軸を分けた4分割の小さい図に変更した。
+_WEATHER_TIMESERIES_ITEMS = [
+    ("気温(℃)", "気温(℃)", "#e74c3c", "line"),
+    ("視程(km)", "視程(km)", "#16a085", "line"),
+    ("相対湿度(％)", "相対湿度(％)", "#8e44ad", "line"),
+    ("降水量(mm)", "降水量(mm)", "#2980b9", "bar"),
+]
+
+
 def _render_weather_timeseries_png(day_main, date_label):
-    """1日分の気温・視程・湿度・降水量の推移をPNGにして返す。"""
-    fig, ax1 = plt.subplots(figsize=(9, 3.6))
+    """1日分の気温・視程・湿度・降水量の推移をPNGにして返す。項目ごとに軸を分けた
+    2x2の小さい図にする(2軸グラフだと目盛りを読み違えやすいため)。"""
+    fig, axes = plt.subplots(2, 2, figsize=(9, 6), sharex=True)
     if day_main is None or day_main.empty:
-        ax1.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax1.transAxes)
+        for ax in axes.flat:
+            ax.axis("off")
+        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
     else:
         x = day_main["datetime"]
-        ax1.plot(x, day_main["気温(℃)"], color="#e74c3c", linewidth=1.4, marker="o", markersize=3, label="気温(℃)")
-        ax1.plot(x, day_main["視程(km)"], color="#16a085", linewidth=1.4, marker="o", markersize=3, label="視程(km)")
-        ax1.set_ylabel("気温(℃) / 視程(km)")
-        ax1.grid(True, alpha=0.3)
-
-        ax2 = ax1.twinx()
-        ax2.bar(x, day_main["降水量(mm)"], width=1 / 48, color="#2980b9", alpha=0.35, label="降水量(mm)")
-        ax2.plot(x, day_main["相対湿度(％)"], color="#8e44ad", linewidth=1.2, linestyle="--", alpha=0.8, label="相対湿度(％)")
-        ax2.set_ylabel("相対湿度(％) / 降水量(mm)")
-        ax2.set_ylim(bottom=0)
-
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        for ax, (col, label, color, kind) in zip(axes.flat, _WEATHER_TIMESERIES_ITEMS):
+            if kind == "bar":
+                ax.bar(x, day_main[col], width=1 / 48, color=color, alpha=0.7)
+                ax.set_ylim(bottom=0)
+            else:
+                ax.plot(x, day_main[col], color=color, linewidth=1.4, marker="o", markersize=3)
+            ax.set_title(label, fontsize=10)
+            ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         fig.autofmt_xdate()
+        fig.suptitle(f"{date_label} の観測値推移", fontsize=12)
 
-        h1, l1 = ax1.get_legend_handles_labels()
-        h2, l2 = ax2.get_legend_handles_labels()
-        ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=8, ncol=2)
-
-    ax1.set_title(f"{date_label} の観測値推移", fontsize=11)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.95) if day_main is not None and not day_main.empty else (0, 0, 1, 1))
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
     plt.close(fig)
@@ -1281,12 +1288,12 @@ def _build_chat_context():
 
     alerts = _upcoming_fog_alerts_safe()
     if alerts:
-        lines.append("【今後24時間以内の霧アラート(予測確率95%以上)】")
+        lines.append("【今後24時間以内の川霧アラート(予測確率95%以上)】")
         for a in alerts[:10]:
             prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
             lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")
     else:
-        lines.append("現在、今後24時間以内の霧アラートは出ていません。")
+        lines.append("現在、今後24時間以内の川霧アラートは出ていません。")
 
     if DB_PATH.exists():
         try:
@@ -1306,7 +1313,7 @@ def _build_chat_context():
                 key=lambda a: a["predicted_fog_prob"], reverse=True,
             )
             if wider_alerts:
-                lines.append("【今後72時間以内の霧予測(確率が高い順、上位10件)】")
+                lines.append("【今後72時間以内の川霧予測(確率が高い順、上位10件)】")
                 for a in wider_alerts[:10]:
                     prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
                     lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")

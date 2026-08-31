@@ -116,12 +116,12 @@
                 {{ feature_snapshot.target_datetime }} 時点の予測({{ feature_snapshot.generated_at }}生成)に
                 実際に使われた入力値です。この地点では下記「モデル種別」の方式(検証データでの
                 正答率が最も高かったものを地点ごとに自動選択しています)で予測しており、
-                下の「霧確率」がその結果です。
+                下の「川霧確率」がその結果です。
             </p>
             <table class="obs-table" style="width:auto;">
                 <tbody>
                 <tr><td>予測された現象</td><td>{{ "霧・層雲系(コード" ~ feature_snapshot.predicted_code ~ ")" if feature_snapshot.predicted_code > 0 else "現象なし" }}</td></tr>
-                <tr><td>霧確率</td><td>{{ "%.1f"|format(feature_snapshot.predicted_fog_prob * 100) }}%</td></tr>
+                <tr><td>川霧確率</td><td>{{ "%.1f"|format(feature_snapshot.predicted_fog_prob * 100) }}%</td></tr>
                 <tr><td>判定しきい値</td><td>{{ "%.2f"|format(feature_snapshot.fog_threshold) if feature_snapshot.fog_threshold is not none else "-" }}</td></tr>
                 <tr><td>モデル種別</td><td>{{ feature_snapshot.model_type or "-" }}</td></tr>
                 {% if feature_snapshot.blend_weight is not none %}
