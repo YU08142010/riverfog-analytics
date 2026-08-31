@@ -111,13 +111,14 @@ Image.MAX_IMAGE_PIXELS = 40_000_000
 LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ)と同じく約53週間分
 
 # --- ファイル共有(DM添付・班の共有ファイル置き場) -------------------------------------
-# 実行ファイル等のリスクを避けるため、画像・PDF・Office文書だけに絞る。1ファイルあたりの
-# サイズ上限はあえて設けていない(利用者からの要望)が、ディスクを使い切ってサーバー全体
-# (霧の収集・予測パイプライン含む)を巻き添えにしないよう、書き込み前に空き容量だけ確認する。
+# 拡張子による制限は設けていない(利用者からの要望で撤廃)。1ファイルあたりのサイズ上限も
+# あえて設けていないが、ディスクを使い切ってサーバー全体(霧の収集・予測パイプライン含む)を
+# 巻き添えにしないよう、書き込み前に空き容量だけ確認する。
 DM_ATTACHMENT_DIR = BASE_DIR / "data" / "dm_attachments"
 SHARED_FILES_DIR = BASE_DIR / "data" / "shared_files"
 UPLOAD_MIN_FREE_BYTES = 2 * 1024 ** 3  # このバイト数を切り込む書き込みは拒否する
-ALLOWED_UPLOAD_EXTENSIONS = {
+# 既知の拡張子はcontent_typeの表示に使うだけで、アップロードの可否には使わない。
+KNOWN_UPLOAD_CONTENT_TYPES = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
     ".gif": "image/gif", ".webp": "image/webp",
     ".pdf": "application/pdf",
@@ -131,17 +132,18 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 
 
 def _save_uploaded_file(file_storage, dest_dir):
-    """アップロードされたファイルを検証して保存する。戻り値は(result, error)のタプルで、
-    成功時はresult=(元のファイル名, 保存用ファイル名, content_type, サイズ)・error=None、
-    拒否した場合はresult=None・errorにエラーメッセージが入る。
-    保存名はUUID+拡張子にし、元のファイル名は一切パスに使わない
-    (パストラバーサル・同名ファイル衝突・不審なファイル名を避けるため)。
+    """アップロードされたファイルを保存する(拡張子による制限なし)。戻り値は
+    (result, error)のタプルで、成功時はresult=(元のファイル名, 保存用ファイル名,
+    content_type, サイズ)・error=None、拒否した場合(空き容量不足等)はresult=None・
+    errorにエラーメッセージが入る。保存名はUUID+拡張子にし、元のファイル名は一切
+    パスに使わない(拡張子を絞らない以上、パストラバーサル・同名ファイル衝突だけは
+    避ける必要があるため)。
     """
     original_name = secure_filename(file_storage.filename or "")
+    if not original_name:
+        return None, "ファイル名を確認できませんでした。"
     ext = Path(original_name).suffix.lower()
-    if not original_name or ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        allowed = "・".join(sorted(e.lstrip(".") for e in ALLOWED_UPLOAD_EXTENSIONS))
-        return None, f"対応していないファイル形式です({allowed}のみアップロードできます)。"
+    content_type = KNOWN_UPLOAD_CONTENT_TYPES.get(ext) or file_storage.content_type or "application/octet-stream"
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid.uuid4().hex}{ext}"
@@ -161,7 +163,8 @@ def _save_uploaded_file(file_storage, dest_dir):
     except IOError:
         dest_path.unlink(missing_ok=True)
         return None, "サーバーの空き容量が不足しているため、アップロードできませんでした。"
-    return (original_name, stored_name, ALLOWED_UPLOAD_EXTENSIONS[ext], size), None
+    return (original_name, stored_name, content_type, size), None
+
 
 # ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている
 # (river-fog-terminal.service)。Tailscale/LANどちらからアクセスしても繋がるよう、iframeのURLは
