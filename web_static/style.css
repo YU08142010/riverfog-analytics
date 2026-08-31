@@ -1080,7 +1080,32 @@ table.obs-table th.sticky-col { z-index: 3; }
 /* 実績ポイントで交換できるアバターフレーム。段階(bronze/silver/gold/platinum)クラスで
    リング太さ・発光・アニメーションを、テーマ(kiri/hare/yuuyake/yuki/hoshizora)クラスで
    配色を指定し、両方を掛け合わせて4x5=20通りの見た目を出す(webapp.pyのFRAME_DEFINITIONS参照)。
-   avatar-circle/avatar-lg/ranking-avatarのどのサイズでも同じルールで包める。 */
+   段階・テーマのクラスはCSS変数を設定するだけにして、実際の描画は用途ごとの
+   ルール(.avatar-frame=アバター周りの丸いリング、.profile-card-frame=プロフィール
+   カード全体の縁取り)に分けている。同じ2クラスを両方の要素に付ければ、アバターの
+   輪と背景のプロフィールカードが同じグレード・テーマで連動して装飾される。 */
+.frame-bronze { --frame-ring: 3px; --frame-glow: none; }
+.frame-silver { --frame-ring: 3px; --frame-glow: 0 0 8px rgba(192, 192, 200, 0.65); }
+.frame-gold {
+    --frame-ring: 4px;
+    --frame-glow: 0 0 12px rgba(255, 196, 64, 0.75);
+    --frame-anim: avatar-frame-shimmer 3s ease-in-out infinite;
+}
+.frame-platinum {
+    --frame-ring: 4px;
+    --frame-glow: 0 0 16px rgba(170, 120, 255, 0.8);
+    --frame-anim: avatar-frame-shimmer 2.2s ease-in-out infinite;
+}
+.theme-kiri { --frame-c1: #c7cdd6; --frame-c2: #8b95a5; --frame-c3: #e9edf2; }
+.theme-hare { --frame-c1: #4fa8e8; --frame-c2: #1c6fb8; --frame-c3: #bfe3ff; }
+.theme-yuuyake { --frame-c1: #ff9a56; --frame-c2: #e0526a; --frame-c3: #ffd39a; }
+.theme-yuki { --frame-c1: #eaf6ff; --frame-c2: #a9d6f5; --frame-c3: #ffffff; }
+.theme-hoshizora { --frame-c1: #2e2a6e; --frame-c2: #7b4fd6; --frame-c3: #f4d35e; }
+@keyframes avatar-frame-shimmer {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.35); }
+}
+
 .avatar-frame {
     display: inline-flex;
     border-radius: 50%;
@@ -1088,27 +1113,23 @@ table.obs-table th.sticky-col { z-index: 3; }
     background: linear-gradient(135deg, var(--frame-c1, #ccc), var(--frame-c2, #999), var(--frame-c3, #eee));
     box-shadow: var(--frame-glow, none);
     flex: 0 0 auto;
+    animation: var(--frame-anim, none);
 }
-.avatar-frame.frame-bronze { --frame-ring: 3px; --frame-glow: none; }
-.avatar-frame.frame-silver { --frame-ring: 3px; --frame-glow: 0 0 8px rgba(192, 192, 200, 0.65); }
-.avatar-frame.frame-gold {
-    --frame-ring: 4px;
-    --frame-glow: 0 0 12px rgba(255, 196, 64, 0.75);
-    animation: avatar-frame-shimmer 3s ease-in-out infinite;
+
+/* プロフィールカード自体の縁取り。アバターの輪(丸)と違い、カードは角丸の四角なので
+   上部に太いグラデーションの縁取り帯を敷き、段階が高いほど発光を足す(控えめに、
+   本文の読みやすさを損なわない程度にとどめる)。 */
+.profile-card-frame {
+    border-top: 5px solid transparent;
+    border-image: linear-gradient(90deg, var(--frame-c1, #ccc), var(--frame-c2, #999), var(--frame-c3, #eee)) 1;
+    background: linear-gradient(180deg, var(--frame-c1, transparent) 0%, transparent 12%);
+    background-blend-mode: overlay;
 }
-.avatar-frame.frame-platinum {
-    --frame-ring: 4px;
-    --frame-glow: 0 0 16px rgba(170, 120, 255, 0.8);
-    animation: avatar-frame-shimmer 2.2s ease-in-out infinite;
+.profile-card-frame.frame-silver, .profile-card-frame.frame-gold, .profile-card-frame.frame-platinum {
+    box-shadow: var(--frame-glow, none);
 }
-.avatar-frame.theme-kiri { --frame-c1: #c7cdd6; --frame-c2: #8b95a5; --frame-c3: #e9edf2; }
-.avatar-frame.theme-hare { --frame-c1: #4fa8e8; --frame-c2: #1c6fb8; --frame-c3: #bfe3ff; }
-.avatar-frame.theme-yuuyake { --frame-c1: #ff9a56; --frame-c2: #e0526a; --frame-c3: #ffd39a; }
-.avatar-frame.theme-yuki { --frame-c1: #eaf6ff; --frame-c2: #a9d6f5; --frame-c3: #ffffff; }
-.avatar-frame.theme-hoshizora { --frame-c1: #2e2a6e; --frame-c2: #7b4fd6; --frame-c3: #f4d35e; }
-@keyframes avatar-frame-shimmer {
-    0%, 100% { filter: brightness(1); }
-    50% { filter: brightness(1.35); }
+.profile-card-frame.frame-gold, .profile-card-frame.frame-platinum {
+    animation: var(--frame-anim, none);
 }
 
 .member-grid {

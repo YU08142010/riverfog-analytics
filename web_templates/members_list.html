@@ -85,7 +85,8 @@
     {% if members %}
     <div class="member-grid">
         {% for m in members %}
-        <a class="member-tile" href="{{ url_for('member_detail', user_id=m.id) }}">
+        {% set frame_cls = "profile-card-frame frame-" ~ m.equipped_frame.split('_', 1)[0] ~ " theme-" ~ m.equipped_frame.split('_', 1)[1] if m.equipped_frame else "" %}
+        <a class="member-tile {{ frame_cls }}" href="{{ url_for('member_detail', user_id=m.id) }}">
             {% set avatar_url = member_avatar_url(m.id) %}
             {% call avatar_frame(m.equipped_frame) %}
             {% if avatar_url %}

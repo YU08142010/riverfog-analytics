@@ -149,12 +149,14 @@ def get_conversation_messages(conn, conversation_id):
 
 
 def record_message(conn, conversation_id, user_id, asked_at, question, answer=None, error=None):
+    """挿入した行のidを返す(チャット利用ポイント付与の一意キーに使うため)。"""
     with conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO chat_messages (conversation_id, user_id, asked_at, question, answer, error) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (conversation_id, user_id, asked_at, question, answer, error),
         )
+        return cur.lastrowid
 
 
 def count_user_messages_since(conn, user_id, since_str):

@@ -1499,7 +1499,7 @@ def chat_ask():
             chat_log.touch_conversation(conn, conversation_id, asked_at)
             return jsonify({"message": "回答の生成に失敗しました。しばらくしてから再度お試しください。", "success": False}), 502
         answer = response.text.strip()
-        chat_log.record_message(conn, conversation_id, user_id, asked_at, question, answer=answer)
+        message_id = chat_log.record_message(conn, conversation_id, user_id, asked_at, question, answer=answer)
         chat_log.touch_conversation(conn, conversation_id, asked_at)
 
         title = None
@@ -1508,6 +1508,11 @@ def chat_ask():
             chat_log.set_conversation_title(conn, conversation_id, title)
     finally:
         conn.close()
+    users_conn = _users_conn()
+    try:
+        users.grant_points(users_conn, user_id, f"chat:{message_id}", CHAT_MESSAGE_POINTS, asked_at)
+    finally:
+        users_conn.close()
     remaining_user, remaining_total = _chat_rate_limit_status(user_id)
     return jsonify({
         "success": True, "answer": answer,
@@ -2576,7 +2581,10 @@ def station_comment_add(name):
     created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
     conn = _users_conn()
     try:
-        users.add_station_comment(conn, name, session["user_id"], body, created_at)
+        comment_id = users.add_station_comment(conn, name, session["user_id"], body, created_at)
+        users.grant_points(
+            conn, session["user_id"], f"comment:{comment_id}", COMMENT_POST_POINTS, created_at,
+        )
     finally:
         conn.close()
     if _wants_json():
@@ -2696,6 +2704,12 @@ def login():
             conn = _users_conn()
             try:
                 users.record_login(conn, user["id"], login_at)
+                # 1日1回だけのログインボーナス。source文字列に日付を含めているので、
+                # 同じ日に何度ログインしても2回目以降は付与されない。
+                users.grant_points(
+                    conn, user["id"], f"daily_login:{login_at[:10]}",
+                    DAILY_LOGIN_BONUS_POINTS, login_at,
+                )
             finally:
                 conn.close()
             return redirect(next_path)
@@ -2737,74 +2751,106 @@ BADGE_DEFINITIONS = [
     # ログイン回数(易→難、上位はcrownで統一しどのカテゴリでも「頂点」と分かるようにする)
     # pointsは達成の難易度に応じたポイント付与量(フレーム交換の原資)。初回付与時のみ加算され、
     # 何度ページを見ても再付与されない(_award_new_badges参照)。
-    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした", "icon": "medal", "points": 10,
+    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした", "icon": "medal", "points": 100,
      "check": lambda s: s["login_count"] >= 1},
-    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成", "icon": "medal", "points": 30,
+    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成", "icon": "medal", "points": 300,
      "check": lambda s: s["login_count"] >= 10},
-    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成", "icon": "medal", "points": 150,
+    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成", "icon": "medal", "points": 1500,
      "check": lambda s: s["login_count"] >= 100},
-    {"id": "login_500", "label": "レジェンド", "desc": "ログイン500回達成", "icon": "crown", "points": 500,
+    {"id": "login_500", "label": "レジェンド", "desc": "ログイン500回達成", "icon": "crown", "points": 5000,
      "check": lambda s: s["login_count"] >= 500},
     # 連続ログイン日数
-    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン", "icon": "flame", "points": 20,
+    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン", "icon": "flame", "points": 200,
      "check": lambda s: s["streak"] >= 3},
-    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン", "icon": "flame", "points": 50,
+    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン", "icon": "flame", "points": 500,
      "check": lambda s: s["streak"] >= 7},
-    {"id": "streak_14", "label": "二週間皆勤", "desc": "14日連続ログイン", "icon": "flame", "points": 100,
+    {"id": "streak_14", "label": "二週間皆勤", "desc": "14日連続ログイン", "icon": "flame", "points": 1000,
      "check": lambda s: s["streak"] >= 14},
-    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン", "icon": "flame", "points": 200,
+    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン", "icon": "flame", "points": 2000,
      "check": lambda s: s["streak"] >= 30},
-    {"id": "streak_100", "label": "百日修行", "desc": "100日連続ログイン", "icon": "crown", "points": 500,
+    {"id": "streak_100", "label": "百日修行", "desc": "100日連続ログイン", "icon": "crown", "points": 5000,
      "check": lambda s: s["streak"] >= 100},
     # コメント投稿数
-    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した", "icon": "comment", "points": 10,
+    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した", "icon": "comment", "points": 100,
      "check": lambda s: s["comment_count"] >= 1},
-    {"id": "comment_5", "label": "常連コメンター", "desc": "コメントを5件投稿した", "icon": "comment", "points": 40,
+    {"id": "comment_5", "label": "常連コメンター", "desc": "コメントを5件投稿した", "icon": "comment", "points": 400,
      "check": lambda s: s["comment_count"] >= 5},
-    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した", "icon": "comment", "points": 80,
+    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した", "icon": "comment", "points": 800,
      "check": lambda s: s["comment_count"] >= 10},
-    {"id": "comment_30", "label": "コメント職人", "desc": "コメントを30件投稿した", "icon": "comment", "points": 200,
+    {"id": "comment_30", "label": "コメント職人", "desc": "コメントを30件投稿した", "icon": "comment", "points": 2000,
      "check": lambda s: s["comment_count"] >= 30},
-    {"id": "comment_100", "label": "コメントマスター", "desc": "コメントを100件投稿した", "icon": "crown", "points": 500,
+    {"id": "comment_100", "label": "コメントマスター", "desc": "コメントを100件投稿した", "icon": "crown", "points": 5000,
      "check": lambda s: s["comment_count"] >= 100},
     # AIチャット利用数
-    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した", "icon": "chat", "points": 10,
+    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した", "icon": "chat", "points": 100,
      "check": lambda s: s["chat_count"] >= 1},
-    {"id": "chat_10", "label": "質問好き", "desc": "AIチャットで10回質問した", "icon": "chat", "points": 40,
+    {"id": "chat_10", "label": "質問好き", "desc": "AIチャットで10回質問した", "icon": "chat", "points": 400,
      "check": lambda s: s["chat_count"] >= 10},
-    {"id": "chat_50", "label": "探究者", "desc": "AIチャットで50回質問した", "icon": "crown", "points": 200,
+    {"id": "chat_50", "label": "探究者", "desc": "AIチャットで50回質問した", "icon": "crown", "points": 2000,
      "check": lambda s: s["chat_count"] >= 50},
     # お気に入り地点
-    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star", "points": 20,
+    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star", "points": 200,
      "check": lambda s: s["favorite_count"] >= 3},
-    {"id": "favorite_10", "label": "お気に入り愛好家", "desc": "お気に入り地点を10件以上登録した", "icon": "star", "points": 60,
+    {"id": "favorite_10", "label": "お気に入り愛好家", "desc": "お気に入り地点を10件以上登録した", "icon": "star", "points": 600,
      "check": lambda s: s["favorite_count"] >= 10},
-    {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown", "points": 300,
+    {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown", "points": 3000,
      "check": lambda s: s["favorite_count"] >= s["station_total"]},
     # 在籍日数
-    {"id": "veteran_30", "label": "新米卒業", "desc": "登録から30日経過", "icon": "calendar", "points": 30,
+    {"id": "veteran_30", "label": "新米卒業", "desc": "登録から30日経過", "icon": "calendar", "points": 300,
      "check": lambda s: s["account_age_days"] >= 30},
-    {"id": "veteran_180", "label": "半年選手", "desc": "登録から180日経過", "icon": "calendar", "points": 120,
+    {"id": "veteran_180", "label": "半年選手", "desc": "登録から180日経過", "icon": "calendar", "points": 1200,
      "check": lambda s: s["account_age_days"] >= 180},
-    {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown", "points": 300,
+    {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown", "points": 3000,
      "check": lambda s: s["account_age_days"] >= 365},
     # プロフィール設定
-    {"id": "avatar_set", "label": "プロフィール画像設定", "desc": "プロフィール画像を設定した", "icon": "camera", "points": 15,
+    {"id": "avatar_set", "label": "プロフィール画像設定", "desc": "プロフィール画像を設定した", "icon": "camera", "points": 150,
      "check": lambda s: s["has_avatar"]},
-    {"id": "bio_set", "label": "自己紹介デビュー", "desc": "自己紹介を入力した", "icon": "account", "points": 15,
+    {"id": "bio_set", "label": "自己紹介デビュー", "desc": "自己紹介を入力した", "icon": "account", "points": 150,
      "check": lambda s: s["bio_set"]},
     # 権限
-    {"id": "role_admin", "label": "運営メンバー", "desc": "管理者権限を持っている", "icon": "admin", "points": 100,
+    {"id": "role_admin", "label": "運営メンバー", "desc": "管理者権限を持っている", "icon": "admin", "points": 1000,
      "check": lambda s: s["role"] == "admin"},
     # ログイン時間帯
-    {"id": "night_owl", "label": "深夜の常連", "desc": "深夜0時〜4時台にログインしたことがある", "icon": "moon", "points": 30,
+    {"id": "night_owl", "label": "深夜の常連", "desc": "深夜0時〜4時台にログインしたことがある", "icon": "moon", "points": 300,
      "check": lambda s: s["night_owl"]},
-    {"id": "early_bird", "label": "早起きさん", "desc": "早朝5時〜6時台にログインしたことがある", "icon": "sunrise", "points": 30,
+    {"id": "early_bird", "label": "早起きさん", "desc": "早朝5時〜6時台にログインしたことがある", "icon": "sunrise", "points": 300,
      "check": lambda s: s["early_bird"]},
     # 週末利用
-    {"id": "weekend_5", "label": "週末も欠かさず", "desc": "土曜日または日曜日にログインした日が5日以上ある", "icon": "calendar", "points": 60,
+    {"id": "weekend_5", "label": "週末も欠かさず", "desc": "土曜日または日曜日にログインした日が5日以上ある", "icon": "calendar", "points": 600,
      "check": lambda s: s["weekend_days"] >= 5},
+    # 上位ラダーの追加(既存カテゴリの、より遠い到達点)
+    {"id": "login_1000", "label": "生き字引", "desc": "ログイン1000回達成", "icon": "crown", "points": 8000,
+     "check": lambda s: s["login_count"] >= 1000},
+    {"id": "comment_300", "label": "座談の主", "desc": "コメントを300件投稿した", "icon": "crown", "points": 6000,
+     "check": lambda s: s["comment_count"] >= 300},
+    {"id": "chat_200", "label": "知恵袋", "desc": "AIチャットで200回質問した", "icon": "crown", "points": 5000,
+     "check": lambda s: s["chat_count"] >= 200},
+    # 季節ログイン
+    {"id": "newyear_login", "label": "元旦詣で", "desc": "1月1日にログインしたことがある", "icon": "calendar", "points": 400,
+     "check": lambda s: s["newyear_login"]},
+    {"id": "newyearseve_login", "label": "大晦日の見届け人", "desc": "12月31日にログインしたことがある", "icon": "calendar", "points": 400,
+     "check": lambda s: s["newyearseve_login"]},
+    # 累計ポイント(実績以外のポイント源も含めたこれまでの総獲得量。使い切っても下がらない)
+    {"id": "points_1000", "label": "小金持ち", "desc": "累計獲得ポイントが1000ptに到達した", "icon": "medal", "points": 100,
+     "check": lambda s: s["lifetime_points"] >= 1000},
+    {"id": "points_10000", "label": "ポイント長者", "desc": "累計獲得ポイントが10000ptに到達した", "icon": "crown", "points": 1000,
+     "check": lambda s: s["lifetime_points"] >= 10000},
+    # フレームコレクション(交換ショップ自体を使ってもらうための実績)
+    {"id": "frame_first", "label": "はじめての着せ替え", "desc": "アバターフレームを1つ交換した", "icon": "star", "points": 100,
+     "check": lambda s: s["owned_frame_count"] >= 1},
+    {"id": "frame_collector", "label": "フレームコレクター", "desc": "アバターフレームを5つ以上交換した", "icon": "star", "points": 500,
+     "check": lambda s: s["owned_frame_count"] >= 5},
+    {"id": "frame_master", "label": "フレームマスター", "desc": "全20種類のアバターフレームを交換した", "icon": "crown", "points": 3000,
+     "check": lambda s: s["owned_frame_count"] >= 20},
 ]
+
+# --- 実績以外のポイント源 ---------------------------------------------------------
+# 一度きりの実績達成だけでなく、日々の利用そのものからも少しずつポイントが貯まるように
+# する。users.grant_points()のsource文字列で1回ごとの重複付与を防ぐ
+# (例: 同じ日の2回目のログインでは付与しない、同じコメントに2回付与しない)。
+DAILY_LOGIN_BONUS_POINTS = 20
+COMMENT_POST_POINTS = 15
+CHAT_MESSAGE_POINTS = 10
 
 # --- ポイント交換アバターフレーム -------------------------------------------------
 # 実績ポイントで交換できるアバター装飾枠。「段階(グレード)」×「テーマ」の組み合わせで
@@ -2812,10 +2858,10 @@ BADGE_DEFINITIONS = [
 # (配色)を掛け合わせて表現するため、フレーム自体を20個ハードコードする必要はない
 # (style.cssの.avatar-frame関連ルール参照)。
 FRAME_GRADES = [
-    {"id": "bronze", "label": "銅", "cost": 100},
-    {"id": "silver", "label": "銀", "cost": 250},
-    {"id": "gold", "label": "金", "cost": 500},
-    {"id": "platinum", "label": "虹", "cost": 1000},
+    {"id": "bronze", "label": "銅", "cost": 1000},
+    {"id": "silver", "label": "銀", "cost": 2500},
+    {"id": "gold", "label": "金", "cost": 5000},
+    {"id": "platinum", "label": "虹", "cost": 10000},
 ]
 FRAME_THEMES = [
     {"id": "kiri", "label": "霧"},
@@ -2839,8 +2885,9 @@ FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
 def _compute_badges(stats):
     """statsは{login_count, streak, comment_count, chat_count, favorite_count,
     station_total, account_age_days, has_avatar, bio_set, role, night_owl, early_bird,
-    weekend_days}。定義済みの実績すべてについて、達成済みかどうかを
-    付けたリストを返す(未達成もロック表示するため、達成したものだけに絞り込まない)。"""
+    weekend_days, newyear_login, newyearseve_login, lifetime_points, owned_frame_count}。
+    定義済みの実績すべてについて、達成済みかどうかを付けたリストを返す
+    (未達成もロック表示するため、達成したものだけに絞り込まない)。"""
     return [
         {"id": b["id"], "label": b["label"], "desc": b["desc"], "icon": b["icon"],
          "points": b["points"], "achieved": b["check"](stats)}
@@ -2909,6 +2956,8 @@ def member_detail(user_id):
         total_logins = users.login_count(conn, user_id)
         streak = users.login_streak(conn, user_id, datetime.now(JST).date())
         comment_count = users.comment_count(conn, user_id)
+        lifetime_points = users.total_earned_points(conn, user_id)
+        owned_frame_count = len(users.owned_frame_ids(conn, user_id))
     finally:
         conn.close()
     favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
@@ -2925,6 +2974,8 @@ def member_detail(user_id):
     has_avatar = _avatar_path(user_id).exists()
     night_owl = any(len(h) >= 13 and int(h[11:13]) < 4 for h in history)
     early_bird = any(len(h) >= 13 and 5 <= int(h[11:13]) < 7 for h in history)
+    newyear_login = any(len(h) >= 10 and h[5:10] == "01-01" for h in history)
+    newyearseve_login = any(len(h) >= 10 and h[5:10] == "12-31" for h in history)
     weekend_days = sum(
         1 for d in counts_by_day if datetime.strptime(d, "%Y-%m-%d").weekday() >= 5
     )
@@ -2934,6 +2985,8 @@ def member_detail(user_id):
         "station_total": len(STATION_NAMES), "account_age_days": account_age_days,
         "has_avatar": has_avatar, "bio_set": bool(target["bio"]), "role": target["role"],
         "night_owl": night_owl, "early_bird": early_bird, "weekend_days": weekend_days,
+        "newyear_login": newyear_login, "newyearseve_login": newyearseve_login,
+        "lifetime_points": lifetime_points, "owned_frame_count": owned_frame_count,
     })
     # 実績の達成状況を見る/見られるたびに、新規達成分のポイントを付与する
     # (award_badgeが既付与分を無視するので、何度呼んでも二重加算にはならない)。

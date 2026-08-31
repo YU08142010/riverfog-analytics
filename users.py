@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS user_frames (
     UNIQUE(user_id, frame_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_frames_user_id ON user_frames(user_id);
+CREATE TABLE IF NOT EXISTS point_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, source)
+);
+CREATE INDEX IF NOT EXISTS idx_point_events_user_id ON point_events(user_id);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -481,11 +490,14 @@ def list_audit_log(conn, limit=500):
 
 
 def add_station_comment(conn, station_name, user_id, body, created_at):
+    """挿入した行のidを返す(コメント投稿ポイントの付与に、地点名+時刻より確実な
+    一意キーとして使うため)。"""
     with conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO station_comments (station_name, user_id, body, created_at) VALUES (?, ?, ?, ?)",
             (station_name, user_id, body, created_at),
         )
+        return cur.lastrowid
 
 
 def _comment_row_to_dict(row):
@@ -539,11 +551,29 @@ def award_badge(conn, user_id, badge_id, points, awarded_at):
         return cur.rowcount > 0
 
 
+def grant_points(conn, user_id, source, amount, created_at):
+    """実績以外のポイント源(ログインボーナス・コメント投稿・AIチャット利用等)用の汎用付与。
+    UNIQUE(user_id, source)制約により、同じsource文字列への二重付与を防ぐ。sourceは
+    呼び出し元で一意になるよう組み立てる(例: "daily_login:2026-08-31", "comment:123")。
+    新規付与ならTrue、既に付与済みならFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO point_events (user_id, source, amount, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, source, amount, created_at),
+        )
+        return cur.rowcount > 0
+
+
 def total_earned_points(conn, user_id):
+    """実績ポイント(badge_awards)とそれ以外のポイント(point_events)の合計。"""
     row = conn.execute(
         "SELECT COALESCE(SUM(points), 0) FROM badge_awards WHERE user_id = ?", (user_id,)
     ).fetchone()
-    return row[0]
+    row2 = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM point_events WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] + row2[0]
 
 
 def total_spent_points(conn, user_id):
@@ -594,6 +624,6 @@ __all__ = [
     "record_audit", "list_audit_log",
     "add_station_comment", "list_station_comments", "get_station_comment",
     "delete_station_comment", "comment_count",
-    "award_badge", "total_earned_points", "total_spent_points", "available_points",
+    "award_badge", "grant_points", "total_earned_points", "total_spent_points", "available_points",
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
 ]
