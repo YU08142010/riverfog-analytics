@@ -51,6 +51,24 @@ CREATE TABLE IF NOT EXISTS station_comments (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_station_comments_station_name ON station_comments(station_name);
+CREATE TABLE IF NOT EXISTS badge_awards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    badge_id TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    awarded_at TEXT NOT NULL,
+    UNIQUE(user_id, badge_id)
+);
+CREATE INDEX IF NOT EXISTS idx_badge_awards_user_id ON badge_awards(user_id);
+CREATE TABLE IF NOT EXISTS user_frames (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    frame_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    acquired_at TEXT NOT NULL,
+    UNIQUE(user_id, frame_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_frames_user_id ON user_frames(user_id);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -116,6 +134,8 @@ def _ensure_profile_columns(conn):
         conn.execute("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''")
     if "favorite_stations" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN favorite_stations TEXT NOT NULL DEFAULT ''")
+    if "equipped_frame" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN equipped_frame TEXT NOT NULL DEFAULT ''")
 
 
 def connect(db_path):
@@ -134,14 +154,16 @@ def _norm_email(email):
     return email.strip().lower()
 
 
-_USER_COLUMNS = "id, name, email, password_hash, role, created_at, bio, favorite_stations"
+_USER_COLUMNS = (
+    "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame"
+)
 
 
 def _user_row_to_dict(row):
     return {
         "id": row[0], "name": row[1], "email": row[2],
         "password_hash": row[3], "role": row[4], "created_at": row[5],
-        "bio": row[6], "favorite_stations": row[7],
+        "bio": row[6], "favorite_stations": row[7], "equipped_frame": row[8],
     }
 
 
@@ -504,6 +526,62 @@ def delete_station_comment(conn, comment_id):
         conn.execute("DELETE FROM station_comments WHERE id = ?", (comment_id,))
 
 
+def award_badge(conn, user_id, badge_id, points, awarded_at):
+    """指定した実績のポイントを付与する。UNIQUE(user_id, badge_id)制約により、
+    同じ実績への二重付与は自動的に無視される(INSERT OR IGNORE)。
+    新規に付与した場合はTrue、既に付与済みで何もしなかった場合はFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO badge_awards (user_id, badge_id, points, awarded_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, badge_id, points, awarded_at),
+        )
+        return cur.rowcount > 0
+
+
+def total_earned_points(conn, user_id):
+    row = conn.execute(
+        "SELECT COALESCE(SUM(points), 0) FROM badge_awards WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def total_spent_points(conn, user_id):
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost), 0) FROM user_frames WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def available_points(conn, user_id):
+    """実績で獲得した合計ポイントから、フレーム交換で使った分を差し引いた残高。"""
+    return total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
+
+
+def owned_frame_ids(conn, user_id):
+    rows = conn.execute(
+        "SELECT frame_id FROM user_frames WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def purchase_frame(conn, user_id, frame_id, cost, acquired_at):
+    """ポイント残高が足りているかは呼び出し側で確認してから使うこと。既に所持している
+    フレームの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。"""
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_frames (user_id, frame_id, cost, acquired_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, frame_id, cost, acquired_at),
+        )
+
+
+def set_equipped_frame(conn, user_id, frame_id):
+    """frame_idに空文字を渡すと「フレームなし」の状態に戻せる。"""
+    with conn:
+        conn.execute("UPDATE users SET equipped_frame = ? WHERE id = ?", (frame_id or "", user_id))
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "get_users_by_ids", "set_role", "update_user", "update_profile", "delete_user",
@@ -516,4 +594,6 @@ __all__ = [
     "record_audit", "list_audit_log",
     "add_station_comment", "list_station_comments", "get_station_comment",
     "delete_station_comment", "comment_count",
+    "award_badge", "total_earned_points", "total_spent_points", "available_points",
+    "owned_frame_ids", "purchase_frame", "set_equipped_frame",
 ]

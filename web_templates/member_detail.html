@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
 {% from "_icons.html" import icon %}
+{% from "_avatar.html" import avatar_frame %}
 {% block title %}{{ member.name }}(メンバー){% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -13,11 +14,13 @@
 <div class="card">
     <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
+        {% call avatar_frame(member.equipped_frame) %}
         {% if avatar_url %}
         <img class="avatar-circle avatar-lg" src="{{ avatar_url }}" alt="">
         {% else %}
         <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
         {% endif %}
+        {% endcall %}
         <div>
             <h2 style="margin-bottom:0.3rem;">
                 {{ member.name }}
@@ -328,13 +331,23 @@
 
 {% if badges %}
 <div class="card">
-    <h2>実績({{ badges|selectattr("achieved")|list|length }}/{{ badges|length }})</h2>
-    <div class="badge-grid">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
+        <h2 style="margin:0;">実績({{ badges|selectattr("achieved")|list|length }}/{{ badges|length }})</h2>
+        {% if is_self %}
+        <div style="text-align:right;">
+            <div class="muted" style="font-size:0.8rem;">実績ポイント</div>
+            <div style="font-size:1.3rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
+            <a href="{{ url_for('member_frames_shop', user_id=member.id) }}" class="button" style="margin-top:0.3rem; display:inline-block;">ポイントでフレームと交換</a>
+        </div>
+        {% endif %}
+    </div>
+    <div class="badge-grid" style="margin-top:0.8rem;">
         {% for b in badges %}
         <div class="badge-tile{{ '' if b.achieved else ' locked' }}" title="{{ b.desc }}">
             <span class="badge-icon">{{ icon(b.icon, size=22) }}</span>
             <div class="badge-label">{{ b.label }}</div>
             <div class="badge-desc">{{ b.desc }}</div>
+            <div class="badge-desc" style="margin-top:0.15rem;">{{ b.points }} pt</div>
         </div>
         {% endfor %}
     </div>

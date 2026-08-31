@@ -1077,6 +1077,40 @@ table.obs-table th.sticky-col { z-index: 3; }
 }
 .avatar-lg { width: 88px; height: 88px; font-size: 2rem; margin: 0; }
 
+/* 実績ポイントで交換できるアバターフレーム。段階(bronze/silver/gold/platinum)クラスで
+   リング太さ・発光・アニメーションを、テーマ(kiri/hare/yuuyake/yuki/hoshizora)クラスで
+   配色を指定し、両方を掛け合わせて4x5=20通りの見た目を出す(webapp.pyのFRAME_DEFINITIONS参照)。
+   avatar-circle/avatar-lg/ranking-avatarのどのサイズでも同じルールで包める。 */
+.avatar-frame {
+    display: inline-flex;
+    border-radius: 50%;
+    padding: var(--frame-ring, 3px);
+    background: linear-gradient(135deg, var(--frame-c1, #ccc), var(--frame-c2, #999), var(--frame-c3, #eee));
+    box-shadow: var(--frame-glow, none);
+    flex: 0 0 auto;
+}
+.avatar-frame.frame-bronze { --frame-ring: 3px; --frame-glow: none; }
+.avatar-frame.frame-silver { --frame-ring: 3px; --frame-glow: 0 0 8px rgba(192, 192, 200, 0.65); }
+.avatar-frame.frame-gold {
+    --frame-ring: 4px;
+    --frame-glow: 0 0 12px rgba(255, 196, 64, 0.75);
+    animation: avatar-frame-shimmer 3s ease-in-out infinite;
+}
+.avatar-frame.frame-platinum {
+    --frame-ring: 4px;
+    --frame-glow: 0 0 16px rgba(170, 120, 255, 0.8);
+    animation: avatar-frame-shimmer 2.2s ease-in-out infinite;
+}
+.avatar-frame.theme-kiri { --frame-c1: #c7cdd6; --frame-c2: #8b95a5; --frame-c3: #e9edf2; }
+.avatar-frame.theme-hare { --frame-c1: #4fa8e8; --frame-c2: #1c6fb8; --frame-c3: #bfe3ff; }
+.avatar-frame.theme-yuuyake { --frame-c1: #ff9a56; --frame-c2: #e0526a; --frame-c3: #ffd39a; }
+.avatar-frame.theme-yuki { --frame-c1: #eaf6ff; --frame-c2: #a9d6f5; --frame-c3: #ffffff; }
+.avatar-frame.theme-hoshizora { --frame-c1: #2e2a6e; --frame-c2: #7b4fd6; --frame-c3: #f4d35e; }
+@keyframes avatar-frame-shimmer {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.35); }
+}
+
 .member-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

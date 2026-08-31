@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_avatar.html" import avatar_frame %}
+{% block title %}フレーム交換({{ member.name }}){% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('members_list') }}">メンバー</a></li>
+    <li><a href="{{ url_for('member_detail', user_id=member.id) }}">{{ member.name }}</a></li>
+    <li>フレーム交換</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2 style="margin-top:0;">アバターフレーム交換</h2>
+    <p class="muted">実績を達成して貯めたポイントで、アバターの飾り枠と交換できます。段階(銅・銀・金・虹)が上がるほど交換に必要なポイントが増え、発光や輝きも豪華になります。</p>
+    <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+        {% set avatar_url = member_avatar_url(member.id) %}
+        {% call avatar_frame(member.equipped_frame) %}
+        {% if avatar_url %}
+        <img class="avatar-circle avatar-lg" src="{{ avatar_url }}" alt="">
+        {% else %}
+        <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
+        {% endif %}
+        {% endcall %}
+        <div>
+            <div class="muted" style="font-size:0.8rem;">現在のポイント</div>
+            <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
+        </div>
+        {% if member.equipped_frame %}
+        <form method="post" action="{{ url_for('member_frame_equip', user_id=member.id) }}" data-ajax data-ajax-reload>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="frame_id" value="">
+            <button type="submit" class="button cancel">フレームを外す</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% for grade in frame_grades %}
+<div class="card">
+    <h3 style="margin-top:0;">{{ grade.label }}({{ grade.cost }} pt)</h3>
+    <div class="member-grid">
+        {% for f in frame_definitions if f.grade == grade.id %}
+        <div class="member-tile" style="cursor:default;">
+            {% call avatar_frame(f.id) %}
+            {% if avatar_url %}
+            <img class="avatar-circle" src="{{ avatar_url }}" alt="">
+            {% else %}
+            <span class="avatar-circle-fallback">{{ member.name[0] }}</span>
+            {% endif %}
+            {% endcall %}
+            <div style="margin-top:0.5rem; font-weight:600;">{{ f.label }}</div>
+            {% if f.id in owned %}
+                {% if member.equipped_frame == f.id %}
+                <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
+                {% else %}
+                <form method="post" action="{{ url_for('member_frame_equip', user_id=member.id) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="frame_id" value="{{ f.id }}">
+                    <button type="submit" class="button">装着する</button>
+                </form>
+                {% endif %}
+            {% else %}
+                <form method="post" action="{{ url_for('member_frame_buy', user_id=member.id) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="frame_id" value="{{ f.id }}">
+                    <button type="submit" class="button" {{ "disabled" if points < f.cost }}>{{ f.cost }} ptで交換</button>
+                </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
+{% from "_avatar.html" import avatar_frame %}
 {% block title %}メンバー{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -14,11 +15,13 @@
     <li class="ranking-item rank-{{ loop.index }}">
         <span class="ranking-badge">{{ loop.index }}</span>
         {% set avatar_url = member_avatar_url(m.id) %}
+        {% call avatar_frame(m.equipped_frame) %}
         {% if avatar_url %}
         <img class="ranking-avatar" src="{{ avatar_url }}" alt="">
         {% else %}
         <span class="ranking-avatar-fallback">{{ m.name[0] }}</span>
         {% endif %}
+        {% endcall %}
         <div class="ranking-info">
             <a href="{{ url_for('member_detail', user_id=m.id) }}" class="ranking-name">{{ m.name }}</a>
             <div class="ranking-bar-track">
@@ -84,11 +87,13 @@
         {% for m in members %}
         <a class="member-tile" href="{{ url_for('member_detail', user_id=m.id) }}">
             {% set avatar_url = member_avatar_url(m.id) %}
+            {% call avatar_frame(m.equipped_frame) %}
             {% if avatar_url %}
             <img class="avatar-circle" src="{{ avatar_url }}" alt="">
             {% else %}
             <span class="avatar-circle-fallback">{{ m.name[0] }}</span>
             {% endif %}
+            {% endcall %}
             <div style="margin-top:0.5rem; font-weight:600;">{{ m.name }}</div>
             <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
             <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">

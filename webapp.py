@@ -2735,74 +2735,105 @@ def _inject_avatar_url():
 # 持たせ、達成/未達成の両方をテンプレート側で判定できるようにしている。
 BADGE_DEFINITIONS = [
     # ログイン回数(易→難、上位はcrownで統一しどのカテゴリでも「頂点」と分かるようにする)
-    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした", "icon": "medal",
+    # pointsは達成の難易度に応じたポイント付与量(フレーム交換の原資)。初回付与時のみ加算され、
+    # 何度ページを見ても再付与されない(_award_new_badges参照)。
+    {"id": "first_login", "label": "はじめの一歩", "desc": "ログインした", "icon": "medal", "points": 10,
      "check": lambda s: s["login_count"] >= 1},
-    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成", "icon": "medal",
+    {"id": "login_10", "label": "常連", "desc": "ログイン10回達成", "icon": "medal", "points": 30,
      "check": lambda s: s["login_count"] >= 10},
-    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成", "icon": "medal",
+    {"id": "login_100", "label": "ヘビーユーザー", "desc": "ログイン100回達成", "icon": "medal", "points": 150,
      "check": lambda s: s["login_count"] >= 100},
-    {"id": "login_500", "label": "レジェンド", "desc": "ログイン500回達成", "icon": "crown",
+    {"id": "login_500", "label": "レジェンド", "desc": "ログイン500回達成", "icon": "crown", "points": 500,
      "check": lambda s: s["login_count"] >= 500},
     # 連続ログイン日数
-    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン", "icon": "flame",
+    {"id": "streak_3", "label": "三日坊主卒業", "desc": "3日連続ログイン", "icon": "flame", "points": 20,
      "check": lambda s: s["streak"] >= 3},
-    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン", "icon": "flame",
+    {"id": "streak_7", "label": "一週間皆勤", "desc": "7日連続ログイン", "icon": "flame", "points": 50,
      "check": lambda s: s["streak"] >= 7},
-    {"id": "streak_14", "label": "二週間皆勤", "desc": "14日連続ログイン", "icon": "flame",
+    {"id": "streak_14", "label": "二週間皆勤", "desc": "14日連続ログイン", "icon": "flame", "points": 100,
      "check": lambda s: s["streak"] >= 14},
-    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン", "icon": "flame",
+    {"id": "streak_30", "label": "常習化", "desc": "30日連続ログイン", "icon": "flame", "points": 200,
      "check": lambda s: s["streak"] >= 30},
-    {"id": "streak_100", "label": "百日修行", "desc": "100日連続ログイン", "icon": "crown",
+    {"id": "streak_100", "label": "百日修行", "desc": "100日連続ログイン", "icon": "crown", "points": 500,
      "check": lambda s: s["streak"] >= 100},
     # コメント投稿数
-    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した", "icon": "comment",
+    {"id": "first_comment", "label": "発言デビュー", "desc": "地点にコメントを投稿した", "icon": "comment", "points": 10,
      "check": lambda s: s["comment_count"] >= 1},
-    {"id": "comment_5", "label": "常連コメンター", "desc": "コメントを5件投稿した", "icon": "comment",
+    {"id": "comment_5", "label": "常連コメンター", "desc": "コメントを5件投稿した", "icon": "comment", "points": 40,
      "check": lambda s: s["comment_count"] >= 5},
-    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した", "icon": "comment",
+    {"id": "comment_10", "label": "地点通", "desc": "コメントを10件投稿した", "icon": "comment", "points": 80,
      "check": lambda s: s["comment_count"] >= 10},
-    {"id": "comment_30", "label": "コメント職人", "desc": "コメントを30件投稿した", "icon": "comment",
+    {"id": "comment_30", "label": "コメント職人", "desc": "コメントを30件投稿した", "icon": "comment", "points": 200,
      "check": lambda s: s["comment_count"] >= 30},
-    {"id": "comment_100", "label": "コメントマスター", "desc": "コメントを100件投稿した", "icon": "crown",
+    {"id": "comment_100", "label": "コメントマスター", "desc": "コメントを100件投稿した", "icon": "crown", "points": 500,
      "check": lambda s: s["comment_count"] >= 100},
     # AIチャット利用数
-    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した", "icon": "chat",
+    {"id": "first_chat", "label": "AIとの対話", "desc": "AIチャットを利用した", "icon": "chat", "points": 10,
      "check": lambda s: s["chat_count"] >= 1},
-    {"id": "chat_10", "label": "質問好き", "desc": "AIチャットで10回質問した", "icon": "chat",
+    {"id": "chat_10", "label": "質問好き", "desc": "AIチャットで10回質問した", "icon": "chat", "points": 40,
      "check": lambda s: s["chat_count"] >= 10},
-    {"id": "chat_50", "label": "探究者", "desc": "AIチャットで50回質問した", "icon": "crown",
+    {"id": "chat_50", "label": "探究者", "desc": "AIチャットで50回質問した", "icon": "crown", "points": 200,
      "check": lambda s: s["chat_count"] >= 50},
     # お気に入り地点
-    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star",
+    {"id": "favorite_3", "label": "お気に入り登録", "desc": "お気に入り地点を3件以上登録した", "icon": "star", "points": 20,
      "check": lambda s: s["favorite_count"] >= 3},
-    {"id": "favorite_10", "label": "お気に入り愛好家", "desc": "お気に入り地点を10件以上登録した", "icon": "star",
+    {"id": "favorite_10", "label": "お気に入り愛好家", "desc": "お気に入り地点を10件以上登録した", "icon": "star", "points": 60,
      "check": lambda s: s["favorite_count"] >= 10},
-    {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown",
+    {"id": "favorite_all", "label": "全地点制覇", "desc": "全地点をお気に入り登録した", "icon": "crown", "points": 300,
      "check": lambda s: s["favorite_count"] >= s["station_total"]},
     # 在籍日数
-    {"id": "veteran_30", "label": "新米卒業", "desc": "登録から30日経過", "icon": "calendar",
+    {"id": "veteran_30", "label": "新米卒業", "desc": "登録から30日経過", "icon": "calendar", "points": 30,
      "check": lambda s: s["account_age_days"] >= 30},
-    {"id": "veteran_180", "label": "半年選手", "desc": "登録から180日経過", "icon": "calendar",
+    {"id": "veteran_180", "label": "半年選手", "desc": "登録から180日経過", "icon": "calendar", "points": 120,
      "check": lambda s: s["account_age_days"] >= 180},
-    {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown",
+    {"id": "veteran_365", "label": "一周年", "desc": "登録から365日経過", "icon": "crown", "points": 300,
      "check": lambda s: s["account_age_days"] >= 365},
     # プロフィール設定
-    {"id": "avatar_set", "label": "プロフィール画像設定", "desc": "プロフィール画像を設定した", "icon": "camera",
+    {"id": "avatar_set", "label": "プロフィール画像設定", "desc": "プロフィール画像を設定した", "icon": "camera", "points": 15,
      "check": lambda s: s["has_avatar"]},
-    {"id": "bio_set", "label": "自己紹介デビュー", "desc": "自己紹介を入力した", "icon": "account",
+    {"id": "bio_set", "label": "自己紹介デビュー", "desc": "自己紹介を入力した", "icon": "account", "points": 15,
      "check": lambda s: s["bio_set"]},
     # 権限
-    {"id": "role_admin", "label": "運営メンバー", "desc": "管理者権限を持っている", "icon": "admin",
+    {"id": "role_admin", "label": "運営メンバー", "desc": "管理者権限を持っている", "icon": "admin", "points": 100,
      "check": lambda s: s["role"] == "admin"},
     # ログイン時間帯
-    {"id": "night_owl", "label": "深夜の常連", "desc": "深夜0時〜4時台にログインしたことがある", "icon": "moon",
+    {"id": "night_owl", "label": "深夜の常連", "desc": "深夜0時〜4時台にログインしたことがある", "icon": "moon", "points": 30,
      "check": lambda s: s["night_owl"]},
-    {"id": "early_bird", "label": "早起きさん", "desc": "早朝5時〜6時台にログインしたことがある", "icon": "sunrise",
+    {"id": "early_bird", "label": "早起きさん", "desc": "早朝5時〜6時台にログインしたことがある", "icon": "sunrise", "points": 30,
      "check": lambda s: s["early_bird"]},
     # 週末利用
-    {"id": "weekend_5", "label": "週末も欠かさず", "desc": "土曜日または日曜日にログインした日が5日以上ある", "icon": "calendar",
+    {"id": "weekend_5", "label": "週末も欠かさず", "desc": "土曜日または日曜日にログインした日が5日以上ある", "icon": "calendar", "points": 60,
      "check": lambda s: s["weekend_days"] >= 5},
 ]
+
+# --- ポイント交換アバターフレーム -------------------------------------------------
+# 実績ポイントで交換できるアバター装飾枠。「段階(グレード)」×「テーマ」の組み合わせで
+# 4x5=20種類になる。CSS側は段階クラス(リング太さ・発光・アニメーション)とテーマクラス
+# (配色)を掛け合わせて表現するため、フレーム自体を20個ハードコードする必要はない
+# (style.cssの.avatar-frame関連ルール参照)。
+FRAME_GRADES = [
+    {"id": "bronze", "label": "銅", "cost": 100},
+    {"id": "silver", "label": "銀", "cost": 250},
+    {"id": "gold", "label": "金", "cost": 500},
+    {"id": "platinum", "label": "虹", "cost": 1000},
+]
+FRAME_THEMES = [
+    {"id": "kiri", "label": "霧"},
+    {"id": "hare", "label": "晴天"},
+    {"id": "yuuyake", "label": "夕焼け"},
+    {"id": "yuki", "label": "雪"},
+    {"id": "hoshizora", "label": "星空"},
+]
+FRAME_DEFINITIONS = [
+    {
+        "id": f"{grade['id']}_{theme['id']}",
+        "label": f"{grade['label']}の{theme['label']}",
+        "grade": grade["id"], "grade_label": grade["label"], "cost": grade["cost"],
+        "theme": theme["id"], "theme_label": theme["label"],
+    }
+    for grade in FRAME_GRADES for theme in FRAME_THEMES
+]
+FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
 
 
 def _compute_badges(stats):
@@ -2812,9 +2843,19 @@ def _compute_badges(stats):
     付けたリストを返す(未達成もロック表示するため、達成したものだけに絞り込まない)。"""
     return [
         {"id": b["id"], "label": b["label"], "desc": b["desc"], "icon": b["icon"],
-         "achieved": b["check"](stats)}
+         "points": b["points"], "achieved": b["check"](stats)}
         for b in BADGE_DEFINITIONS
     ]
+
+
+def _award_new_badges(conn, user_id, badges):
+    """達成済みなのにまだポイントを付与していない実績があれば、その分だけ付与する。
+    users.award_badge()がUNIQUE制約で二重付与を防ぐため、member_detail()を見るたびに
+    呼び出しても達成済みの実績に再度ポイントが入ることはない(新規達成分だけ加算される)。"""
+    awarded_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    for b in badges:
+        if b["achieved"]:
+            users.award_badge(conn, user_id, b["id"], b["points"], awarded_at)
 
 
 @app.route("/members")
@@ -2841,6 +2882,7 @@ def members_list():
             "last_login": last_logins.get(u["id"]),
             "streak": streaks.get(u["id"], 0),
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
+            "equipped_frame": u["equipped_frame"],
         }
         for u in all_users
     ]
@@ -2893,6 +2935,14 @@ def member_detail(user_id):
         "has_avatar": has_avatar, "bio_set": bool(target["bio"]), "role": target["role"],
         "night_owl": night_owl, "early_bird": early_bird, "weekend_days": weekend_days,
     })
+    # 実績の達成状況を見る/見られるたびに、新規達成分のポイントを付与する
+    # (award_badgeが既付与分を無視するので、何度呼んでも二重加算にはならない)。
+    points_conn = _users_conn()
+    try:
+        _award_new_badges(points_conn, user_id, badges)
+        points = users.available_points(points_conn, user_id)
+    finally:
+        points_conn.close()
     return render_template(
         "member_detail.html",
         member=target,
@@ -2910,6 +2960,7 @@ def member_detail(user_id):
         avatar_size=AVATAR_SIZE,
         bio_max_length=BIO_MAX_LENGTH,
         badges=badges,
+        points=points,
     )
 
 
@@ -2926,6 +2977,73 @@ def member_profile_update(user_id):
     finally:
         conn.close()
     return _finish("member_detail", "プロフィールを更新しました。", user_id=user_id)
+
+
+@app.route("/members/<int:user_id>/frames")
+def member_frames_shop(user_id):
+    """実績ポイントでアバターフレームと交換する画面。本人のみ閲覧できる
+    (ポイント残高・所持状況は他人に見せる必要がないため、avatar/profile編集と同じ制限)。"""
+    if session.get("user_id") != user_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        points = users.available_points(conn, user_id)
+        owned = users.owned_frame_ids(conn, user_id)
+    finally:
+        conn.close()
+    return render_template(
+        "member_frames.html",
+        member=target,
+        points=points,
+        owned=owned,
+        frame_grades=FRAME_GRADES,
+        frame_themes=FRAME_THEMES,
+        frame_definitions=FRAME_DEFINITIONS,
+    )
+
+
+@app.route("/members/<int:user_id>/frames/buy", methods=["POST"])
+def member_frame_buy(user_id):
+    if session.get("user_id") != user_id:
+        abort(403)
+    frame = FRAME_BY_ID.get(request.form.get("frame_id", ""))
+    if frame is None:
+        abort(404)
+    conn = _users_conn()
+    try:
+        if frame["id"] in users.owned_frame_ids(conn, user_id):
+            return _finish(
+                "member_frames_shop", "そのフレームは既に持っています。", success=False, user_id=user_id,
+            )
+        if users.available_points(conn, user_id) < frame["cost"]:
+            return _finish(
+                "member_frames_shop", "ポイントが足りません。", success=False, user_id=user_id,
+            )
+        users.purchase_frame(
+            conn, user_id, frame["id"], frame["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+    return _finish("member_frames_shop", f"「{frame['label']}」と交換しました。", user_id=user_id)
+
+
+@app.route("/members/<int:user_id>/frames/equip", methods=["POST"])
+def member_frame_equip(user_id):
+    if session.get("user_id") != user_id:
+        abort(403)
+    frame_id = request.form.get("frame_id", "").strip()
+    conn = _users_conn()
+    try:
+        if frame_id and frame_id not in users.owned_frame_ids(conn, user_id):
+            abort(400)
+        users.set_equipped_frame(conn, user_id, frame_id)
+    finally:
+        conn.close()
+    message = "フレームを装着しました。" if frame_id else "フレームを外しました。"
+    return _finish("member_frames_shop", message, user_id=user_id)
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

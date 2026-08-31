@@ -1,0 +1,7 @@
+{% macro avatar_frame(frame_id) %}
+{%- if frame_id -%}
+<span class="avatar-frame frame-{{ frame_id.split('_', 1)[0] }} theme-{{ frame_id.split('_', 1)[1] }}">{{ caller() }}</span>
+{%- else -%}
+{{ caller() }}
+{%- endif -%}
+{% endmacro %}
