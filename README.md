@@ -53,12 +53,22 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 - コミットメッセージは英語で書く。コミット前に差分をユーザーに日本語で要約し、承認を得てからコミットする(このセッションでは自動コミット自体は事前承認されているケースがあるが、そうでない限りは確認を取る)。
 - `users.db` は **絶対にコミットしない**(`.gitignore` 登録済み)。実運用中のユーザーDBでパスワードハッシュ等を含む。
 
+## 実DBのパスに関する重要な注意
+
+**実際にアプリが読み書きするユーザーDBは `/opt/river-fog/data/users.db` であり、リポジトリ直下の `/opt/river-fog/users.db` ではない。** `webapp.py` の `USERS_DB_PATH = BASE_DIR / "data" / "users.db"` がこれを定義している。
+
+リポジトリ直下にも `users.db` という同名ファイルが存在するが、これは **アプリからは一切参照されない未使用の別ファイル**(由来不明、おそらく過去の移行残骸)。このファイルを対話的な `sqlite3` コマンドや `python3 -c "..."` で相対パス `'users.db'`(カレントディレクトリが `/opt/river-fog` の場合)を使って開くと、誤ってこの未使用ファイルを操作してしまう。
+
+過去に、この2つのファイルを取り違えて実データが失われたと誤認した事故があった(実際には未使用ファイルを操作していただけで実データに影響はなかったが、テストアカウントの削除が実DBに反映されておらず、テスト用ゴミデータが本番に残ってしまった)。
+
+**DBに直接アクセスするスクリプトを書くときは、必ず絶対パス `/opt/river-fog/data/users.db` を指定すること。** `users.connect(...)` を呼ぶ場合も同様に、`webapp.py` の `USERS_DB_PATH` と同じ絶対パスを渡す。
+
 ## 主要モジュール
 
 | ファイル | 役割 |
 |---|---|
 | `webapp.py` | Flask アプリ本体。ルーティング、認証、通知、DM、共有ファイル、ポイント/実績、グラフ描画など全機能がここに集約されている(非常に大きい、22万字超)。 |
-| `users.py` | SQLite (`users.db`) の唯一のスキーマ定義元。`SCHEMA` という1つの文字列を `executescript` で流し込む方式。新しいテーブル/カラムは全てここに追加する。カラム追加は `_ensure_*_columns()` というマイグレーションヘルパーを書き、`connect(db_path)` から呼ぶ。 |
+| `users.py` | SQLite (`data/users.db`。下記「実DBのパスに関する重要な注意」参照) の唯一のスキーマ定義元。`SCHEMA` という1つの文字列を `executescript` で流し込む方式。新しいテーブル/カラムは全てここに追加する。カラム追加は `_ensure_*_columns()` というマイグレーションヘルパーを書き、`connect(db_path)` から呼ぶ。 |
 | `collect.py` | カメラ画像からGeminiで霧の現象を分類する収集パイプライン。低信頼度(-1)判定はより強いモデルへのエスカレーションで再分類する。 |
 | `fog_features.py` | `SUMMARY_FOG_CODES`(現在は `{1,2,3}` = 川霧のみ)など特徴量定義。この定数は霧確率計算・アラート・モデル評価の全てに効いてくるので変更時は影響範囲を必ず説明してから進めること。 |
 | `fog_model.py` | 霧予測モデル。`compute_fog_probability()` など。 |
@@ -81,7 +91,7 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 
 このプロジェクトに自動テストスイートは無い。動作確認は毎回、使い捨てアカウントを作って curl または実ブラウザで一連の操作を再現する方式で行う。
 
-1. `users.connect()` + `users.create_user()` + `werkzeug.security.generate_password_hash` で使い捨てアカウントを作る(既存ユーザーには絶対に触らない)。
+1. `users.connect("/opt/river-fog/data/users.db")` + `users.create_user()` + `werkzeug.security.generate_password_hash` で使い捨てアカウントを作る(既存ユーザーには絶対に触らない。パスを間違えないこと、上記の注意参照)。
 2. ログインは `email` フィールドと、直前に取得した `csrf_token` を使う。
 3. cookie jar は毎回 `rm -f` して新規に張り直し、以降のリクエストは全て `-b "$JAR" -c "$JAR"` を両方付ける(中間の GET リクエストで `-c` を忘れると CSRF token が更新されず、あとのPOSTで false-positive の "CSRF token mismatch" になる)。
 4. 検証が終わったら、作成したユーザー・関連行・アップロードしたファイルを確実に削除し、ローカル/リモート双方の一時ファイル(`/tmp/*`, スクラッチパッド)も片付ける。生成データ・カメラID・座標などを絶対に捏造しない。
