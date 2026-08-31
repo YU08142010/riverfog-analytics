@@ -9,3 +9,4 @@ data_before_restore_*/
 .DS_Store
 .vscode/
 .idea/
+users.db

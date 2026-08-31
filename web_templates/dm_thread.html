@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_avatar.html" import avatar_frame %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ other.name }}とのメッセージ{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -23,24 +24,20 @@
     </div>
 
     <div class="dm-bubbles" id="dm-bubbles">
-        {% for m in messages %}
-        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}">
-            <div class="dm-bubble">
-                {% if m.body %}{{ m.body|linkify }}{% endif %}
-                {% for a in m.attachments %}
-                <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">📎 {{ a.filename }}</a></div>
-                {% endfor %}
-                <span class="dm-bubble-time">{{ m.created_at }}</span>
-            </div>
-        </div>
-        {% endfor %}
+        {% for m in messages -%}
+        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}"><div class="dm-bubble">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
+            {%- for a in m.attachments -%}
+            <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">{{ icon("attach", size=13) }} {{ a.filename }}</a></div>
+            {%- endfor -%}
+            <span class="dm-bubble-time">{{ m.created_at }}</span></div></div>
+        {%- endfor %}
     </div>
 
     <form id="dm-send-form" class="dm-compose" action="{{ url_for('dm_send', user_id=other.id) }}" method="post" enctype="multipart/form-data" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <textarea name="body" id="dm-send-body" rows="1" maxlength="{{ dm_message_max_length }}" placeholder="メッセージを入力..."></textarea>
-        <label class="button cancel" style="cursor:pointer; display:inline-flex; align-items:center;">
-            📎<input type="file" name="attachment" id="dm-send-file" style="display:none;">
+        <label class="button cancel" style="cursor:pointer; display:inline-flex; align-items:center;" title="ファイルを添付">
+            {{ icon("attach", size=16) }}<input type="file" name="attachment" id="dm-send-file" style="display:none;">
         </label>
         <button type="submit" class="button">送信</button>
     </form>
@@ -75,13 +72,18 @@
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
         var bubble = document.createElement("div");
         bubble.className = "dm-bubble";
-        if (body) { bubble.appendChild(document.createTextNode(body)); }
+        if (body) {
+            var textSpan = document.createElement("span");
+            textSpan.className = "dm-bubble-text";
+            textSpan.textContent = body;
+            bubble.appendChild(textSpan);
+        }
         if (attachment) {
             var div = document.createElement("div");
             div.className = "dm-attachment";
             var a = document.createElement("a");
             a.href = "/messages/attachments/" + attachment.id;
-            a.textContent = "📎 " + attachment.filename;
+            a.textContent = "添付: " + attachment.filename;
             div.appendChild(a);
             bubble.appendChild(div);
         }

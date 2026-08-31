@@ -42,26 +42,11 @@
 
 {% if other_members %}
 <div class="card">
-    <h2 style="margin-top:0;">他のメンバー</h2>
-    <ul class="dm-thread-list">
+    <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
         {% for m in other_members %}
-        <li>
-            <a class="dm-thread-item" href="{{ url_for('dm_thread', user_id=m.id) }}">
-                {% set avatar_url = member_avatar_url(m.id) %}
-                {% call avatar_frame(m.equipped_frame) %}
-                {% if avatar_url %}
-                <img class="avatar-circle" src="{{ avatar_url }}" alt="">
-                {% else %}
-                <span class="avatar-circle-fallback">{{ m.name[0] }}</span>
-                {% endif %}
-                {% endcall %}
-                <div class="dm-thread-info">
-                    <div class="dm-thread-name">{{ m.name }}</div>
-                </div>
-            </a>
-        </li>
+        <a href="{{ url_for('dm_thread', user_id=m.id) }}" class="button cancel">{{ m.name }}</a>
         {% endfor %}
-    </ul>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

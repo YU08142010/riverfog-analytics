@@ -112,6 +112,7 @@
 <div class="modal-overlay" id="modal-overlay" hidden>
     <div class="modal-dialog" role="alertdialog" aria-modal="true">
         <p id="modal-message"></p>
+        <input type="text" id="modal-prompt-input" hidden style="width:100%; padding:0.5rem 0.7rem; margin-top:0.3rem; border-radius:var(--radius-sm); border:1px solid var(--color-border); font-family:inherit; font-size:0.9rem;">
         <div class="modal-actions">
             <button type="button" class="button cancel" id="modal-cancel-btn">キャンセル</button>
             <button type="button" class="button" id="modal-confirm-btn">OK</button>
@@ -247,6 +248,83 @@ function confirmModal(message) {
         okBtn.focus();
     });
 }
+
+// window.prompt()の代わりのモーダル。1行テキスト入力が必要な操作(フォルダ名の入力等)に使う。
+// promptModal(message, defaultValue).then(function(value) { ... }) のように使い、
+// キャンセル時はvalueがnullになる。confirmModalと同じオーバーレイ・ボタンを共有し、
+// 入力欄だけ表示を切り替える。
+function promptModal(message, defaultValue) {
+    return new Promise(function(resolve) {
+        var overlay = document.getElementById("modal-overlay");
+        var msgEl = document.getElementById("modal-message");
+        var input = document.getElementById("modal-prompt-input");
+        var okBtn = document.getElementById("modal-confirm-btn");
+        var cancelBtn = document.getElementById("modal-cancel-btn");
+        msgEl.textContent = message;
+        input.hidden = false;
+        input.value = defaultValue || "";
+        overlay.hidden = false;
+        function cleanup(result) {
+            overlay.hidden = true;
+            input.hidden = true;
+            okBtn.removeEventListener("click", onOk);
+            cancelBtn.removeEventListener("click", onCancel);
+            overlay.removeEventListener("click", onOverlay);
+            input.removeEventListener("keydown", onInputKey);
+            document.removeEventListener("keydown", onKey);
+            resolve(result);
+        }
+        function onOk() { cleanup(input.value); }
+        function onCancel() { cleanup(null); }
+        function onOverlay(e) { if (e.target === overlay) { cleanup(null); } }
+        function onInputKey(e) {
+            if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
+        }
+        function onKey(e) {
+            if (e.key === "Escape") { cleanup(null); return; }
+            if (e.key !== "Tab") { return; }
+            e.preventDefault();
+            if (document.activeElement === okBtn) { cancelBtn.focus(); } else { okBtn.focus(); }
+        }
+        okBtn.addEventListener("click", onOk);
+        cancelBtn.addEventListener("click", onCancel);
+        overlay.addEventListener("click", onOverlay);
+        input.addEventListener("keydown", onInputKey);
+        document.addEventListener("keydown", onKey);
+        input.focus();
+    });
+}
+
+// 汎用の右クリックメニュー。data-context-menu="menu要素id"を持つ要素上で右クリックすると、
+// そのidのメニュー(hiddenな<div class="context-menu">)をクリック位置に表示する。
+// メニュー内のbutton要素にはdata-context-actionを付け、"contextmenuaction"カスタム
+// イベント(detail: {action, target})をdocumentに投げるので、各ページはそれを購読するだけでよい
+// (共有ファイルページに限らず、右クリックメニューを使いたいページはこの仕組みに乗せられる)。
+document.addEventListener("contextmenu", function(e) {
+    var host = e.target.closest("[data-context-menu]");
+    if (!host) { return; }
+    var menu = document.getElementById(host.getAttribute("data-context-menu"));
+    if (!menu) { return; }
+    e.preventDefault();
+    document.querySelectorAll(".context-menu").forEach(function(m) { m.hidden = true; });
+    menu.dataset.targetId = host.dataset.contextTargetId || "";
+    menu.style.left = e.pageX + "px";
+    menu.style.top = e.pageY + "px";
+    menu.hidden = false;
+});
+document.addEventListener("click", function(e) {
+    if (e.target.closest(".context-menu")) { return; }
+    document.querySelectorAll(".context-menu").forEach(function(m) { m.hidden = true; });
+});
+document.addEventListener("click", function(e) {
+    var btn = e.target.closest(".context-menu [data-context-action]");
+    if (!btn) { return; }
+    var menu = btn.closest(".context-menu");
+    menu.hidden = true;
+    document.dispatchEvent(new CustomEvent("contextmenuaction", {
+        detail: {action: btn.getAttribute("data-context-action"), targetId: menu.dataset.targetId},
+    }));
+});
 
 // data-confirm="メッセージ" を持つform/buttonは、確認モーダルを通してから送信する
 // (これまでonsubmit/onclickでbrowser標準confirm()を呼んでいた箇所の置き換え用)。

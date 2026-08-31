@@ -199,9 +199,11 @@ body {
     border-radius: 1rem;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    white-space: pre-wrap;
     word-break: break-word;
 }
+/* white-space:pre-wrapは本文だけに絞る(.dm-bubble本体に付けると、テンプレートの
+   インデント用の改行までそのまま高さとして表示され、吹き出しが不自然に縦長になっていた)。 */
+.dm-bubble-text { display: block; white-space: pre-wrap; }
 .dm-bubble-row.mine .dm-bubble {
     background: var(--color-primary);
     color: #fff;
@@ -214,7 +216,7 @@ body {
     opacity: 0.7;
 }
 .dm-attachment { margin-top: 0.3rem; }
-.dm-attachment a { color: inherit; text-decoration: underline; word-break: break-all; }
+.dm-attachment a { color: inherit; text-decoration: underline; word-break: break-all; display: inline-flex; align-items: center; gap: 0.25rem; }
 
 /* 共有ファイルページの右クリックメニュー(フォルダの作成・削除)。 */
 .context-menu {
