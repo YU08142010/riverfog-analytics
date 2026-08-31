@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}気象条件別の川霧発生状況{% endblock %}
+{% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2 style="margin-top:0;">気象条件別の川霧発生状況</h2>
+    <p class="muted">
+        気温・湿度・風速・降水量それぞれについて、実際に川霧が発生した観測時刻と発生しなかった
+        観測時刻とで値の分布(箱ひげ図)を比較します。箱の中央線が中央値、箱の上下端が四分位範囲です。
+    </p>
+    <label class="muted" style="font-size:0.85rem;">地点</label><br>
+    <select onchange="location.href='{{ url_for('weather_fog_graph_page') }}?station=' + encodeURIComponent(this.value)">
+        {% for s in station_names %}
+        <option value="{{ s }}" {{ "selected" if s == station }}>{{ s }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="card">
+    <img class="full-graph" src="{{ url_for('weather_fog_graph_png', station=station) }}" alt="{{ station }}の気象条件別川霧発生状況">
+</div>
+{% endblock %}

@@ -749,6 +749,70 @@ def _render_line_chart_png(dates, rates, title):
     return buf.getvalue()
 
 
+# 気象条件別の川霧発生グラフの2群比較色。dataviz skillの検証済みパレットの
+# カテゴリ1番目(青)・2番目(オレンジ)を固定順で使う(CVD安全性が確認済みの組み合わせ)。
+_WEATHER_FOG_NO_COLOR = "#2a78d6"
+_WEATHER_FOG_YES_COLOR = "#eb6834"
+_WEATHER_FOG_BOXPLOT_FEATURES = [
+    (COL_TEMP, "気温(℃)"), (COL_HUMIDITY, "相対湿度(％)"),
+    (COL_WIND_SPEED, "風速(m/s)"), (COL_PRECIP, "降水量(mm)"),
+]
+
+
+def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
+    """station_nameの川霧発生有無ごとに、気象条件(気温・湿度・風速・降水量)の分布を
+    箱ひげ図で比較する。同じdatetimeの気象値と現象コードを突き合わせ、SUMMARY_FOG_CODES
+    (川霧のコード)に該当するかどうかで「川霧あり」「川霧なし」の2群に分ける。
+    2群の識別だけなのでカテゴリ色は2色のみ使用し、標本数(n=)を各箱に添えて
+    比較の信頼性が一目で分かるようにする。"""
+    fig, axes = plt.subplots(2, 2, figsize=(9, 7))
+
+    has_data = (
+        main_df is not None and phenom_df is not None
+        and not main_df.empty and station_name in phenom_df.columns
+    )
+    merged = None
+    if has_data:
+        merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
+        codes = merged[station_name].apply(encode_phenomena_cell)
+        merged = merged.loc[codes.notna()].copy()
+        merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
+        has_data = not merged.empty
+
+    if not has_data:
+        for ax in axes.flat:
+            ax.axis("off")
+        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
+    else:
+        for ax, (col, label) in zip(axes.flat, _WEATHER_FOG_BOXPLOT_FEATURES):
+            values = merged[[col, "is_fog"]].dropna()
+            no_fog_vals = values.loc[~values["is_fog"], col]
+            fog_vals = values.loc[values["is_fog"], col]
+            if no_fog_vals.empty and fog_vals.empty:
+                ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label, fontsize=10)
+                continue
+            bp = ax.boxplot(
+                [no_fog_vals, fog_vals],
+                tick_labels=[f"川霧なし\n(n={len(no_fog_vals)})", f"川霧あり\n(n={len(fog_vals)})"],
+                patch_artist=True, widths=0.5, medianprops={"color": "#0b0b0b"},
+            )
+            for patch, color in zip(bp["boxes"], [_WEATHER_FOG_NO_COLOR, _WEATHER_FOG_YES_COLOR]):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.75)
+            ax.set_title(label, fontsize=10)
+            ax.grid(True, axis="y", alpha=0.25)
+            ax.tick_params(axis="x", labelsize=8)
+        fig.suptitle(f"{station_name}: 気象条件別の川霧発生状況", fontsize=12)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.95) if has_data else (0, 0, 1, 1))
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 def _render_weather_timeseries_png(day_main, date_label):
     """1日分の気温・視程・湿度・降水量の推移をPNGにして返す。"""
     fig, ax1 = plt.subplots(figsize=(9, 3.6))
@@ -2570,6 +2634,30 @@ def station_detail(name):
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
         feature_snapshot=_load_station_feature_snapshot(name),
     )
+
+
+@app.route("/graphs/weather-fog")
+def weather_fog_graph_page():
+    """気象条件(気温・湿度・風速・降水量)ごとに、川霧が発生した/しなかった日でどう
+    分布が違うかを箱ひげ図で比較するページ。地点はクエリパラメータで切り替える。"""
+    station = _validate_station(request.args.get("station", STATION_NAMES[0]))
+    return render_template(
+        "weather_fog_graph.html", station=station, station_names=STATION_NAMES,
+        active_names=[station],
+    )
+
+
+@app.route("/graphs/weather-fog.png")
+def weather_fog_graph_png():
+    station = _validate_station(request.args.get("station", STATION_NAMES[0]))
+    main_df = phenom_df = None
+    if DATA_XLSX.exists():
+        try:
+            main_df, phenom_df, _ = fog_data.load_river_fog_data()
+        except Exception as e:
+            log.warning("Failed to load data for weather-fog graph: %s", e)
+    png = _render_weather_fog_boxplot_png(main_df, phenom_df, station)
+    return Response(png, mimetype="image/png")
 
 
 @app.route("/stations/<name>/comments", methods=["POST"])
