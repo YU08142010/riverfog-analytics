@@ -22,6 +22,19 @@
     <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
     {% endif %}
 
+    {% if share_targets %}
+    <form method="post" action="{{ url_for('station_share', name=name) }}" style="margin-top:0.8rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="muted" style="font-size:0.85rem;">メンバーに共有:</label>
+        <select name="user_id">
+            {% for u in share_targets %}
+            <option value="{{ u.id }}">{{ u.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="button">{{ icon("comment", size=16) }} 共有する</button>
+    </form>
+    {% endif %}
+
     {% if ai_station_summary %}
     <div style="margin-top:1rem; padding-top:0.8rem; border-top:1px solid var(--color-border);">
         <p style="display:flex; align-items:flex-start; gap:0.4rem; margin:0; white-space:pre-wrap;">

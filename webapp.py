@@ -2686,11 +2686,13 @@ def station_detail(name):
     timelapse = _station_timelapse_images(name)
     image_dates = _sorted_subdirs(IMAGE_DIR)
 
+    my_id = session.get("user_id")
     conn = _users_conn()
     try:
         raw_comments = users.list_station_comments(conn, name)
         commenter_ids = {c["user_id"] for c in raw_comments}
         author_names = {uid: u["name"] for uid, u in users.get_users_by_ids(conn, commenter_ids).items()}
+        share_targets = [u for u in users.list_users(conn) if u["id"] != my_id] if my_id else []
     finally:
         conn.close()
     comments = [
@@ -2714,6 +2716,7 @@ def station_detail(name):
         latest_pred_date=latest_pred_date,
         forecast_file=forecast_file,
         timelapse=timelapse,
+        share_targets=share_targets,
         date_groups=_group_dates_by_month(image_dates),
         station_names=STATION_NAMES,
         current_by_name=current_by_name,
@@ -2790,6 +2793,36 @@ def station_comment_delete(name, comment_id):
     finally:
         conn.close()
     return _finish("station_detail", "コメントを削除しました。", name=name)
+
+
+@app.route("/stations/<name>/share", methods=["POST"])
+def station_share(name):
+    """地点の現在の様子+リンクを定型メッセージにして、選んだメンバーにDMでワンタップ共有する。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    name = _validate_station(name)
+    user_id = request.form.get("user_id", type=int)
+    if not user_id or user_id == my_id:
+        return _finish("station_detail", "共有先のメンバーを選んでください。", success=False, name=name)
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            return _finish("station_detail", "共有先のメンバーが見つかりません。", success=False, name=name)
+        observations = _latest_observations()
+        current = None
+        if observations:
+            current = {s["name"]: s for s in observations["stations"]}.get(name)
+        url = url_for("station_detail", name=name, _external=True)
+        body = f"{name}、{current['label']}です！ {url}" if current else f"{name}の様子を見てください！ {url}"
+        created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
+        message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at)
+        users.mark_dm_read(conn, conversation_id, my_id, message_id)
+    finally:
+        conn.close()
+    return _finish("dm_thread", f"{target['name']}さんに共有しました。", user_id=user_id)
 
 
 @app.route("/stations/<name>/timelapse.json")
@@ -2921,6 +2954,24 @@ def _inject_avatar_url():
             return None
         return url_for("member_avatar_file", user_id=user_id) + f"?t={int(path.stat().st_mtime)}"
     return {"member_avatar_url": member_avatar_url}
+
+
+_URL_RE = re.compile(r"(https?://\S+)")
+
+
+@app.template_filter("linkify")
+def linkify(text):
+    """メッセージ本文中のURLをクリックできるリンクにする(地点共有ボタンが添える
+    URLなど)。本文は自前でHTMLエスケープしてから組み立てるので、テンプレート側は
+    {{ m.body|linkify }} とだけ書けば安全に埋め込める。"""
+    from markupsafe import Markup, escape
+    parts = _URL_RE.split(text or "")
+    html = "".join(
+        f'<a href="{escape(p)}" target="_blank" rel="noopener">{escape(p)}</a>'
+        if _URL_RE.fullmatch(p) else str(escape(p))
+        for p in parts
+    )
+    return Markup(html)
 
 
 @app.context_processor

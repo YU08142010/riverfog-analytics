@@ -26,7 +26,7 @@
         {% for m in messages %}
         <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}">
             <div class="dm-bubble">
-                {% if m.body %}{{ m.body }}{% endif %}
+                {% if m.body %}{{ m.body|linkify }}{% endif %}
                 {% for a in m.attachments %}
                 <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">📎 {{ a.filename }}</a></div>
                 {% endfor %}
