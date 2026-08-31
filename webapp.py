@@ -32,7 +32,6 @@ from flask import (
     Flask, Response, abort, flash, g, jsonify, redirect, render_template,
     request, send_file, send_from_directory, session, url_for,
 )
-from werkzeug.utils import secure_filename
 
 import matplotlib
 matplotlib.use("Agg")
@@ -139,7 +138,12 @@ def _save_uploaded_file(file_storage, dest_dir):
     パスに使わない(拡張子を絞らない以上、パストラバーサル・同名ファイル衝突だけは
     避ける必要があるため)。
     """
-    original_name = secure_filename(file_storage.filename or "")
+    # secure_filename()は非ASCII文字を全て"_"に潰してしまい、日本語ファイル名が
+    # ダウンロード時に別物になってしまう。実ディスク上のパスは下でUUIDから作る
+    # stored_nameだけを使うので、表示・ダウンロード名側はパス区切り文字を除去する
+    # だけでよく、文字種を制限する必要はない。
+    raw_name = (file_storage.filename or "").strip().replace("\\", "/")
+    original_name = raw_name.rsplit("/", 1)[-1]
     if not original_name:
         return None, "ファイル名を確認できませんでした。"
     ext = Path(original_name).suffix.lower()
@@ -3514,6 +3518,29 @@ def dm_attachment_file(attachment_id):
     return send_from_directory(
         DM_ATTACHMENT_DIR, att["stored_name"], as_attachment=True, download_name=att["filename"],
     )
+
+
+@app.route("/messages/<int:user_id>/<int:message_id>/delete", methods=["POST"])
+def dm_message_delete(user_id, message_id):
+    """自分が送信したメッセージを削除する(相手のメッセージは消せない。右クリック
+    メニューからJS経由で叩かれる想定なので、成功/失敗をJSONで返すだけでよい)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        msg = users.get_dm_message(conn, message_id)
+        if msg is None or my_id not in (msg["user_a_id"], msg["user_b_id"]):
+            abort(404)
+        if msg["sender_id"] != my_id:
+            return jsonify({"success": False, "message": "自分が送信したメッセージのみ削除できます。"}), 403
+        stored_names = users.get_dm_message_attachment_stored_names(conn, message_id)
+        users.delete_dm_message(conn, message_id)
+    finally:
+        conn.close()
+    for stored_name in stored_names:
+        (DM_ATTACHMENT_DIR / stored_name).unlink(missing_ok=True)
+    return jsonify({"success": True, "message_id": message_id})
 
 
 _PREVIEWABLE_XLSX_CONTENT_TYPES = {

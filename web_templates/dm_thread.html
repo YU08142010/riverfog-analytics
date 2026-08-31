@@ -25,7 +25,7 @@
 
     <div class="dm-bubbles" id="dm-bubbles">
         {% for m in messages -%}
-        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}"><div class="dm-bubble">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
+        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}" id="dm-bubble-row-{{ m.id }}"{% if m.sender_id == my_id %} data-context-menu="dm-message-context-menu" data-context-target-id="{{ m.id }}"{% endif %}><div class="dm-bubble">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
             {%- for a in m.attachments -%}
             <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">{{ icon("attach", size=13) }} {{ a.filename }}</a></div>
             {%- endfor -%}
@@ -43,6 +43,11 @@
     </form>
     <p class="muted" id="dm-file-name" style="font-size:0.78rem; margin-top:0.3rem;" hidden></p>
 </div>
+
+<div id="dm-message-context-menu" class="context-menu" hidden>
+    <button type="button" data-context-action="delete-message">削除</button>
+</div>
+
 <script>
 (function() {
     var bubbles = document.getElementById("dm-bubbles");
@@ -51,6 +56,7 @@
     var fileInput = document.getElementById("dm-send-file");
     var fileNameLabel = document.getElementById("dm-file-name");
     var pollUrl = "{{ url_for('dm_poll', user_id=other.id) }}";
+    var deleteUrlBase = "/messages/{{ other.id }}/";
     var lastId = {{ (messages[-1].id if messages else 0) }};
 
     fileInput.addEventListener("change", function() {
@@ -67,9 +73,16 @@
     }
     scrollToBottom();
 
-    function appendBubble(body, createdAt, mine, attachment) {
+    function appendBubble(id, body, createdAt, mine, attachment) {
         var row = document.createElement("div");
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
+        if (id) {
+            row.id = "dm-bubble-row-" + id;
+            if (mine) {
+                row.dataset.contextMenu = "dm-message-context-menu";
+                row.dataset.contextTargetId = id;
+            }
+        }
         var bubble = document.createElement("div");
         bubble.className = "dm-bubble";
         if (body) {
@@ -100,7 +113,7 @@
         if (e.detail.form !== form) { return; }
         var data = e.detail.data || {};
         if (data.id) {
-            appendBubble(data.body || "", data.created_at || "", true, data.attachment);
+            appendBubble(data.id, data.body || "", data.created_at || "", true, data.attachment);
             lastId = data.id;
         }
         textarea.value = "";
@@ -117,13 +130,41 @@
             .then(function(data) {
                 (data.messages || []).forEach(function(m) {
                     var att = (m.attachments && m.attachments[0]) || null;
-                    appendBubble(m.body, m.created_at, false, att);
+                    appendBubble(m.id, m.body, m.created_at, false, att);
                     lastId = m.id;
                 });
             })
             .catch(function() {});
     }, 4000);
     window.addEventListener("beforeunload", function() { clearInterval(pollTimer); });
+
+    // 右クリックメニュー(base.htmlの汎用フレームワーク)からの「削除」。
+    // 自分が送信したメッセージにしかメニュー自体を出していないので、ここでは
+    // サーバー側にPOSTして成功したら該当の吹き出しをDOMから消すだけでよい。
+    document.addEventListener("contextmenuaction", function(e) {
+        if (e.detail.action !== "delete-message") { return; }
+        var messageId = e.detail.targetId;
+        confirmModal("このメッセージを削除しますか？").then(function(ok) {
+            if (!ok) { return; }
+            fetch(deleteUrlBase + messageId + "/delete", {
+                method: "POST",
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-CSRF-Token": "{{ csrf_token() }}",
+                },
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var row = document.getElementById("dm-bubble-row-" + messageId);
+                        if (row) { row.remove(); }
+                    } else {
+                        showToast(data.message || "削除できませんでした。", true);
+                    }
+                })
+                .catch(function() { showToast("削除できませんでした。", true); });
+        });
+    });
 })();
 </script>
 {% endblock %}

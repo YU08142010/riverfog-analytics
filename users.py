@@ -825,6 +825,41 @@ def get_dm_attachments_for_messages(conn, message_ids):
     return result
 
 
+def get_dm_message(conn, message_id):
+    """メッセージ本体と、それが属する会話のuser_a_id/user_b_idを一緒に返す
+    (削除時に本人か会話の当事者かをその場で判定できるようにするため)。"""
+    row = conn.execute(
+        """
+        SELECT m.id, m.conversation_id, m.sender_id, c.user_a_id, c.user_b_id
+        FROM dm_messages m
+        JOIN dm_conversations c ON c.id = m.conversation_id
+        WHERE m.id = ?
+        """,
+        (message_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "conversation_id": row[1], "sender_id": row[2],
+        "user_a_id": row[3], "user_b_id": row[4],
+    }
+
+
+def get_dm_message_attachment_stored_names(conn, message_id):
+    """メッセージ削除の前に、ディスク上から一緒に消す添付ファイルの保存名一覧を返す
+    (dm_attachmentsの行自体はON DELETE CASCADEで自動的に消えるが、ファイル本体は
+    別途消す必要があるため)。"""
+    rows = conn.execute(
+        "SELECT stored_name FROM dm_attachments WHERE message_id = ?", (message_id,)
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def delete_dm_message(conn, message_id):
+    with conn:
+        conn.execute("DELETE FROM dm_messages WHERE id = ?", (message_id,))
+
+
 def add_shared_file(
     conn, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at,
     description="", folder_id=None,
@@ -966,6 +1001,7 @@ __all__ = [
     "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
+    "get_dm_message", "get_dm_message_attachment_stored_names", "delete_dm_message",
     "add_shared_file", "list_shared_files", "get_shared_file", "delete_shared_file",
     "create_shared_folder", "get_shared_folder", "list_shared_folders",
     "shared_folder_breadcrumbs", "shared_folder_is_empty", "delete_shared_folder",
