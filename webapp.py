@@ -32,6 +32,7 @@ from flask import (
     Flask, Response, abort, flash, g, jsonify, redirect, render_template,
     request, send_file, send_from_directory, session, url_for,
 )
+from werkzeug.utils import secure_filename
 
 import matplotlib
 matplotlib.use("Agg")
@@ -108,6 +109,59 @@ AVATAR_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 # (アバターとして必要なサイズよりかなり余裕を持たせた値)。
 Image.MAX_IMAGE_PIXELS = 40_000_000
 LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ)と同じく約53週間分
+
+# --- ファイル共有(DM添付・班の共有ファイル置き場) -------------------------------------
+# 実行ファイル等のリスクを避けるため、画像・PDF・Office文書だけに絞る。1ファイルあたりの
+# サイズ上限はあえて設けていない(利用者からの要望)が、ディスクを使い切ってサーバー全体
+# (霧の収集・予測パイプライン含む)を巻き添えにしないよう、書き込み前に空き容量だけ確認する。
+DM_ATTACHMENT_DIR = BASE_DIR / "data" / "dm_attachments"
+SHARED_FILES_DIR = BASE_DIR / "data" / "shared_files"
+UPLOAD_MIN_FREE_BYTES = 2 * 1024 ** 3  # このバイト数を切り込む書き込みは拒否する
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".webp": "image/webp",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+def _save_uploaded_file(file_storage, dest_dir):
+    """アップロードされたファイルを検証して保存する。戻り値は(result, error)のタプルで、
+    成功時はresult=(元のファイル名, 保存用ファイル名, content_type, サイズ)・error=None、
+    拒否した場合はresult=None・errorにエラーメッセージが入る。
+    保存名はUUID+拡張子にし、元のファイル名は一切パスに使わない
+    (パストラバーサル・同名ファイル衝突・不審なファイル名を避けるため)。
+    """
+    original_name = secure_filename(file_storage.filename or "")
+    ext = Path(original_name).suffix.lower()
+    if not original_name or ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        allowed = "・".join(sorted(e.lstrip(".") for e in ALLOWED_UPLOAD_EXTENSIONS))
+        return None, f"対応していないファイル形式です({allowed}のみアップロードできます)。"
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    dest_path = dest_dir / stored_name
+    size = 0
+    try:
+        with open(dest_path, "wb") as out:
+            while True:
+                chunk = file_storage.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                free = shutil.disk_usage(BASE_DIR).free
+                if free - len(chunk) < UPLOAD_MIN_FREE_BYTES:
+                    raise IOError("disk space")
+                out.write(chunk)
+    except IOError:
+        dest_path.unlink(missing_ok=True)
+        return None, "サーバーの空き容量が不足しているため、アップロードできませんでした。"
+    return (original_name, stored_name, ALLOWED_UPLOAD_EXTENSIONS[ext], size), None
 
 # ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている
 # (river-fog-terminal.service)。Tailscale/LANどちらからアクセスしても繋がるよう、iframeのURLは
@@ -647,6 +701,34 @@ def _current_notifications():
             "message": f"{station}: カメラ画像が直近{CAMERA_FAILURE_ALERT_CONSECUTIVE}回連続で取得できていません",
             "url": url_for("station_detail", name=station),
         })
+
+    my_id = session.get("user_id")
+    if my_id:
+        conn = _users_conn()
+        try:
+            unread = users.dm_unread_counts(conn, my_id)
+            conversations = {cid: users.get_dm_conversation(conn, cid) for cid in unread}
+            other_ids = [
+                (c["user_b_id"] if c["user_a_id"] == my_id else c["user_a_id"])
+                for c in conversations.values() if c is not None
+            ]
+            senders = users.get_users_by_ids(conn, other_ids)
+        finally:
+            conn.close()
+        for cid, count in unread.items():
+            conv = conversations.get(cid)
+            if conv is None:
+                continue
+            other_id = conv["user_b_id"] if conv["user_a_id"] == my_id else conv["user_a_id"]
+            other = senders.get(other_id)
+            if other is None:
+                continue
+            notifications.append({
+                "id": f"dm:{cid}",
+                "level": "info",
+                "message": f"{other['name']}さんから未読メッセージが{count}件あります",
+                "url": url_for("dm_thread", user_id=other_id),
+            })
 
     if session.get("role") == "admin":
         overview = _admin_overview_cached()
@@ -3213,7 +3295,9 @@ def member_frame_equip(user_id):
 
 @app.route("/messages")
 def dm_inbox():
-    """自分が参加している会話の一覧(直近やり取りが新しい順、未読件数付き)。"""
+    """自分が参加している会話の一覧(直近やり取りが新しい順、未読件数付き)に加えて、
+    まだ会話していない他の全メンバーも一覧に出す(わざわざ相手のプロフィールページを
+    経由しなくても、ここから新しい会話を始められるようにするため)。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -3222,6 +3306,7 @@ def dm_inbox():
         conversations = users.list_dm_conversations(conn, my_id)
         unread = users.dm_unread_counts(conn, my_id)
         others = users.get_users_by_ids(conn, [c["other_id"] for c in conversations])
+        all_users = users.list_users(conn)
     finally:
         conn.close()
     threads = [
@@ -3234,7 +3319,9 @@ def dm_inbox():
         for c in conversations
         if c["other_id"] in others  # 退会済みの相手は一覧に出さない
     ]
-    return render_template("dm_inbox.html", threads=threads)
+    started_ids = {c["other_id"] for c in conversations}
+    other_members = [u for u in all_users if u["id"] != my_id and u["id"] not in started_ids]
+    return render_template("dm_inbox.html", threads=threads, other_members=other_members)
 
 
 @app.route("/messages/<int:user_id>")
@@ -3259,6 +3346,9 @@ def dm_thread(user_id):
         if row is not None:
             conversation_id = row[0]
             messages = users.list_dm_messages(conn, conversation_id)
+            attachments_by_message = users.get_dm_attachments_for_messages(conn, [m["id"] for m in messages])
+            for m in messages:
+                m["attachments"] = attachments_by_message.get(m["id"], [])
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
         else:
@@ -3279,8 +3369,18 @@ def dm_send(user_id):
     if user_id == my_id:
         abort(404)
     body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
-    if not body:
-        return _finish("dm_thread", "メッセージを入力してください。", success=False, user_id=user_id)
+    file = request.files.get("attachment")
+    has_file = bool(file and file.filename)
+    if not body and not has_file:
+        return _finish(
+            "dm_thread", "メッセージまたは添付ファイルを指定してください。", success=False, user_id=user_id,
+        )
+    attachment_info = None
+    if has_file:
+        result, error = _save_uploaded_file(file, DM_ATTACHMENT_DIR)
+        if error:
+            return _finish("dm_thread", error, success=False, user_id=user_id)
+        attachment_info = result
     conn = _users_conn()
     try:
         if users.get_user_by_id(conn, user_id) is None:
@@ -3288,6 +3388,12 @@ def dm_send(user_id):
         created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
         message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at)
+        attachment_id = None
+        if attachment_info:
+            original_name, stored_name, content_type, size = attachment_info
+            attachment_id = users.add_dm_attachment(
+                conn, message_id, original_name, stored_name, content_type, size, created_at,
+            )
         users.mark_dm_read(conn, conversation_id, my_id, message_id)
     finally:
         conn.close()
@@ -3295,6 +3401,9 @@ def dm_send(user_id):
         return jsonify({
             "message": "送信しました。", "success": True,
             "id": message_id, "body": body, "created_at": created_at,
+            "attachment": (
+                {"id": attachment_id, "filename": attachment_info[0]} if attachment_info else None
+            ),
         })
     return redirect(url_for("dm_thread", user_id=user_id))
 
@@ -3318,11 +3427,113 @@ def dm_poll(user_id):
         if row is not None:
             conversation_id = row[0]
             messages = users.list_dm_messages(conn, conversation_id, after_id)
+            attachments_by_message = users.get_dm_attachments_for_messages(conn, [m["id"] for m in messages])
+            for m in messages:
+                m["attachments"] = attachments_by_message.get(m["id"], [])
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
     finally:
         conn.close()
     return jsonify({"messages": messages})
+
+
+@app.route("/messages/attachments/<int:attachment_id>")
+def dm_attachment_file(attachment_id):
+    """DM添付ファイルのダウンロード。その会話の当事者(送信者・受信者どちらか)だけが
+    取得できる(会話に無関係な人がidを推測してもファイルを見られないようにするため)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        att = users.get_dm_attachment(conn, attachment_id)
+    finally:
+        conn.close()
+    if att is None:
+        abort(404)
+    if my_id not in (att["user_a_id"], att["user_b_id"]):
+        abort(403)
+    return send_from_directory(
+        DM_ATTACHMENT_DIR, att["stored_name"], as_attachment=True, download_name=att["filename"],
+    )
+
+
+@app.route("/files")
+def shared_files_page():
+    """班の共有ファイル置き場(誰でもアップロード・ダウンロードできる、Teamsの「ファイル」
+    タブに相当)。ログイン済みなら誰でも見られる。"""
+    if not session.get("user_id"):
+        return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        files = users.list_shared_files(conn)
+        uploaders = users.get_users_by_ids(conn, [f["uploaded_by"] for f in files])
+    finally:
+        conn.close()
+    for f in files:
+        f["uploader_name"] = uploaders.get(f["uploaded_by"], {}).get("name", "(退会済みユーザー)")
+    return render_template("shared_files.html", files=files)
+
+
+@app.route("/files/upload", methods=["POST"])
+def shared_file_upload():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return _finish("shared_files_page", "ファイルを選択してください。", success=False)
+    result, error = _save_uploaded_file(file, SHARED_FILES_DIR)
+    if error:
+        return _finish("shared_files_page", error, success=False)
+    original_name, stored_name, content_type, size = result
+    description = request.form.get("description", "").strip()[:200]
+    conn = _users_conn()
+    try:
+        users.add_shared_file(
+            conn, original_name, stored_name, content_type, size, my_id,
+            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"), description,
+        )
+    finally:
+        conn.close()
+    return _finish("shared_files_page", "アップロードしました。")
+
+
+@app.route("/files/<int:file_id>")
+def shared_file_download(file_id):
+    if not session.get("user_id"):
+        abort(403)
+    conn = _users_conn()
+    try:
+        f = users.get_shared_file(conn, file_id)
+    finally:
+        conn.close()
+    if f is None:
+        abort(404)
+    return send_from_directory(
+        SHARED_FILES_DIR, f["stored_name"], as_attachment=True, download_name=f["filename"],
+    )
+
+
+@app.route("/files/<int:file_id>/delete", methods=["POST"])
+def shared_file_delete(file_id):
+    """アップロード本人か管理者だけが削除できる。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        f = users.get_shared_file(conn, file_id)
+        if f is None:
+            abort(404)
+        if f["uploaded_by"] != my_id and session.get("role") != "admin":
+            abort(403)
+        users.delete_shared_file(conn, file_id)
+    finally:
+        conn.close()
+    stored_path = SHARED_FILES_DIR / f["stored_name"]
+    stored_path.unlink(missing_ok=True)
+    return _finish("shared_files_page", "削除しました。")
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

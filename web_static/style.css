@@ -213,6 +213,8 @@ body {
     font-size: 0.68rem;
     opacity: 0.7;
 }
+.dm-attachment { margin-top: 0.3rem; }
+.dm-attachment a { color: inherit; text-decoration: underline; word-break: break-all; }
 .dm-compose { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 .dm-compose textarea {
     flex: 1 1 auto;

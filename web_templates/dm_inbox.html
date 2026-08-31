@@ -11,9 +11,8 @@
 {% block content %}
 <div class="card">
     <h2 style="margin-top:0;">メッセージ</h2>
-    <p class="muted">メンバー一覧から相手を選び、「メッセージを送る」で会話を始められます。</p>
     {% if not threads %}
-    <div class="empty-state">{{ icon("empty") }}<span>まだメッセージのやり取りがありません。</span></div>
+    <div class="empty-state">{{ icon("empty") }}<span>まだメッセージのやり取りがありません。下のメンバー一覧から相手を選んで送れます。</span></div>
     {% else %}
     <ul class="dm-thread-list">
         {% for t in threads %}
@@ -40,4 +39,30 @@
     </ul>
     {% endif %}
 </div>
+
+{% if other_members %}
+<div class="card">
+    <h2 style="margin-top:0;">他のメンバー</h2>
+    <p class="muted">まだ会話していないメンバーです。選ぶと新しく会話を始められます。</p>
+    <ul class="dm-thread-list">
+        {% for m in other_members %}
+        <li>
+            <a class="dm-thread-item" href="{{ url_for('dm_thread', user_id=m.id) }}">
+                {% set avatar_url = member_avatar_url(m.id) %}
+                {% call avatar_frame(m.equipped_frame) %}
+                {% if avatar_url %}
+                <img class="avatar-circle" src="{{ avatar_url }}" alt="">
+                {% else %}
+                <span class="avatar-circle-fallback">{{ m.name[0] }}</span>
+                {% endif %}
+                {% endcall %}
+                <div class="dm-thread-info">
+                    <div class="dm-thread-name">{{ m.name }}</div>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
 {% endblock %}

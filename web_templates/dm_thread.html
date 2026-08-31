@@ -25,36 +25,66 @@
     <div class="dm-bubbles" id="dm-bubbles">
         {% for m in messages %}
         <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}">
-            <div class="dm-bubble">{{ m.body }}<span class="dm-bubble-time">{{ m.created_at }}</span></div>
+            <div class="dm-bubble">
+                {% if m.body %}{{ m.body }}{% endif %}
+                {% for a in m.attachments %}
+                <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">📎 {{ a.filename }}</a></div>
+                {% endfor %}
+                <span class="dm-bubble-time">{{ m.created_at }}</span>
+            </div>
         </div>
         {% endfor %}
     </div>
 
-    <form id="dm-send-form" class="dm-compose" action="{{ url_for('dm_send', user_id=other.id) }}" method="post" data-ajax>
+    <form id="dm-send-form" class="dm-compose" action="{{ url_for('dm_send', user_id=other.id) }}" method="post" enctype="multipart/form-data" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <textarea name="body" id="dm-send-body" rows="1" maxlength="{{ dm_message_max_length }}" placeholder="メッセージを入力..."></textarea>
+        <label class="button cancel" style="cursor:pointer; display:inline-flex; align-items:center;">
+            📎<input type="file" name="attachment" id="dm-send-file" style="display:none;">
+        </label>
         <button type="submit" class="button">送信</button>
     </form>
+    <p class="muted" id="dm-file-name" style="font-size:0.78rem; margin-top:0.3rem;" hidden></p>
 </div>
 <script>
 (function() {
     var bubbles = document.getElementById("dm-bubbles");
     var form = document.getElementById("dm-send-form");
     var textarea = document.getElementById("dm-send-body");
+    var fileInput = document.getElementById("dm-send-file");
+    var fileNameLabel = document.getElementById("dm-file-name");
     var pollUrl = "{{ url_for('dm_poll', user_id=other.id) }}";
     var lastId = {{ (messages[-1].id if messages else 0) }};
+
+    fileInput.addEventListener("change", function() {
+        if (fileInput.files.length) {
+            fileNameLabel.textContent = "添付: " + fileInput.files[0].name;
+            fileNameLabel.hidden = false;
+        } else {
+            fileNameLabel.hidden = true;
+        }
+    });
 
     function scrollToBottom() {
         bubbles.scrollTop = bubbles.scrollHeight;
     }
     scrollToBottom();
 
-    function appendBubble(body, createdAt, mine) {
+    function appendBubble(body, createdAt, mine, attachment) {
         var row = document.createElement("div");
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
         var bubble = document.createElement("div");
         bubble.className = "dm-bubble";
-        bubble.textContent = body;
+        if (body) { bubble.appendChild(document.createTextNode(body)); }
+        if (attachment) {
+            var div = document.createElement("div");
+            div.className = "dm-attachment";
+            var a = document.createElement("a");
+            a.href = "/messages/attachments/" + attachment.id;
+            a.textContent = "📎 " + attachment.filename;
+            div.appendChild(a);
+            bubble.appendChild(div);
+        }
         var time = document.createElement("span");
         time.className = "dm-bubble-time";
         time.textContent = createdAt;
@@ -68,10 +98,12 @@
         if (e.detail.form !== form) { return; }
         var data = e.detail.data || {};
         if (data.id) {
-            appendBubble(data.body || "", data.created_at || "", true);
+            appendBubble(data.body || "", data.created_at || "", true, data.attachment);
             lastId = data.id;
         }
         textarea.value = "";
+        fileInput.value = "";
+        fileNameLabel.hidden = true;
     });
 
     // このアプリには汎用のリアルタイム配信基盤が無いため、スレッドを開いている間
@@ -82,7 +114,8 @@
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 (data.messages || []).forEach(function(m) {
-                    appendBubble(m.body, m.created_at, false);
+                    var att = (m.attachments && m.attachments[0]) || null;
+                    appendBubble(m.body, m.created_at, false, att);
                     lastId = m.id;
                 });
             })

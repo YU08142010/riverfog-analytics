@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}共有ファイル{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li>共有ファイル</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h2 style="margin-top:0;">共有ファイル</h2>
+    <p class="muted">ログインしている全員が見られる共有スペースです。画像・PDF・Office文書をアップロードできます。</p>
+    <form method="post" action="{{ url_for('shared_file_upload') }}" enctype="multipart/form-data" data-ajax data-ajax-reload>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="file" name="file" required>
+        <input type="text" name="description" maxlength="200" placeholder="メモ(任意)" style="margin-left:0.5rem; padding:0.3rem 0.5rem;">
+        <button type="submit" class="button" style="margin-left:0.5rem;">アップロード</button>
+    </form>
+</div>
+
+<div class="card">
+    {% if not files %}
+    <div class="empty-state">{{ icon("empty") }}<span>まだファイルがアップロードされていません。</span></div>
+    {% else %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead>
+        <tr>
+            <th>ファイル名</th>
+            <th>メモ</th>
+            <th>アップロード者</th>
+            <th>日時</th>
+            <th>サイズ</th>
+            <th></th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for f in files %}
+        <tr>
+            <td><a href="{{ url_for('shared_file_download', file_id=f.id) }}">{{ f.filename }}</a></td>
+            <td>{{ f.description }}</td>
+            <td>{{ f.uploader_name }}</td>
+            <td>{{ f.uploaded_at }}</td>
+            <td>{{ "%.1f"|format(f.size_bytes / 1024 / 1024) }} MB</td>
+            <td>
+                {% if f.uploaded_by == session.get('user_id') or session.get('role') == 'admin' %}
+                <form method="post" action="{{ url_for('shared_file_delete', file_id=f.id) }}" data-ajax data-ajax-reload data-confirm="このファイルを削除しますか？">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button cancel" style="padding:0.2rem 0.5rem; font-size:0.78rem;">削除</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

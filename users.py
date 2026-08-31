@@ -100,6 +100,26 @@ CREATE TABLE IF NOT EXISTS dm_read_state (
     last_read_message_id INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conversation_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS dm_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shared_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    uploaded_at TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shared_files_uploaded_at ON shared_files(uploaded_at);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -737,6 +757,100 @@ def total_dm_unread(conn, user_id):
     return sum(dm_unread_counts(conn, user_id).values())
 
 
+def add_dm_attachment(conn, message_id, filename, stored_name, content_type, size_bytes, uploaded_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO dm_attachments (message_id, filename, stored_name, content_type, size_bytes, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (message_id, filename, stored_name, content_type, size_bytes, uploaded_at),
+        )
+        return cur.lastrowid
+
+
+def get_dm_attachment(conn, attachment_id):
+    """添付ファイルと、それが属する会話のuser_a_id/user_b_idも一緒に返す
+    (ダウンロード時に会話の参加者本人かどうかをその場で確認できるようにするため)。"""
+    row = conn.execute(
+        """
+        SELECT a.id, a.filename, a.stored_name, a.content_type, a.size_bytes,
+               m.conversation_id, c.user_a_id, c.user_b_id
+        FROM dm_attachments a
+        JOIN dm_messages m ON m.id = a.message_id
+        JOIN dm_conversations c ON c.id = m.conversation_id
+        WHERE a.id = ?
+        """,
+        (attachment_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "filename": row[1], "stored_name": row[2], "content_type": row[3],
+        "size_bytes": row[4], "conversation_id": row[5], "user_a_id": row[6], "user_b_id": row[7],
+    }
+
+
+def get_dm_attachments_for_messages(conn, message_ids):
+    """{message_id: [添付情報, ...]} を返す(スレッド表示でメッセージ一覧と一緒にまとめて
+    引くため。1件ずつ引くとメッセージ数だけクエリが発生してしまう)。"""
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT id, message_id, filename, size_bytes FROM dm_attachments "
+        f"WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[1], []).append({"id": r[0], "filename": r[2], "size_bytes": r[3]})
+    return result
+
+
+def add_shared_file(conn, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description=""):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO shared_files "
+            "(filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description),
+        )
+        return cur.lastrowid
+
+
+def list_shared_files(conn):
+    rows = conn.execute(
+        "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description "
+        "FROM shared_files ORDER BY uploaded_at DESC"
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "filename": r[1], "content_type": r[2], "size_bytes": r[3],
+            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6],
+        }
+        for r in rows
+    ]
+
+
+def get_shared_file(conn, file_id):
+    row = conn.execute(
+        "SELECT id, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description "
+        "FROM shared_files WHERE id = ?",
+        (file_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "filename": row[1], "stored_name": row[2], "content_type": row[3],
+        "size_bytes": row[4], "uploaded_by": row[5], "uploaded_at": row[6], "description": row[7],
+    }
+
+
+def delete_shared_file(conn, file_id):
+    with conn:
+        conn.execute("DELETE FROM shared_files WHERE id = ?", (file_id,))
+
+
 __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "get_users_by_ids", "set_role", "update_user", "update_profile", "delete_user",
@@ -753,4 +867,6 @@ __all__ = [
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
     "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
+    "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
+    "add_shared_file", "list_shared_files", "get_shared_file", "delete_shared_file",
 ]
