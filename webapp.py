@@ -3512,21 +3512,45 @@ def dm_attachment_file(attachment_id):
     )
 
 
+_PREVIEWABLE_XLSX_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+_PREVIEW_MAX_ROWS = 200
+_PREVIEW_MAX_COLS = 30
+
+
 @app.route("/files")
 def shared_files_page():
     """班の共有ファイル置き場(誰でもアップロード・ダウンロードできる、Teamsの「ファイル」
-    タブに相当)。ログイン済みなら誰でも見られる。"""
+    タブに相当)。ログイン済みなら誰でも見られる。?folder=<id>でフォルダの中を表示する
+    (省略時は最上位)。"""
     if not session.get("user_id"):
         return redirect(url_for("login", next=request.path))
+    folder_id = request.args.get("folder", type=int)
     conn = _users_conn()
     try:
-        files = users.list_shared_files(conn)
-        uploaders = users.get_users_by_ids(conn, [f["uploaded_by"] for f in files])
+        if folder_id is not None and users.get_shared_folder(conn, folder_id) is None:
+            abort(404)
+        folders = users.list_shared_folders(conn, folder_id)
+        files = users.list_shared_files(conn, folder_id)
+        breadcrumbs = users.shared_folder_breadcrumbs(conn, folder_id) if folder_id else []
+        creators = users.get_users_by_ids(
+            conn, [f["uploaded_by"] for f in files] + [fo["created_by"] for fo in folders]
+        )
     finally:
         conn.close()
     for f in files:
-        f["uploader_name"] = uploaders.get(f["uploaded_by"], {}).get("name", "(退会済みユーザー)")
-    return render_template("shared_files.html", files=files)
+        f["uploader_name"] = creators.get(f["uploaded_by"], {}).get("name", "(退会済みユーザー)")
+        f["previewable"] = (
+            f["content_type"].startswith("image/") or f["content_type"] == "application/pdf"
+            or f["content_type"] in _PREVIEWABLE_XLSX_CONTENT_TYPES
+        )
+    for fo in folders:
+        fo["created_by_name"] = creators.get(fo["created_by"], {}).get("name", "(退会済みユーザー)")
+    return render_template(
+        "shared_files.html", files=files, folders=folders, breadcrumbs=breadcrumbs,
+        current_folder_id=folder_id,
+    )
 
 
 @app.route("/files/upload", methods=["POST"])
@@ -3534,23 +3558,71 @@ def shared_file_upload():
     my_id = session.get("user_id")
     if not my_id:
         abort(403)
+    folder_id = request.form.get("folder_id", type=int)
     file = request.files.get("file")
     if not file or not file.filename:
-        return _finish("shared_files_page", "ファイルを選択してください。", success=False)
+        return _finish("shared_files_page", "ファイルを選択してください。", success=False, folder=folder_id)
     result, error = _save_uploaded_file(file, SHARED_FILES_DIR)
     if error:
-        return _finish("shared_files_page", error, success=False)
+        return _finish("shared_files_page", error, success=False, folder=folder_id)
     original_name, stored_name, content_type, size = result
     description = request.form.get("description", "").strip()[:200]
     conn = _users_conn()
     try:
+        if folder_id is not None and users.get_shared_folder(conn, folder_id) is None:
+            abort(404)
         users.add_shared_file(
             conn, original_name, stored_name, content_type, size, my_id,
-            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"), description,
+            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"), description, folder_id,
         )
     finally:
         conn.close()
-    return _finish("shared_files_page", "アップロードしました。")
+    return _finish("shared_files_page", "アップロードしました。", folder=folder_id)
+
+
+@app.route("/files/folders", methods=["POST"])
+def shared_folder_create():
+    """右クリックメニューの「新しいフォルダ」から呼ばれる。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    parent_id = request.form.get("parent_id", type=int)
+    name = request.form.get("name", "").strip()[:100]
+    if not name:
+        return _finish("shared_files_page", "フォルダ名を入力してください。", success=False, folder=parent_id)
+    conn = _users_conn()
+    try:
+        if parent_id is not None and users.get_shared_folder(conn, parent_id) is None:
+            abort(404)
+        users.create_shared_folder(conn, name, parent_id, my_id, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+    finally:
+        conn.close()
+    return _finish("shared_files_page", "フォルダを作成しました。", folder=parent_id)
+
+
+@app.route("/files/folders/<int:folder_id>/delete", methods=["POST"])
+def shared_folder_delete(folder_id):
+    """空のフォルダのみ削除できる(中身を巻き添えで消さないため)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        folder = users.get_shared_folder(conn, folder_id)
+        if folder is None:
+            abort(404)
+        if folder["created_by"] != my_id and session.get("role") != "admin":
+            abort(403)
+        if not users.shared_folder_is_empty(conn, folder_id):
+            return _finish(
+                "shared_files_page", "空でないフォルダは削除できません。",
+                success=False, folder=folder["parent_id"],
+            )
+        users.delete_shared_folder(conn, folder_id)
+        parent_id = folder["parent_id"]
+    finally:
+        conn.close()
+    return _finish("shared_files_page", "フォルダを削除しました。", folder=parent_id)
 
 
 @app.route("/files/<int:file_id>")
@@ -3569,6 +3641,67 @@ def shared_file_download(file_id):
     )
 
 
+@app.route("/files/<int:file_id>/raw")
+def shared_file_raw(file_id):
+    """プレビュー画面の<img>/<embed>から読み込ませる、添付ヘッダーを付けない生配信。"""
+    if not session.get("user_id"):
+        abort(403)
+    conn = _users_conn()
+    try:
+        f = users.get_shared_file(conn, file_id)
+    finally:
+        conn.close()
+    if f is None:
+        abort(404)
+    return send_from_directory(SHARED_FILES_DIR, f["stored_name"], mimetype=f["content_type"])
+
+
+@app.route("/files/<int:file_id>/preview")
+def shared_file_preview(file_id):
+    """画像・PDF・xlsxをブラウザ上でその場に見られるプレビュー画面。
+    xlsxはopenpyxlで読み込み、先頭シートを表としてサーバー側でHTML化する
+    (行・列数が多いシートは重くなるので上限で打ち切る)。"""
+    if not session.get("user_id"):
+        abort(403)
+    conn = _users_conn()
+    try:
+        f = users.get_shared_file(conn, file_id)
+    finally:
+        conn.close()
+    if f is None:
+        abort(404)
+
+    kind = None
+    xlsx_rows = None
+    xlsx_truncated = False
+    if f["content_type"].startswith("image/"):
+        kind = "image"
+    elif f["content_type"] == "application/pdf":
+        kind = "pdf"
+    elif f["content_type"] in _PREVIEWABLE_XLSX_CONTENT_TYPES:
+        kind = "xlsx"
+        import openpyxl
+        try:
+            wb = openpyxl.load_workbook(
+                SHARED_FILES_DIR / f["stored_name"], data_only=True, read_only=True,
+            )
+            ws = wb.active
+            xlsx_rows = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= _PREVIEW_MAX_ROWS:
+                    xlsx_truncated = True
+                    break
+                xlsx_rows.append(row[:_PREVIEW_MAX_COLS])
+            if ws.max_column and ws.max_column > _PREVIEW_MAX_COLS:
+                xlsx_truncated = True
+        except Exception as e:
+            log.warning("xlsx preview failed for shared_files id=%d: %s", file_id, e)
+            kind = None
+    return render_template(
+        "shared_file_preview.html", f=f, kind=kind, xlsx_rows=xlsx_rows, xlsx_truncated=xlsx_truncated,
+    )
+
+
 @app.route("/files/<int:file_id>/delete", methods=["POST"])
 def shared_file_delete(file_id):
     """アップロード本人か管理者だけが削除できる。"""
@@ -3583,11 +3716,12 @@ def shared_file_delete(file_id):
         if f["uploaded_by"] != my_id and session.get("role") != "admin":
             abort(403)
         users.delete_shared_file(conn, file_id)
+        folder_id = f["folder_id"]
     finally:
         conn.close()
     stored_path = SHARED_FILES_DIR / f["stored_name"]
     stored_path.unlink(missing_ok=True)
-    return _finish("shared_files_page", "削除しました。")
+    return _finish("shared_files_page", "削除しました。", folder=folder_id)
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

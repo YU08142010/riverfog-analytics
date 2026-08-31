@@ -4,48 +4,57 @@
 {% block breadcrumb %}
 <ul class="breadcrumb">
     <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
-    <li>共有ファイル</li>
+    <li><a href="{{ url_for('shared_files_page') }}">共有ファイル</a></li>
+    {% for b in breadcrumbs %}
+    <li><a href="{{ url_for('shared_files_page', folder=b.id) }}">{{ b.name }}</a></li>
+    {% endfor %}
 </ul>
 {% endblock %}
 {% block content %}
-<div class="card">
-    <h2 style="margin-top:0;">共有ファイル</h2>
-    <p class="muted">ログインしている全員が見られる共有スペースです。画像・PDF・Office文書をアップロードできます。</p>
-    <form method="post" action="{{ url_for('shared_file_upload') }}" enctype="multipart/form-data" data-ajax data-ajax-reload>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="file" name="file" required>
-        <input type="text" name="description" maxlength="200" placeholder="メモ(任意)" style="margin-left:0.5rem; padding:0.3rem 0.5rem;">
-        <button type="submit" class="button" style="margin-left:0.5rem;">アップロード</button>
-    </form>
-</div>
+<div class="card" id="files-area">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <h2 style="margin:0;">共有ファイル</h2>
+        <form method="post" action="{{ url_for('shared_file_upload') }}" enctype="multipart/form-data" data-ajax data-ajax-reload style="display:flex; gap:0.4rem; align-items:center;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="folder_id" value="{{ current_folder_id or '' }}">
+            <input type="file" name="file" required>
+            <button type="submit" class="button">アップロード</button>
+        </form>
+    </div>
 
-<div class="card">
-    {% if not files %}
-    <div class="empty-state">{{ icon("empty") }}<span>まだファイルがアップロードされていません。</span></div>
+    <div id="files-drop-area" style="margin-top:0.8rem; min-height:120px;">
+    {% if not folders and not files %}
+    <div class="empty-state">{{ icon("empty") }}<span>ここは空です(右クリックでフォルダを作成できます)</span></div>
     {% else %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead>
-        <tr>
-            <th>ファイル名</th>
-            <th>メモ</th>
-            <th>アップロード者</th>
-            <th>日時</th>
-            <th>サイズ</th>
-            <th></th>
-        </tr>
-        </thead>
+        <thead><tr><th>名前</th><th>アップロード者</th><th>日時</th><th>サイズ</th><th></th></tr></thead>
         <tbody>
+        {% for fo in folders %}
+        <tr class="folder-row" data-folder-id="{{ fo.id }}">
+            <td><a href="{{ url_for('shared_files_page', folder=fo.id) }}">📁 {{ fo.name }}</a></td>
+            <td>{{ fo.created_by_name }}</td>
+            <td>{{ fo.created_at }}</td>
+            <td></td>
+            <td></td>
+        </tr>
+        {% endfor %}
         {% for f in files %}
         <tr>
-            <td><a href="{{ url_for('shared_file_download', file_id=f.id) }}">{{ f.filename }}</a></td>
-            <td>{{ f.description }}</td>
+            <td>
+                {% if f.previewable %}
+                <a href="{{ url_for('shared_file_preview', file_id=f.id) }}">{{ f.filename }}</a>
+                {% else %}
+                <a href="{{ url_for('shared_file_download', file_id=f.id) }}">{{ f.filename }}</a>
+                {% endif %}
+            </td>
             <td>{{ f.uploader_name }}</td>
             <td>{{ f.uploaded_at }}</td>
             <td>{{ "%.1f"|format(f.size_bytes / 1024 / 1024) }} MB</td>
-            <td>
+            <td style="white-space:nowrap;">
+                <a href="{{ url_for('shared_file_download', file_id=f.id) }}">DL</a>
                 {% if f.uploaded_by == session.get('user_id') or session.get('role') == 'admin' %}
-                <form method="post" action="{{ url_for('shared_file_delete', file_id=f.id) }}" data-ajax data-ajax-reload data-confirm="このファイルを削除しますか？">
+                <form method="post" action="{{ url_for('shared_file_delete', file_id=f.id) }}" data-ajax data-ajax-reload data-confirm="このファイルを削除しますか？" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="button cancel" style="padding:0.2rem 0.5rem; font-size:0.78rem;">削除</button>
                 </form>
@@ -57,5 +66,79 @@
     </table>
     </div>
     {% endif %}
+    </div>
 </div>
+
+<div id="file-context-menu" class="context-menu" hidden>
+    <button type="button" id="ctx-new-folder">📁 新しいフォルダ</button>
+</div>
+<div id="folder-context-menu" class="context-menu" hidden>
+    <button type="button" id="ctx-delete-folder">🗑 フォルダを削除</button>
+</div>
+
+<script>
+(function() {
+    var dropArea = document.getElementById("files-drop-area");
+    var fileMenu = document.getElementById("file-context-menu");
+    var folderMenu = document.getElementById("folder-context-menu");
+
+    function hideMenus() {
+        fileMenu.hidden = true;
+        folderMenu.hidden = true;
+    }
+    document.addEventListener("click", hideMenus);
+
+    function positionMenu(menu, e) {
+        menu.style.left = e.pageX + "px";
+        menu.style.top = e.pageY + "px";
+        menu.hidden = false;
+    }
+
+    dropArea.addEventListener("contextmenu", function(e) {
+        var row = e.target.closest(".folder-row");
+        e.preventDefault();
+        hideMenus();
+        if (row) {
+            folderMenu.dataset.folderId = row.dataset.folderId;
+            positionMenu(folderMenu, e);
+        } else {
+            positionMenu(fileMenu, e);
+        }
+    });
+
+    function postForm(action, fields) {
+        var f = document.createElement("form");
+        f.method = "post";
+        f.action = action;
+        f.style.display = "none";
+        var csrf = document.createElement("input");
+        csrf.type = "hidden"; csrf.name = "csrf_token"; csrf.value = "{{ csrf_token() }}";
+        f.appendChild(csrf);
+        Object.keys(fields).forEach(function(k) {
+            var input = document.createElement("input");
+            input.type = "hidden"; input.name = k; input.value = fields[k];
+            f.appendChild(input);
+        });
+        document.body.appendChild(f);
+        f.submit();
+    }
+
+    document.getElementById("ctx-new-folder").addEventListener("click", function() {
+        hideMenus();
+        var name = prompt("新しいフォルダ名");
+        if (name && name.trim()) {
+            postForm("{{ url_for('shared_folder_create') }}", {
+                parent_id: "{{ current_folder_id or '' }}", name: name.trim(),
+            });
+        }
+    });
+    document.getElementById("ctx-delete-folder").addEventListener("click", function() {
+        var folderId = folderMenu.dataset.folderId;
+        hideMenus();
+        if (confirm("このフォルダを削除しますか？(空の場合のみ削除できます)")) {
+            postForm("/files/folders/" + folderId + "/delete", {});
+        }
+    });
+})();
+</script>
 {% endblock %}

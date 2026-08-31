@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ f.filename }}{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('shared_files_page', folder=f.folder_id) }}">共有ファイル</a></li>
+    <li>{{ f.filename }}</li>
+</ul>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <h2 style="margin:0;">{{ f.filename }}</h2>
+        <a href="{{ url_for('shared_file_download', file_id=f.id) }}" class="button">ダウンロード</a>
+    </div>
+
+    {% if kind == "image" %}
+    <img src="{{ url_for('shared_file_raw', file_id=f.id) }}" style="max-width:100%; margin-top:1rem; border-radius:var(--radius-sm);" alt="{{ f.filename }}">
+    {% elif kind == "pdf" %}
+    <embed src="{{ url_for('shared_file_raw', file_id=f.id) }}" type="application/pdf" style="width:100%; height:80vh; margin-top:1rem; border:1px solid var(--color-border);">
+    {% elif kind == "xlsx" and xlsx_rows is not none %}
+    {% if xlsx_truncated %}
+    <p class="muted" style="margin-top:0.8rem;">一部のみ表示しています。</p>
+    {% endif %}
+    <div class="table-scroll" style="margin-top:0.6rem;">
+    <table class="obs-table">
+        <tbody>
+        {% for row in xlsx_rows %}
+        <tr>{% for cell in row %}<td>{{ cell if cell is not none else "" }}</td>{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted" style="margin-top:1rem;">このファイル形式はプレビューに対応していません。ダウンロードしてご覧ください。</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -215,6 +215,32 @@ body {
 }
 .dm-attachment { margin-top: 0.3rem; }
 .dm-attachment a { color: inherit; text-decoration: underline; word-break: break-all; }
+
+/* 共有ファイルページの右クリックメニュー(フォルダの作成・削除)。 */
+.context-menu {
+    position: absolute;
+    z-index: 200;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-card-hover);
+    padding: 0.3rem;
+    min-width: 160px;
+}
+.context-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border: none;
+    background: none;
+    font-size: 0.85rem;
+    color: var(--color-text);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+.context-menu button:hover { background: var(--color-bg); }
+.folder-row td:first-child a { font-weight: 600; }
 .dm-compose { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 .dm-compose textarea {
     flex: 1 1 auto;

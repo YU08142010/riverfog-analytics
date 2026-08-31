@@ -120,6 +120,14 @@ CREATE TABLE IF NOT EXISTS shared_files (
     description TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_shared_files_uploaded_at ON shared_files(uploaded_at);
+CREATE TABLE IF NOT EXISTS shared_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES shared_folders(id) ON DELETE CASCADE,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shared_folders_parent_id ON shared_folders(parent_id);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -189,6 +197,15 @@ def _ensure_profile_columns(conn):
         conn.execute("ALTER TABLE users ADD COLUMN equipped_frame TEXT NOT NULL DEFAULT ''")
 
 
+def _ensure_shared_files_columns(conn):
+    """folder_idはフォルダ機能を後から追加した列。無ければ足す。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(shared_files)").fetchall()}
+    if "folder_id" not in cols:
+        conn.execute(
+            "ALTER TABLE shared_files ADD COLUMN folder_id INTEGER REFERENCES shared_folders(id)"
+        )
+
+
 def connect(db_path):
     conn = sqlite3.connect(db_path)
     # テーブル作り直し(移行)中はFK違反チェックを一時的に無効にする必要があるため、
@@ -196,6 +213,7 @@ def connect(db_path):
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(SCHEMA)
     _ensure_profile_columns(conn)
+    _ensure_shared_files_columns(conn)
     _migrate_add_foreign_keys(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -807,26 +825,37 @@ def get_dm_attachments_for_messages(conn, message_ids):
     return result
 
 
-def add_shared_file(conn, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description=""):
+def add_shared_file(
+    conn, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at,
+    description="", folder_id=None,
+):
     with conn:
         cur = conn.execute(
             "INSERT INTO shared_files "
-            "(filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description),
+            "(filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id),
         )
         return cur.lastrowid
 
 
-def list_shared_files(conn):
-    rows = conn.execute(
-        "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description "
-        "FROM shared_files ORDER BY uploaded_at DESC"
-    ).fetchall()
+def list_shared_files(conn, folder_id=None):
+    """folder_id=Noneは最上位(フォルダに属さない)ファイルだけを返す。"""
+    if folder_id is None:
+        rows = conn.execute(
+            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id "
+            "FROM shared_files WHERE folder_id IS NULL ORDER BY uploaded_at DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id "
+            "FROM shared_files WHERE folder_id = ? ORDER BY uploaded_at DESC",
+            (folder_id,),
+        ).fetchall()
     return [
         {
             "id": r[0], "filename": r[1], "content_type": r[2], "size_bytes": r[3],
-            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6],
+            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6], "folder_id": r[7],
         }
         for r in rows
     ]
@@ -834,8 +863,8 @@ def list_shared_files(conn):
 
 def get_shared_file(conn, file_id):
     row = conn.execute(
-        "SELECT id, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description "
-        "FROM shared_files WHERE id = ?",
+        "SELECT id, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, "
+        "description, folder_id FROM shared_files WHERE id = ?",
         (file_id,),
     ).fetchone()
     if row is None:
@@ -843,12 +872,81 @@ def get_shared_file(conn, file_id):
     return {
         "id": row[0], "filename": row[1], "stored_name": row[2], "content_type": row[3],
         "size_bytes": row[4], "uploaded_by": row[5], "uploaded_at": row[6], "description": row[7],
+        "folder_id": row[8],
     }
 
 
 def delete_shared_file(conn, file_id):
     with conn:
         conn.execute("DELETE FROM shared_files WHERE id = ?", (file_id,))
+
+
+def create_shared_folder(conn, name, parent_id, created_by, created_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO shared_folders (name, parent_id, created_by, created_at) VALUES (?, ?, ?, ?)",
+            (name, parent_id, created_by, created_at),
+        )
+        return cur.lastrowid
+
+
+def get_shared_folder(conn, folder_id):
+    row = conn.execute(
+        "SELECT id, name, parent_id, created_by, created_at FROM shared_folders WHERE id = ?",
+        (folder_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "name": row[1], "parent_id": row[2], "created_by": row[3], "created_at": row[4]}
+
+
+def list_shared_folders(conn, parent_id=None):
+    if parent_id is None:
+        rows = conn.execute(
+            "SELECT id, name, parent_id, created_by, created_at FROM shared_folders "
+            "WHERE parent_id IS NULL ORDER BY name"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, name, parent_id, created_by, created_at FROM shared_folders "
+            "WHERE parent_id = ? ORDER BY name",
+            (parent_id,),
+        ).fetchall()
+    return [
+        {"id": r[0], "name": r[1], "parent_id": r[2], "created_by": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
+def shared_folder_breadcrumbs(conn, folder_id):
+    """ルートから対象フォルダまでの祖先を [{id, name}, ...] の順で返す(パンくずリスト用)。"""
+    trail = []
+    seen = set()
+    current = folder_id
+    while current is not None and current not in seen:
+        seen.add(current)
+        folder = get_shared_folder(conn, current)
+        if folder is None:
+            break
+        trail.append({"id": folder["id"], "name": folder["name"]})
+        current = folder["parent_id"]
+    trail.reverse()
+    return trail
+
+
+def shared_folder_is_empty(conn, folder_id):
+    has_subfolder = conn.execute(
+        "SELECT 1 FROM shared_folders WHERE parent_id = ? LIMIT 1", (folder_id,)
+    ).fetchone()
+    has_file = conn.execute(
+        "SELECT 1 FROM shared_files WHERE folder_id = ? LIMIT 1", (folder_id,)
+    ).fetchone()
+    return has_subfolder is None and has_file is None
+
+
+def delete_shared_folder(conn, folder_id):
+    with conn:
+        conn.execute("DELETE FROM shared_folders WHERE id = ?", (folder_id,))
 
 
 __all__ = [
@@ -869,4 +967,6 @@ __all__ = [
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
     "add_shared_file", "list_shared_files", "get_shared_file", "delete_shared_file",
+    "create_shared_folder", "get_shared_folder", "list_shared_folders",
+    "shared_folder_breadcrumbs", "shared_folder_is_empty", "delete_shared_folder",
 ]

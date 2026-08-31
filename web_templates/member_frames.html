@@ -12,7 +12,6 @@
 {% block content %}
 <div class="card">
     <h2 style="margin-top:0;">アバターフレーム交換</h2>
-    <p class="muted">実績を達成して貯めたポイントで、アバターの飾り枠と交換できます。段階(銅・銀・金・虹)が上がるほど交換に必要なポイントが増え、発光や輝きも豪華になります。</p>
     <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
         {% call avatar_frame(member.equipped_frame) %}
