@@ -305,7 +305,7 @@ def _choose_triple_blend_weights(rf, xgb, lgbm, X_val, y_val):
 
 
 def compute_fog_probability(pipe, X):
-    """霧（コード1〜6）である確率（predict_probaの該当クラス列の合計）。"""
+    """川霧（SUMMARY_FOG_CODES、コード1〜3）である確率（predict_probaの該当クラス列の合計）。"""
     proba = pipe.predict_proba(X)
     fog_idx = [i for i, c in enumerate(pipe.classes_) if c in SUMMARY_FOG_CODES]
     if not fog_idx:

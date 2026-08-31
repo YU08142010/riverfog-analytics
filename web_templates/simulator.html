@@ -80,7 +80,7 @@
         </span>
     </p>
     <p>
-        霧である確率: <strong>{{ "%.1f"|format(result.fog_prob * 100) }}%</strong>
+        川霧である確率: <strong>{{ "%.1f"|format(result.fog_prob * 100) }}%</strong>
         <span class="muted">
             (この地点の霧アラートしきい値: {{ "%.0f"|format(result.fog_threshold * 100) }}%{{ " ・ しきい値を超えています" if result.is_fog_alert else "" }})
         </span>
