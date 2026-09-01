@@ -957,9 +957,10 @@ def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
             ax.hist(
                 values, bins=edges, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
                 edgecolor="white", linewidth=0.5, rwidth=0.92,
+                weights=[100.0 / len(values)] * len(values),
             )
             ax.set_title(f"{label}(n={len(values)})", fontsize=10)
-            ax.set_ylabel("件数")
+            ax.set_ylabel("割合(%)")
             ax.grid(True, axis="y", alpha=0.25)
             ax.tick_params(axis="x", labelsize=8)
         fig.suptitle("全地点合算：川霧発生時の気象条件ヒストグラム", fontsize=12)
