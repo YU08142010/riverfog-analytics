@@ -904,19 +904,23 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
 
 
 # 気象条件ごとの川霧発生時ヒストグラムのビン幅(気温は2℃刻みなど、項目ごとに固定)。
+# 日射量・視程はアメダスでも観測している地点が少なく、川霧発生時に限るとさらに
+# サンプル数が少なくなるが、値を捏造せずそのまま少ないn件のヒストグラムとして出す。
 _RIVER_FOG_HISTOGRAM_FEATURES = [
     (COL_TEMP, "気温(℃)", 2), (COL_HUMIDITY, "相対湿度(％)", 5),
     (COL_WIND_SPEED, "風速(m/s)", 1), (COL_PRECIP, "降水量(mm)", 1),
+    (COL_DEWPOINT, "露点温度(℃)", 2), (COL_SOLAR, "日射量(MJ/m2)", 0.5),
+    (COL_SUNSHINE, "日照時間(時間)", 0.1), (COL_VISIBILITY, "視程(km)", 2),
 ]
 
 
 def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
-    """気象条件(気温・湿度・風速・降水量)ごとに、川霧が発生していた瞬間の値だけを
-    ヒストグラムにする。_render_weather_fog_boxplot_pngとは違い地点ごとに分けず、
-    全地点分の「川霧あり」行をまとめて1つの分布として扱う(同じ日時でも複数地点で
-    同時に川霧が発生していればその分だけ重みが乗る)。項目ごとに固定の刻み幅で
-    ビンを揃える(気温なら2℃刻み)。"""
-    fig, axes = plt.subplots(2, 2, figsize=(9, 7))
+    """気象条件(気温・湿度・風速・降水量・露点温度・日射量・日照時間・視程)ごとに、
+    川霧が発生していた瞬間の値だけをヒストグラムにする。_render_weather_fog_boxplot_png
+    とは違い地点ごとに分けず、全地点分の「川霧あり」行をまとめて1つの分布として扱う
+    (同じ日時でも複数地点で同時に川霧が発生していればその分だけ重みが乗る)。項目ごとに
+    固定の刻み幅でビンを揃える(気温なら2℃刻み)。"""
+    fig, axes = plt.subplots(4, 2, figsize=(9, 13))
 
     values_by_col = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
     has_data = main_df is not None and phenom_df is not None and not main_df.empty
