@@ -37,6 +37,7 @@
         <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">{{ icon("forecast") }}予測結果</a>
         <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">{{ icon("accuracy") }}予測精度</a>
         <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') else '' }}">{{ icon("report") }}気象と川霧</a>
+        <a href="{{ url_for('river_fog_histogram_page') }}" class="{{ 'active' if request.path.startswith(url_for('river_fog_histogram_page')) else '' }}">{{ icon("report") }}ヒストグラム</a>
         {% if session.get('user_id') %}
         <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">{{ icon("members") }}メンバー</a>
         <a href="{{ url_for('dm_inbox') }}" class="{{ 'active' if request.path.startswith('/messages') else '' }}">{{ icon("comment") }}メッセージ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>

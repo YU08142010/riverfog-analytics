@@ -2825,6 +2825,14 @@ def weather_fog_graph_png():
     return Response(png, mimetype="image/png")
 
 
+@app.route("/river-fog-histogram")
+def river_fog_histogram_page():
+    """全地点合算・川霧発生時のみに絞った気象条件ヒストグラムの専用ページ。
+    「気象と川霧」ページ(/graphs配下)とはナビの見た目上のアクティブ判定が
+    衝突しないよう、あえて/graphs以下ではないパスにしている。"""
+    return render_template("river_fog_histogram.html")
+
+
 @app.route("/graphs/weather-fog-histogram.png")
 def weather_fog_histogram_png():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。"""

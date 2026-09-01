@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}ヒストグラム{% endblock %}
+{% block content %}
+<div class="card">
+    <h2 style="margin-top:0;">全地点合算：川霧発生時の気象条件ヒストグラム</h2>
+    <img class="full-graph" src="{{ url_for('weather_fog_histogram_png') }}" alt="全地点合算の川霧発生時の気象条件ヒストグラム">
+</div>
+{% endblock %}
