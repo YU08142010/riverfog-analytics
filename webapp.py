@@ -903,6 +903,71 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
     return buf.getvalue()
 
 
+# 気象条件ごとの川霧発生時ヒストグラムのビン幅(気温は2℃刻みなど、項目ごとに固定)。
+_RIVER_FOG_HISTOGRAM_FEATURES = [
+    (COL_TEMP, "気温(℃)", 2), (COL_HUMIDITY, "相対湿度(％)", 5),
+    (COL_WIND_SPEED, "風速(m/s)", 1), (COL_PRECIP, "降水量(mm)", 1),
+]
+
+
+def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
+    """気象条件(気温・湿度・風速・降水量)ごとに、川霧が発生していた瞬間の値だけを
+    ヒストグラムにする。_render_weather_fog_boxplot_pngとは違い地点ごとに分けず、
+    全地点分の「川霧あり」行をまとめて1つの分布として扱う(同じ日時でも複数地点で
+    同時に川霧が発生していればその分だけ重みが乗る)。項目ごとに固定の刻み幅で
+    ビンを揃える(気温なら2℃刻み)。"""
+    fig, axes = plt.subplots(2, 2, figsize=(9, 7))
+
+    values_by_col = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
+    has_data = main_df is not None and phenom_df is not None and not main_df.empty
+    if has_data:
+        for station_name in station_names or []:
+            if station_name not in phenom_df.columns:
+                continue
+            merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
+            codes = merged[station_name].apply(encode_phenomena_cell)
+            merged = merged.loc[codes.notna()].copy()
+            merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
+            fog_rows = merged.loc[merged["is_fog"]]
+            if fog_rows.empty:
+                continue
+            for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES:
+                values_by_col[col].extend(fog_rows[col].dropna().tolist())
+        has_data = any(values_by_col.values())
+
+    if not has_data:
+        for ax in axes.flat:
+            ax.axis("off")
+        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
+    else:
+        for ax, (col, label, step) in zip(axes.flat, _RIVER_FOG_HISTOGRAM_FEATURES):
+            values = values_by_col[col]
+            if not values:
+                ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(label, fontsize=10)
+                continue
+            lo = (min(values) // step) * step
+            hi = (max(values) // step) * step + step
+            n_bins = int(round((hi - lo) / step))
+            edges = [lo + i * step for i in range(n_bins + 1)]
+            ax.hist(
+                values, bins=edges, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
+                edgecolor="white", linewidth=0.5, rwidth=0.92,
+            )
+            ax.set_title(f"{label}(n={len(values)})", fontsize=10)
+            ax.set_ylabel("件数")
+            ax.grid(True, axis="y", alpha=0.25)
+            ax.tick_params(axis="x", labelsize=8)
+        fig.suptitle("全地点合算：川霧発生時の気象条件ヒストグラム", fontsize=12)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.95) if has_data else (0, 0, 1, 1))
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 # 1日分の観測値推移グラフの項目(列名, 表示ラベル, 色, プロット種別)。
 # 以前は気温・視程を左軸、湿度・降水量を右軸(twinx)にまとめた2軸グラフだったが、
 # 軸を読み違えやすいため、項目ごとに軸を分けた4分割の小さい図に変更した。
@@ -2757,6 +2822,19 @@ def weather_fog_graph_png():
         except Exception as e:
             log.warning("Failed to load data for weather-fog graph: %s", e)
     png = _render_weather_fog_boxplot_png(main_df, phenom_df, station)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/graphs/weather-fog-histogram.png")
+def weather_fog_histogram_png():
+    """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。"""
+    main_df = phenom_df = station_names = None
+    if DATA_XLSX.exists():
+        try:
+            main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+        except Exception as e:
+            log.warning("Failed to load data for river-fog histogram: %s", e)
+    png = _render_river_fog_histogram_png(main_df, phenom_df, station_names or STATION_NAMES)
     return Response(png, mimetype="image/png")
 
 
