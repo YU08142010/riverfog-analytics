@@ -1,15 +1,20 @@
 {% extends "base.html" %}
 {% from "_avatar.html" import avatar_frame %}
-{% block title %}フレーム交換({{ member.name }}){% endblock %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}ショップ{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
     <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
-    <li><a href="{{ url_for('members_list') }}">メンバー</a></li>
-    <li><a href="{{ url_for('member_detail', user_id=member.id) }}">{{ member.name }}</a></li>
-    <li>フレーム交換</li>
+    <li><a href="{{ url_for('game_home') }}">ゲーム</a></li>
+    <li>ショップ</li>
 </ul>
 {% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
+    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+]) }}
 <div class="card">
     <h2 style="margin-top:0;">アバターフレーム交換</h2>
     <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
@@ -26,7 +31,7 @@
             <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
         </div>
         {% if member.equipped_frame %}
-        <form method="post" action="{{ url_for('member_frame_equip', user_id=member.id) }}" data-ajax data-ajax-reload>
+        <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="frame_id" value="">
             <button type="submit" class="button cancel">フレームを外す</button>
@@ -53,14 +58,14 @@
                 {% if member.equipped_frame == f.id %}
                 <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
                 {% else %}
-                <form method="post" action="{{ url_for('member_frame_equip', user_id=member.id) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="frame_id" value="{{ f.id }}">
                     <button type="submit" class="button">装着する</button>
                 </form>
                 {% endif %}
             {% else %}
-                <form method="post" action="{{ url_for('member_frame_buy', user_id=member.id) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                <form method="post" action="{{ url_for('game_shop_buy') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="frame_id" value="{{ f.id }}">
                     <button type="submit" class="button" {{ "disabled" if points < f.cost }}>{{ f.cost }} ptで交換</button>

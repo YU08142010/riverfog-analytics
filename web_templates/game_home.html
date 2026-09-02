@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}ゲーム{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li>ゲーム</li>
+</ul>
+{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
+    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+]) }}
+<div class="card">
+    <h2 style="margin-top:0;">現在のポイント</h2>
+    <div style="font-size:2rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
+    <p class="muted" style="font-size:0.82rem;">
+        ポイントはログインボーナス・コメント投稿・AIチャット利用・実績達成で貯まります
+        (実績の一覧は各自のプロフィールページで確認できます)。
+    </p>
+</div>
+
+<div class="member-grid">
+    <a class="member-tile" href="{{ url_for('game_shop') }}" style="text-decoration:none;">
+        <div style="font-size:1.1rem; font-weight:600;">ショップ</div>
+        <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">ポイントでアバターフレームと交換できます。</p>
+    </a>
+    <a class="member-tile" href="{{ url_for('game_gamble') }}" style="text-decoration:none;">
+        <div style="font-size:1.1rem; font-weight:600;">川霧ギャンブル</div>
+        <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">
+            未来のある地点・時刻に川霧が出るかポイントを賭けます。難しい予想ほど倍率が上がります。
+        </p>
+    </a>
+</div>
+
+{% if recent_bets %}
+<div class="card">
+    <h2>最近の賭け</h2>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>地点</th><th>対象時刻</th><th>賭けpt</th><th>倍率</th><th>状態</th></tr></thead>
+        <tbody>
+        {% for b in recent_bets %}
+        <tr>
+            <td>{{ b.station_name }}</td>
+            <td>{{ b.window_start }}{% if b.window_start != b.window_end %} 〜 {{ b.window_end }}{% endif %}</td>
+            <td>{{ b.bet_amount }}</td>
+            <td>{{ b.multiplier }}倍</td>
+            <td>
+                {% if b.status == "pending" %}<span class="muted">結果待ち</span>
+                {% elif b.status == "won" %}<span class="role-tag admin">的中(+{{ b.payout }}pt)</span>
+                {% else %}<span class="muted">はずれ</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p style="margin-top:0.6rem;"><a href="{{ url_for('game_gamble') }}">すべての履歴を見る &raquo;</a></p>
+</div>
+{% endif %}
+{% endblock %}

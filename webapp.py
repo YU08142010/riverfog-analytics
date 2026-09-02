@@ -3427,6 +3427,135 @@ FRAME_DEFINITIONS = [
 ]
 FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
 
+# --- 川霧ギャンブル ---------------------------------------------------------------
+# 「この地点でこの時刻に川霧が出るか」にポイントを賭けるゲーム。
+# 倍率 = 地点の難易度(過去の川霧発生率が低いほど高倍率) × 先の長さ(遠い予測ほど高倍率)
+#      × 時間精度(ざっくり日付だけ<時間帯<正確な1時間、細かく当てるほど高倍率)
+# 賭けた時点でポイントは引かれ(fog_bets.bet_amountがtotal_spent_pointsに含まれる)、
+# 的中すれば bet_amount * multiplier をgrant_pointsで払い戻す。外れれば戻ってこない
+# (名前どおりの「ギャンブル」として、当てずっぽうの丁半博打にならないよう
+# 難易度に応じた倍率を付ける)。
+GAMBLE_MIN_BET = 10
+GAMBLE_MAX_BET = 500
+GAMBLE_MAX_LEAD_HOURS = 24 * 7  # 1週間先まで賭けられる
+GAMBLE_MULTIPLIER_CAP = 30.0
+GAMBLE_STATION_RARITY_FLOOR = 0.02  # 観測史上ほぼ川霧が出ない地点でも倍率を無限大にしない下限
+GAMBLE_STATION_RARITY_CAP = 15.0
+# 観測時間帯(04-19 JST)を3つの時間帯(block精度)に区切る。
+GAMBLE_BLOCKS = [(4, 9, "早朝〜午前(4-9時)"), (9, 14, "昼(9-14時)"), (14, 19, "夕方(14-19時)")]
+GAMBLE_PRECISIONS = [
+    {"id": "day", "label": "日(その日いつでも)", "multiplier": 1.0},
+    {"id": "block", "label": "時間帯(5時間区切り)", "multiplier": 1.8},
+    {"id": "hour", "label": "正確な1時間", "multiplier": 3.0},
+]
+GAMBLE_PRECISION_BY_ID = {p["id"]: p for p in GAMBLE_PRECISIONS}
+
+_station_fog_rate_cache = {"data": None, "at": 0.0}
+_station_fog_rate_cache_lock = threading.Lock()
+
+
+def _station_fog_rates():
+    """地点ごとの、観測時間帯(04-19 JST)における川霧発生率(0〜1)を返す({地点名: 発生率})。
+    データが無い/読めない場合は空dict(倍率計算側でフロア値にフォールバックする)。"""
+    now = time.monotonic()
+    with _station_fog_rate_cache_lock:
+        cached = _station_fog_rate_cache["data"]
+        if cached is not None and now - _station_fog_rate_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+            return cached
+    if not DATA_XLSX.exists():
+        return {}
+    try:
+        main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+        rates = {}
+        for name in station_names or []:
+            if name not in phenom_df.columns:
+                continue
+            merged = main_df.merge(phenom_df[["datetime", name]], on="datetime", how="inner")
+            codes = merged[name].apply(encode_phenomena_cell)
+            valid = codes.notna()
+            n = int(valid.sum())
+            if n == 0:
+                continue
+            fog_n = int(codes.loc[valid].isin(SUMMARY_FOG_CODES).sum())
+            rates[name] = fog_n / n
+    except Exception as e:
+        log.warning("Failed to compute station fog rates: %s", e)
+        return {}
+    with _station_fog_rate_cache_lock:
+        _station_fog_rate_cache["data"] = rates
+        _station_fog_rate_cache["at"] = now
+    return rates
+
+
+def _gamble_multiplier(fog_rate, lead_hours, precision_id):
+    """賭けの倍率を計算する。fog_rateがNone(データ不足)の場合は最も保守的な
+    (rarity_mult=1.0の)側に倒す。"""
+    if fog_rate is None:
+        rarity_mult = 1.0
+    else:
+        rarity_mult = min(max(1.0 / max(fog_rate, GAMBLE_STATION_RARITY_FLOOR), 1.0), GAMBLE_STATION_RARITY_CAP)
+    lead_mult = 1.0 + min(max(lead_hours, 0), GAMBLE_MAX_LEAD_HOURS) / GAMBLE_MAX_LEAD_HOURS * 2.0
+    precision_mult = GAMBLE_PRECISION_BY_ID.get(precision_id, {"multiplier": 1.0})["multiplier"]
+    total = rarity_mult * lead_mult * precision_mult
+    return round(min(total, GAMBLE_MULTIPLIER_CAP), 2)
+
+
+def _gamble_window_for_bet(target_date, precision_id, hour=None, block_index=None):
+    """precisionに応じて(window_start, window_end)のdatetime文字列ペアを返す。
+    観測時間帯(04-19 JST)の外を指定された場合はNoneを返す(呼び出し側でエラー扱い)。"""
+    if precision_id == "day":
+        start_h, end_h = 4, 19
+    elif precision_id == "block":
+        if block_index is None or not (0 <= block_index < len(GAMBLE_BLOCKS)):
+            return None
+        start_h, end_h = GAMBLE_BLOCKS[block_index][0], GAMBLE_BLOCKS[block_index][1]
+    elif precision_id == "hour":
+        if hour is None or not (4 <= hour <= 19):
+            return None
+        start_h, end_h = hour, hour
+    else:
+        return None
+    window_start = f"{target_date} {start_h:02d}:00:00"
+    window_end = f"{target_date} {end_h:02d}:00:00"
+    return window_start, window_end
+
+
+def _resolve_pending_fog_bets():
+    """window_endが過ぎた賭けの答え合わせをする。バッジ付与(_award_new_badges)と同じく、
+    ゲーム関連ページを開いたタイミングで遅延実行する(専用のcronは持たない)。"""
+    conn = _users_conn()
+    try:
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        pending = users.list_pending_fog_bets(conn, now_str)
+        if not pending:
+            return
+        if not DATA_XLSX.exists():
+            return
+        main_df, phenom_df, _ = fog_data.load_river_fog_data()
+        for bet in pending:
+            station = bet["station_name"]
+            if station not in phenom_df.columns:
+                # 地点が無くなった等、答え合わせ不能。賭け金は返さずlostとして締める
+                # (無期限pendingのまま残り続けるのを防ぐ)。
+                users.resolve_fog_bet(conn, bet["id"], "lost", now_str, 0)
+                continue
+            window = main_df[
+                (main_df["datetime"] >= bet["window_start"]) & (main_df["datetime"] <= bet["window_end"])
+            ]
+            merged = window.merge(phenom_df[["datetime", station]], on="datetime", how="inner")
+            codes = merged[station].apply(encode_phenomena_cell)
+            occurred = bool(codes.dropna().isin(SUMMARY_FOG_CODES).any())
+            if occurred:
+                payout = int(round(bet["bet_amount"] * bet["multiplier"]))
+                users.resolve_fog_bet(conn, bet["id"], "won", now_str, payout)
+                users.grant_points(conn, bet["user_id"], f"gamble_win:{bet['id']}", payout, now_str)
+            else:
+                users.resolve_fog_bet(conn, bet["id"], "lost", now_str, 0)
+    except Exception as e:
+        log.warning("Failed to resolve pending fog bets: %s", e)
+    finally:
+        conn.close()
+
 
 def _compute_badges(stats):
     """statsは{login_count, streak, comment_count, chat_count, favorite_count,
@@ -3583,24 +3712,38 @@ def member_profile_update(user_id):
     return _finish("member_detail", "プロフィールを更新しました。", user_id=user_id)
 
 
-@app.route("/members/<int:user_id>/frames")
-def member_frames_shop(user_id):
-    """実績ポイントでアバターフレームと交換する画面。本人のみ閲覧できる
-    (ポイント残高・所持状況は他人に見せる必要がないため、avatar/profile編集と同じ制限)。"""
-    if session.get("user_id") != user_id:
-        abort(403)
+@app.route("/game")
+def game_home():
+    """ポイント・ショップ・川霧ギャンブルをまとめたゲームのトップページ。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    _resolve_pending_fog_bets()
     conn = _users_conn()
     try:
-        target = users.get_user_by_id(conn, user_id)
-        if target is None:
-            abort(404)
-        points = users.available_points(conn, user_id)
-        owned = users.owned_frame_ids(conn, user_id)
+        points = users.available_points(conn, my_id)
+        recent_bets = users.list_fog_bets_for_user(conn, my_id, limit=5)
+    finally:
+        conn.close()
+    return render_template("game_home.html", points=points, recent_bets=recent_bets)
+
+
+@app.route("/game/shop")
+def game_shop():
+    """ポイントでアバターフレームと交換する画面。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        member = users.get_user_by_id(conn, my_id)
+        points = users.available_points(conn, my_id)
+        owned = users.owned_frame_ids(conn, my_id)
     finally:
         conn.close()
     return render_template(
-        "member_frames.html",
-        member=target,
+        "game_shop.html",
+        member=member,
         points=points,
         owned=owned,
         frame_grades=FRAME_GRADES,
@@ -3609,45 +3752,162 @@ def member_frames_shop(user_id):
     )
 
 
-@app.route("/members/<int:user_id>/frames/buy", methods=["POST"])
-def member_frame_buy(user_id):
-    if session.get("user_id") != user_id:
+@app.route("/game/shop/buy", methods=["POST"])
+def game_shop_buy():
+    my_id = session.get("user_id")
+    if not my_id:
         abort(403)
     frame = FRAME_BY_ID.get(request.form.get("frame_id", ""))
     if frame is None:
         abort(404)
     conn = _users_conn()
     try:
-        if frame["id"] in users.owned_frame_ids(conn, user_id):
-            return _finish(
-                "member_frames_shop", "そのフレームは既に持っています。", success=False, user_id=user_id,
-            )
-        if users.available_points(conn, user_id) < frame["cost"]:
-            return _finish(
-                "member_frames_shop", "ポイントが足りません。", success=False, user_id=user_id,
-            )
+        if frame["id"] in users.owned_frame_ids(conn, my_id):
+            return _finish("game_shop", "そのフレームは既に持っています。", success=False)
+        if users.available_points(conn, my_id) < frame["cost"]:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
         users.purchase_frame(
-            conn, user_id, frame["id"], frame["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+            conn, my_id, frame["id"], frame["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
         )
     finally:
         conn.close()
-    return _finish("member_frames_shop", f"「{frame['label']}」と交換しました。", user_id=user_id)
+    return _finish("game_shop", f"「{frame['label']}」と交換しました。")
 
 
-@app.route("/members/<int:user_id>/frames/equip", methods=["POST"])
-def member_frame_equip(user_id):
-    if session.get("user_id") != user_id:
+@app.route("/game/shop/equip", methods=["POST"])
+def game_shop_equip():
+    my_id = session.get("user_id")
+    if not my_id:
         abort(403)
     frame_id = request.form.get("frame_id", "").strip()
     conn = _users_conn()
     try:
-        if frame_id and frame_id not in users.owned_frame_ids(conn, user_id):
+        if frame_id and frame_id not in users.owned_frame_ids(conn, my_id):
             abort(400)
-        users.set_equipped_frame(conn, user_id, frame_id)
+        users.set_equipped_frame(conn, my_id, frame_id)
     finally:
         conn.close()
     message = "フレームを装着しました。" if frame_id else "フレームを外しました。"
-    return _finish("member_frames_shop", message, user_id=user_id)
+    return _finish("game_shop", message)
+
+
+@app.route("/game/gamble")
+def game_gamble():
+    """川霧ギャンブル: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    _resolve_pending_fog_bets()
+    conn = _users_conn()
+    try:
+        points = users.available_points(conn, my_id)
+        bets = users.list_fog_bets_for_user(conn, my_id)
+    finally:
+        conn.close()
+    fog_rates = _station_fog_rates()
+    station_rows = sorted(
+        (
+            {
+                "name": name,
+                "fog_rate": fog_rates.get(name),
+                "rarity_multiplier": _gamble_multiplier(fog_rates.get(name), 0, "day"),
+            }
+            for name in STATION_NAMES
+        ),
+        key=lambda r: -r["rarity_multiplier"],
+    )
+    return render_template(
+        "game_gamble.html",
+        points=points, bets=bets, station_rows=station_rows,
+        station_names=STATION_NAMES, precisions=GAMBLE_PRECISIONS, blocks=GAMBLE_BLOCKS,
+        min_bet=GAMBLE_MIN_BET, max_bet=GAMBLE_MAX_BET,
+        today=now_jst_naive().strftime("%Y-%m-%d"),
+    )
+
+
+@app.route("/game/gamble/preview")
+def game_gamble_preview():
+    """賭けフォームが入力を変えるたびに叩く、倍率だけを返す軽量プレビューAPI。
+    入力が不正/不完全な場合は倍率算出をせずmultiplier: nullを返す(フォーム側でエラー表示は
+    別途行うため、ここではエラーメッセージまでは作らない)。"""
+    station = request.args.get("station", "")
+    target_date = request.args.get("target_date", "")
+    precision_id = request.args.get("precision", "")
+    hour = request.args.get("hour", type=int)
+    block_index = request.args.get("block_index", type=int)
+
+    if station not in STATION_NAMES or precision_id not in GAMBLE_PRECISION_BY_ID or not DATE_RE.match(target_date or ""):
+        return jsonify({"multiplier": None})
+    window = _gamble_window_for_bet(target_date, precision_id, hour=hour, block_index=block_index)
+    if window is None:
+        return jsonify({"multiplier": None})
+    window_start, _ = window
+    try:
+        lead_hours = (
+            datetime.strptime(window_start, "%Y-%m-%d %H:%M:%S") - now_jst_naive()
+        ).total_seconds() / 3600.0
+    except ValueError:
+        return jsonify({"multiplier": None})
+    if lead_hours < 0 or lead_hours > GAMBLE_MAX_LEAD_HOURS:
+        return jsonify({"multiplier": None})
+    fog_rate = _station_fog_rates().get(station)
+    multiplier = _gamble_multiplier(fog_rate, lead_hours, precision_id)
+    return jsonify({"multiplier": multiplier})
+
+
+@app.route("/game/gamble/place", methods=["POST"])
+def game_gamble_place():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    station = request.form.get("station", "")
+    target_date = request.form.get("target_date", "")
+    precision_id = request.form.get("precision", "")
+    hour = request.form.get("hour", type=int)
+    block_index = request.form.get("block_index", type=int)
+    bet_amount = request.form.get("bet_amount", type=int)
+
+    if station not in STATION_NAMES:
+        return _finish("game_gamble", "地点を選んでください。", success=False)
+    if precision_id not in GAMBLE_PRECISION_BY_ID:
+        return _finish("game_gamble", "時間精度を選んでください。", success=False)
+    if not DATE_RE.match(target_date or ""):
+        return _finish("game_gamble", "日付が正しくありません。", success=False)
+    if bet_amount is None or not (GAMBLE_MIN_BET <= bet_amount <= GAMBLE_MAX_BET):
+        return _finish(
+            "game_gamble", f"賭けポイントは{GAMBLE_MIN_BET}〜{GAMBLE_MAX_BET}の範囲で指定してください。",
+            success=False,
+        )
+
+    window = _gamble_window_for_bet(target_date, precision_id, hour=hour, block_index=block_index)
+    if window is None:
+        return _finish("game_gamble", "指定した時刻が観測時間帯(4-19時)の範囲外です。", success=False)
+    window_start, window_end = window
+
+    now = now_jst_naive()
+    lead_hours = (datetime.strptime(window_start, "%Y-%m-%d %H:%M:%S") - now).total_seconds() / 3600.0
+    if lead_hours < 0:
+        return _finish("game_gamble", "過去の時刻には賭けられません。", success=False)
+    if lead_hours > GAMBLE_MAX_LEAD_HOURS:
+        return _finish("game_gamble", "1週間より先の時刻には賭けられません。", success=False)
+
+    fog_rate = _station_fog_rates().get(station)
+    multiplier = _gamble_multiplier(fog_rate, lead_hours, precision_id)
+
+    conn = _users_conn()
+    try:
+        if users.available_points(conn, my_id) < bet_amount:
+            return _finish("game_gamble", "ポイントが足りません。", success=False)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        users.place_fog_bet(
+            conn, my_id, station, precision_id, window_start, window_end, bet_amount, multiplier, now_str,
+        )
+    finally:
+        conn.close()
+    return _finish(
+        "game_gamble",
+        f"{station}に{bet_amount}pt賭けました(倍率{multiplier}倍)。観測が終わり次第、答え合わせされます。",
+    )
 
 
 @app.route("/messages")

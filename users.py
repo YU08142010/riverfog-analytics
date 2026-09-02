@@ -98,6 +98,22 @@ CREATE TABLE IF NOT EXISTS point_events (
     UNIQUE(user_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_point_events_user_id ON point_events(user_id);
+CREATE TABLE IF NOT EXISTS fog_bets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    station_name TEXT NOT NULL,
+    precision TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    bet_amount INTEGER NOT NULL,
+    multiplier REAL NOT NULL,
+    placed_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_at TEXT,
+    payout INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_fog_bets_user_id ON fog_bets(user_id);
+CREATE INDEX IF NOT EXISTS idx_fog_bets_status ON fog_bets(status);
 CREATE TABLE IF NOT EXISTS dm_conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -819,10 +835,69 @@ def total_earned_points(conn, user_id):
 
 
 def total_spent_points(conn, user_id):
+    """フレーム交換で使った分(user_frames)と、川霧ギャンブルで賭けた分(fog_bets、
+    勝敗に関わらず賭けた時点で「使った」扱いにする。勝った場合の払い戻しはgrant_points
+    経由でtotal_earned_points側に加算されるので二重計上にはならない)の合計。"""
     row = conn.execute(
         "SELECT COALESCE(SUM(cost), 0) FROM user_frames WHERE user_id = ?", (user_id,)
     ).fetchone()
-    return row[0]
+    row2 = conn.execute(
+        "SELECT COALESCE(SUM(bet_amount), 0) FROM fog_bets WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] + row2[0]
+
+
+def place_fog_bet(conn, user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO fog_bets "
+            "(user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at),
+        )
+        return cur.lastrowid
+
+
+def list_pending_fog_bets(conn, up_to):
+    """window_endが過ぎた(=答え合わせに必要な観測データが出揃っているはずの)未決済の
+    賭けを返す。"""
+    rows = conn.execute(
+        "SELECT id, user_id, station_name, window_start, window_end, bet_amount, multiplier "
+        "FROM fog_bets WHERE status = 'pending' AND window_end <= ?",
+        (up_to,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "user_id": r[1], "station_name": r[2], "window_start": r[3],
+            "window_end": r[4], "bet_amount": r[5], "multiplier": r[6],
+        }
+        for r in rows
+    ]
+
+
+def resolve_fog_bet(conn, bet_id, status, resolved_at, payout):
+    with conn:
+        conn.execute(
+            "UPDATE fog_bets SET status = ?, resolved_at = ?, payout = ? WHERE id = ?",
+            (status, resolved_at, payout, bet_id),
+        )
+
+
+def list_fog_bets_for_user(conn, user_id, limit=30):
+    rows = conn.execute(
+        "SELECT id, station_name, precision, window_start, window_end, bet_amount, multiplier, "
+        "status, resolved_at, payout, placed_at FROM fog_bets WHERE user_id = ? "
+        "ORDER BY placed_at DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "station_name": r[1], "precision": r[2], "window_start": r[3],
+            "window_end": r[4], "bet_amount": r[5], "multiplier": r[6], "status": r[7],
+            "resolved_at": r[8], "payout": r[9], "placed_at": r[10],
+        }
+        for r in rows
+    ]
 
 
 def available_points(conn, user_id):

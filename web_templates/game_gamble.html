@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}川霧ギャンブル{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('game_home') }}">ゲーム</a></li>
+    <li>川霧ギャンブル</li>
+</ul>
+{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
+    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+]) }}
+
+<div class="card">
+    <h2 style="margin-top:0;">川霧ギャンブル</h2>
+    <p class="muted" style="font-size:0.85rem;">
+        指定した地点・時刻に川霧が出るかどうかにポイントを賭けます。川霧が出にくい地点ほど、
+        また先の時刻を指定するほど、時刻を細かく指定するほど倍率が上がります。
+        外れると賭けた分は戻ってきません。答え合わせは対象の観測時間が終わってから行われます。
+    </p>
+    <p style="font-weight:600;">現在のポイント: <span style="color: var(--color-primary);">{{ points }} pt</span></p>
+
+    <form method="post" action="{{ url_for('game_gamble_place') }}" id="gamble-form" data-ajax data-ajax-reload>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+            <div>
+                <label class="muted" style="font-size:0.82rem;">地点</label><br>
+                <select name="station" id="gamble-station" required style="padding:0.4rem;">
+                    <option value="">選択してください</option>
+                    {% for name in station_names %}
+                    <option value="{{ name }}">{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="muted" style="font-size:0.82rem;">日付</label><br>
+                <input type="date" name="target_date" id="gamble-date" min="{{ today }}" required style="padding:0.35rem;">
+            </div>
+            <div>
+                <label class="muted" style="font-size:0.82rem;">時間精度</label><br>
+                <select name="precision" id="gamble-precision" required style="padding:0.4rem;">
+                    {% for p in precisions %}
+                    <option value="{{ p.id }}">{{ p.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="gamble-block-wrap" hidden>
+                <label class="muted" style="font-size:0.82rem;">時間帯</label><br>
+                <select name="block_index" id="gamble-block" style="padding:0.4rem;">
+                    {% for b in blocks %}
+                    <option value="{{ loop.index0 }}">{{ b[2] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="gamble-hour-wrap" hidden>
+                <label class="muted" style="font-size:0.82rem;">時刻</label><br>
+                <select name="hour" id="gamble-hour" style="padding:0.4rem;">
+                    {% for h in range(4, 20) %}
+                    <option value="{{ h }}">{{ h }}時</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="muted" style="font-size:0.82rem;">賭けポイント({{ min_bet }}〜{{ max_bet }})</label><br>
+                <input type="number" name="bet_amount" id="gamble-amount" min="{{ min_bet }}" max="{{ max_bet }}" value="{{ min_bet }}" required style="padding:0.35rem; width:7em;">
+            </div>
+        </div>
+        <div style="margin-top:1rem; display:flex; align-items:center; gap:1rem;">
+            <div>
+                <span class="muted" style="font-size:0.82rem;">倍率</span>
+                <span id="gamble-multiplier" style="font-size:1.3rem; font-weight:700; color: var(--color-primary);">-</span>
+            </div>
+            <div>
+                <span class="muted" style="font-size:0.82rem;">的中時の獲得ポイント</span>
+                <span id="gamble-payout" style="font-size:1.3rem; font-weight:700;">-</span>
+            </div>
+            <button type="submit" class="button" id="gamble-submit" disabled>賭ける</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h3 style="margin-top:0;">地点別の目安倍率(基準日=当日、時間精度=日単位)</h3>
+    <p class="muted" style="font-size:0.8rem;">実際の倍率は日付・時間精度の選択でさらに上がります。</p>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>地点</th><th>観測史上の川霧発生率</th><th>目安倍率</th></tr></thead>
+        <tbody>
+        {% for row in station_rows %}
+        <tr>
+            <td>{{ row.name }}</td>
+            <td>{{ "%.1f"|format(row.fog_rate * 100) if row.fog_rate is not none else "データ不足" }}{{ "%" if row.fog_rate is not none }}</td>
+            <td>{{ row.rarity_multiplier }}倍〜</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+{% if bets %}
+<div class="card">
+    <h3 style="margin-top:0;">これまでの賭け</h3>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>地点</th><th>対象時刻</th><th>賭けpt</th><th>倍率</th><th>状態</th><th>賭けた日時</th></tr></thead>
+        <tbody>
+        {% for b in bets %}
+        <tr>
+            <td>{{ b.station_name }}</td>
+            <td>{{ b.window_start }}{% if b.window_start != b.window_end %} 〜 {{ b.window_end }}{% endif %}</td>
+            <td>{{ b.bet_amount }}</td>
+            <td>{{ b.multiplier }}倍</td>
+            <td>
+                {% if b.status == "pending" %}<span class="muted">結果待ち</span>
+                {% elif b.status == "won" %}<span class="role-tag admin">的中(+{{ b.payout }}pt)</span>
+                {% else %}<span class="muted">はずれ</span>{% endif %}
+            </td>
+            <td>{{ b.placed_at }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<script>
+(function() {
+    var stationSel = document.getElementById("gamble-station");
+    var dateInput = document.getElementById("gamble-date");
+    var precisionSel = document.getElementById("gamble-precision");
+    var blockWrap = document.getElementById("gamble-block-wrap");
+    var blockSel = document.getElementById("gamble-block");
+    var hourWrap = document.getElementById("gamble-hour-wrap");
+    var hourSel = document.getElementById("gamble-hour");
+    var amountInput = document.getElementById("gamble-amount");
+    var multiplierLabel = document.getElementById("gamble-multiplier");
+    var payoutLabel = document.getElementById("gamble-payout");
+    var submitBtn = document.getElementById("gamble-submit");
+    var previewUrl = "{{ url_for('game_gamble_preview') }}";
+    var currentMultiplier = null;
+
+    function updatePrecisionVisibility() {
+        var p = precisionSel.value;
+        blockWrap.hidden = p !== "block";
+        hourWrap.hidden = p !== "hour";
+    }
+
+    function updatePayout() {
+        var amount = parseInt(amountInput.value, 10) || 0;
+        if (currentMultiplier == null) {
+            payoutLabel.textContent = "-";
+        } else {
+            payoutLabel.textContent = Math.round(amount * currentMultiplier) + " pt";
+        }
+    }
+
+    function fetchPreview() {
+        if (!stationSel.value || !dateInput.value || !precisionSel.value) {
+            currentMultiplier = null;
+            multiplierLabel.textContent = "-";
+            updatePayout();
+            submitBtn.disabled = true;
+            return;
+        }
+        var params = new URLSearchParams({
+            station: stationSel.value, target_date: dateInput.value, precision: precisionSel.value,
+        });
+        if (precisionSel.value === "block") { params.set("block_index", blockSel.value); }
+        if (precisionSel.value === "hour") { params.set("hour", hourSel.value); }
+        fetch(previewUrl + "?" + params.toString(), {headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                currentMultiplier = data.multiplier;
+                multiplierLabel.textContent = currentMultiplier == null ? "指定できません" : currentMultiplier + "倍";
+                submitBtn.disabled = currentMultiplier == null;
+                updatePayout();
+            })
+            .catch(function() {
+                currentMultiplier = null;
+                multiplierLabel.textContent = "-";
+                submitBtn.disabled = true;
+            });
+    }
+
+    [stationSel, dateInput, precisionSel, blockSel, hourSel].forEach(function(el) {
+        el.addEventListener("change", function() {
+            updatePrecisionVisibility();
+            fetchPreview();
+        });
+    });
+    amountInput.addEventListener("input", updatePayout);
+    updatePrecisionVisibility();
+})();
+</script>
+{% endblock %}
