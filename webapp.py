@@ -906,12 +906,37 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
 # 気象条件ごとの川霧発生時ヒストグラムのビン幅(気温は2℃刻みなど、項目ごとに固定)。
 # 日射量・視程はアメダスでも観測している地点が少なく、川霧発生時に限るとさらに
 # サンプル数が少なくなるが、値を捏造せずそのまま少ないn件のヒストグラムとして出す。
+# 風速だけは値がほぼ弱風側に偏るため、固定刻み幅ではなく低速側を細かくした不均等な
+# 区分(リストで指定)を使い、各区分を等幅の棒として並べる(区分の実際の幅は棒の幅に
+# 反映しない。気象庁の観測資料等でよく使われる並べ方に合わせた)。
 _RIVER_FOG_HISTOGRAM_FEATURES = [
     (COL_TEMP, "気温(℃)", 2), (COL_HUMIDITY, "相対湿度(％)", 5),
-    (COL_WIND_SPEED, "風速(m/s)", 1), (COL_PRECIP, "降水量(mm)", 1),
+    (COL_WIND_SPEED, "風速(m/s)", [0.2, 0.5, 1, 2, 3]), (COL_PRECIP, "降水量(mm)", 1),
     (COL_DEWPOINT, "露点温度(℃)", 2), (COL_SOLAR, "日射量(MJ/m2)", 0.5),
     (COL_SUNSHINE, "日照時間(時間)", 0.1), (COL_VISIBILITY, "視程(km)", 2),
 ]
+
+
+def _bucket_by_edges(values, edges):
+    """不均等な境界値edges(例: [0, 0.2, 0.5, 1, 2, 3])で値を区分けし、
+    (ラベル一覧, 区分ごとの割合(%)一覧)を返す。最初の区分は「edges[0]未満」、
+    最後の区分は「edges[-1]以上」として全ての値を必ずどこかの区分に入れる。"""
+    n = len(values)
+    counts = [0] * (len(edges) + 1)
+    for v in values:
+        placed = False
+        for i, e in enumerate(edges):
+            if v < e:
+                counts[i] += 1
+                placed = True
+                break
+        if not placed:
+            counts[-1] += 1
+    labels = [f"〜{edges[0]}"]
+    labels += [f"{edges[i]}〜{edges[i + 1]}" for i in range(len(edges) - 1)]
+    labels.append(f"{edges[-1]}〜")
+    pct = [c * 100.0 / n for c in counts]
+    return labels, pct
 
 
 def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
@@ -950,19 +975,29 @@ def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
                 ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
                 ax.set_title(label, fontsize=10)
                 continue
-            lo = (min(values) // step) * step
-            hi = (max(values) // step) * step + step
-            n_bins = int(round((hi - lo) / step))
-            edges = [lo + i * step for i in range(n_bins + 1)]
-            ax.hist(
-                values, bins=edges, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
-                edgecolor="white", linewidth=0.5, rwidth=0.92,
-                weights=[100.0 / len(values)] * len(values),
-            )
+            if isinstance(step, list):
+                bin_labels, pct = _bucket_by_edges(values, step)
+                bars = ax.bar(
+                    range(len(bin_labels)), pct, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
+                    edgecolor="white", linewidth=0.5, width=0.85,
+                )
+                ax.set_xticks(range(len(bin_labels)))
+                ax.set_xticklabels(bin_labels, rotation=45, ha="right", fontsize=8)
+                ax.bar_label(bars, fmt="%.1f", fontsize=7, padding=2)
+            else:
+                lo = (min(values) // step) * step
+                hi = (max(values) // step) * step + step
+                n_bins = int(round((hi - lo) / step))
+                edges = [lo + i * step for i in range(n_bins + 1)]
+                ax.hist(
+                    values, bins=edges, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
+                    edgecolor="white", linewidth=0.5, rwidth=0.92,
+                    weights=[100.0 / len(values)] * len(values),
+                )
+                ax.tick_params(axis="x", labelsize=8)
             ax.set_title(f"{label}(n={len(values)})", fontsize=10)
             ax.set_ylabel("割合(%)")
             ax.grid(True, axis="y", alpha=0.25)
-            ax.tick_params(axis="x", labelsize=8)
         fig.suptitle("全地点合算：川霧発生時の気象条件ヒストグラム", fontsize=12)
 
     fig.tight_layout(rect=(0, 0, 1, 0.95) if has_data else (0, 0, 1, 1))
