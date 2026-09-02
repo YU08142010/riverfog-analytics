@@ -95,7 +95,10 @@
             <span class="avatar-circle-fallback">{{ m.name[0] }}</span>
             {% endif %}
             {% endcall %}
-            <div style="margin-top:0.5rem; font-weight:600;">{{ m.name }}</div>
+            <div style="margin-top:0.5rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:0.35rem;">
+                <span class="sidebar-dot" style="background: {{ '#2ecc71' if m.online else 'var(--color-border)' }};" title="{{ 'オンライン' if m.online else 'オフライン' }}"></span>
+                {{ m.name }}
+            </div>
             <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
             <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">
                 ログイン{{ m.login_count }}回{% if m.streak > 1 %}・連続{{ m.streak }}日{% endif %}

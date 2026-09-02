@@ -72,6 +72,12 @@ BIO_MAX_LENGTH = 300
 STATION_COMMENT_MAX_LENGTH = 1000
 DM_MESSAGE_MAX_LENGTH = 1000
 
+# オンライン/オフライン表示用の閾値(この時間内にリクエストがあればオンライン扱い)。
+# リアルタイム配信基盤が無いため、直近アクセスの有無で近似する簡易な方式。
+ONLINE_THRESHOLD = timedelta(minutes=3)
+# 毎リクエストDBに書き込むと負荷が大きいため、この間隔以上空いた時だけ更新する。
+PRESENCE_TOUCH_INTERVAL = timedelta(seconds=60)
+
 # ログイン試行のレート制限(総当たり・アカウント列挙対策)。プロセス内メモリで管理する
 # シンプルな実装(waitressは単一プロセスで動かしているため、これで十分機能する)。
 LOGIN_ATTEMPT_WINDOW = timedelta(minutes=15)
@@ -340,6 +346,8 @@ def _require_login():
     conn = _users_conn()
     try:
         user = users.get_user_by_id(conn, user_id)
+        if user is not None:
+            _touch_presence_if_due(conn, user_id)
     finally:
         conn.close()
     if user is None:
@@ -351,6 +359,34 @@ def _require_login():
     # 場合に備えてgに載せておく(_current_user_favorite_stations参照、二重問い合わせ防止)。
     g.current_user = user
     return None
+
+
+def _touch_presence_if_due(conn, user_id):
+    """オンライン判定用の最終アクセス時刻を更新する。毎リクエストDBに書き込むと
+    負荷が大きいので、セッションに前回更新時刻を持たせてPRESENCE_TOUCH_INTERVAL
+    以上経過している時だけ実際に書き込む。"""
+    now = now_jst_naive()
+    last_touch_str = session.get("_presence_touched_at")
+    if last_touch_str:
+        try:
+            last_touch = datetime.strptime(last_touch_str, "%Y-%m-%d %H:%M:%S")
+            if now - last_touch < PRESENCE_TOUCH_INTERVAL:
+                return
+        except ValueError:
+            pass
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    users.touch_presence(conn, user_id, now_str)
+    session["_presence_touched_at"] = now_str
+
+
+def _is_online(last_active_str):
+    if not last_active_str:
+        return False
+    try:
+        last_active = datetime.strptime(last_active_str[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return False
+    return now_jst_naive() - last_active <= ONLINE_THRESHOLD
 
 
 CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -3296,6 +3332,7 @@ def members_list():
         month_login_counts = users.login_counts_since(conn, month_start)
         last_logins = users.last_logins_all(conn)
         streaks = users.login_streaks_all(conn, today)
+        last_active = users.last_active_all(conn)
     finally:
         conn.close()
     members = [
@@ -3308,6 +3345,7 @@ def members_list():
             "streak": streaks.get(u["id"], 0),
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
             "equipped_frame": u["equipped_frame"],
+            "online": _is_online(last_active.get(u["id"])),
         }
         for u in all_users
     ]
@@ -3336,6 +3374,7 @@ def member_detail(user_id):
         comment_count = users.comment_count(conn, user_id)
         lifetime_points = users.total_earned_points(conn, user_id)
         owned_frame_count = len(users.owned_frame_ids(conn, user_id))
+        last_active_at = users.last_active(conn, user_id)
     finally:
         conn.close()
     favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
@@ -3392,6 +3431,8 @@ def member_detail(user_id):
         bio_max_length=BIO_MAX_LENGTH,
         badges=badges,
         points=points,
+        online=_is_online(last_active_at),
+        last_active_at=last_active_at,
     )
 
 
@@ -3492,6 +3533,7 @@ def dm_inbox():
         unread = users.dm_unread_counts(conn, my_id)
         others = users.get_users_by_ids(conn, [c["other_id"] for c in conversations])
         all_users = users.list_users(conn)
+        last_active = users.last_active_all(conn)
     finally:
         conn.close()
     entries = [
@@ -3499,13 +3541,14 @@ def dm_inbox():
             "other": others.get(c["other_id"]),
             "last_message_at": c["last_message_at"],
             "unread": unread.get(c["id"], 0),
+            "online": _is_online(last_active.get(c["other_id"])),
         }
         for c in conversations
         if c["other_id"] in others  # 退会済みの相手は一覧に出さない
     ]
     started_ids = {c["other_id"] for c in conversations}
     entries += [
-        {"other": u, "last_message_at": "", "unread": 0}
+        {"other": u, "last_message_at": "", "unread": 0, "online": _is_online(last_active.get(u["id"]))}
         for u in all_users
         if u["id"] != my_id and u["id"] not in started_ids
     ]
@@ -3541,11 +3584,12 @@ def dm_thread(user_id):
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
         else:
             conversation_id = None
+        other_online = _is_online(users.last_active(conn, user_id))
     finally:
         conn.close()
     return render_template(
         "dm_thread.html", other=other, messages=messages, conversation_id=conversation_id,
-        my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH,
+        my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH, other_online=other_online,
     )
 
 
@@ -3620,9 +3664,10 @@ def dm_poll(user_id):
                 m["attachments"] = attachments_by_message.get(m["id"], [])
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
+        other_online = _is_online(users.last_active(conn, user_id))
     finally:
         conn.close()
-    return jsonify({"messages": messages})
+    return jsonify({"messages": messages, "other_online": other_online})
 
 
 @app.route("/messages/attachments/<int:attachment_id>")

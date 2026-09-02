@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS login_events (
     logged_in_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_login_events_user_id ON login_events(user_id);
+CREATE TABLE IF NOT EXISTS user_presence (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    last_active_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -471,6 +475,30 @@ def last_login(conn, user_id):
 def last_logins_all(conn):
     """全ユーザーの最終ログイン日時を1クエリでまとめて返す({user_id: last_login})。"""
     rows = conn.execute("SELECT user_id, MAX(logged_in_at) FROM login_events GROUP BY user_id").fetchall()
+    return {uid: v for uid, v in rows}
+
+
+def touch_presence(conn, user_id, at):
+    """オンライン判定用の最終アクセス時刻を記録する(呼び出し側で更新頻度を
+    間引いていること前提。webapp.py の _touch_presence_if_due 参照)。"""
+    with conn:
+        conn.execute(
+            "INSERT INTO user_presence (user_id, last_active_at) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET last_active_at = excluded.last_active_at",
+            (user_id, at),
+        )
+
+
+def last_active(conn, user_id):
+    row = conn.execute(
+        "SELECT last_active_at FROM user_presence WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def last_active_all(conn):
+    """全ユーザーの最終アクセス日時を1クエリでまとめて返す({user_id: last_active_at})。"""
+    rows = conn.execute("SELECT user_id, last_active_at FROM user_presence").fetchall()
     return {uid: v for uid, v in rows}
 
 

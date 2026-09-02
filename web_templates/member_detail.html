@@ -27,6 +27,13 @@
                 {{ member.name }}
                 <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
             </h2>
+            <p class="muted" style="margin:0 0 0.2rem; display:flex; align-items:center; gap:0.4rem;">
+                <span class="sidebar-dot" style="background: {{ '#2ecc71' if online else 'var(--color-border)' }};"></span>
+                {{ "オンライン" if online else "オフライン" }}
+                {% if not online and last_active_at %}
+                <span style="font-size:0.78rem;">(最終アクセス: {{ last_active_at[:16] }})</span>
+                {% endif %}
+            </p>
             <p class="muted" style="margin:0;">登録日: {{ member.created_at }}</p>
             {% if not is_self %}
             <a href="{{ url_for('dm_thread', user_id=member.id) }}" class="button" style="margin-top:0.5rem; display:inline-block;">{{ icon("comment", size=16) }} メッセージを送る</a>

@@ -27,7 +27,10 @@
                 {% endif %}
                 {% endcall %}
                 <div class="dm-thread-info">
-                    <div class="dm-thread-name">{{ e.other.name }}</div>
+                    <div class="dm-thread-name" style="display:flex; align-items:center; gap:0.35rem;">
+                        <span class="sidebar-dot" style="background: {{ '#2ecc71' if e.online else 'var(--color-border)' }};" title="{{ 'オンライン' if e.online else 'オフライン' }}"></span>
+                        {{ e.other.name }}
+                    </div>
                     <div class="dm-thread-snippet">{{ e.last_message_at }}</div>
                 </div>
                 {% if e.unread %}
