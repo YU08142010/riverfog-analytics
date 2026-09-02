@@ -23,7 +23,7 @@ from typing import Literal
 import openpyxl
 import requests
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageChops
 from pydantic import BaseModel
 
 from common import (
@@ -209,6 +209,43 @@ def resize_image(raw_bytes):
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=JPEG_QUALITY)
     return buf.getvalue()
+
+
+# 前後フレーム比較によるエスカレーション(自己申告confidenceだけに頼らない追加の機械的
+# シグナル)。直前の同地点の画像と比べて見た目が大きく変わっている場合、Geminiが
+# confidence:highと自己申告していても念のため上位モデルで再確認する(急な霧の発生・解消、
+# あるいは誤判定を疑う根拠になるため)。閾値は経験的な値で、単なる明るさの日内変動では
+# 超えない程度を想定している(運用しながら調整すること)。
+FRAME_DIFF_THUMBNAIL_SIZE = (64, 64)
+FRAME_DIFF_ESCALATION_THRESHOLD = 40.0  # 0-255スケールでの平均輝度差
+
+
+def _frame_diff_score(bytes_a, bytes_b):
+    """2枚の画像のグレースケール平均輝度差(0-255)を返す。小さいサムネイルに縮小してから
+    比較するため、圧縮ノイズ等の微差は吸収される。"""
+    img_a = Image.open(BytesIO(bytes_a)).convert("L").resize(FRAME_DIFF_THUMBNAIL_SIZE)
+    img_b = Image.open(BytesIO(bytes_b)).convert("L").resize(FRAME_DIFF_THUMBNAIL_SIZE)
+    diff = ImageChops.difference(img_a, img_b)
+    hist = diff.histogram()
+    total_pixels = sum(hist)
+    if not total_pixels:
+        return 0.0
+    return sum(i * count for i, count in enumerate(hist)) / total_pixels
+
+
+def _previous_hour_image_bytes(name, run_time):
+    """直前の観測時刻(1時間前)にこの地点で実際に保存された(取得失敗プレースホルダー
+    ではない)画像のbytesを返す。無ければNone。"""
+    if run_time is None:
+        return None
+    prev_time = run_time - timedelta(hours=1)
+    path = IMAGE_ARCHIVE_DIR / prev_time.strftime("%Y-%m-%d") / prev_time.strftime("%H%M") / f"{name}.jpg"
+    if not path.exists():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
 
 
 def _fetch_failed_placeholder_bytes():
@@ -557,12 +594,12 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
     """
     valid = [(name, images_by_name[name]) for name, _ in cameras if images_by_name.get(name)]
     if not valid:
-        return {}, set(), {}
+        return {}, set(), {}, {}
 
     api_keys = get_api_keys()
     if not api_keys:
         log.warning("GEMINI_API_KEY is not set, skipping Gemini classification (all stations missing)")
-        return {}, set(), {}
+        return {}, set(), {}, {}
 
     resized_by_name = {}
     for name, raw_bytes in valid:
@@ -572,14 +609,14 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
             log.warning("Image resize failed: %s: %s", name, e)
 
     if not resized_by_name:
-        return {}, set(), {}
+        return {}, set(), {}, {}
 
     weather_context = _weather_context_text(weather)
     contents, index_to_name = _build_contents(list(resized_by_name.items()), weather_context=weather_context)
     primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     parsed = _classify_with_model(contents, primary_model, api_keys)
     if parsed is None:
-        return {}, set(), {}
+        return {}, set(), {}, {}
 
     result, invalid_stations, low_confidence, confidence_by_name, reasoning_by_name = _parse_classifications(
         parsed, index_to_name,
@@ -604,6 +641,33 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
             len(extra_escalation), ", ".join(extra_escalation),
         )
         low_confidence = low_confidence + extra_escalation
+
+    # 薄暮・夜明け前後は光量変化そのものが大きく、フレーム間の輝度差が(実際の現象と無関係に)
+    # 通常時より大幅に高く出ることを実データで確認済み(閾値40に対し中央値50〜65)。
+    # その時間帯は既にDAWN_DUSK_HOURSの仕組みで別途エスカレーション対象になっているため、
+    # フレーム比較はそれ以外の時間帯に限定する(でないと薄暮のたびにほぼ全地点が
+    # 引っかかってしまい、シグナルとして機能しない)。
+    frame_change_escalation = []
+    if run_time is not None and run_time.hour not in DAWN_DUSK_HOURS:
+        for name, raw_bytes in valid:
+            if name in low_confidence:
+                continue
+            prev_bytes = _previous_hour_image_bytes(name, run_time)
+            if prev_bytes is None:
+                continue
+            try:
+                score = _frame_diff_score(prev_bytes, raw_bytes)
+            except Exception as e:
+                log.warning("Frame diff check failed for %s: %s", name, e)
+                continue
+            if score >= FRAME_DIFF_ESCALATION_THRESHOLD:
+                frame_change_escalation.append(name)
+    if frame_change_escalation:
+        log.info(
+            "Escalating %d additional station(s) due to large frame-to-frame change vs previous hour: %s",
+            len(frame_change_escalation), ", ".join(frame_change_escalation),
+        )
+        low_confidence = low_confidence + frame_change_escalation
 
     if low_confidence:
         for name in low_confidence:
@@ -664,6 +728,9 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
                     elif name in sub_result:
                         result[name] = sub_result[name]
                         confidence_by_name[name] = sub_confidence.get(name, "low")
+                        # 判定理由も再判定時のものに揃える(採用したコードと理由がズレたまま
+                        # ログに残ってしまう不整合を防ぐ)。
+                        reasoning_by_name[name] = sub_reasoning.get(name, reasoning_by_name.get(name, ""))
                         # 1回目は-1(無効画像)判定だったが、上位モデルの再判定で実際の現象
                         # コードが得られた場合は、無効判定を取り消して正しい現象を採用する。
                         invalid_stations.discard(name)
@@ -673,7 +740,7 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
                         ", ".join(sub_low),
                     )
 
-    return result, invalid_stations, confidence_by_name
+    return result, invalid_stations, confidence_by_name, reasoning_by_name
 
 
 # エスカレーション(上位モデルでの再判定)が連続で失敗する場合のサーキットブレーカー。
@@ -704,21 +771,41 @@ def _save_escalation_state(state):
 CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
 
 
-def append_confidence_log(confidence_by_name, run_time):
-    """Geminiの分類confidenceを記録する。fog_model.pyがこれを読み、学習時に
-    confidence:lowだったラベルを除外するために使う。"""
+def _migrate_confidence_log_add_reasoning_column():
+    """旧フォーマット(datetime,station,confidenceの3列)のログファイルに、reasoning列を
+    追加する1回限りの移行処理。既にreasoning列があれば何もしない(冪等)。"""
+    if not CONFIDENCE_LOG_PATH.exists():
+        return
+    with open(CONFIDENCE_LOG_PATH, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    if not rows or (rows[0] and rows[0][-1] == "reasoning"):
+        return
+    rows[0].append("reasoning")
+    for row in rows[1:]:
+        row.append("")
+    with open(CONFIDENCE_LOG_PATH, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(rows)
+    log.info("Migrated confidence_log.csv to add reasoning column (%d row(s))", len(rows) - 1)
+
+
+def append_confidence_log(confidence_by_name, reasoning_by_name, run_time):
+    """Geminiの分類confidenceと判定理由を記録する。fog_model.pyがこれを読み、学習時に
+    confidence:lowだったラベルを除外するために使う。reasoningは元々ログファイルにのみ
+    出力する診断用の項目だったが、後から人間が誤判定を見直す際の手がかりとして
+    構造化して残すようにした。"""
     if not confidence_by_name:
         return
     try:
         CONFIDENCE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _migrate_confidence_log_add_reasoning_column()
         is_new = not CONFIDENCE_LOG_PATH.exists()
         dt_str = run_time.strftime("%Y-%m-%d %H:%M:%S")
         with open(CONFIDENCE_LOG_PATH, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             if is_new:
-                writer.writerow(["datetime", "station", "confidence"])
+                writer.writerow(["datetime", "station", "confidence", "reasoning"])
             for name, confidence in confidence_by_name.items():
-                writer.writerow([dt_str, name, confidence])
+                writer.writerow([dt_str, name, confidence, reasoning_by_name.get(name, "")])
     except Exception as e:
         log.warning("Failed to append confidence log: %s", e)
 
@@ -1092,7 +1179,7 @@ def main():
     if weather is None:
         log.warning("Failed to fetch weather data (all fields treated as missing)")
 
-    phenom_by_name, invalid_stations, confidence_by_name = classify_images(
+    phenom_by_name, invalid_stations, confidence_by_name, reasoning_by_name = classify_images(
         cameras, images_by_name, weather=weather, run_time=run_time,
     )
     log.info(
@@ -1111,7 +1198,7 @@ def main():
         )
         log.error(message)
         send_alert(message, source="collect.py")
-    append_confidence_log(confidence_by_name, run_time)
+    append_confidence_log(confidence_by_name, reasoning_by_name, run_time)
 
     usable_count = ok_count - len(invalid_stations)
     problem_ratio = (1.0 - usable_count / len(cameras)) if cameras else 0.0

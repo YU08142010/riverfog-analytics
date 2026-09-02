@@ -211,6 +211,7 @@ def _run_backfill(dry_run):
     still_missing = 0
     gave_up = 0
     confidence_updates = {}
+    reasoning_updates = {}
 
     for (date_str, hhmm), names in sorted(by_time.items()):
         target_dt = datetime.strptime(f"{date_str} {hhmm}", "%Y-%m-%d %H%M")
@@ -238,7 +239,7 @@ def _run_backfill(dry_run):
             continue
 
         # Geminiで再分類（この時刻分だけをまとめて1回のAPI呼び出しにする）
-        phenom_by_name, invalid_stations, confidence_by_name = {}, set(), {}
+        phenom_by_name, invalid_stations, confidence_by_name, reasoning_by_name = {}, set(), {}, {}
         if api_keys:
             resized_by_name = {}
             for name, raw_bytes in recovered_bytes.items():
@@ -251,7 +252,11 @@ def _run_backfill(dry_run):
                 model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
                 parsed = collect._classify_with_model(contents, model, api_keys)
                 if parsed is not None:
-                    phenom_by_name, invalid_stations, _low, confidence_by_name = (
+                    # _parse_classifications()は(result, invalid, low_confidence, confidence,
+                    # reasoning)の5値を返す。以前はここが4値で受けており、この再分類パスが
+                    # 実行されるたび ValueError で落ちていた(recovered_bytesがあり、かつ
+                    # APIキー設定済みで分類に成功した場合に必ず踏む欠陥だったため修正)。
+                    phenom_by_name, invalid_stations, _low, confidence_by_name, reasoning_by_name = (
                         collect._parse_classifications(parsed, index_to_name)
                     )
 
@@ -286,13 +291,14 @@ def _run_backfill(dry_run):
             conf = confidence_by_name.get(name)
             if conf:
                 confidence_updates.setdefault(target_dt, {})[name] = conf
+                reasoning_updates.setdefault(target_dt, {})[name] = reasoning_by_name.get(name, "")
 
     if wb is not None and filled and not dry_run:
         wb.save(DATA_XLSX)
 
     if confidence_updates and not dry_run:
         for dt, conf_map in confidence_updates.items():
-            collect.append_confidence_log(conf_map, dt)
+            collect.append_confidence_log(conf_map, reasoning_updates.get(dt, {}), dt)
 
     if gave_up:
         log.info(

@@ -21,6 +21,7 @@ collect.py の毎時収集は、DNS障害等でその回の気象取得（Open-M
 collect.py と同じ時間帯に同時実行されると xlsx の書き込みが競合するため、
 cron 等で定期実行する場合は毎時収集(04:00-19:00台の00分)を避けたタイミングにすること。
 """
+import csv
 import logging
 import logging.handlers
 import sys
@@ -72,6 +73,11 @@ BETWEEN_DATE_DELAY_SEC = 0.5
 # これより古い行がまだ埋まらない場合は、個別ログを出さず件数のみ集計する
 GIVE_UP_AFTER_DAYS = 30
 
+# バックフィル(推定補完)した日時を記録するログ。fog_model.pyがこれを読み、
+# 実測ではなく後から推定で埋めた気象値の日時を学習から除外するために使う
+# (confidence_log.csvの「低確信度ラベルを除外する」仕組みと同じ考え方)。
+BACKFILL_LOG_PATH = BASE_DIR / "data" / "models" / "backfill_log.csv"
+
 LOG_FILE = BASE_DIR / "logs" / "backfill_weather.log"
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
@@ -87,6 +93,23 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("backfill_weather")
+
+
+def append_backfill_log(datetimes):
+    """バックフィルで埋めた日時をCSVに追記する(collect.pyのappend_confidence_logと同じ形)。"""
+    if not datetimes:
+        return
+    try:
+        BACKFILL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        is_new = not BACKFILL_LOG_PATH.exists()
+        with open(BACKFILL_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if is_new:
+                writer.writerow(["datetime"])
+            for dt in datetimes:
+                writer.writerow([dt.strftime("%Y-%m-%d %H:%M:%S")])
+    except Exception as e:
+        log.warning("Failed to append backfill log: %s", e)
 
 
 def query_open_meteo(url, params):
@@ -283,6 +306,7 @@ def _run_backfill(dry_run, lat, lon):
         return date_cache[key].get(dt_naive.hour)
 
     gave_up = 0
+    backfilled_datetimes = []
 
     # 1) 既存行のうち気象データのみ欠測している行を埋める
     missing = find_missing_rows(ws)
@@ -300,6 +324,7 @@ def _run_backfill(dry_run, lat, lon):
             weather, source = entry
             if not dry_run:
                 set_weather_measures(ws, row, weather)
+                backfilled_datetimes.append(dt)
             filled += 1
             log.info("Backfilled: row %d (%s) via %s%s", row, dt, source, " [dry-run]" if dry_run else "")
     else:
@@ -332,6 +357,7 @@ def _run_backfill(dry_run, lat, lon):
                 ws.insert_rows(insert_at)
                 ws.cell(row=insert_at, column=COL_DATETIME).value = dt
                 set_weather_measures(ws, insert_at, weather)
+                backfilled_datetimes.append(dt)
             inserted += 1
             log.warning(
                 "Inserted weather-only row for entirely missing time (phenomenon codes left blank): "
@@ -346,6 +372,8 @@ def _run_backfill(dry_run, lat, lon):
             "%d row(s) older than %d days still unavailable; will keep checking quietly",
             gave_up, GIVE_UP_AFTER_DAYS,
         )
+
+    append_backfill_log(backfilled_datetimes)
 
     log.info(
         "=== Backfill finished: %d weather value(s) filled, %d fully-missing row(s) inserted ===",

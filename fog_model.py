@@ -144,6 +144,10 @@ WEATHER_INTERPOLATE_LIMIT = 3
 # confidence:lowだったラベルを学習から除外するために読む。
 CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
 
+# backfill_weather.pyが後から推定で埋めた(実測ではない)日時のログ。ここでは
+# その日時の気象特徴量を学習から除外するために読む(confidence_log.csvと同じ考え方)。
+BACKFILL_LOG_PATH = BASE_DIR / "data" / "models" / "backfill_log.csv"
+
 # モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）が悪化した地点を自動検出する。
 # 固定の許容誤差ではなく、各回のテストデータをブートストラップ再抽出して「今回のスコアが
 # 前回以上になる確率」を推定し、それがREGRESSION_CONFIDENCE分の1未満（＝ノイズでは説明が
@@ -694,6 +698,22 @@ def load_low_confidence_set(path=CONFIDENCE_LOG_PATH):
     return set(zip(low["datetime"].astype(str), low["station"].astype(str)))
 
 
+def load_backfilled_datetime_set(path=BACKFILL_LOG_PATH):
+    """backfill_weather.pyが記録したログから、実測ではなく後から推定で埋めた日時の
+    setを返す。気象特徴量は全地点共通(代表値)なので、地点を問わずその日時の行全体を
+    学習から除外するために使う。ファイルが無ければ空set。"""
+    if not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        log.warning("Failed to read backfill log (%s): %s", path, e)
+        return set()
+    if "datetime" not in df.columns:
+        return set()
+    return set(df["datetime"].astype(str))
+
+
 # station_weather.py（Open-Meteoのキー名）-> fog_features.py列名（学習・予報のDataFrameで使う名前）
 _STATION_WEATHER_COL_MAP = {
     "temperature": COL_TEMP, "precipitation": COL_PRECIP, "wind_speed": COL_WIND_SPEED,
@@ -741,6 +761,18 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             log.info(
                 "Excluded %d low-confidence label(s) from training across %d station(s)",
                 excluded_total, len(phenom_cols),
+            )
+
+    backfilled = load_backfilled_datetime_set()
+    if backfilled:
+        dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        mask = dt_strs.isin(backfilled)
+        n = int(mask.sum())
+        if n:
+            targets.loc[mask, phenom_cols] = np.nan
+            log.info(
+                "Excluded %d backfilled (estimated, not observed) datetime row(s) from training "
+                "across %d station(s)", n, len(phenom_cols),
             )
 
     merged = pd.merge(main_df, targets, on="datetime", how="inner")
