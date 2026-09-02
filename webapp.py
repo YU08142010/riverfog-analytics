@@ -4180,10 +4180,15 @@ def admin_accounts():
             a["id"]: users.recent_login_failures(conn, a["email"])
             for a in accounts if a["locked_at"]
         }
+        role_requests = users.list_pending_role_change_requests(conn)
+        role_request_users = users.get_users_by_ids(
+            conn, [r["target_user_id"] for r in role_requests] + [r["requested_by"] for r in role_requests]
+        )
     finally:
         conn.close()
     return render_template(
         "admin_accounts.html", accounts=accounts, pending=pending, locked_failures=locked_failures,
+        role_requests=role_requests, role_request_users=role_request_users,
     )
 
 
@@ -4205,6 +4210,9 @@ def admin_accounts_unlock(user_id):
 @app.route("/admin/accounts/<int:user_id>/role", methods=["POST"])
 @requires_admin
 def admin_accounts_role(user_id):
+    """管理者への昇格(general→admin)は、権限昇格の悪用・誤操作を防ぐため即時反映せず、
+    別の管理者による承認を必須にする(admin_accounts_role_approve参照)。降格
+    (admin→general)は安全側の変更なので従来どおり即時反映する。"""
     role = request.form.get("role")
     if role not in ("general", "admin"):
         abort(400)
@@ -4215,9 +4223,63 @@ def admin_accounts_role(user_id):
             abort(404)
         if target["role"] == "admin" and role != "admin" and users.count_admins(conn) <= 1:
             return _finish("admin_accounts", "最後の管理者アカウントの権限は変更できません。", success=False)
+        if role == "admin" and target["role"] != "admin":
+            now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+            users.create_role_change_request(conn, user_id, role, session["user_id"], now_str)
+            _record_audit("管理者昇格を申請", f"{target['name']}({target['email']})を管理者に昇格申請")
+            _send_alert_throttled(
+                f"role_request:{user_id}",
+                f"{session.get('name')}さんが{target['name']}さんの管理者昇格を申請しました。"
+                f"他の管理者の承認が必要です。",
+            )
+            return _finish(
+                "admin_accounts",
+                f"{target['name']}さんの管理者昇格を申請しました。他の管理者の承認後に反映されます。",
+            )
         users.set_role(conn, user_id, role)
         _record_audit("ロール変更", f"{target['name']}({target['email']})を{target['role']}→{role}に変更")
         return _finish("admin_accounts", f"{target['name']}さんのロールを変更しました。")
+    finally:
+        conn.close()
+
+
+@app.route("/admin/accounts/role-requests/<int:request_id>/approve", methods=["POST"])
+@requires_admin
+def admin_accounts_role_approve(request_id):
+    conn = _users_conn()
+    try:
+        req = users.get_role_change_request(conn, request_id)
+        if req is None or req["status"] != "pending":
+            abort(404)
+        if req["requested_by"] == session["user_id"]:
+            return _finish("admin_accounts", "自分自身が申請した昇格は承認できません。別の管理者に依頼してください。", success=False)
+        target = users.get_user_by_id(conn, req["target_user_id"])
+        if target is None:
+            users.set_role_change_request_status(conn, request_id, "canceled")
+            return _finish("admin_accounts", "対象のアカウントが見つかりませんでした。", success=False)
+        users.set_role(conn, target["id"], req["requested_role"])
+        users.set_role_change_request_status(conn, request_id, "approved")
+        _record_audit("管理者昇格を承認", f"{target['name']}({target['email']})の管理者昇格を承認")
+        return _finish("admin_accounts", f"{target['name']}さんを管理者に昇格しました。")
+    finally:
+        conn.close()
+
+
+@app.route("/admin/accounts/role-requests/<int:request_id>/reject", methods=["POST"])
+@requires_admin
+def admin_accounts_role_reject(request_id):
+    conn = _users_conn()
+    try:
+        req = users.get_role_change_request(conn, request_id)
+        if req is None or req["status"] != "pending":
+            abort(404)
+        target = users.get_user_by_id(conn, req["target_user_id"])
+        users.set_role_change_request_status(conn, request_id, "rejected")
+        _record_audit(
+            "管理者昇格を却下",
+            f"{target['name'] if target else req['target_user_id']}の管理者昇格申請を却下",
+        )
+        return _finish("admin_accounts", "昇格申請を却下しました。")
     finally:
         conn.close()
 

@@ -65,6 +65,43 @@
     {% endif %}
 </div>
 
+{% if role_requests %}
+<div class="card">
+    <h2>管理者昇格の承認待ち({{ role_requests|length }}件)</h2>
+    <p class="muted">権限昇格の誤操作・悪用を防ぐため、申請した本人以外の管理者が承認するまで反映されません。</p>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>昇格対象</th><th>申請者</th><th>申請日時</th><th></th></tr></thead>
+        <tbody>
+        {% for r in role_requests %}
+        {% set target_u = role_request_users.get(r.target_user_id) %}
+        {% set requester_u = role_request_users.get(r.requested_by) %}
+        <tr>
+            <td>{{ target_u.name if target_u else "(退会済み)" }}</td>
+            <td>{{ requester_u.name if requester_u else "-" }}</td>
+            <td>{{ r.requested_at }}</td>
+            <td style="white-space:nowrap;">
+                {% if r.requested_by == session.get('user_id') %}
+                <span class="muted" style="font-size:0.82rem;">自分の申請のため承認できません</span>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_accounts_role_approve', request_id=r.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button">承認</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('admin_accounts_role_reject', request_id=r.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button button-danger">却下</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <h2>登録済みアカウント</h2>
     <p class="muted">お名前・メールアドレス・パスワードはその場で編集できます(パスワード欄は空欄のままなら変更されません)。</p>
@@ -83,13 +120,16 @@
             </td>
             <td><button type="submit" form="edit-form-{{ a.id }}" class="button">更新</button></td>
             <td>
-                <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;" data-ajax>
+                <form method="post" action="{{ url_for('admin_accounts_role', user_id=a.id) }}" style="display:inline;" data-ajax data-ajax-reload>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="role" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:0.3rem;">
                         <option value="general" {{ "selected" if a.role == "general" }}>一般</option>
                         <option value="admin" {{ "selected" if a.role == "admin" }}>管理者</option>
                     </select>
                 </form>
+                {% if role_requests|selectattr("target_user_id", "equalto", a.id)|list %}
+                <span class="muted" style="font-size:0.75rem; white-space:nowrap;">昇格承認待ち</span>
+                {% endif %}
             </td>
             <td>
                 {% if a.locked_at %}

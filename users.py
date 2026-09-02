@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS user_presence (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     last_active_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS role_change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    requested_role TEXT NOT NULL,
+    requested_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    requested_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+);
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -427,6 +435,51 @@ def count_admins(conn):
     return row[0] if row else 0
 
 
+def create_role_change_request(conn, target_user_id, requested_role, requested_by, requested_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO role_change_requests "
+            "(target_user_id, requested_role, requested_by, requested_at) VALUES (?, ?, ?, ?)",
+            (target_user_id, requested_role, requested_by, requested_at),
+        )
+        return cur.lastrowid
+
+
+def get_role_change_request(conn, request_id):
+    row = conn.execute(
+        "SELECT id, target_user_id, requested_role, requested_by, requested_at, status "
+        "FROM role_change_requests WHERE id = ?",
+        (request_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "target_user_id": row[1], "requested_role": row[2],
+        "requested_by": row[3], "requested_at": row[4], "status": row[5],
+    }
+
+
+def list_pending_role_change_requests(conn):
+    rows = conn.execute(
+        "SELECT id, target_user_id, requested_role, requested_by, requested_at, status "
+        "FROM role_change_requests WHERE status = 'pending' ORDER BY requested_at"
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "target_user_id": r[1], "requested_role": r[2],
+            "requested_by": r[3], "requested_at": r[4], "status": r[5],
+        }
+        for r in rows
+    ]
+
+
+def set_role_change_request_status(conn, request_id, status):
+    with conn:
+        conn.execute(
+            "UPDATE role_change_requests SET status = ? WHERE id = ?", (status, request_id)
+        )
+
+
 def email_taken(conn, email):
     """既存アカウント、または未処理(pending)の申請のいずれかで既に使われているか。"""
     email = _norm_email(email)
@@ -651,6 +704,19 @@ def record_audit(conn, actor_id, actor_name, action, detail, created_at):
             "INSERT INTO audit_log (actor_id, actor_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)",
             (actor_id, actor_name, action, detail, created_at),
         )
+
+
+def list_audit_log_since(conn, since_str):
+    """指定日時以降の監査ログを古い順で返す(週次ダイジェスト通知用)。"""
+    rows = conn.execute(
+        "SELECT id, actor_id, actor_name, action, detail, created_at FROM audit_log "
+        "WHERE created_at >= ? ORDER BY created_at",
+        (since_str,),
+    ).fetchall()
+    return [
+        {"id": r[0], "actor_id": r[1], "actor_name": r[2], "action": r[3], "detail": r[4], "created_at": r[5]}
+        for r in rows
+    ]
 
 
 def list_audit_log(conn, limit=500):
