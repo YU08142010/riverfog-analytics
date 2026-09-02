@@ -2336,6 +2336,78 @@ def _accuracy_summary_safe():
     return result
 
 
+# 気象条件別の的中率集計(降水の有無・気温帯)もキャッシュする。predictionsテーブルの
+# 全件をxlsxの気象データとdatetimeで突き合わせる処理はやや重いため。
+_accuracy_by_weather_cache = {"data": None, "at": 0.0}
+_accuracy_by_weather_cache_lock = threading.Lock()
+
+
+def _accuracy_by_weather_safe():
+    """答え合わせ済みの予測を、対象時刻の気象条件(降水の有無・気温帯)ごとに束ねて
+    的中率を返す。地点別・リードタイム別の集計(prediction_log.accuracy_summary)はあるが、
+    気象条件別の集計が無かったため追加。DB/xlsxが無い、または読めない場合はNoneを返す。
+    """
+    now = time.monotonic()
+    with _accuracy_by_weather_cache_lock:
+        cached = _accuracy_by_weather_cache["data"]
+        if cached is not None and now - _accuracy_by_weather_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+            return cached
+    if not DB_PATH.exists() or not DATA_XLSX.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT target_datetime, predicted_code, actual_code FROM predictions "
+                "WHERE actual_code IS NOT NULL"
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None
+        main_df, _, _ = fog_data.load_river_fog_data()
+        weather_by_dt = {
+            row["datetime"].strftime("%Y-%m-%d %H:%M:%S"): row
+            for _, row in main_df.iterrows()
+        }
+        precip_buckets = {}
+        temp_buckets = {}
+        for target_dt, predicted_code, actual_code in rows:
+            weather_row = weather_by_dt.get(target_dt)
+            if weather_row is None:
+                continue
+            correct = 1 if predicted_code == actual_code else 0
+            precip = weather_row[COL_PRECIP]
+            precip_key = "降水あり" if precip is not None and precip > 0 else "降水なし"
+            precip_buckets.setdefault(precip_key, {"n": 0, "correct": 0})
+            precip_buckets[precip_key]["n"] += 1
+            precip_buckets[precip_key]["correct"] += correct
+            temp = weather_row[COL_TEMP]
+            if temp is not None:
+                band_lo = int(temp // 5) * 5
+                temp_key = f"{band_lo}〜{band_lo + 5}℃"
+                temp_buckets.setdefault(temp_key, {"n": 0, "correct": 0})
+                temp_buckets[temp_key]["n"] += 1
+                temp_buckets[temp_key]["correct"] += correct
+    except Exception as e:
+        log.warning("Failed to compute accuracy by weather condition: %s", e)
+        return None
+    result = {
+        "by_precip": [
+            {"label": k, "n": v["n"], "correct": v["correct"]}
+            for k, v in sorted(precip_buckets.items())
+        ],
+        "by_temp": [
+            {"label": k, "n": v["n"], "correct": v["correct"]}
+            for k, v in sorted(temp_buckets.items(), key=lambda kv: int(kv[0].split("〜")[0]))
+        ],
+    }
+    with _accuracy_by_weather_cache_lock:
+        _accuracy_by_weather_cache["data"] = result
+        _accuracy_by_weather_cache["at"] = now
+    return result
+
+
 def _latest_observations():
     """最新時刻の観測(気象値+地点ごとの現象コード)を返す。データが無ければNoneを返す。"""
     if not DATA_XLSX.exists():
@@ -3058,7 +3130,8 @@ def station_chart(name):
 @app.route("/accuracy")
 def accuracy_page():
     summary = _accuracy_summary_safe()
-    return render_template("accuracy.html", summary=summary)
+    by_weather = _accuracy_by_weather_safe()
+    return render_template("accuracy.html", summary=summary, by_weather=by_weather)
 
 
 @app.route("/accuracy/chart.png")

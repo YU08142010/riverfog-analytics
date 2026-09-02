@@ -59,4 +59,45 @@
 </div>
 </div>
 {% endif %}
+
+{% if by_weather and (by_weather.by_precip or by_weather.by_temp) %}
+<div class="card">
+    <h2>気象条件別の的中率</h2>
+    <p class="muted">対象時刻の降水の有無・気温帯ごとに、答え合わせ済みの予測の的中率をまとめたもの。</p>
+    <div style="display:flex; gap:2rem; flex-wrap:wrap;">
+    {% if by_weather.by_precip %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>降水</th><th>件数</th><th>的中率</th></tr></thead>
+        <tbody>
+        {% for row in by_weather.by_precip %}
+        <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.n }}</td>
+            <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+    {% if by_weather.by_temp %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>気温帯</th><th>件数</th><th>的中率</th></tr></thead>
+        <tbody>
+        {% for row in by_weather.by_temp %}
+        <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.n }}</td>
+            <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}
