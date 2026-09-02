@@ -82,6 +82,11 @@ PRESENCE_TOUCH_INTERVAL = timedelta(seconds=60)
 # シンプルな実装(waitressは単一プロセスで動かしているため、これで十分機能する)。
 LOGIN_ATTEMPT_WINDOW = timedelta(minutes=15)
 LOGIN_ATTEMPT_MAX = 10
+
+# アカウント単位のロックアウト。IPベースのレート制限(上記)とは別に、特定アカウントへの
+# パスワード総当たりを検知したらそのアカウント自体をロックし、正しいパスワードが来ても
+# 管理者が解除するまでログインさせない(IPを変えられても意味が無いようにする)。
+ACCOUNT_LOCKOUT_THRESHOLD = 5
 _login_attempts_lock = threading.Lock()
 _login_attempts_by_ip = {}
 
@@ -317,6 +322,22 @@ except Exception:
 MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
 LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
+
+# Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
+# 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる
+# (実機のHostヘッダーで検証済み: funnel経由はHostが必ずこの値になり、nginx経由では
+# ならない)。管理者機能は、たとえ管理者ロールでログインしていてもこの経路では常に
+# 使わせない(公開範囲を広げすぎないための多層防御)。
+FUNNEL_PUBLIC_HOSTNAME = "sshserver.taile43041.ts.net"
+
+
+def _is_funnel_request():
+    return request.host.split(":")[0] == FUNNEL_PUBLIC_HOSTNAME
+
+
+@app.context_processor
+def _inject_is_funnel_request():
+    return {"is_funnel_request": _is_funnel_request}
 
 
 @app.before_request
@@ -839,6 +860,10 @@ def requires_admin(view):
     def wrapped(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login", next=request.path))
+        if _is_funnel_request():
+            # 管理者ロールであっても、公開URL(Funnel)経由では常にブロックする。
+            flash("管理者機能は公開URLからは利用できません。Tailscale経由でアクセスしてください。", "error")
+            return redirect(url_for("dashboard"))
         if session.get("role") != "admin":
             flash("この操作には管理者権限が必要です。", "error")
             return redirect(url_for("dashboard"))
@@ -3069,8 +3094,16 @@ def login():
             return render_template("login.html", error=error, next=next_path)
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
+        user_agent = request.headers.get("User-Agent", "")[:255]
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         conn = _users_conn()
         try:
+            existing = users.get_user_by_email(conn, email)
+            if existing and existing["locked_at"]:
+                # 正しいパスワードでもロック中は一切ログインさせない(IPを変えても無意味にする)。
+                users.record_login_failure(conn, email, ip, user_agent, now_str)
+                error = "このアカウントはロックされています。管理者に解除を依頼してください。"
+                return render_template("login.html", error=error, next=next_path)
             user = users.verify_login(conn, email, password)
         finally:
             conn.close()
@@ -3080,10 +3113,17 @@ def login():
             session["role"] = user["role"]
             session["name"] = user["name"]
             session.permanent = True
-            login_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+            login_at = now_str
             conn = _users_conn()
             try:
-                users.record_login(conn, user["id"], login_at)
+                if user["role"] == "admin" and not users.has_logged_in_from_ip(conn, user["id"], ip):
+                    _send_alert_throttled(
+                        f"admin_new_ip:{user['id']}:{ip}",
+                        f"管理者「{user['name']}」({user['email']})が未知のIP({ip})からログインしました。"
+                        f"心当たりが無い場合はパスワード変更・アカウントロックを検討してください。",
+                    )
+                users.record_login(conn, user["id"], login_at, ip)
+                users.clear_login_failures(conn, user["email"])
                 # 1日1回だけのログインボーナス。source文字列に日付を含めているので、
                 # 同じ日に何度ログインしても2回目以降は付与されない。
                 users.grant_points(
@@ -3094,7 +3134,26 @@ def login():
                 conn.close()
             return redirect(next_path)
         _record_login_failure(ip)
-        error = "メールアドレスまたはパスワードが違います。"
+        if existing:
+            conn = _users_conn()
+            try:
+                users.record_login_failure(conn, email, ip, user_agent, now_str)
+                fail_count = users.count_login_failures(conn, existing["email"])
+                if fail_count >= ACCOUNT_LOCKOUT_THRESHOLD:
+                    users.lock_account(conn, existing["id"], now_str)
+            finally:
+                conn.close()
+            if fail_count >= ACCOUNT_LOCKOUT_THRESHOLD:
+                _send_alert_throttled(
+                    f"account_lock:{existing['id']}",
+                    f"アカウント「{existing['name']}」({existing['email']})が連続ログイン失敗により"
+                    f"ロックされました。直近アクセス元IP: {ip}",
+                )
+                error = "ログイン失敗が続いたため、このアカウントはロックされました。管理者に解除を依頼してください。"
+            else:
+                error = "メールアドレスまたはパスワードが違います。"
+        else:
+            error = "メールアドレスまたはパスワードが違います。"
 
     return render_template("login.html", error=error, next=next_path)
 
@@ -4117,9 +4176,30 @@ def admin_accounts():
     try:
         accounts = users.list_users(conn)
         pending = users.list_signup_requests(conn, status="pending")
+        locked_failures = {
+            a["id"]: users.recent_login_failures(conn, a["email"])
+            for a in accounts if a["locked_at"]
+        }
     finally:
         conn.close()
-    return render_template("admin_accounts.html", accounts=accounts, pending=pending)
+    return render_template(
+        "admin_accounts.html", accounts=accounts, pending=pending, locked_failures=locked_failures,
+    )
+
+
+@app.route("/admin/accounts/<int:user_id>/unlock", methods=["POST"])
+@requires_admin
+def admin_accounts_unlock(user_id):
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        users.unlock_account(conn, user_id)
+        _record_audit("ロック解除", f"{target['name']}({target['email']})のアカウントロックを解除")
+        return _finish("admin_accounts", f"{target['name']}さんのロックを解除しました。")
+    finally:
+        conn.close()
 
 
 @app.route("/admin/accounts/<int:user_id>/role", methods=["POST"])
@@ -5017,5 +5097,15 @@ if __name__ == "__main__":
     from waitress import serve
     # 8080番は外部公開用にnginxが受け、Cockpit(9090番、別オリジン)と同一オリジンで
     # リバースプロキシするために127.0.0.1:8081をローカル専用で使う(直接の外部公開はしない)。
+    # trusted_proxyを設定しないと、waitressはX-Forwarded-For等のヘッダーを黙って
+    # 破棄してしまい、request.remote_addrが常に127.0.0.1(nginx/tailscaledからの接続元)
+    # になってしまう。nginxとTailscale Funnelはどちらも127.0.0.1経由で接続してくる
+    # ローカルの正規プロキシなので、これを信頼してX-Forwarded-Forを実際のクライアント
+    # 情報として使う。
     log.info("Starting river-fog webapp on 127.0.0.1:8081 (behind nginx on :8080)")
-    serve(app, host="127.0.0.1", port=8081)
+    serve(
+        app, host="127.0.0.1", port=8081,
+        trusted_proxy="127.0.0.1", trusted_proxy_count=1,
+        trusted_proxy_headers={"x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"},
+        clear_untrusted_proxy_headers=True,
+    )

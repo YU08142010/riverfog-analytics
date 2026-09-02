@@ -70,7 +70,7 @@
     <p class="muted">お名前・メールアドレス・パスワードはその場で編集できます(パスワード欄は空欄のままなら変更されません)。</p>
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>お名前</th><th>メールアドレス</th><th>新しいパスワード</th><th></th><th>ロール</th><th>登録日時</th><th></th></tr></thead>
+        <thead><tr><th>お名前</th><th>メールアドレス</th><th>新しいパスワード</th><th></th><th>ロール</th><th>状態</th><th>登録日時</th><th></th></tr></thead>
         <tbody>
         {% for a in accounts %}
         <tr>
@@ -90,6 +90,13 @@
                         <option value="admin" {{ "selected" if a.role == "admin" }}>管理者</option>
                     </select>
                 </form>
+            </td>
+            <td>
+                {% if a.locked_at %}
+                <span class="role-tag" style="background: var(--color-danger); color:#fff;">ロック中</span>
+                {% else %}
+                <span class="muted">-</span>
+                {% endif %}
             </td>
             <td>{{ a.created_at }}</td>
             <td>
@@ -124,4 +131,46 @@
     });
     </script>
 </div>
+
+{% set locked_accounts = accounts|selectattr("locked_at")|list %}
+{% if locked_accounts %}
+<div class="card">
+    <h2>ロック中のアカウント({{ locked_accounts|length }}件)</h2>
+    <p class="muted">ログイン失敗が続いたため自動的にロックされたアカウントです。本人からの申告等で
+        安全と確認できたら「ロックを解除」してください(解除すると失敗履歴もリセットされます)。</p>
+    {% for a in locked_accounts %}
+    <div class="card" style="background: var(--color-bg); margin-bottom:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+            <div>
+                <strong>{{ a.name }}</strong>
+                <span class="muted">({{ a.email }})</span>
+                <span class="muted" style="font-size:0.82rem;"> — ロック日時: {{ a.locked_at }}</span>
+            </div>
+            <form method="post" action="{{ url_for('admin_accounts_unlock', user_id=a.id) }}"
+                  data-confirm="{{ a.name }}さんのロックを解除しますか？">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="button">ロックを解除</button>
+            </form>
+        </div>
+        {% set failures = locked_failures.get(a.id, []) %}
+        {% if failures %}
+        <div class="table-scroll" style="margin-top:0.6rem;">
+        <table class="obs-table" style="width:100%;">
+            <thead><tr><th>失敗日時</th><th>IPアドレス</th><th>User-Agent</th></tr></thead>
+            <tbody>
+            {% for f in failures %}
+            <tr>
+                <td>{{ f.attempted_at }}</td>
+                <td style="font-family:monospace;">{{ f.ip or "-" }}</td>
+                <td style="font-size:0.8rem; max-width:24em; overflow-wrap:anywhere;">{{ f.user_agent or "-" }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

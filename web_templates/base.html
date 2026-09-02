@@ -37,7 +37,7 @@
         <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') else '' }}">{{ icon("members") }}コミュニティ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
         {% endif %}
-        {% if session.get('role') == 'admin' %}
+        {% if session.get('role') == 'admin' and not is_funnel_request() %}
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
         {% endif %}
     </nav>
@@ -463,7 +463,7 @@ document.addEventListener("submit", function(e) {
 // パスワード強度メーター(_pwStrength)はweb_static/shared.jsに共通化した。
 
 // 保留中の登録申請があれば、管理者にはfaviconにも赤いバッジを出す(気づきやすくするため)。
-{% if session.get('role') == 'admin' %}
+{% if session.get('role') == 'admin' and not is_funnel_request() %}
 (function() {
     var pending = {{ pending_signup_count()|tojson }};
     if (!pending) { return; }

@@ -34,6 +34,14 @@ CREATE TABLE IF NOT EXISTS login_events (
     logged_in_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_login_events_user_id ON login_events(user_id);
+CREATE TABLE IF NOT EXISTS login_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    attempted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_failures_email ON login_failures(email);
 CREATE TABLE IF NOT EXISTS user_presence (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     last_active_at TEXT NOT NULL
@@ -199,6 +207,8 @@ def _ensure_profile_columns(conn):
         conn.execute("ALTER TABLE users ADD COLUMN favorite_stations TEXT NOT NULL DEFAULT ''")
     if "equipped_frame" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN equipped_frame TEXT NOT NULL DEFAULT ''")
+    if "locked_at" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN locked_at TEXT")
 
 
 def _ensure_shared_files_columns(conn):
@@ -210,6 +220,15 @@ def _ensure_shared_files_columns(conn):
         )
 
 
+def _ensure_login_events_columns(conn):
+    """ipは異常ログイン検知(未知IPからの管理者ログイン等)のために後から追加した列。
+    login_eventsはFK移行(_migrate_add_foreign_keys)でテーブルごと作り直されることが
+    あるため、移行の後に呼ぶこと。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(login_events)").fetchall()}
+    if "ip" not in cols:
+        conn.execute("ALTER TABLE login_events ADD COLUMN ip TEXT")
+
+
 def connect(db_path):
     conn = sqlite3.connect(db_path)
     # テーブル作り直し(移行)中はFK違反チェックを一時的に無効にする必要があるため、
@@ -219,6 +238,7 @@ def connect(db_path):
     _ensure_profile_columns(conn)
     _ensure_shared_files_columns(conn)
     _migrate_add_foreign_keys(conn)
+    _ensure_login_events_columns(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -228,7 +248,7 @@ def _norm_email(email):
 
 
 _USER_COLUMNS = (
-    "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame"
+    "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame, locked_at"
 )
 
 
@@ -237,6 +257,7 @@ def _user_row_to_dict(row):
         "id": row[0], "name": row[1], "email": row[2],
         "password_hash": row[3], "role": row[4], "created_at": row[5],
         "bio": row[6], "favorite_stations": row[7], "equipped_frame": row[8],
+        "locked_at": row[9],
     }
 
 
@@ -302,6 +323,62 @@ def get_users_by_ids(conn, user_ids):
 def set_role(conn, user_id, role):
     with conn:
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+
+
+def record_login_failure(conn, email, ip, user_agent, attempted_at):
+    with conn:
+        conn.execute(
+            "INSERT INTO login_failures (email, ip, user_agent, attempted_at) VALUES (?, ?, ?, ?)",
+            (_norm_email(email), ip, user_agent, attempted_at),
+        )
+
+
+def count_login_failures(conn, email):
+    """直近のリセット(ログイン成功またはロック解除)以降に溜まっている失敗回数。
+    成功・解除のたびにclear_login_failures()で該当分を消しているので、単純に
+    残っている行数を数えるだけでよい。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM login_failures WHERE email = ?", (_norm_email(email),)
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def recent_login_failures(conn, email, limit=20):
+    """ロック解除画面で「誰が・どのIPから・いつ」失敗したかを見せるための一覧
+    (新しい順)。"""
+    rows = conn.execute(
+        "SELECT ip, user_agent, attempted_at FROM login_failures "
+        "WHERE email = ? ORDER BY attempted_at DESC LIMIT ?",
+        (_norm_email(email), limit),
+    ).fetchall()
+    return [{"ip": r[0], "user_agent": r[1], "attempted_at": r[2]} for r in rows]
+
+
+def clear_login_failures(conn, email):
+    with conn:
+        conn.execute("DELETE FROM login_failures WHERE email = ?", (_norm_email(email),))
+
+
+def lock_account(conn, user_id, locked_at):
+    with conn:
+        conn.execute("UPDATE users SET locked_at = ? WHERE id = ?", (locked_at, user_id))
+
+
+def unlock_account(conn, user_id):
+    """ロック解除。以後の再ロックが即座に起きないよう、溜まっていた失敗履歴も
+    合わせて消す。"""
+    with conn:
+        row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.execute("UPDATE users SET locked_at = NULL WHERE id = ?", (user_id,))
+        if row:
+            conn.execute("DELETE FROM login_failures WHERE email = ?", (row[0],))
+
+
+def list_locked_users(conn):
+    rows = conn.execute(
+        f"SELECT {_USER_COLUMNS} FROM users WHERE locked_at IS NOT NULL ORDER BY locked_at DESC"
+    ).fetchall()
+    return [_user_row_to_dict(r) for r in rows]
 
 
 def update_user(conn, user_id, name=None, email=None, password_hash=None):
@@ -417,12 +494,23 @@ def reject_signup_request(conn, request_id):
         )
 
 
-def record_login(conn, user_id, logged_in_at):
+def record_login(conn, user_id, logged_in_at, ip=None):
     with conn:
         conn.execute(
-            "INSERT INTO login_events (user_id, logged_in_at) VALUES (?, ?)",
-            (user_id, logged_in_at),
+            "INSERT INTO login_events (user_id, logged_in_at, ip) VALUES (?, ?, ?)",
+            (user_id, logged_in_at, ip),
         )
+
+
+def has_logged_in_from_ip(conn, user_id, ip):
+    """このユーザーが過去にこのIPからログインしたことがあるか(異常検知用)。
+    ipがNoneの場合は判定不能として「既知扱い」にする(誤検知でアラートを出さないため)。"""
+    if not ip:
+        return True
+    row = conn.execute(
+        "SELECT 1 FROM login_events WHERE user_id = ? AND ip = ? LIMIT 1", (user_id, ip)
+    ).fetchone()
+    return row is not None
 
 
 def login_history(conn, user_id):
