@@ -17,11 +17,38 @@
     {% if files %}
     <div class="image-grid">
         {% for f in files %}
-        <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
-            <img src="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" loading="lazy" alt="{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}のカメラ画像">
+        {% set station_name = f.replace('_unavailable.jpg', '').replace('.jpg', '') %}
+        {% set is_unavailable = '_unavailable' in f %}
+        <figure class="{{ 'unavailable' if is_unavailable else '' }}">
+            <img src="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" loading="lazy" alt="{{ station_name }}のカメラ画像">
             <figcaption>
-                {{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}{% if '_unavailable' in f %} (取得失敗){% endif %}
+                {{ station_name }}{% if is_unavailable %} (取得失敗){% endif %}
                 <br><a href="{{ url_for('images_file', date=date, hhmm=hhmm, filename=f) }}" download>ダウンロード</a>
+                {% if not is_unavailable %}
+                {% set code = codes_by_station.get(station_name) %}
+                {% set corrected = corrections_by_station.get(station_name) %}
+                <br>
+                <span class="muted" style="font-size:0.78rem;">
+                    AI判定: {{ phenom_labels.get(code, "現象なし" if code == 0 else "-") }}
+                    {% if corrected is not none %}
+                    <br>→ 訂正済み: {{ phenom_labels.get(corrected, "現象なし" if corrected == 0 else "-") }}
+                    {% endif %}
+                </span>
+                <details style="margin-top:0.3rem; font-size:0.78rem;">
+                    <summary style="cursor:pointer;">この判定を訂正する</summary>
+                    <form method="post" action="{{ url_for('images_hour_correct', date=date, hhmm=hhmm) }}" style="margin-top:0.3rem; display:flex; gap:0.3rem; align-items:center;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="station" value="{{ station_name }}">
+                        <select name="corrected_code" style="padding:0.2rem; font-size:0.78rem;">
+                            <option value="0">0: 現象なし</option>
+                            {% for c, label in phenom_labels.items() %}
+                            <option value="{{ c }}" {{ "selected" if corrected == c else "" }}>{{ c }}: {{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="button" style="padding:0.2rem 0.5rem; font-size:0.78rem;">保存</button>
+                    </form>
+                </details>
+                {% endif %}
             </figcaption>
         </figure>
         {% endfor %}

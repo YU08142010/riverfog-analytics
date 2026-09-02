@@ -2712,7 +2712,77 @@ def images_hour(date, hhmm):
     if not hour_dir.is_dir():
         abort(404)
     files = sorted(p.name for p in hour_dir.iterdir() if p.suffix.lower() == ".jpg")
-    return render_template("images_hour.html", date=date, hhmm=hhmm, files=files)
+
+    target_dt_str = f"{date} {hhmm[:2]}:{hhmm[2:]}:00"
+    codes_by_station, corrections_by_station = _phenom_codes_for_datetime(target_dt_str)
+
+    return render_template(
+        "images_hour.html", date=date, hhmm=hhmm, files=files,
+        codes_by_station=codes_by_station, corrections_by_station=corrections_by_station,
+        phenom_labels=PHENOM_LABELS,
+    )
+
+
+def _phenom_codes_for_datetime(target_dt_str):
+    """指定日時(YYYY-MM-DD HH:MM:SS)の、地点ごとのGemini判定コードと人間による訂正済み
+    コードを返す((codes_by_station, corrections_by_station)、いずれも{地点名: コード})。
+    images_hour()と後述のimages_hour_correct()の両方から使う共通処理。"""
+    codes_by_station = {}
+    if DATA_XLSX.exists():
+        try:
+            _, phenom_df, station_names = fog_data.load_river_fog_data()
+            row = phenom_df[phenom_df["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S") == target_dt_str]
+            if not row.empty:
+                for name in station_names:
+                    if name not in row.columns:
+                        continue
+                    code = encode_phenomena_cell(row.iloc[0][name])
+                    if code == code:  # NaNではない
+                        codes_by_station[name] = int(code)
+        except Exception as e:
+            log.warning("Failed to load phenom codes for %s: %s", target_dt_str, e)
+    conn = _users_conn()
+    try:
+        corrections_by_station = users.get_phenomena_corrections_for_datetime(conn, target_dt_str)
+    finally:
+        conn.close()
+    return codes_by_station, corrections_by_station
+
+
+@app.route("/images/<date>/<hhmm>/correct", methods=["POST"])
+def images_hour_correct(date, hhmm):
+    """人間がGeminiの現象判定を訂正する。訂正内容はphenomena_correctionsに記録するのみで、
+    xlsx上の値そのものは書き換えない(次回の再学習でfog_model.py側がこの記録を使って
+    除外・重み付けする設計にしやすいよう、生データと訂正履歴を分けて持つ)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    date = _validate_date(date)
+    hhmm = _validate_hhmm(hhmm)
+    station = request.form.get("station", "")
+    if station not in STATION_NAMES:
+        abort(404)
+    corrected_code = request.form.get("corrected_code", type=int)
+    if corrected_code is None or not (0 <= corrected_code <= 10):
+        return _finish(
+            "images_hour", "訂正後の現象コードを選んでください。", success=False, date=date, hhmm=hhmm,
+        )
+
+    target_dt_str = f"{date} {hhmm[:2]}:{hhmm[2:]}:00"
+    codes_by_station, _ = _phenom_codes_for_datetime(target_dt_str)
+    original_code = codes_by_station.get(station)
+
+    conn = _users_conn()
+    try:
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.add_phenomena_correction(conn, station, target_dt_str, original_code, corrected_code, my_id, now_str)
+        _record_audit(
+            "画像判定を訂正",
+            f"{station} {target_dt_str}: {original_code} → {corrected_code}",
+        )
+    finally:
+        conn.close()
+    return _finish("images_hour", "訂正を記録しました。", date=date, hhmm=hhmm)
 
 
 @app.route("/images/<date>/<hhmm>/file/<path:filename>")
@@ -3033,7 +3103,12 @@ def river_fog_histogram_page():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラムの専用ページ。
     「気象と川霧」ページ(/graphs配下)とはナビの見た目上のアクティブ判定が
     衝突しないよう、あえて/graphs以下ではないパスにしている。"""
-    return render_template("river_fog_histogram.html")
+    conn = _users_conn()
+    try:
+        correction_counts = users.phenomena_correction_counts_by_station(conn)
+    finally:
+        conn.close()
+    return render_template("river_fog_histogram.html", correction_counts=correction_counts)
 
 
 @app.route("/graphs/weather-fog-histogram.png")

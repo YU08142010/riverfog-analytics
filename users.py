@@ -114,6 +114,16 @@ CREATE TABLE IF NOT EXISTS fog_bets (
 );
 CREATE INDEX IF NOT EXISTS idx_fog_bets_user_id ON fog_bets(user_id);
 CREATE INDEX IF NOT EXISTS idx_fog_bets_status ON fog_bets(status);
+CREATE TABLE IF NOT EXISTS phenomena_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_name TEXT NOT NULL,
+    target_datetime TEXT NOT NULL,
+    original_code INTEGER,
+    corrected_code INTEGER NOT NULL,
+    corrected_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    corrected_at TEXT NOT NULL,
+    UNIQUE(station_name, target_datetime)
+);
 CREATE TABLE IF NOT EXISTS dm_conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -903,6 +913,40 @@ def list_fog_bets_for_user(conn, user_id, limit=30):
 def available_points(conn, user_id):
     """実績で獲得した合計ポイントから、フレーム交換で使った分を差し引いた残高。"""
     return total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
+
+
+def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at):
+    """カメラ画像の現象判定(Gemini)を人間が訂正した記録を残す。同じ(地点, 日時)を
+    再度訂正した場合は上書きする(訂正の訂正はよくあることなので、履歴は持たず
+    最新の1件だけを残す)。"""
+    with conn:
+        conn.execute(
+            "INSERT INTO phenomena_corrections "
+            "(station_name, target_datetime, original_code, corrected_code, corrected_by, corrected_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(station_name, target_datetime) DO UPDATE SET "
+            "corrected_code = excluded.corrected_code, corrected_by = excluded.corrected_by, "
+            "corrected_at = excluded.corrected_at",
+            (station_name, target_datetime, original_code, corrected_code, user_id, at),
+        )
+
+
+def get_phenomena_corrections_for_datetime(conn, target_datetime):
+    """指定日時の全地点分の訂正済みコードを返す({地点名: 訂正後コード})。"""
+    rows = conn.execute(
+        "SELECT station_name, corrected_code FROM phenomena_corrections WHERE target_datetime = ?",
+        (target_datetime,),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def phenomena_correction_counts_by_station(conn):
+    """地点別の訂正件数を多い順で返す(画像判定の誤りやすい地点を把握するため)。"""
+    rows = conn.execute(
+        "SELECT station_name, COUNT(*) FROM phenomena_corrections GROUP BY station_name "
+        "ORDER BY COUNT(*) DESC"
+    ).fetchall()
+    return [{"station": s, "count": c} for s, c in rows]
 
 
 def owned_frame_ids(conn, user_id):
