@@ -1000,10 +1000,13 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
 # 風速だけは値がほぼ弱風側に偏るため、固定刻み幅ではなく低速側を細かくした不均等な
 # 区分(リストで指定)を使い、各区分を等幅の棒として並べる(区分の実際の幅は棒の幅に
 # 反映しない。気象庁の観測資料等でよく使われる並べ方に合わせた)。
+_COL_DEWPOINT_DEPRESSION = "気温露点差"  # 湿数(気温-露点温度)。fog_features.pyの予測用特徴量と同じ列名・定義。
+
 _RIVER_FOG_HISTOGRAM_FEATURES = [
     (COL_TEMP, "気温(℃)", 2), (COL_HUMIDITY, "相対湿度(％)", 5),
     (COL_WIND_SPEED, "風速(m/s)", [0.2, 0.5, 1, 2, 3]), (COL_PRECIP, "降水量(mm)", 1),
-    (COL_DEWPOINT, "露点温度(℃)", 2), (COL_SOLAR, "日射量(MJ/m2)", 0.5),
+    (COL_DEWPOINT, "露点温度(℃)", 2), (_COL_DEWPOINT_DEPRESSION, "湿数(℃)", 1),
+    (COL_SOLAR, "日射量(MJ/m2)", 0.5),
     (COL_SUNSHINE, "日照時間(時間)", 0.1), (COL_VISIBILITY, "視程(km)", 2),
 ]
 
@@ -1031,16 +1034,18 @@ def _bucket_by_edges(values, edges):
 
 
 def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
-    """気象条件(気温・湿度・風速・降水量・露点温度・日射量・日照時間・視程)ごとに、
+    """気象条件(気温・湿度・風速・降水量・露点温度・湿数・日射量・日照時間・視程)ごとに、
     川霧が発生していた瞬間の値だけをヒストグラムにする。_render_weather_fog_boxplot_png
     とは違い地点ごとに分けず、全地点分の「川霧あり」行をまとめて1つの分布として扱う
     (同じ日時でも複数地点で同時に川霧が発生していればその分だけ重みが乗る)。項目ごとに
     固定の刻み幅でビンを揃える(気温なら2℃刻み)。"""
-    fig, axes = plt.subplots(4, 2, figsize=(9, 13))
+    fig, axes = plt.subplots(3, 3, figsize=(12, 11))
 
     values_by_col = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
     has_data = main_df is not None and phenom_df is not None and not main_df.empty
     if has_data:
+        main_df = main_df.copy()
+        main_df[_COL_DEWPOINT_DEPRESSION] = main_df[COL_TEMP] - main_df[COL_DEWPOINT]
         for station_name in station_names or []:
             if station_name not in phenom_df.columns:
                 continue
