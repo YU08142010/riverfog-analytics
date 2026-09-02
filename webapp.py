@@ -178,7 +178,37 @@ def _save_uploaded_file(file_storage, dest_dir):
     except IOError:
         dest_path.unlink(missing_ok=True)
         return None, "サーバーの空き容量が不足しているため、アップロードできませんでした。"
+
+    if _scan_file_for_malware(dest_path):
+        dest_path.unlink(missing_ok=True)
+        log.warning("Malware detected in upload, rejected: %s (original name: %s)", stored_name, original_name)
+        _record_audit("マルウェア検知", f"アップロードされたファイル「{original_name}」からマルウェアを検知し拒否")
+        return None, "このファイルはウイルス対策スキャンで問題が検出されたため、アップロードできませんでした。"
     return (original_name, stored_name, content_type, size), None
+
+
+def _scan_file_for_malware(path):
+    """ClamAV(clamd常駐プロセス)にclamdscan経由でスキャンさせる。デーモンが落ちている・
+    タイムアウトする等スキャンできなかった場合は「検知なし」として扱う(可用性を優先し、
+    スキャン基盤の一時的な不調でアップロード機能自体を止めない。ただし継続的に失敗する
+    場合は管理者に気づけるようアラートする)。ウイルスを検出した場合のみTrueを返す。"""
+    try:
+        result = subprocess.run(
+            ["clamdscan", "--fdpass", "--no-summary", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as e:
+        log.warning("Malware scan could not run for %s: %s", path, e)
+        _send_alert_throttled("malware_scan_unavailable", f"ウイルススキャン(clamdscan)が実行できません: {e}")
+        return False
+    # clamdscanの終了コード: 0=クリーン, 1=感染検出, 2=エラー(引数不正・デーモン未応答等)。
+    if result.returncode == 2:
+        log.warning("Malware scan returned an error for %s: %s", path, result.stdout + result.stderr)
+        _send_alert_throttled(
+            "malware_scan_error", f"ウイルススキャン(clamdscan)がエラーを返しました: {(result.stdout + result.stderr)[:300]}",
+        )
+        return False
+    return result.returncode == 1
 
 
 # ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている

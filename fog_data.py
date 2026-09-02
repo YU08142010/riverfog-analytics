@@ -3,6 +3,7 @@
 common.pyの固定列レイアウトを前提とする（列自動検出は行わない）。
 """
 import csv
+import threading
 from datetime import datetime
 
 import openpyxl
@@ -43,10 +44,44 @@ def load_station_names(cameras_csv=CAMERAS_CSV):
         return [row["地点名"] for row in reader]
 
 
+# openpyxlのread_onlyモードでもiter_rows(values_only=True)自体の解析コストは行×列数に
+# 比例して重く、データが数年分溜まった現状(19000行超)では1回の読み込みに10秒以上かかる
+# （ws.cell()のセル単位ランダムアクセスほど酷くはないが、無視できる差ではない）。
+# webapp.py側のほぼ全ページがリクエストのたびにこの関数を呼ぶため、キャッシュ無しだと
+# サイト全体が常にこの待ち時間を背負うことになる。xlsxのファイル更新時刻(mtime)をキーに
+# キャッシュし、collect.py等が実際に書き込むまでは再パースしない。
+_cache_lock = threading.Lock()
+_cache = {"xlsx_path": None, "mtime": None, "data": None}
+
+
 def load_river_fog_data(xlsx_path=DATA_XLSX, cameras_csv=CAMERAS_CSV):
-    """(main_df, phenom_df, station_names) を返す。
+    """(main_df, phenom_df, station_names) を返す。呼び出し元ごとに独立した
+    DataFrameのコピーを返すので、呼び出し側で自由に加工してよい(キャッシュ本体は
+    汚染されない)。
+
     main_df  : datetime + 気象特徴量（fog_features.py の列名）
     phenom_df: datetime + 地点名ごとの現象コード生値（"/" / 数値 / None）
+    """
+    try:
+        mtime = xlsx_path.stat().st_mtime
+    except OSError:
+        mtime = None
+    with _cache_lock:
+        if _cache["xlsx_path"] == xlsx_path and _cache["mtime"] == mtime and _cache["data"] is not None:
+            main_df, phenom_df, station_names = _cache["data"]
+            return main_df.copy(), phenom_df.copy(), list(station_names)
+
+    main_df, phenom_df, station_names = _load_river_fog_data_uncached(xlsx_path, cameras_csv)
+
+    with _cache_lock:
+        _cache["xlsx_path"] = xlsx_path
+        _cache["mtime"] = mtime
+        _cache["data"] = (main_df, phenom_df, station_names)
+    return main_df.copy(), phenom_df.copy(), list(station_names)
+
+
+def _load_river_fog_data_uncached(xlsx_path, cameras_csv):
+    """load_river_fog_data()の実処理(キャッシュ未ヒット時のみ呼ばれる)。
 
     openpyxlのread_onlyモードでは ws.cell(row, col) によるセル単位のランダムアクセスは
     行ごとに内部XMLの再走査が発生し、行数に対してほぼ二乗オーダーで遅くなる
