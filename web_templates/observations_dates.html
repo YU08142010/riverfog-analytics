@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% from "_date_month_groups.html" import date_month_groups %}
+{% from "_page_tabs.html" import page_tabs %}
 {% block title %}観測データ{% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "観測データ", "url": url_for('observations_dates'), "active": request.path.startswith('/observations')},
+    {"label": "カメラ画像", "url": url_for('images_dates'), "active": request.path.startswith('/images')},
+    {"label": "予測結果", "url": url_for('predictions_dates'), "active": request.path.startswith('/predictions')},
+]) }}
 <div class="card">
     <h2>観測データ(日付一覧)</h2>
     <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ全体(Excel)をダウンロード</a></p>

@@ -1,8 +1,14 @@
 {% extends "base.html" %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
+{% from "_page_tabs.html" import page_tabs %}
 {% block title %}地点別{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "一覧", "url": url_for('stations_list'), "active": request.path.startswith('/stations')},
+    {"label": "比較", "url": url_for('compare_stations'), "active": request.path.startswith('/compare')},
+    {"label": "地図", "url": url_for('map_page'), "active": request.path.startswith('/map')},
+]) }}
 <div class="card">
     <h2>地点一覧</h2>
     {% if station_names %}

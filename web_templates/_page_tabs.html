@@ -1,0 +1,7 @@
+{% macro page_tabs(items) %}
+<div class="page-tabs">
+    {% for item in items %}
+    <a href="{{ item.url }}" class="{{ 'active' if item.active else '' }}">{{ item.label }}{% if item.badge %}<span class="nav-unread-badge">{{ item.badge }}</span>{% endif %}</a>
+    {% endfor %}
+</div>
+{% endmacro %}

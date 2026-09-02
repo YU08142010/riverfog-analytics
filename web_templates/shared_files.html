@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
+{% from "_page_tabs.html" import page_tabs %}
 {% block title %}共有ファイル{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -11,6 +12,11 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "メンバー", "url": url_for('members_list'), "active": request.path.startswith('/members')},
+    {"label": "メッセージ", "url": url_for('dm_inbox'), "active": request.path.startswith('/messages'), "badge": dm_unread_count()},
+    {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
+]) }}
 <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
         <h2 style="margin:0;">共有ファイル</h2>

@@ -29,19 +29,12 @@
     </button>
     <nav id="main-nav">
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
-        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith(url_for('stations_list')) or request.path.startswith('/compare') else '' }}">{{ icon("stations") }}地点別</a>
-        <a href="{{ url_for('map_page') }}" class="{{ 'active' if request.path.startswith(url_for('map_page')) else '' }}">{{ icon("map") }}地図</a>
+        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
         <a href="{{ url_for('simulator_page') }}" class="{{ 'active' if request.path.startswith(url_for('simulator_page')) else '' }}">{{ icon("simulator") }}シミュレーター</a>
-        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith(url_for('observations_dates')) else '' }}">{{ icon("data") }}観測データ</a>
-        <a href="{{ url_for('images_dates') }}" class="{{ 'active' if request.path.startswith(url_for('images_dates')) else '' }}">{{ icon("camera") }}カメラ画像</a>
-        <a href="{{ url_for('predictions_dates') }}" class="{{ 'active' if request.path.startswith(url_for('predictions_dates')) else '' }}">{{ icon("forecast") }}予測結果</a>
-        <a href="{{ url_for('accuracy_page') }}" class="{{ 'active' if request.path.startswith(url_for('accuracy_page')) else '' }}">{{ icon("accuracy") }}予測精度</a>
-        <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') else '' }}">{{ icon("report") }}気象と川霧</a>
-        <a href="{{ url_for('river_fog_histogram_page') }}" class="{{ 'active' if request.path.startswith(url_for('river_fog_histogram_page')) else '' }}">{{ icon("report") }}ヒストグラム</a>
+        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith('/observations') or request.path.startswith('/images') or request.path.startswith('/predictions') else '' }}">{{ icon("data") }}観測アーカイブ</a>
+        <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') or request.path.startswith('/river-fog-histogram') or request.path.startswith('/accuracy') else '' }}">{{ icon("report") }}分析</a>
         {% if session.get('user_id') %}
-        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') else '' }}">{{ icon("members") }}メンバー</a>
-        <a href="{{ url_for('dm_inbox') }}" class="{{ 'active' if request.path.startswith('/messages') else '' }}">{{ icon("comment") }}メッセージ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>
-        <a href="{{ url_for('shared_files_page') }}" class="{{ 'active' if request.path.startswith('/files') else '' }}">{{ icon("data") }}共有ファイル</a>
+        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') else '' }}">{{ icon("members") }}コミュニティ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
         {% endif %}
         {% if session.get('role') == 'admin' %}
@@ -86,8 +79,8 @@
     <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
     {% if request.path.startswith('/admin') and request.path != url_for('admin_home') %}
     <li><a href="{{ url_for('admin_home') }}">管理者</a></li>
-    {% elif request.path.startswith('/compare') %}
-    <li><a href="{{ url_for('stations_list') }}">地点別</a></li>
+    {% elif request.path.startswith('/compare') or request.path.startswith('/map') %}
+    <li><a href="{{ url_for('stations_list') }}">地点</a></li>
     {% endif %}
     {% if request.path != url_for('dashboard') %}<li>{{ self.title() }}</li>{% endif %}
 </ul>

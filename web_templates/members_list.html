@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_avatar.html" import avatar_frame %}
+{% from "_page_tabs.html" import page_tabs %}
 {% block title %}メンバー{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -9,6 +10,11 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "メンバー", "url": url_for('members_list'), "active": request.path.startswith('/members')},
+    {"label": "メッセージ", "url": url_for('dm_inbox'), "active": request.path.startswith('/messages'), "badge": dm_unread_count()},
+    {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
+]) }}
 {% macro render_ranking(items, count_key) %}
 <ol class="ranking-list">
     {% for m in items %}
