@@ -456,6 +456,12 @@
                 tile.setAttribute("data-shop-owned", "1");
                 tile.querySelector(".shop-buy-block").hidden = true;
                 tile.querySelector(".shop-owned-block").hidden = false;
+                // 買った直後は未装着のはずなので、以前このタイルに残っていたかもしれない
+                // 装着中表示を必ずクリアする(bfcache等でJSが古いDOM状態を引き継ぐ場合の保険)。
+                var freshTag = tile.querySelector(".equip-tag");
+                var freshForm = tile.querySelector(".equip-form");
+                if (freshTag) { freshTag.hidden = true; }
+                if (freshForm) { freshForm.hidden = false; }
             }
         }
         if ((data.action === "equip" || data.action === "unequip") && data.category) {
@@ -480,7 +486,13 @@
         gachaForm.addEventListener("ajaxformsuccess", function() {});
         document.addEventListener("ajaxformsuccess", function(e) {
             if (e.detail.form === gachaForm) {
-                document.getElementById("gacha-result").textContent = (e.detail.data || {}).message || "";
+                var gachaData = e.detail.data || {};
+                document.getElementById("gacha-result").textContent = gachaData.message || "";
+                // 福袋でアイテムが当たった場合はその場でタイルを更新する処理を持たないため、
+                // 結果メッセージを表示した直後にページを再読み込みして所持状況を反映する。
+                if (gachaData.success) {
+                    setTimeout(function() { window.location.reload(); }, 1600);
+                }
             }
         });
     }
