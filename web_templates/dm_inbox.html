@@ -42,7 +42,7 @@
                 {% endcall %}
                 <div class="dm-thread-info">
                     <div class="dm-thread-name" style="display:flex; align-items:center; gap:0.35rem;">
-                        <span class="sidebar-dot" style="background: {{ '#2ecc71' if e.online else 'var(--color-border)' }};" title="{{ 'オンライン' if e.online else 'オフライン' }}"></span>
+                        <span class="sidebar-dot" data-user-id="{{ e.other.id }}" style="background: {{ '#2ecc71' if e.online else 'var(--color-border)' }};" title="{{ 'オンライン' if e.online else 'オフライン' }}"></span>
                         {{ e.other.name }}
                         {% if e.pinned %}<span title="ピン留め済み">📌</span>{% endif %}
                     </div>

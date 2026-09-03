@@ -54,7 +54,7 @@
                     <strong>{{ m.reply_preview.sender_name }}</strong>: {{ m.reply_preview.snippet }}
                 </div>
                 {% endif %}
-                <div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else '' }}">
+                <div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else '' }} {{ my_bubble_style_class if m.sender_id == my_id else '' }}">
                     {% if m.card %}
                     {{ station_card(m.card) }}
                     {% elif m.body %}
@@ -111,6 +111,7 @@
 <script>
 (function() {
     var myDmThemeClass = {{ my_dm_theme_class|tojson }};
+    var myBubbleStyleClass = {{ my_bubble_style_class|tojson }};
     var reactionEmojis = {{ reaction_emojis|tojson }};
     var bubbles = document.getElementById("group-bubbles");
     var form = document.getElementById("group-send-form");
@@ -239,7 +240,8 @@
             wrap.appendChild(nameEl);
         }
         var bubble = document.createElement("div");
-        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : "");
+        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : "")
+            + (mine && myBubbleStyleClass ? " " + myBubbleStyleClass : "");
         if (m.card) {
             bubble.appendChild(renderCard(m.card));
         } else if (m.body) {

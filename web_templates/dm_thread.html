@@ -24,7 +24,7 @@
         <h2 style="margin:0; display:flex; align-items:center; gap:0.5rem; flex:1;">
             <a href="{{ url_for('member_detail', user_id=other.id) }}">{{ other.name }}</a>
             <span id="dm-other-status" style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.72rem; font-weight:normal;" class="muted">
-                <span id="dm-other-status-dot" class="sidebar-dot" style="background: {{ '#2ecc71' if other_online else 'var(--color-border)' }};"></span>
+                <span id="dm-other-status-dot" class="sidebar-dot" data-user-id="{{ other.id }}" style="background: {{ '#2ecc71' if other_online else 'var(--color-border)' }};"></span>
                 <span id="dm-other-status-label">{{ "オンライン" if other_online else "オフライン" }}</span>
             </span>
         </h2>
@@ -59,7 +59,7 @@
                     <strong>{{ m.reply_preview.sender_name }}</strong>: {{ m.reply_preview.snippet }}
                 </div>
                 {% endif %}
-                <div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else other_dm_theme_class }}">
+                <div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else other_dm_theme_class }} {{ my_bubble_style_class if m.sender_id == my_id else other_bubble_style_class }}">
                     {% if m.card %}
                     {{ station_card(m.card) }}
                     {% elif m.body %}
@@ -117,6 +117,8 @@
 (function() {
     var myDmThemeClass = {{ my_dm_theme_class|tojson }};
     var otherDmThemeClass = {{ other_dm_theme_class|tojson }};
+    var myBubbleStyleClass = {{ my_bubble_style_class|tojson }};
+    var otherBubbleStyleClass = {{ other_bubble_style_class|tojson }};
     var reactionEmojis = {{ reaction_emojis|tojson }};
     var bubbles = document.getElementById("dm-bubbles");
     var form = document.getElementById("dm-send-form");
@@ -248,7 +250,8 @@
         var wrap = document.createElement("div");
         wrap.className = "dm-bubble-wrap";
         var bubble = document.createElement("div");
-        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : (!mine && otherDmThemeClass ? " " + otherDmThemeClass : ""));
+        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : (!mine && otherDmThemeClass ? " " + otherDmThemeClass : ""))
+            + (mine && myBubbleStyleClass ? " " + myBubbleStyleClass : (!mine && otherBubbleStyleClass ? " " + otherBubbleStyleClass : ""));
         if (m.card) {
             bubble.appendChild(renderCard(m.card));
         } else if (m.body) {

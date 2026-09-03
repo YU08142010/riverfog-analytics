@@ -79,6 +79,10 @@
                 <input type="checkbox" name="use_boost" id="gamble-use-boost" value="1" {{ "disabled" if consumables.get('boost_ticket', 0) < 1 }}>
                 倍率ブーストチケットを使う(残り{{ consumables.get('boost_ticket', 0) }}個、倍率+10%)
             </label>
+            <label style="font-size:0.85rem; {{ 'opacity:0.5;' if consumables.get('super_boost_ticket', 0) < 1 }}">
+                <input type="checkbox" name="use_super_boost" id="gamble-use-super-boost" value="1" {{ "disabled" if consumables.get('super_boost_ticket', 0) < 1 }}>
+                上級倍率ブーストチケットを使う(残り{{ consumables.get('super_boost_ticket', 0) }}個、倍率+25%、通常版と同時ONの場合はこちらが優先)
+            </label>
         </div>
         <div style="margin-top:1rem; display:flex; align-items:center; gap:1rem;">
             <div>
@@ -118,7 +122,7 @@
     <h3 style="margin-top:0;">これまでの賭け</h3>
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>地点</th><th>対象時刻</th><th>賭けpt</th><th>倍率</th><th>状態</th><th>賭けた日時</th></tr></thead>
+        <thead><tr><th>地点</th><th>対象時刻</th><th>賭けpt</th><th>倍率</th><th>状態</th><th>賭けた日時</th><th></th></tr></thead>
         <tbody>
         {% for b in bets %}
         <tr>
@@ -129,10 +133,19 @@
             <td>
                 {% if b.status == "pending" %}<span class="muted">結果待ち{% if b.insurance %}(保険あり){% endif %}</span>
                 {% elif b.status == "won" %}<span class="role-tag admin">的中(+{{ b.payout }}pt)</span>
+                {% elif b.status == "cancelled" %}<span class="muted">取消(全額返却)</span>
                 {% elif b.payout %}<span class="muted">はずれ(保険で+{{ b.payout }}pt返却)</span>
                 {% else %}<span class="muted">はずれ</span>{% endif %}
             </td>
             <td>{{ b.placed_at }}</td>
+            <td>
+                {% if b.status == "pending" and now_str < b.window_start and consumables.get('withdraw_ticket', 0) > 0 %}
+                <form method="post" action="{{ url_for('game_gamble_cancel', bet_id=b.id) }}" data-ajax data-ajax-reload style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button cancel" style="font-size:0.75rem; padding:0.2rem 0.5rem;">見送り券で取消</button>
+                </form>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         </tbody>
@@ -155,8 +168,10 @@
     var payoutLabel = document.getElementById("gamble-payout");
     var submitBtn = document.getElementById("gamble-submit");
     var boostCheckbox = document.getElementById("gamble-use-boost");
+    var superBoostCheckbox = document.getElementById("gamble-use-super-boost");
     var previewUrl = "{{ url_for('game_gamble_preview') }}";
     var boostFactor = {{ consumable_boost_multiplier }};
+    var superBoostFactor = {{ consumable_super_boost_multiplier }};
     var currentMultiplier = null;
 
     function updatePrecisionVisibility() {
@@ -167,6 +182,9 @@
 
     function displayedMultiplier() {
         if (currentMultiplier == null) { return null; }
+        if (superBoostCheckbox && superBoostCheckbox.checked) {
+            return Math.round(currentMultiplier * superBoostFactor * 100) / 100;
+        }
         return boostCheckbox && boostCheckbox.checked
             ? Math.round(currentMultiplier * boostFactor * 100) / 100
             : currentMultiplier;
@@ -218,11 +236,16 @@
         });
     });
     amountInput.addEventListener("input", updatePayout);
-    if (boostCheckbox) {
-        boostCheckbox.addEventListener("change", function() {
-            var m = displayedMultiplier();
-            multiplierLabel.textContent = m == null ? multiplierLabel.textContent : m + "倍";
-            updatePayout();
+    function onBoostToggleChange() {
+        var m = displayedMultiplier();
+        multiplierLabel.textContent = m == null ? multiplierLabel.textContent : m + "倍";
+        updatePayout();
+    }
+    if (boostCheckbox) { boostCheckbox.addEventListener("change", onBoostToggleChange); }
+    if (superBoostCheckbox) {
+        superBoostCheckbox.addEventListener("change", function() {
+            if (superBoostCheckbox.checked && boostCheckbox) { boostCheckbox.checked = false; }
+            onBoostToggleChange();
         });
     }
     updatePrecisionVisibility();

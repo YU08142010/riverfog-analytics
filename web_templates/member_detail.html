@@ -16,8 +16,12 @@
     {% if banner_class %}
     <div class="profile-banner {{ banner_class }}"></div>
     {% endif %}
+    {% if seasonal_class %}
+    <div class="profile-banner {{ seasonal_class }}"></div>
+    {% endif %}
     <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
+        <span class="{{ 'avatar-bg ' ~ avatar_bg_class if avatar_bg_class else '' }}">
         {% call avatar_frame(member.equipped_frame) %}
         {% if avatar_url %}
         <img class="avatar-circle avatar-lg" src="{{ avatar_url }}" alt="">
@@ -25,6 +29,7 @@
         <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
         {% endif %}
         {% endcall %}
+        </span>
         <div>
             <h2 style="margin-bottom:0.3rem;">
                 <span class="{{ name_color_class }}">{{ member.name }}</span>
@@ -32,7 +37,9 @@
                 <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
             </h2>
             {% if title_label %}
-            <p class="muted {{ title_color_class }}" style="margin:0 0 0.3rem; font-size:0.85rem;">{{ title_label }}</p>
+            <p class="muted {{ title_color_class }}" style="margin:0 0 0.3rem; font-size:0.85rem;">
+                {{ title_label }}{% if title_badge_icon %} <span>{{ title_badge_icon }}</span>{% endif %}
+            </p>
             {% endif %}
             <p class="muted" style="margin:0 0 0.2rem; display:flex; align-items:center; gap:0.4rem;">
                 <span class="sidebar-dot" style="background: {{ '#2ecc71' if online else 'var(--color-border)' }};"></span>
@@ -268,6 +275,41 @@
         多い
     </p>
 </div>
+{% if profile_sound and not is_self %}
+<script>
+(function() {
+    // プロフィール効果音: 音声ファイルは持たず、Web Audio APIで短い音を都度合成する
+    // (依存追加なし)。ページ読み込み時に1回だけ鳴らす。
+    var sound = {{ profile_sound|tojson }};
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { return; }
+    try {
+        var ctx = new Ctx();
+        var patterns = {
+            chime: [{f: 880, t: 0, d: 0.35}, {f: 1318.5, t: 0.12, d: 0.3}],
+            bell: [{f: 660, t: 0, d: 0.5}],
+            kirakira: [{f: 1200, t: 0, d: 0.12}, {f: 1600, t: 0.1, d: 0.12}, {f: 2000, t: 0.2, d: 0.2}],
+        };
+        (patterns[sound] || patterns.chime).forEach(function(note) {
+            var osc = ctx.createOscillator();
+            var gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.value = note.f;
+            var startAt = ctx.currentTime + note.t;
+            gain.gain.setValueAtTime(0.0001, startAt);
+            gain.gain.exponentialRampToValueAtTime(0.15, startAt + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, startAt + note.d);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(startAt);
+            osc.stop(startAt + note.d + 0.05);
+        });
+    } catch (e) {
+        // 自動再生ポリシー等で失敗しても無視する(効果音は演出であり必須機能ではない)。
+    }
+})();
+</script>
+{% endif %}
 <script>
 (function() {
     var counts = {{ counts_by_day|tojson }};

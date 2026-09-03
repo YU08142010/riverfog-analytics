@@ -16,21 +16,87 @@
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
     {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
-<div class="card">
-    <h2 style="margin-top:0;">アバターフレーム交換</h2>
+
+<div class="card shop-points-header">
     <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
         {% call avatar_frame(member.equipped_frame) %}
         {% if avatar_url %}
-        <img class="avatar-circle avatar-lg" src="{{ avatar_url }}" alt="">
+        <img class="avatar-circle" src="{{ avatar_url }}" alt="">
         {% else %}
-        <span class="avatar-circle-fallback avatar-lg">{{ member.name[0] }}</span>
+        <span class="avatar-circle-fallback">{{ member.name[0] }}</span>
         {% endif %}
         {% endcall %}
         <div>
             <div class="muted" style="font-size:0.8rem;">現在のポイント</div>
-            <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
+            <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);" id="shop-points-value">{{ points }} pt</div>
         </div>
+        <input type="text" class="shop-search-input" id="shop-search-input" placeholder="アイテム名で検索...">
+        <label class="muted" style="font-size:0.82rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer;">
+            <input type="checkbox" id="shop-hide-owned-toggle"> 所持済みを隠す
+        </label>
+    </div>
+</div>
+
+<div class="shop-tab-bar" id="shop-tab-bar">
+    <button type="button" class="ranking-toggle-btn active" data-shop-tab="frame">フレーム</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="title">称号</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="title_badge">称号バッジ</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="title_color">称号の色</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="name_color">名前の色</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="dashboard_theme">ダッシュボード配色</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="effect">演出</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="banner">プロフィールバナー</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="avatar_bg">アバター背景</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="dm_theme">メッセージ配色</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="bubble_style">吹き出し形状</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="rank_style">ランキング書体</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="profile_sound">プロフィール効果音</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="marker">殿堂入り章</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="seasonal">季節限定</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="gacha">福袋</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="consumable">ギャンブル用アイテム</button>
+</div>
+
+{% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
+{% set owned = item.id in owned_ids %}
+{% set unavailable = (item.available_from and today_str < item.available_from) or (item.available_until and today_str > item.available_until) %}
+<div class="member-tile" style="cursor:default;" data-shop-category="{{ category }}" data-item-id="{{ item.id }}" data-shop-owned="{{ '1' if owned else '0' }}" data-shop-name="{{ item.label|lower }}">
+    {{ caller() }}
+    {% if is_new(item) %}<span class="shop-new-badge">NEW</span>{% endif %}
+    {% if item.available_from or item.available_until %}
+    <div class="shop-seasonal-window">{{ item.available_from }} 〜 {{ item.available_until }}</div>
+    {% endif %}
+    <div class="shop-owned-block" {{ "" if owned else "hidden" }}>
+        <span class="role-tag admin equip-tag" {{ "" if equipped_id == item.id else "hidden" }}>装着中</span>
+        <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax class="equip-form" {{ "hidden" if equipped_id == item.id else "" }} style="margin-top:0.4rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <button type="submit" class="button equip-btn">装着する</button>
+        </form>
+    </div>
+    <div class="shop-buy-block" {{ "hidden" if owned else "" }}>
+        <form method="post" action="{{ url_for('game_shop_buy_cosmetic', category=category) }}" data-ajax class="buy-form" style="margin-top:0.4rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <button type="submit" class="button buy-btn" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost or unavailable }}>{{ item.cost }} ptで交換</button>
+        </form>
+        <div class="shop-shortfall" {{ "" if points < item.cost else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro unequip_form(category, label, equipped_id) %}
+<form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax class="unequip-form" data-shop-category="{{ category }}" style="margin-top:0.6rem;" {{ "" if equipped_id else "hidden" }}>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="item_id" value="">
+    <button type="submit" class="button cancel">{{ label }}を外す</button>
+</form>
+{% endmacro %}
+
+<div data-shop-panel data-shop-tab-panel="frame">
+    <div class="card">
+        <h2 style="margin-top:0;">アバターフレーム交換</h2>
         {% if member.equipped_frame %}
         <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -39,241 +105,384 @@
         </form>
         {% endif %}
     </div>
-</div>
-
-{% for grade in frame_grades %}
-<div class="card">
-    <h3 style="margin-top:0;">{{ grade.label }}({{ grade.cost }} pt)</h3>
-    <div class="member-grid">
-        {% for f in frame_definitions if f.grade == grade.id %}
-        <div class="member-tile" style="cursor:default;">
-            {% call avatar_frame(f.id) %}
-            {% if avatar_url %}
-            <img class="avatar-circle" src="{{ avatar_url }}" alt="">
-            {% else %}
-            <span class="avatar-circle-fallback">{{ member.name[0] }}</span>
-            {% endif %}
-            {% endcall %}
-            <div style="margin-top:0.5rem; font-weight:600;">{{ f.label }}</div>
-            {% if f.id in owned %}
-                {% if member.equipped_frame == f.id %}
-                <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
+    {% for grade in frame_grades %}
+    <div class="card">
+        <h3 style="margin-top:0;">{{ grade.label }}({{ grade.cost }} pt)</h3>
+        <div class="member-grid">
+            {% for f in frame_definitions if f.grade == grade.id %}
+            <div class="member-tile" style="cursor:default;">
+                {% call avatar_frame(f.id) %}
+                {% if avatar_url %}
+                <img class="avatar-circle" src="{{ avatar_url }}" alt="">
                 {% else %}
-                <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="frame_id" value="{{ f.id }}">
-                    <button type="submit" class="button">装着する</button>
-                </form>
+                <span class="avatar-circle-fallback">{{ member.name[0] }}</span>
                 {% endif %}
-            {% else %}
-                <form method="post" action="{{ url_for('game_shop_buy') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="frame_id" value="{{ f.id }}">
-                    <button type="submit" class="button" {{ "disabled" if points < f.cost }}>{{ f.cost }} ptで交換</button>
-                </form>
-            {% endif %}
+                {% endcall %}
+                <div style="margin-top:0.5rem; font-weight:600;">{{ f.label }}</div>
+                {% if f.id in owned %}
+                    {% if member.equipped_frame == f.id %}
+                    <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
+                    {% else %}
+                    <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="frame_id" value="{{ f.id }}">
+                        <button type="submit" class="button">装着する</button>
+                    </form>
+                    {% endif %}
+                {% else %}
+                    <form method="post" action="{{ url_for('game_shop_buy') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="frame_id" value="{{ f.id }}">
+                        <button type="submit" class="button" {{ "disabled" if points < f.cost }}>{{ f.cost }} ptで交換</button>
+                    </form>
+                    <div class="shop-shortfall" {{ "" if points < f.cost else "hidden" }}>あと {{ f.cost - points if f.cost > points else 0 }} pt</div>
+                {% endif %}
+            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
     </div>
-</div>
-{% endfor %}
-
-{% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
-<div class="member-tile" style="cursor:default;">
-    {{ caller() }}
-    {% if item.id in owned_ids %}
-        {% if equipped_id == item.id %}
-        <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
-        {% else %}
-        <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="item_id" value="{{ item.id }}">
-            <button type="submit" class="button">装着する</button>
-        </form>
-        {% endif %}
-    {% else %}
-        <form method="post" action="{{ url_for('game_shop_buy_cosmetic', category=category) }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="item_id" value="{{ item.id }}">
-            <button type="submit" class="button" {{ "disabled" if points < item.cost }}>{{ item.cost }} ptで交換</button>
-        </form>
-    {% endif %}
-</div>
-{% endmacro %}
-
-<div class="card">
-    <h2 style="margin-top:0;">称号</h2>
-    <p class="muted" style="font-size:0.85rem;">購入すると、メンバー一覧・プロフィールで名前の下に表示されます。</p>
-    <div class="member-grid">
-        {% for item in title_definitions %}
-        {% call cosmetic_item("title", item, owned_titles, member.equipped_title) %}
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_title %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='title') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">称号を外す</button>
-    </form>
-    {% endif %}
+    {% endfor %}
 </div>
 
-<div class="card">
-    <h2 style="margin-top:0;">名前の色</h2>
-    <p class="muted" style="font-size:0.85rem;">メンバー一覧・ランキング・プロフィールでの名前の表示色を変えられます。</p>
-    <div class="member-grid">
-        {% for item in name_color_definitions %}
-        {% call cosmetic_item("name_color", item, owned_name_colors, member.equipped_name_color) %}
-        <div style="font-weight:700;" class="{{ item.css_class }}">{{ member.name }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_name_color %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='name_color') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">名前の色を元に戻す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">ダッシュボード配色</h2>
-    <p class="muted" style="font-size:0.85rem;">自分のダッシュボードの背景に薄い配色を重ねられます(自分にだけ見えます)。</p>
-    <div class="member-grid">
-        {% for item in dashboard_theme_definitions %}
-        {% call cosmetic_item("dashboard_theme", item, owned_dashboard_themes, member.equipped_dashboard_theme) %}
-        <div class="{{ item.css_class }}" style="height:40px; border-radius:6px; margin-bottom:0.3rem;"></div>
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_dashboard_theme %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='dashboard_theme') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">配色を元に戻す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">プロフィールの演出</h2>
-    <p class="muted" style="font-size:0.85rem;">プロフィールカードに動く演出を付けられます。</p>
-    <div class="member-grid">
-        {% for item in effect_definitions %}
-        {% call cosmetic_item("effect", item, owned_effects, member.equipped_effect) %}
-        <div class="card {{ item.css_class }}" style="padding:0.5rem; font-size:0.75rem; margin-bottom:0.3rem;">プレビュー</div>
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_effect %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='effect') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">演出を外す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">プロフィールバナー</h2>
-    <p class="muted" style="font-size:0.85rem;">プロフィールカード上部に飾る風景バナーです。</p>
-    <div class="member-grid">
-        {% for item in banner_definitions %}
-        {% call cosmetic_item("banner", item, owned_banners, member.equipped_banner) %}
-        <div class="{{ item.css_class }}" style="height:36px; border-radius:6px; margin-bottom:0.3rem;"></div>
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_banner %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='banner') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">バナーを外す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">メッセージ配色</h2>
-    <p class="muted" style="font-size:0.85rem;">自分が送るDMの吹き出しの色を変えられます(相手にも見えます)。</p>
-    <div class="member-grid">
-        {% for item in dm_theme_definitions %}
-        {% call cosmetic_item("dm_theme", item, owned_dm_themes, member.equipped_dm_theme) %}
-        <div class="dm-bubble {{ item.css_class }}" style="display:inline-block; padding:0.4rem 0.7rem; margin-bottom:0.3rem; font-size:0.75rem;">プレビュー</div>
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_dm_theme %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='dm_theme') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">メッセージ配色を元に戻す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">称号の色</h2>
-    <p class="muted" style="font-size:0.85rem;">称号(未購入の場合はまず「称号」から購入してください)の表示色を変えられます。</p>
-    <div class="member-grid">
-        {% for item in title_color_definitions %}
-        {% call cosmetic_item("title_color", item, owned_title_colors, member.equipped_title_color) %}
-        <div class="{{ item.css_class }}" style="font-weight:700;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_title_color %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='title_color') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">称号の色を元に戻す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">殿堂入り章</h2>
-    <p class="muted" style="font-size:0.85rem;">名前の横に特別なマークが付きます。</p>
-    <div class="member-grid">
-        {% for item in marker_definitions %}
-        {% call cosmetic_item("marker", item, owned_markers, member.equipped_marker) %}
-        <div style="font-size:1.5rem;">{{ item.icon }}</div>
-        <div style="font-weight:600;">{{ item.label }}</div>
-        {% endcall %}
-        {% endfor %}
-    </div>
-    {% if member.equipped_marker %}
-    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='marker') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="item_id" value="">
-        <button type="submit" class="button cancel">殿堂入り章を外す</button>
-    </form>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">川霧ギャンブル用アイテム</h2>
-    <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、ギャンブルで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
-    <div class="member-grid">
-        {% for item in consumable_definitions %}
-        <div class="member-tile" style="cursor:default;">
+<div data-shop-panel data-shop-tab-panel="title" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">称号</h2>
+        <p class="muted" style="font-size:0.85rem;">購入すると、メンバー一覧・プロフィールで名前の下に表示されます。</p>
+        <div class="member-grid">
+            {% for item in title_definitions %}
+            {% call cosmetic_item("title", item, owned_titles, member.equipped_title) %}
             <div style="font-weight:600;">{{ item.label }}</div>
-            <div class="muted" style="font-size:0.72rem; margin:0.3rem 0;">{{ item.desc }}</div>
-            <div class="muted" style="font-size:0.8rem;">所持: {{ consumables.get(item.id, 0) }}個</div>
-            <form method="post" action="{{ url_for('game_shop_buy_consumable') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="item_id" value="{{ item.id }}">
-                <button type="submit" class="button" {{ "disabled" if points < item.cost }}>{{ item.cost }} ptで購入</button>
-            </form>
+            {% endcall %}
+            {% endfor %}
         </div>
-        {% endfor %}
+        {{ unequip_form("title", "称号", member.equipped_title) }}
     </div>
 </div>
+
+<div data-shop-panel data-shop-tab-panel="title_badge" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">称号バッジ</h2>
+        <p class="muted" style="font-size:0.85rem;">称号の隣に小さなアイコンを添えられます(称号自体は別途購入が必要です)。</p>
+        <div class="member-grid">
+            {% for item in title_badge_definitions %}
+            {% call cosmetic_item("title_badge", item, owned_title_badges, member.equipped_title_badge) %}
+            <div style="font-size:1.5rem;">{{ item.icon }}</div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("title_badge", "称号バッジ", member.equipped_title_badge) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="title_color" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">称号の色</h2>
+        <p class="muted" style="font-size:0.85rem;">称号(未購入の場合はまず「称号」から購入してください)の表示色を変えられます。</p>
+        <div class="member-grid">
+            {% for item in title_color_definitions %}
+            {% call cosmetic_item("title_color", item, owned_title_colors, member.equipped_title_color) %}
+            <div class="{{ item.css_class }}" style="font-weight:700;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("title_color", "称号の色", member.equipped_title_color) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="name_color" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">名前の色</h2>
+        <p class="muted" style="font-size:0.85rem;">メンバー一覧・ランキング・プロフィールでの名前の表示色を変えられます。</p>
+        <div class="member-grid">
+            {% for item in name_color_definitions %}
+            {% call cosmetic_item("name_color", item, owned_name_colors, member.equipped_name_color) %}
+            <div style="font-weight:700;" class="{{ item.css_class }}">{{ member.name }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("name_color", "名前の色", member.equipped_name_color) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="dashboard_theme" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">ダッシュボード配色</h2>
+        <p class="muted" style="font-size:0.85rem;">自分のダッシュボードの背景に薄い配色を重ねられます(自分にだけ見えます)。</p>
+        <div class="member-grid">
+            {% for item in dashboard_theme_definitions %}
+            {% call cosmetic_item("dashboard_theme", item, owned_dashboard_themes, member.equipped_dashboard_theme) %}
+            <div class="{{ item.css_class }}" style="height:40px; border-radius:6px; margin-bottom:0.3rem;"></div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("dashboard_theme", "配色", member.equipped_dashboard_theme) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="effect" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">プロフィールの演出</h2>
+        <p class="muted" style="font-size:0.85rem;">プロフィールカードに動く演出を付けられます。</p>
+        <div class="member-grid">
+            {% for item in effect_definitions %}
+            {% call cosmetic_item("effect", item, owned_effects, member.equipped_effect) %}
+            <div class="card {{ item.css_class }}" style="padding:0.5rem; font-size:0.75rem; margin-bottom:0.3rem;">プレビュー</div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("effect", "演出", member.equipped_effect) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="banner" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">プロフィールバナー</h2>
+        <p class="muted" style="font-size:0.85rem;">プロフィールカード上部に飾る風景バナーです。</p>
+        <div class="member-grid">
+            {% for item in banner_definitions %}
+            {% call cosmetic_item("banner", item, owned_banners, member.equipped_banner) %}
+            <div class="{{ item.css_class }}" style="height:36px; border-radius:6px; margin-bottom:0.3rem;"></div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("banner", "バナー", member.equipped_banner) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="avatar_bg" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">アバター背景エフェクト</h2>
+        <p class="muted" style="font-size:0.85rem;">フレームとは別に、アバターの背後に光や模様を敷けます。</p>
+        <div class="member-grid">
+            {% for item in avatar_bg_definitions %}
+            {% call cosmetic_item("avatar_bg", item, owned_avatar_bgs, member.equipped_avatar_bg) %}
+            <span class="avatar-bg {{ item.css_class }}" style="display:inline-flex; padding:0.3rem;">
+                <span class="avatar-circle-fallback">{{ member.name[0] }}</span>
+            </span>
+            <div style="font-weight:600; margin-top:0.3rem;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("avatar_bg", "アバター背景", member.equipped_avatar_bg) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="dm_theme" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">メッセージ配色</h2>
+        <p class="muted" style="font-size:0.85rem;">自分が送るDM・グループチャットの吹き出しの色を変えられます(相手にも見えます)。</p>
+        <div class="member-grid">
+            {% for item in dm_theme_definitions %}
+            {% call cosmetic_item("dm_theme", item, owned_dm_themes, member.equipped_dm_theme) %}
+            <div class="dm-bubble {{ item.css_class }}" style="display:inline-block; padding:0.4rem 0.7rem; margin-bottom:0.3rem; font-size:0.75rem;">プレビュー</div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("dm_theme", "メッセージ配色", member.equipped_dm_theme) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="bubble_style" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">チャット吹き出し形状</h2>
+        <p class="muted" style="font-size:0.85rem;">自分の吹き出しの形やフォントを変えられます(色とは独立して併用できます)。</p>
+        <div class="member-grid">
+            {% for item in bubble_style_definitions %}
+            {% call cosmetic_item("bubble_style", item, owned_bubble_styles, member.equipped_bubble_style) %}
+            <div class="dm-bubble {{ item.css_class }}" style="display:inline-block; padding:0.4rem 0.7rem; margin-bottom:0.3rem; font-size:0.75rem;">プレビュー</div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("bubble_style", "吹き出し形状", member.equipped_bubble_style) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="rank_style" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">ランキング数字の書体</h2>
+        <p class="muted" style="font-size:0.85rem;">メンバー一覧のランキングに表示される自分の順位番号の見た目を変えられます。</p>
+        <div class="member-grid">
+            {% for item in rank_style_definitions %}
+            {% call cosmetic_item("rank_style", item, owned_rank_styles, member.equipped_rank_style) %}
+            <span class="ranking-badge {{ item.css_class }}" style="display:inline-flex;">1</span>
+            <div style="font-weight:600; margin-top:0.3rem;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("rank_style", "書体", member.equipped_rank_style) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="profile_sound" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">プロフィール効果音</h2>
+        <p class="muted" style="font-size:0.85rem;">他のメンバーが自分のプロフィールを開いた時に短い効果音が鳴ります。</p>
+        <div class="member-grid">
+            {% for item in profile_sound_definitions %}
+            {% call cosmetic_item("profile_sound", item, owned_profile_sounds, member.equipped_profile_sound) %}
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("profile_sound", "効果音", member.equipped_profile_sound) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="marker" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">殿堂入り章</h2>
+        <p class="muted" style="font-size:0.85rem;">名前の横に特別なマークが付きます。</p>
+        <div class="member-grid">
+            {% for item in marker_definitions %}
+            {% call cosmetic_item("marker", item, owned_markers, member.equipped_marker) %}
+            <div style="font-size:1.5rem;">{{ item.icon }}</div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("marker", "殿堂入り章", member.equipped_marker) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="seasonal" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">季節限定コレクション</h2>
+        <p class="muted" style="font-size:0.85rem;">販売期間内だけ購入できます。既に持っているものは期間外でも装備・表示できます。</p>
+        <div class="member-grid">
+            {% for item in seasonal_definitions %}
+            {% call cosmetic_item("seasonal", item, owned_seasonal, member.equipped_seasonal) %}
+            <div class="{{ item.css_class }}" style="height:36px; border-radius:6px; margin-bottom:0.3rem;"></div>
+            <div style="font-weight:600;">{{ item.label }}</div>
+            {% endcall %}
+            {% endfor %}
+        </div>
+        {{ unequip_form("seasonal", "季節限定コレクション", member.equipped_seasonal) }}
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="gacha" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">福袋</h2>
+        <p class="muted" style="font-size:0.85rem;">
+            {{ gacha_cost }} ptで、未所持のショップ品からランダムに1つ交換できます。稀に大きめのポイント払い戻しも当たります。
+            全部所持済みの場合は参加賞のポイントを獲得します。
+        </p>
+        <form method="post" action="{{ url_for('game_shop_gacha') }}" data-ajax id="gacha-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button" {{ "disabled" if points < gacha_cost }}>{{ gacha_cost }} ptで福袋を引く</button>
+        </form>
+        <div class="shop-gacha-result" id="gacha-result"></div>
+    </div>
+</div>
+
+<div data-shop-panel data-shop-tab-panel="consumable" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">川霧ギャンブル用アイテム</h2>
+        <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、ギャンブルで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
+        <div class="member-grid">
+            {% for item in consumable_definitions %}
+            <div class="member-tile" style="cursor:default;" data-item-id="{{ item.id }}">
+                {% if is_new(item) %}<span class="shop-new-badge">NEW</span>{% endif %}
+                <div style="font-weight:600;">{{ item.label }}</div>
+                <div class="muted" style="font-size:0.72rem; margin:0.3rem 0;">{{ item.desc }}</div>
+                <div class="muted" style="font-size:0.8rem;" id="shop-consumable-qty-{{ item.id }}">所持: {{ consumables.get(item.id, 0) }}個</div>
+                <form method="post" action="{{ url_for('game_shop_buy_consumable') }}" data-ajax class="consumable-buy-form" style="margin-top:0.4rem;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="item_id" value="{{ item.id }}">
+                    <button type="submit" class="button" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost }}>{{ item.cost }} ptで購入</button>
+                </form>
+                <div class="shop-shortfall" {{ "" if points < item.cost else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var tabBar = document.getElementById("shop-tab-bar");
+    var panels = document.querySelectorAll("[data-shop-panel]");
+    tabBar.addEventListener("click", function(e) {
+        var btn = e.target.closest("[data-shop-tab]");
+        if (!btn) { return; }
+        tabBar.querySelectorAll("[data-shop-tab]").forEach(function(b) { b.classList.remove("active"); });
+        btn.classList.add("active");
+        var tab = btn.dataset.shopTab;
+        panels.forEach(function(p) { p.hidden = (p.dataset.shopTabPanel !== tab); });
+    });
+
+    var hideOwnedToggle = document.getElementById("shop-hide-owned-toggle");
+    hideOwnedToggle.addEventListener("change", function() {
+        document.body.classList.toggle("shop-hide-owned", hideOwnedToggle.checked);
+    });
+
+    var searchInput = document.getElementById("shop-search-input");
+    searchInput.addEventListener("input", function() {
+        var q = searchInput.value.trim().toLowerCase();
+        document.querySelectorAll("[data-shop-tab-panel] .member-tile").forEach(function(tile) {
+            var name = (tile.dataset.shopName || tile.textContent || "").toLowerCase();
+            tile.setAttribute("data-shop-search-hidden", (q && name.indexOf(q) === -1) ? "1" : "0");
+        });
+    });
+
+    function updatePointsDisplay(points) {
+        if (typeof points !== "number") { return; }
+        document.getElementById("shop-points-value").textContent = points + " pt";
+        document.querySelectorAll(".buy-form .buy-btn, .consumable-buy-form button").forEach(function(btn) {
+            var cost = parseInt(btn.dataset.cost, 10);
+            if (isNaN(cost)) { return; }
+            btn.disabled = points < cost;
+            var shortfall = btn.closest(".shop-buy-block, .member-tile").querySelector(".shop-shortfall");
+            if (shortfall) { shortfall.hidden = points >= cost; shortfall.textContent = "あと " + Math.max(cost - points, 0) + " pt"; }
+        });
+        var gachaBtn = document.querySelector("#gacha-form button");
+        if (gachaBtn) { gachaBtn.disabled = points < {{ gacha_cost }}; }
+    }
+
+    document.addEventListener("ajaxformsuccess", function(e) {
+        var data = e.detail.data || {};
+        if (typeof data.available_points === "number") { updatePointsDisplay(data.available_points); }
+
+        if (data.action === "buy" && data.category && data.item_id) {
+            var tile = document.querySelector('[data-shop-category="' + data.category + '"][data-item-id="' + data.item_id + '"]');
+            if (tile) {
+                tile.setAttribute("data-shop-owned", "1");
+                tile.querySelector(".shop-buy-block").hidden = true;
+                tile.querySelector(".shop-owned-block").hidden = false;
+            }
+        }
+        if ((data.action === "equip" || data.action === "unequip") && data.category) {
+            document.querySelectorAll('[data-shop-category="' + data.category + '"][data-item-id]').forEach(function(tile) {
+                var mine = data.action === "equip" && tile.dataset.itemId === data.item_id;
+                var tag = tile.querySelector(".equip-tag");
+                var form = tile.querySelector(".equip-form");
+                if (tag) { tag.hidden = !mine; }
+                if (form) { form.hidden = mine; }
+            });
+            var unequipForm = document.querySelector('.unequip-form[data-shop-category="' + data.category + '"]');
+            if (unequipForm) { unequipForm.hidden = (data.action !== "equip"); }
+        }
+        if (data.action === "buy_consumable" && data.item_id) {
+            var qtyEl = document.getElementById("shop-consumable-qty-" + data.item_id);
+            if (qtyEl && typeof data.quantity === "number") { qtyEl.textContent = "所持: " + data.quantity + "個"; }
+        }
+    });
+
+    var gachaForm = document.getElementById("gacha-form");
+    if (gachaForm) {
+        gachaForm.addEventListener("ajaxformsuccess", function() {});
+        document.addEventListener("ajaxformsuccess", function(e) {
+            if (e.detail.form === gachaForm) {
+                document.getElementById("gacha-result").textContent = (e.detail.data || {}).message || "";
+            }
+        });
+    }
+})();
+</script>
 {% endblock %}

@@ -626,12 +626,17 @@ def _wants_json():
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
-def _finish(endpoint, message, success=True, **url_kwargs):
+def _finish(endpoint, message, success=True, extra=None, **url_kwargs):
     """通常のフォーム送信ならflash+redirect、fetch()経由のAjax送信ならJSONを返す。
     どちらで来たかはX-Requested-Withヘッダの有無で判定する（base.htmlのdata-ajaxフォーム用）。
+    extraはJSON応答にだけ追加で乗せたいフィールド(ショップのその場更新用のitem_id等)。
+    リダイレクト先のURLパラメータには影響しない。
     """
     if _wants_json():
-        return jsonify({"message": message, "success": success}), (200 if success else 400)
+        payload = {"message": message, "success": success}
+        if extra:
+            payload.update(extra)
+        return jsonify(payload), (200 if success else 400)
     flash(message, "success" if success else "error")
     return redirect(url_for(endpoint, **url_kwargs))
 
@@ -3019,6 +3024,7 @@ def simulator_page():
         hour = now.hour
 
     values = {}
+    explicit_fields = set()
     for field in SIM_WEATHER_FIELDS:
         raw = request.args.get(field["key"])
         if raw not in (None, ""):
@@ -3026,6 +3032,7 @@ def simulator_page():
                 # URL経由の値は公開時に外部から自由に渡せるため、想定レンジにクランプする
                 # (学習データのレンジを大きく外れた値をモデルにそのまま与えないようにするため)。
                 values[field["key"]] = min(max(float(raw), field["min"]), field["max"])
+                explicit_fields.add(field["key"])
                 continue
             except ValueError:
                 pass
@@ -3068,6 +3075,7 @@ def simulator_page():
         fields=SIM_WEATHER_FIELDS, values=values, hour=hour, date=date_str,
         no_model=(station is not None and info is None), result=result,
         defaults_are_real=defaults_are_real, wind_dir_label=wind_dir_label, warnings=warnings,
+        explicit_fields=explicit_fields,
     )
 
 
@@ -3538,6 +3546,27 @@ def _inject_group_unread_count():
     return {"group_unread_count": group_unread_count}
 
 
+@app.route("/api/nav_status")
+def api_nav_status():
+    """base.htmlのグローバルポーラーが15秒おきに叩く軽量API。ナビの未読バッジと、
+    現在のページに映っているメンバー(data-user-id属性を持つ要素)のオンライン状況を、
+    スレッドを開いていなくても・タブを切り替えなくても更新できるようにする。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return jsonify({"dm_unread": 0, "group_unread": 0, "online_user_ids": []})
+    ids_param = request.args.get("ids", "")
+    watch_ids = [int(i) for i in ids_param.split(",") if i.strip().isdigit()][:100]
+    conn = _users_conn()
+    try:
+        dm_unread = users.total_dm_unread(conn, my_id)
+        group_unread = users.group_unread_count(conn, my_id)
+        last_active = users.last_active_all(conn) if watch_ids else {}
+    finally:
+        conn.close()
+    online_ids = [uid for uid in watch_ids if _is_online(last_active.get(uid))]
+    return jsonify({"dm_unread": dm_unread, "group_unread": group_unread, "online_user_ids": online_ids})
+
+
 # メンバーページの実績バッジ。未達成のものもロック表示するため、達成条件を関数として
 # 持たせ、達成/未達成の両方をテンプレート側で判定できるようにしている。
 BADGE_DEFINITIONS = [
@@ -3628,13 +3657,92 @@ BADGE_DEFINITIONS = [
      "check": lambda s: s["lifetime_points"] >= 1000},
     {"id": "points_10000", "label": "ポイント長者", "desc": "累計獲得ポイントが10000ptに到達した", "icon": "crown", "points": 1000,
      "check": lambda s: s["lifetime_points"] >= 10000},
+    {"id": "points_25000", "label": "資産家", "desc": "累計獲得ポイントが25000ptに到達した", "icon": "medal", "points": 600,
+     "check": lambda s: s["lifetime_points"] >= 25000},
+    {"id": "points_50000", "label": "富豪", "desc": "累計獲得ポイントが50000ptに到達した", "icon": "medal", "points": 1500,
+     "check": lambda s: s["lifetime_points"] >= 50000},
+    {"id": "points_100000", "label": "億万長者", "desc": "累計獲得ポイントが100000ptに到達した", "icon": "crown", "points": 3000,
+     "check": lambda s: s["lifetime_points"] >= 100000},
+    {"id": "points_300000", "label": "只見川の大富豪", "desc": "累計獲得ポイントが300000ptに到達した", "icon": "crown", "points": 8000,
+     "check": lambda s: s["lifetime_points"] >= 300000},
+    {"id": "points_1000000", "label": "伝説の資産家", "desc": "累計獲得ポイントが100万ptに到達した", "icon": "crown", "points": 20000,
+     "check": lambda s: s["lifetime_points"] >= 1000000},
     # フレームコレクション(交換ショップ自体を使ってもらうための実績)
     {"id": "frame_first", "label": "はじめての着せ替え", "desc": "アバターフレームを1つ交換した", "icon": "star", "points": 100,
      "check": lambda s: s["owned_frame_count"] >= 1},
     {"id": "frame_collector", "label": "フレームコレクター", "desc": "アバターフレームを5つ以上交換した", "icon": "star", "points": 500,
      "check": lambda s: s["owned_frame_count"] >= 5},
-    {"id": "frame_master", "label": "フレームマスター", "desc": "全20種類のアバターフレームを交換した", "icon": "crown", "points": 3000,
-     "check": lambda s: s["owned_frame_count"] >= 20},
+    {"id": "frame_master", "label": "フレームマスター", "desc": "全種類のアバターフレームを交換した", "icon": "crown", "points": 3000,
+     # FRAME_DEFINITIONSはこの後で定義されるが、lambda本体はaward/表示のたびに評価される
+     # ため問題ない(定義時ではなく呼び出し時にグローバル名を解決するPythonの通常の挙動)。
+     "check": lambda s: s["owned_frame_count"] >= len(FRAME_DEFINITIONS)},
+    # 川霧ギャンブルの的中実績
+    {"id": "gamble_first_win", "label": "初勝利", "desc": "川霧ギャンブルで初めて賭けを的中させた", "icon": "star", "points": 200,
+     "check": lambda s: s["gamble_won_count"] >= 1},
+    {"id": "gamble_won_20", "label": "ギャンブラー", "desc": "川霧ギャンブルで20回的中させた", "icon": "star", "points": 600,
+     "check": lambda s: s["gamble_won_count"] >= 20},
+    {"id": "gamble_won_50", "label": "目利き", "desc": "川霧ギャンブルで50回的中させた", "icon": "star", "points": 1500,
+     "check": lambda s: s["gamble_won_count"] >= 50},
+    {"id": "gamble_won_100", "label": "霧予知能力者", "desc": "川霧ギャンブルで100回的中させた", "icon": "crown", "points": 3000,
+     "check": lambda s: s["gamble_won_count"] >= 100},
+    {"id": "gamble_won_500", "label": "川霧の神様", "desc": "川霧ギャンブルで500回的中させた", "icon": "crown", "points": 10000,
+     "check": lambda s: s["gamble_won_count"] >= 500},
+    # メッセージ機能の利用(DM・グループチャット合算)
+    {"id": "msg_10", "label": "おしゃべりデビュー", "desc": "DM・グループチャットで合計10件送信した", "icon": "chat", "points": 200,
+     "check": lambda s: s["msg_count"] >= 10},
+    {"id": "msg_100", "label": "おしゃべり好き", "desc": "DM・グループチャットで合計100件送信した", "icon": "chat", "points": 800,
+     "check": lambda s: s["msg_count"] >= 100},
+    {"id": "msg_500", "label": "コミュ力おばけ", "desc": "DM・グループチャットで合計500件送信した", "icon": "crown", "points": 3000,
+     "check": lambda s: s["msg_count"] >= 500},
+    {"id": "reaction_given_50", "label": "気配り上手", "desc": "リアクションを50回送った", "icon": "star", "points": 400,
+     "check": lambda s: s["reaction_given_count"] >= 50},
+    {"id": "reaction_received_50", "label": "人気者", "desc": "リアクションを50回もらった", "icon": "star", "points": 400,
+     "check": lambda s: s["reaction_received_count"] >= 50},
+    {"id": "mention_received_20", "label": "頼られる存在", "desc": "@メンションを20回もらった", "icon": "comment", "points": 400,
+     "check": lambda s: s["mention_received_count"] >= 20},
+    # 無料デイリーゲーム
+    {"id": "fog_quiz_correct_10", "label": "予報士見習い", "desc": "霧予報クイズに10回正解した", "icon": "forecast", "points": 300,
+     "check": lambda s: s["fog_quiz_correct"] >= 10},
+    {"id": "fog_quiz_correct_50", "label": "予報士", "desc": "霧予報クイズに50回正解した", "icon": "forecast", "points": 1200,
+     "check": lambda s: s["fog_quiz_correct"] >= 50},
+    {"id": "fog_quiz_correct_200", "label": "名予報士", "desc": "霧予報クイズに200回正解した", "icon": "crown", "points": 4000,
+     "check": lambda s: s["fog_quiz_correct"] >= 200},
+    {"id": "phenom_quiz_correct_20", "label": "現象マニア", "desc": "現象当てクイズに20回正解した", "icon": "accuracy", "points": 400,
+     "check": lambda s: s["phenom_quiz_correct"] >= 20},
+    {"id": "phenom_quiz_correct_100", "label": "現象博士", "desc": "現象当てクイズに100回正解した", "icon": "crown", "points": 2500,
+     "check": lambda s: s["phenom_quiz_correct"] >= 100},
+    {"id": "lottery_30", "label": "くじ引き常連", "desc": "デイリーくじを30日分引いた", "icon": "star", "points": 300,
+     "check": lambda s: s["lottery_draws"] >= 30},
+    {"id": "lottery_180", "label": "くじの達人", "desc": "デイリーくじを180日分引いた", "icon": "crown", "points": 2000,
+     "check": lambda s: s["lottery_draws"] >= 180},
+    # ファイル共有
+    {"id": "file_upload_5", "label": "共有デビュー", "desc": "ファイルを5件アップロードした", "icon": "attach", "points": 200,
+     "check": lambda s: s["file_upload_count"] >= 5},
+    {"id": "file_upload_30", "label": "資料係", "desc": "ファイルを30件アップロードした", "icon": "attach", "points": 1000,
+     "check": lambda s: s["file_upload_count"] >= 30},
+    {"id": "file_star_10", "label": "整理整頓", "desc": "ファイルを10件お気に入り登録した", "icon": "star", "points": 300,
+     "check": lambda s: s["file_star_count"] >= 10},
+    # ショップコレクション
+    {"id": "title_complete", "label": "称号コンプリート", "desc": "全ての称号を交換した", "icon": "crown", "points": 2000,
+     "check": lambda s: s["title_complete"]},
+    {"id": "name_color_complete", "label": "名前の色コンプリート", "desc": "全ての名前の色を交換した", "icon": "crown", "points": 1500,
+     "check": lambda s: s["name_color_complete"]},
+    {"id": "points_spent_10000", "label": "太っ腹", "desc": "ショップで累計10000pt使った", "icon": "medal", "points": 500,
+     "check": lambda s: s["points_spent"] >= 10000},
+    {"id": "points_spent_50000", "label": "浪費家", "desc": "ショップで累計50000pt使った", "icon": "crown", "points": 2000,
+     "check": lambda s: s["points_spent"] >= 50000},
+    # 月間ランキング
+    {"id": "ranking_first_1", "label": "月間王者", "desc": "月間ログインランキングで1位を取った", "icon": "crown", "points": 500,
+     "check": lambda s: s["ranking_first_count"] >= 1},
+    {"id": "ranking_first_3", "label": "常勝の風格", "desc": "月間ログインランキングで1位を3回取った", "icon": "crown", "points": 2000,
+     "check": lambda s: s["ranking_first_count"] >= 3},
+    {"id": "ranking_first_12", "label": "只見川の覇者", "desc": "月間ログインランキングで1位を12回取った", "icon": "crown", "points": 6000,
+     "check": lambda s: s["ranking_first_count"] >= 12},
+    # 地点共有カード
+    {"id": "station_share_10", "label": "情報通", "desc": "地点情報を10回共有した", "icon": "share", "points": 250,
+     "check": lambda s: s["station_share_count"] >= 10},
+    {"id": "station_share_50", "label": "地点ソムリエ", "desc": "地点情報を50回共有した", "icon": "crown", "points": 1500,
+     "check": lambda s: s["station_share_count"] >= 50},
 ]
 
 # --- 実績以外のポイント源 ---------------------------------------------------------
@@ -3747,6 +3855,73 @@ MARKER_DEFINITIONS = [
 ]
 MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
 
+# --- 2026-09-03追加のショップ拡張分 ------------------------------------------------
+# NEW_ITEM_ADDED_ATはこのバッチで追加したカタログ品に付けた"added"日付。ショップ側で
+# 一定期間(SHOP_NEW_BADGE_DAYS)だけ「NEW」バッジを出すのに使う。
+NEW_ITEM_ADDED_AT = "2026-09-03"
+SHOP_NEW_BADGE_DAYS = 21
+
+TITLE_BADGE_DEFINITIONS = [
+    {"id": "sparkle", "label": "きらきら", "cost": 600, "icon": "✨", "added": NEW_ITEM_ADDED_AT},
+    {"id": "fire", "label": "めらめら", "cost": 600, "icon": "🔥", "added": NEW_ITEM_ADDED_AT},
+    {"id": "drop", "label": "しずく", "cost": 800, "icon": "💧", "added": NEW_ITEM_ADDED_AT},
+    {"id": "gem", "label": "きらめく宝石", "cost": 2500, "icon": "💎", "added": NEW_ITEM_ADDED_AT},
+]
+TITLE_BADGE_BY_ID = {t["id"]: t for t in TITLE_BADGE_DEFINITIONS}
+
+BUBBLE_STYLE_DEFINITIONS = [
+    {"id": "round", "label": "まる型", "cost": 1200, "css_class": "bubble-style-round", "added": NEW_ITEM_ADDED_AT},
+    {"id": "square", "label": "かく型", "cost": 1200, "css_class": "bubble-style-square", "added": NEW_ITEM_ADDED_AT},
+    {"id": "handwritten", "label": "手書き風", "cost": 2500, "css_class": "bubble-style-handwritten", "added": NEW_ITEM_ADDED_AT},
+]
+BUBBLE_STYLE_BY_ID = {b["id"]: b for b in BUBBLE_STYLE_DEFINITIONS}
+
+AVATAR_BG_DEFINITIONS = [
+    {"id": "glow_blue", "label": "青の光暈", "cost": 1800, "css_class": "avatar-bg-glow-blue", "added": NEW_ITEM_ADDED_AT},
+    {"id": "glow_gold", "label": "金の光暈", "cost": 3500, "css_class": "avatar-bg-glow-gold", "added": NEW_ITEM_ADDED_AT},
+    {"id": "mist", "label": "霧の背景", "cost": 2200, "css_class": "avatar-bg-mist", "added": NEW_ITEM_ADDED_AT},
+]
+AVATAR_BG_BY_ID = {a["id"]: a for a in AVATAR_BG_DEFINITIONS}
+
+RANK_STYLE_DEFINITIONS = [
+    {"id": "gold_number", "label": "金の数字", "cost": 1500, "css_class": "rank-style-gold", "added": NEW_ITEM_ADDED_AT},
+    {"id": "neon_number", "label": "ネオンの数字", "cost": 1500, "css_class": "rank-style-neon", "added": NEW_ITEM_ADDED_AT},
+    {"id": "serif_number", "label": "書道体の数字", "cost": 1500, "css_class": "rank-style-serif", "added": NEW_ITEM_ADDED_AT},
+]
+RANK_STYLE_BY_ID = {r["id"]: r for r in RANK_STYLE_DEFINITIONS}
+
+# soundは効果音の種類ID。実際の音はWeb Audio APIでmember_detail.html側が合成するので、
+# 音声ファイルは持たない(依存を増やさないため)。
+PROFILE_SOUND_DEFINITIONS = [
+    {"id": "chime", "label": "チャイム", "cost": 1000, "sound": "chime", "added": NEW_ITEM_ADDED_AT},
+    {"id": "bell", "label": "鈴の音", "cost": 1000, "sound": "bell", "added": NEW_ITEM_ADDED_AT},
+    {"id": "kirakira", "label": "きらめき音", "cost": 1800, "sound": "kirakira", "added": NEW_ITEM_ADDED_AT},
+]
+PROFILE_SOUND_BY_ID = {p["id"]: p for p in PROFILE_SOUND_DEFINITIONS}
+
+# 季節限定コレクション。available_from/available_untilの期間外は新規購入できないが、
+# 既に持っている分はそのまま装備・表示し続けられる(買い方だけを期間で絞る)。
+SEASONAL_DEFINITIONS = [
+    {
+        "id": "summer_2026", "label": "夏祭りの提灯", "cost": 1800, "css_class": "seasonal-summer",
+        "available_from": "2026-07-01", "available_until": "2026-08-31", "added": NEW_ITEM_ADDED_AT,
+    },
+    {
+        "id": "autumn_2026", "label": "紅葉の川面", "cost": 1800, "css_class": "seasonal-autumn",
+        "available_from": "2026-10-01", "available_until": "2026-11-30", "added": NEW_ITEM_ADDED_AT,
+    },
+    {
+        "id": "newyear_2027", "label": "迎春の霧", "cost": 2200, "css_class": "seasonal-newyear",
+        "available_from": "2026-12-15", "available_until": "2027-01-15", "added": NEW_ITEM_ADDED_AT,
+    },
+]
+SEASONAL_BY_ID = {s["id"]: s for s in SEASONAL_DEFINITIONS}
+
+GACHA_COST = 1500
+GACHA_BIG_REFUND_MULTIPLIER = 2.5
+GACHA_BIG_REFUND_WEIGHT = 5
+GACHA_CONSOLATION_POINTS = 300
+
 # --- 川霧ギャンブル・デイリーゲーム共通の消費アイテム ---------------------------------
 CONSUMABLE_DEFINITIONS = [
     {
@@ -3765,9 +3940,20 @@ CONSUMABLE_DEFINITIONS = [
         "id": "quiz_hint_ticket", "label": "クイズヒントチケット", "cost": 150,
         "desc": "現象当てクイズで、誤った選択肢を1つ消せます。",
     },
+    {
+        "id": "super_boost_ticket", "label": "上級倍率ブーストチケット", "cost": 600,
+        "desc": "川霧ギャンブルの賭けの倍率が25%上がります(倍率ブーストチケットの上位版。同時使用時はこちらが優先されます)。",
+        "added": NEW_ITEM_ADDED_AT,
+    },
+    {
+        "id": "withdraw_ticket", "label": "見送り券", "cost": 200,
+        "desc": "観測時間帯が始まる前なら、賭けた後でもこのチケットで取り消し、全額払い戻せます。",
+        "added": NEW_ITEM_ADDED_AT,
+    },
 ]
 CONSUMABLE_BY_ID = {c["id"]: c for c in CONSUMABLE_DEFINITIONS}
 CONSUMABLE_BOOST_MULTIPLIER = 1.1
+CONSUMABLE_SUPER_BOOST_MULTIPLIER = 1.25
 CONSUMABLE_INSURANCE_REFUND_RATIO = 0.5
 # ラッキーチケット使用時、100pt以上の枠の重みをこの倍率で底上げする(重みの再配分)。
 LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
@@ -4157,6 +4343,8 @@ def members_list():
             "name_color_class": NAME_COLOR_BY_ID.get(u["equipped_name_color"], {}).get("css_class", ""),
             "title_color_class": TITLE_COLOR_BY_ID.get(u["equipped_title_color"], {}).get("css_class", ""),
             "marker_icon": MARKER_BY_ID.get(u["equipped_marker"], {}).get("icon", ""),
+            "title_badge_icon": TITLE_BADGE_BY_ID.get(u["equipped_title_badge"], {}).get("icon", ""),
+            "rank_style_class": RANK_STYLE_BY_ID.get(u["equipped_rank_style"], {}).get("css_class", ""),
         }
         for u in all_users
     ]
@@ -4186,6 +4374,23 @@ def member_detail(user_id):
         lifetime_points = users.total_earned_points(conn, user_id)
         owned_frame_count = len(users.owned_frame_ids(conn, user_id))
         last_active_at = users.last_active(conn, user_id)
+        gamble_won_count = users.won_fog_bet_count(conn, user_id)
+        msg_count = users.messages_sent_count(conn, user_id)
+        reaction_given_count = users.reactions_given_count(conn, user_id)
+        reaction_received_count = users.reactions_received_count(conn, user_id)
+        mention_received_count = users.mentions_received_count(conn, user_id)
+        fog_quiz_stats_for_badges = users.get_daily_fog_quiz_stats(conn, user_id)
+        phenom_quiz_correct = users.phenom_quiz_correct_count(conn, user_id)
+        lottery_draws = users.lottery_draw_count(conn, user_id)
+        file_upload_count = users.shared_file_upload_count(conn, user_id)
+        file_star_count = users.shared_file_star_count(conn, user_id)
+        title_complete = len(users.owned_cosmetic_ids(conn, user_id, "title")) >= len(TITLE_DEFINITIONS)
+        name_color_complete = (
+            len(users.owned_cosmetic_ids(conn, user_id, "name_color")) >= len(NAME_COLOR_DEFINITIONS)
+        )
+        points_spent = users.total_spent_points(conn, user_id)
+        ranking_first_count = users.monthly_ranking_first_count(conn, user_id)
+        station_share_count = users.station_share_count(conn, user_id)
     finally:
         conn.close()
     favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
@@ -4215,6 +4420,15 @@ def member_detail(user_id):
         "night_owl": night_owl, "early_bird": early_bird, "weekend_days": weekend_days,
         "newyear_login": newyear_login, "newyearseve_login": newyearseve_login,
         "lifetime_points": lifetime_points, "owned_frame_count": owned_frame_count,
+        "gamble_won_count": gamble_won_count, "msg_count": msg_count,
+        "reaction_given_count": reaction_given_count, "reaction_received_count": reaction_received_count,
+        "mention_received_count": mention_received_count,
+        "fog_quiz_correct": fog_quiz_stats_for_badges["total_correct"],
+        "phenom_quiz_correct": phenom_quiz_correct, "lottery_draws": lottery_draws,
+        "file_upload_count": file_upload_count, "file_star_count": file_star_count,
+        "title_complete": title_complete, "name_color_complete": name_color_complete,
+        "points_spent": points_spent, "ranking_first_count": ranking_first_count,
+        "station_share_count": station_share_count,
     })
     # 実績の達成状況を見る/見られるたびに、新規達成分のポイントを付与する
     # (award_badgeが既付与分を無視するので、何度呼んでも二重加算にはならない)。
@@ -4230,6 +4444,10 @@ def member_detail(user_id):
     banner_class = BANNER_BY_ID.get(target["equipped_banner"], {}).get("css_class", "")
     title_color_class = TITLE_COLOR_BY_ID.get(target["equipped_title_color"], {}).get("css_class", "")
     marker_icon = MARKER_BY_ID.get(target["equipped_marker"], {}).get("icon", "")
+    title_badge_icon = TITLE_BADGE_BY_ID.get(target["equipped_title_badge"], {}).get("icon", "")
+    avatar_bg_class = AVATAR_BG_BY_ID.get(target["equipped_avatar_bg"], {}).get("css_class", "")
+    seasonal_class = SEASONAL_BY_ID.get(target["equipped_seasonal"], {}).get("css_class", "")
+    profile_sound = PROFILE_SOUND_BY_ID.get(target["equipped_profile_sound"], {}).get("sound", "")
     return render_template(
         "member_detail.html",
         member=target,
@@ -4239,6 +4457,10 @@ def member_detail(user_id):
         banner_class=banner_class,
         title_color_class=title_color_class,
         marker_icon=marker_icon,
+        title_badge_icon=title_badge_icon,
+        avatar_bg_class=avatar_bg_class,
+        seasonal_class=seasonal_class,
+        profile_sound=profile_sound,
         history=history,
         counts_by_day=counts_by_day,
         total_logins=total_logins,
@@ -4310,9 +4532,21 @@ def game_shop():
         owned_dm_themes = users.owned_cosmetic_ids(conn, my_id, "dm_theme")
         owned_title_colors = users.owned_cosmetic_ids(conn, my_id, "title_color")
         owned_markers = users.owned_cosmetic_ids(conn, my_id, "marker")
+        owned_title_badges = users.owned_cosmetic_ids(conn, my_id, "title_badge")
+        owned_bubble_styles = users.owned_cosmetic_ids(conn, my_id, "bubble_style")
+        owned_avatar_bgs = users.owned_cosmetic_ids(conn, my_id, "avatar_bg")
+        owned_rank_styles = users.owned_cosmetic_ids(conn, my_id, "rank_style")
+        owned_profile_sounds = users.owned_cosmetic_ids(conn, my_id, "profile_sound")
+        owned_seasonal = users.owned_cosmetic_ids(conn, my_id, "seasonal")
         consumables = users.consumable_quantities(conn, my_id)
     finally:
         conn.close()
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    new_cutoff = (now_jst_naive() - timedelta(days=SHOP_NEW_BADGE_DAYS)).strftime("%Y-%m-%d")
+
+    def _is_new(item):
+        return bool(item.get("added")) and item["added"] >= new_cutoff
+
     return render_template(
         "game_shop.html",
         member=member,
@@ -4337,6 +4571,21 @@ def game_shop():
         owned_title_colors=owned_title_colors,
         marker_definitions=MARKER_DEFINITIONS,
         owned_markers=owned_markers,
+        title_badge_definitions=TITLE_BADGE_DEFINITIONS,
+        owned_title_badges=owned_title_badges,
+        bubble_style_definitions=BUBBLE_STYLE_DEFINITIONS,
+        owned_bubble_styles=owned_bubble_styles,
+        avatar_bg_definitions=AVATAR_BG_DEFINITIONS,
+        owned_avatar_bgs=owned_avatar_bgs,
+        rank_style_definitions=RANK_STYLE_DEFINITIONS,
+        owned_rank_styles=owned_rank_styles,
+        profile_sound_definitions=PROFILE_SOUND_DEFINITIONS,
+        owned_profile_sounds=owned_profile_sounds,
+        seasonal_definitions=SEASONAL_DEFINITIONS,
+        owned_seasonal=owned_seasonal,
+        today_str=today_str,
+        is_new=_is_new,
+        gacha_cost=GACHA_COST,
         consumable_definitions=CONSUMABLE_DEFINITIONS,
         consumables=consumables,
     )
@@ -4391,6 +4640,12 @@ COSMETIC_CATALOGS = {
     "dm_theme": (DM_THEME_BY_ID, "dm_theme", "メッセージ配色"),
     "title_color": (TITLE_COLOR_BY_ID, "title_color", "称号の色"),
     "marker": (MARKER_BY_ID, "marker", "殿堂入り章"),
+    "title_badge": (TITLE_BADGE_BY_ID, "title_badge", "称号バッジ"),
+    "bubble_style": (BUBBLE_STYLE_BY_ID, "bubble_style", "チャット吹き出し形状"),
+    "avatar_bg": (AVATAR_BG_BY_ID, "avatar_bg", "アバター背景エフェクト"),
+    "rank_style": (RANK_STYLE_BY_ID, "rank_style", "ランキング数字の書体"),
+    "profile_sound": (PROFILE_SOUND_BY_ID, "profile_sound", "プロフィール効果音"),
+    "seasonal": (SEASONAL_BY_ID, "seasonal", "季節限定コレクション"),
 }
 
 
@@ -4406,6 +4661,11 @@ def game_shop_buy_cosmetic(category):
     item = catalog.get(request.form.get("item_id", ""))
     if item is None:
         abort(404)
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    if item.get("available_from") and today_str < item["available_from"]:
+        return _finish("game_shop", "まだ販売期間ではありません。", success=False)
+    if item.get("available_until") and today_str > item["available_until"]:
+        return _finish("game_shop", "販売期間が終了しました。", success=False)
     conn = _users_conn()
     try:
         if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
@@ -4416,9 +4676,13 @@ def game_shop_buy_cosmetic(category):
             conn, my_id, cosmetic_category, item["id"], item["cost"],
             datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
         )
+        points = users.available_points(conn, my_id)
     finally:
         conn.close()
-    return _finish("game_shop", f"「{item['label']}」と交換しました。")
+    return _finish(
+        "game_shop", f"「{item['label']}」と交換しました。",
+        extra={"action": "buy", "category": category, "item_id": item["id"], "available_points": points},
+    )
 
 
 @app.route("/game/shop/equip/<category>", methods=["POST"])
@@ -4439,7 +4703,67 @@ def game_shop_equip_cosmetic(category):
     finally:
         conn.close()
     message = f"{label}を装着しました。" if item_id else f"{label}を外しました。"
-    return _finish("game_shop", message)
+    return _finish(
+        "game_shop", message,
+        extra={"action": "equip" if item_id else "unequip", "category": category, "item_id": item_id},
+    )
+
+
+@app.route("/game/shop/gacha", methods=["POST"])
+def game_shop_gacha():
+    """福袋: 固定ポイントで、未所持コスメの中からランダムに1つ交換するか、ポイントを
+    払い戻す。GACHA_BIG_REFUND_WEIGHT分の1の確率で大きめの払い戻し、残りは安いアイテム
+    ほど当たりやすい重み付き抽選(値段の逆数を重みにする)。全部所持済みなら参加賞として
+    少額ポイントを返す。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        if users.available_points(conn, my_id) < GACHA_COST:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        candidates = []
+        for category, (catalog, cosmetic_category, label) in COSMETIC_CATALOGS.items():
+            owned = users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
+            today_str = now_str[:10]
+            for item in catalog.values():
+                if item["id"] in owned:
+                    continue
+                if item.get("available_from") and today_str < item["available_from"]:
+                    continue
+                if item.get("available_until") and today_str > item["available_until"]:
+                    continue
+                candidates.append((category, cosmetic_category, label, item))
+        weighted = [(c, cc, lb, it, 1.0 / max(it["cost"], 1)) for c, cc, lb, it in candidates]
+        roll = random.random() * (GACHA_BIG_REFUND_WEIGHT + sum(w for *_, w in weighted))
+        if roll < GACHA_BIG_REFUND_WEIGHT or not weighted:
+            # 参加費(GACHA_COST)はconsumable_purchases経由で記録し(total_spent_pointsの
+            # 集計対象)、当たり分だけを別途grant_pointsで加算する(二重計上にならない)。
+            users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
+            if weighted:
+                refund = int(round(GACHA_COST * GACHA_BIG_REFUND_MULTIPLIER))
+                users.grant_points(conn, my_id, f"gacha_refund:{uuid.uuid4()}", refund, now_str)
+                message = f"福袋の結果: {refund}pt の大当たり!"
+            else:
+                users.grant_points(conn, my_id, f"gacha_consolation:{uuid.uuid4()}", GACHA_CONSOLATION_POINTS, now_str)
+                message = f"すべて所持済みだったため、参加賞として{GACHA_CONSOLATION_POINTS}ptを獲得しました。"
+        else:
+            roll -= GACHA_BIG_REFUND_WEIGHT
+            chosen = weighted[-1]
+            for entry in weighted:
+                roll -= entry[4]
+                if roll <= 0:
+                    chosen = entry
+                    break
+            _, cosmetic_category, label, item, _ = chosen
+            users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
+            users.purchase_cosmetic(conn, my_id, cosmetic_category, item["id"], 0, now_str)
+            message = f"福袋の結果: 「{item['label']}」({label})を獲得しました!"
+        points = users.available_points(conn, my_id)
+    finally:
+        conn.close()
+    return _finish("game_shop", message, extra={"available_points": points})
 
 
 @app.route("/game/shop/buy_consumable", methods=["POST"])
@@ -4457,9 +4781,14 @@ def game_shop_buy_consumable():
         users.buy_consumable(
             conn, my_id, item["id"], item["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
         )
+        points = users.available_points(conn, my_id)
+        quantity = users.consumable_quantities(conn, my_id).get(item["id"], 0)
     finally:
         conn.close()
-    return _finish("game_shop", f"「{item['label']}」を購入しました。")
+    return _finish(
+        "game_shop", f"「{item['label']}」を購入しました。",
+        extra={"action": "buy_consumable", "item_id": item["id"], "available_points": points, "quantity": quantity},
+    )
 
 
 @app.route("/game/gamble")
@@ -4496,6 +4825,8 @@ def game_gamble():
         today=now_jst_naive().strftime("%Y-%m-%d"),
         consumables=consumables, consumable_definitions=CONSUMABLE_DEFINITIONS,
         consumable_boost_multiplier=CONSUMABLE_BOOST_MULTIPLIER,
+        consumable_super_boost_multiplier=CONSUMABLE_SUPER_BOOST_MULTIPLIER,
+        now_str=now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
     )
 
 
@@ -4542,6 +4873,7 @@ def game_gamble_place():
     bet_amount = request.form.get("bet_amount", type=int)
     use_insurance = request.form.get("use_insurance") == "1"
     use_boost = request.form.get("use_boost") == "1"
+    use_super_boost = request.form.get("use_super_boost") == "1"
 
     if station not in STATION_NAMES:
         return _finish("game_gamble", "地点を選んでください。", success=False)
@@ -4579,8 +4911,14 @@ def game_gamble_place():
             return _finish("game_gamble", "保険チケットを持っていません。", success=False)
         if use_boost and owned.get("boost_ticket", 0) < 1:
             return _finish("game_gamble", "倍率ブーストチケットを持っていません。", success=False)
+        if use_super_boost and owned.get("super_boost_ticket", 0) < 1:
+            return _finish("game_gamble", "上級倍率ブーストチケットを持っていません。", success=False)
 
-        if use_boost:
+        # 上級版と通常版が同時に指定された場合は上級版だけを使う(効果は重複させない)。
+        if use_super_boost:
+            users.use_consumable(conn, my_id, "super_boost_ticket")
+            multiplier = round(multiplier * CONSUMABLE_SUPER_BOOST_MULTIPLIER, 2)
+        elif use_boost:
             users.use_consumable(conn, my_id, "boost_ticket")
             multiplier = round(multiplier * CONSUMABLE_BOOST_MULTIPLIER, 2)
         if use_insurance:
@@ -4597,6 +4935,32 @@ def game_gamble_place():
         "game_gamble",
         f"{station}に{bet_amount}pt賭けました(倍率{multiplier}倍)。観測が終わり次第、答え合わせされます。",
     )
+
+
+@app.route("/game/gamble/cancel/<int:bet_id>", methods=["POST"])
+def game_gamble_cancel(bet_id):
+    """見送り券を使い、観測時間帯が始まる前ならpending中の賭けを全額払い戻して取り消す。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        bet = users.get_fog_bet(conn, bet_id)
+        if bet is None or bet["user_id"] != my_id:
+            abort(404)
+        if bet["status"] != "pending":
+            return _finish("game_gamble", "この賭けは既に答え合わせ済みです。", success=False)
+        window_start_dt = datetime.strptime(bet["window_start"], "%Y-%m-%d %H:%M:%S")
+        if now_jst_naive() >= window_start_dt:
+            return _finish("game_gamble", "観測時間帯が始まっているため取り消せません。", success=False)
+        if not users.use_consumable(conn, my_id, "withdraw_ticket"):
+            return _finish("game_gamble", "見送り券を持っていません。", success=False)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.cancel_fog_bet(conn, bet_id, now_str, 0)
+        users.grant_points(conn, my_id, f"gamble_withdraw:{bet_id}", 0, now_str)
+    finally:
+        conn.close()
+    return _finish("game_gamble", "賭けを取り消し、全額払い戻しました。")
 
 
 @app.route("/game/daily")
@@ -4865,10 +5229,12 @@ def group_home():
     for p in pinned:
         p["sender_name"] = name_by_id.get(p["sender_id"], "(退会済みユーザー)")
     my_dm_theme_class = DM_THEME_BY_ID.get(me["equipped_dm_theme"], {}).get("css_class", "") if me else ""
+    my_bubble_style_class = BUBBLE_STYLE_BY_ID.get(me["equipped_bubble_style"], {}).get("css_class", "") if me else ""
     return render_template(
         "group_chat.html", messages=messages, pinned=pinned, my_id=my_id,
         dm_message_max_length=DM_MESSAGE_MAX_LENGTH, reaction_emojis=REACTION_EMOJIS,
         member_names=sorted(name_by_id.values()), my_dm_theme_class=my_dm_theme_class,
+        my_bubble_style_class=my_bubble_style_class,
     )
 
 
@@ -5227,10 +5593,13 @@ def dm_thread(user_id):
         conn.close()
     my_dm_theme_class = DM_THEME_BY_ID.get(me["equipped_dm_theme"], {}).get("css_class", "") if me else ""
     other_dm_theme_class = DM_THEME_BY_ID.get(other["equipped_dm_theme"], {}).get("css_class", "")
+    my_bubble_style_class = BUBBLE_STYLE_BY_ID.get(me["equipped_bubble_style"], {}).get("css_class", "") if me else ""
+    other_bubble_style_class = BUBBLE_STYLE_BY_ID.get(other["equipped_bubble_style"], {}).get("css_class", "")
     return render_template(
         "dm_thread.html", other=other, messages=messages, conversation_id=conversation_id,
         my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH, other_online=other_online,
         my_dm_theme_class=my_dm_theme_class, other_dm_theme_class=other_dm_theme_class,
+        my_bubble_style_class=my_bubble_style_class, other_bubble_style_class=other_bubble_style_class,
         pinned=pinned, other_read=other_read, reaction_emojis=REACTION_EMOJIS,
     )
 

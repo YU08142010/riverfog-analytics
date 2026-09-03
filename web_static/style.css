@@ -166,6 +166,7 @@ body {
     line-height: 1;
     vertical-align: middle;
 }
+.nav-unread-badge[hidden] { display: none; }
 
 /* メンバー間メッセージ(LINE風の吹き出しチャット)。 */
 .dm-thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
@@ -256,6 +257,7 @@ body {
     border-radius: var(--radius-sm);
 }
 .context-menu button:hover { background: var(--color-bg); }
+.context-menu button[hidden] { display: none; }
 .folder-row td:first-child a { font-weight: 600; }
 .dm-compose { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 .dm-compose textarea {
@@ -1739,6 +1741,87 @@ table.obs-table th.sticky-col { z-index: 3; }
     background: #d9f7ee; color: #0d4a37; border-color: #7fd9bc;
 }
 
+/* --- ショップ品(2026-09-03追加分): チャット吹き出し形状/フォント -------------------
+   dm-themeと違い色ではなく形・フォントを変えるので、色クラスと重ねて併用できる。 */
+.dm-bubble.bubble-style-round { border-radius: 999px; padding: 0.5rem 1.1rem; }
+.dm-bubble.bubble-style-square { border-radius: 4px; }
+.dm-bubble.bubble-style-handwritten { font-family: "Comic Sans MS", "Yu Kyokasho", "UD Digi Kyokasho N-R", cursive, sans-serif; }
+
+/* --- ショップ品: アバター背景エフェクト(フレームのリングとは別に、円の背後に敷く) --- */
+.avatar-bg { position: relative; display: inline-flex; border-radius: 50%; }
+.avatar-bg.avatar-bg-glow-blue { box-shadow: 0 0 22px 6px rgba(74, 144, 226, 0.55); }
+.avatar-bg.avatar-bg-glow-gold { box-shadow: 0 0 22px 6px rgba(212, 175, 55, 0.6); }
+.avatar-bg.avatar-bg-mist {
+    background: radial-gradient(circle, rgba(200, 210, 220, 0.55), transparent 70%);
+    padding: 6px;
+}
+
+/* --- ショップ品: ランキング数字の書体/色(members_list.htmlの.ranking-badge) ------ */
+.ranking-badge.rank-style-gold { background: linear-gradient(135deg, #f5d67c, #b8860b); color: #3a2a00; }
+.ranking-badge.rank-style-neon {
+    background: #111; color: #39ff88; text-shadow: 0 0 6px #39ff88, 0 0 12px #39ff88;
+}
+.ranking-badge.rank-style-serif { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; }
+
+/* --- ショップ品: 季節限定コレクション(banner同様、プロフィール上部の帯) ----------- */
+.seasonal-summer { background: linear-gradient(135deg, #2b6cb0, #f6ad55); }
+.seasonal-autumn { background: linear-gradient(135deg, #c05621, #742a2a); }
+.seasonal-newyear { background: linear-gradient(135deg, #742a2a, #f7fafc); }
+
+/* --- ショップページ刷新(game_shop.html): タブ・固定ヘッダー・検索・NEW/期間限定表示 --- */
+.shop-points-header {
+    position: sticky;
+    top: 0.5rem;
+    z-index: 5;
+}
+.shop-tab-bar { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.8rem; }
+.shop-search-input {
+    width: 100%;
+    max-width: 320px;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 0.85rem;
+}
+.shop-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.8rem;
+}
+.shop-new-badge {
+    display: inline-block;
+    background: #e0526a;
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    margin-left: 0.3rem;
+    vertical-align: middle;
+}
+.shop-shortfall {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+    margin-top: 0.2rem;
+}
+.shop-seasonal-window {
+    font-size: 0.68rem;
+    color: var(--color-text-muted);
+    margin-top: 0.2rem;
+}
+.shop-gacha-result {
+    font-size: 0.85rem;
+    margin-top: 0.6rem;
+    min-height: 1.2em;
+}
+.shop-hide-owned [data-shop-owned="1"] { display: none; }
+[data-shop-panel][hidden] { display: none; }
+[data-shop-search-hidden="1"] { display: none; }
+
 /* --- メッセージ機能拡張(グループチャット・DM共通): 返信/リアクション/ピン留め/
    メンション/既読/地点共有カード。var(--color-*)トークンを使い、ダークモードでは
    :root側の変数切り替えだけで自動的にコントラストが保たれるようにしている。 */
@@ -1836,6 +1919,7 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 0;
 }
 .pinned-bar-list { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.pinned-bar-list[hidden] { display: none; }
 .pinned-bar-item {
     font-size: 0.78rem;
     background: var(--color-surface);
@@ -1900,6 +1984,7 @@ table.obs-table th.sticky-col { z-index: 3; }
     margin-top: 0.6rem;
     flex-wrap: wrap;
 }
+.bulk-toolbar[hidden] { display: none; }
 .star-toggle-btn {
     background: none;
     border: none;

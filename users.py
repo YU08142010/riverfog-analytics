@@ -358,6 +358,8 @@ def _ensure_profile_columns(conn):
     for col in (
         "equipped_title", "equipped_name_color", "equipped_dashboard_theme", "equipped_effect",
         "equipped_banner", "equipped_dm_theme", "equipped_title_color", "equipped_marker",
+        "equipped_title_badge", "equipped_bubble_style", "equipped_avatar_bg",
+        "equipped_rank_style", "equipped_profile_sound", "equipped_seasonal",
     ):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
@@ -432,7 +434,9 @@ def _norm_email(email):
 _USER_COLUMNS = (
     "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame, locked_at, "
     "equipped_title, equipped_name_color, equipped_dashboard_theme, equipped_effect, "
-    "equipped_banner, equipped_dm_theme, equipped_title_color, equipped_marker"
+    "equipped_banner, equipped_dm_theme, equipped_title_color, equipped_marker, "
+    "equipped_title_badge, equipped_bubble_style, equipped_avatar_bg, equipped_rank_style, "
+    "equipped_profile_sound, equipped_seasonal"
 )
 
 
@@ -445,6 +449,9 @@ def _user_row_to_dict(row):
         "equipped_dashboard_theme": row[12], "equipped_effect": row[13],
         "equipped_banner": row[14], "equipped_dm_theme": row[15],
         "equipped_title_color": row[16], "equipped_marker": row[17],
+        "equipped_title_badge": row[18], "equipped_bubble_style": row[19],
+        "equipped_avatar_bg": row[20], "equipped_rank_style": row[21],
+        "equipped_profile_sound": row[22], "equipped_seasonal": row[23],
     }
 
 
@@ -1030,6 +1037,97 @@ def total_spent_points(conn, user_id):
     return row[0] + row2[0] + row3[0] + row4[0]
 
 
+def messages_sent_count(conn, user_id):
+    """DM・グループチャット両方の送信件数の合計(実績「発言量」系で使う)。"""
+    row1 = conn.execute("SELECT COUNT(*) FROM dm_messages WHERE sender_id = ?", (user_id,)).fetchone()
+    row2 = conn.execute("SELECT COUNT(*) FROM group_messages WHERE sender_id = ?", (user_id,)).fetchone()
+    return row1[0] + row2[0]
+
+
+def reactions_given_count(conn, user_id):
+    row1 = conn.execute(
+        "SELECT COUNT(*) FROM dm_message_reactions WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    row2 = conn.execute(
+        "SELECT COUNT(*) FROM group_message_reactions WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row1[0] + row2[0]
+
+
+def reactions_received_count(conn, user_id):
+    row1 = conn.execute(
+        "SELECT COUNT(*) FROM dm_message_reactions r JOIN dm_messages m ON r.message_id = m.id "
+        "WHERE m.sender_id = ?", (user_id,),
+    ).fetchone()
+    row2 = conn.execute(
+        "SELECT COUNT(*) FROM group_message_reactions r JOIN group_messages m ON r.message_id = m.id "
+        "WHERE m.sender_id = ?", (user_id,),
+    ).fetchone()
+    return row1[0] + row2[0]
+
+
+def mentions_received_count(conn, user_id):
+    row1 = conn.execute(
+        "SELECT COUNT(*) FROM dm_message_mentions WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    row2 = conn.execute(
+        "SELECT COUNT(*) FROM group_message_mentions WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row1[0] + row2[0]
+
+
+def station_share_count(conn, user_id):
+    """station_share()がcard_type='station'で送るメッセージの件数(DM・グループ合算)。"""
+    row1 = conn.execute(
+        "SELECT COUNT(*) FROM dm_messages WHERE sender_id = ? AND card_type = 'station'", (user_id,)
+    ).fetchone()
+    row2 = conn.execute(
+        "SELECT COUNT(*) FROM group_messages WHERE sender_id = ? AND card_type = 'station'", (user_id,)
+    ).fetchone()
+    return row1[0] + row2[0]
+
+
+def shared_file_upload_count(conn, user_id):
+    row = conn.execute(
+        "SELECT COUNT(*) FROM shared_files WHERE uploaded_by = ?", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def shared_file_star_count(conn, user_id):
+    row = conn.execute(
+        "SELECT COUNT(*) FROM shared_file_stars WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def phenom_quiz_correct_count(conn, user_id):
+    row = conn.execute(
+        "SELECT COUNT(*) FROM daily_phenom_quiz WHERE user_id = ? AND correct = 1", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def lottery_draw_count(conn, user_id):
+    """デイリーくじはpoint_events(source='daily_lottery:YYYY-MM-DD')のUNIQUE制約で
+    1日1回しか記録されないため、件数がそのまま「くじを引いた日数」になる。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM point_events WHERE user_id = ? AND source LIKE 'daily_lottery:%'",
+        (user_id,),
+    ).fetchone()
+    return row[0]
+
+
+def monthly_ranking_first_count(conn, user_id):
+    """月間ログインランキングで1位を取った回数(_award_monthly_ranking_rewardsが
+    source='monthly_login_ranking_<YYYY-MM>_1'でgrant_pointsするのを利用する)。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM point_events WHERE user_id = ? AND source LIKE 'monthly_login_ranking_%\\_1' ESCAPE '\\'",
+        (user_id,),
+    ).fetchone()
+    return row[0]
+
+
 def place_fog_bet(conn, user_id, station_name, precision, window_start, window_end, bet_amount, multiplier,
                    placed_at, insurance=False):
     with conn:
@@ -1066,6 +1164,33 @@ def resolve_fog_bet(conn, bet_id, status, resolved_at, payout):
             "UPDATE fog_bets SET status = ?, resolved_at = ?, payout = ? WHERE id = ?",
             (status, resolved_at, payout, bet_id),
         )
+
+
+def get_fog_bet(conn, bet_id):
+    row = conn.execute(
+        "SELECT id, user_id, station_name, window_start, status FROM fog_bets WHERE id = ?", (bet_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "user_id": row[1], "station_name": row[2], "window_start": row[3], "status": row[4]}
+
+
+def cancel_fog_bet(conn, bet_id, cancelled_at, refund):
+    """見送り券で賭けを取り消す時に使う。resolve_fog_betと同じUPDATEだが、statusに
+    'cancelled'を使う点だけが違う(_resolve_pending_fog_betsはstatus='pending'しか
+    見ないため、cancelled行は以後の答え合わせ対象から自然に外れる)。"""
+    with conn:
+        conn.execute(
+            "UPDATE fog_bets SET status = 'cancelled', resolved_at = ?, payout = ? WHERE id = ?",
+            (cancelled_at, refund, bet_id),
+        )
+
+
+def won_fog_bet_count(conn, user_id):
+    row = conn.execute(
+        "SELECT COUNT(*) FROM fog_bets WHERE user_id = ? AND status = 'won'", (user_id,)
+    ).fetchone()
+    return row[0]
 
 
 def list_fog_bets_for_user(conn, user_id, limit=30):
@@ -1161,6 +1286,12 @@ _COSMETIC_EQUIP_COLUMNS = {
     "dm_theme": "equipped_dm_theme",
     "title_color": "equipped_title_color",
     "marker": "equipped_marker",
+    "title_badge": "equipped_title_badge",
+    "bubble_style": "equipped_bubble_style",
+    "avatar_bg": "equipped_avatar_bg",
+    "rank_style": "equipped_rank_style",
+    "profile_sound": "equipped_profile_sound",
+    "seasonal": "equipped_seasonal",
 }
 
 
@@ -2059,6 +2190,11 @@ __all__ = [
     "owned_cosmetic_ids", "purchase_cosmetic", "set_equipped_cosmetic",
     "buy_consumable", "consumable_quantities", "use_consumable",
     "login_counts_between",
+    "get_fog_bet", "cancel_fog_bet", "won_fog_bet_count",
+    "messages_sent_count", "reactions_given_count", "reactions_received_count",
+    "mentions_received_count", "station_share_count",
+    "shared_file_upload_count", "shared_file_star_count",
+    "phenom_quiz_correct_count", "lottery_draw_count", "monthly_ranking_first_count",
     "place_daily_fog_quiz_guess", "get_daily_fog_quiz", "list_pending_daily_fog_quiz",
     "resolve_daily_fog_quiz", "get_daily_fog_quiz_stats", "update_daily_fog_quiz_stats",
     "place_daily_phenom_quiz_answer", "get_daily_phenom_quiz", "get_point_event_amount",
