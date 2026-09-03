@@ -4736,8 +4736,10 @@ def game_shop_gacha():
                     continue
                 candidates.append((category, cosmetic_category, label, item))
         weighted = [(c, cc, lb, it, 1.0 / max(it["cost"], 1)) for c, cc, lb, it in candidates]
-        roll = random.random() * (GACHA_BIG_REFUND_WEIGHT + sum(w for *_, w in weighted))
-        if roll < GACHA_BIG_REFUND_WEIGHT or not weighted:
+        # 当たり確率は1/GACHA_BIG_REFUND_WEIGHT に固定する(アイテム側の重みをそのまま
+        # 分母に混ぜると、アイテムの価格帯によって当たり確率が事実上100%近くまで
+        # ぶれてしまうバグがあったため、確率とアイテム抽選の重み計算を分離した)。
+        if not weighted or random.random() < (1.0 / GACHA_BIG_REFUND_WEIGHT):
             # 参加費(GACHA_COST)はconsumable_purchases経由で記録し(total_spent_pointsの
             # 集計対象)、当たり分だけを別途grant_pointsで加算する(二重計上にならない)。
             users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
@@ -4749,7 +4751,7 @@ def game_shop_gacha():
                 users.grant_points(conn, my_id, f"gacha_consolation:{uuid.uuid4()}", GACHA_CONSOLATION_POINTS, now_str)
                 message = f"すべて所持済みだったため、参加賞として{GACHA_CONSOLATION_POINTS}ptを獲得しました。"
         else:
-            roll -= GACHA_BIG_REFUND_WEIGHT
+            roll = random.random() * sum(w for *_, w in weighted)
             chosen = weighted[-1]
             for entry in weighted:
                 roll -= entry[4]
