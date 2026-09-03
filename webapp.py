@@ -708,6 +708,20 @@ def _inject_pending_signup_count():
     return {"pending_signup_count": pending_signup_count}
 
 
+@app.context_processor
+def _inject_pending_observation_report_count():
+    """管理者サイドバーの「観測報告」に未対応件数のバッジを出すため注入する。"""
+    def pending_observation_report_count():
+        if session.get("role") != "admin":
+            return 0
+        conn = _users_conn()
+        try:
+            return users.pending_observation_report_count(conn)
+        finally:
+            conn.close()
+    return {"pending_observation_report_count": pending_observation_report_count}
+
+
 def _current_user_favorite_stations():
     """ログイン中ユーザーのお気に入り地点名のsetを返す(未ログイン/未設定なら空set)。
     空setは「絞り込み対象なし(=全地点を通知対象にする)」という意味で扱う
@@ -2500,7 +2514,10 @@ def _latest_observations():
     for name in station_names:
         code = encode_phenomena_cell(phenom_row.get(name))
         label, color, text_color = _phenom_label_color(code)
-        stations.append({"name": name, "label": label, "color": color, "text_color": text_color})
+        clean_code = int(code) if code == code else None  # NaNはNoneにする
+        stations.append({
+            "name": name, "label": label, "color": color, "text_color": text_color, "code": clean_code,
+        })
 
     return {
         "datetime": last_dt,
@@ -3080,9 +3097,163 @@ def simulator_page():
     )
 
 
+_anomaly_scan_cache = {}
+_anomaly_scan_lock = threading.Lock()
+ANOMALY_SCAN_INTERVAL_SECONDS = 900
+ANOMALY_SCAN_LOOKBACK_HOURS = 48
+
+
+def _scan_and_autocorrect_station_anomalies(name):
+    """孤立した1時間だけのブレ(前後の観測が一致し、その1時間だけ現象コードが違う)を
+    観測・判定ミスの疑いとして扱い、周囲の値に自動で訂正する。地点別ページを開くたびに
+    その地点だけ軽く走査する(全地点を毎回スキャンする専用バッチは持たない)。
+    ギャンブルの払い戻し計算はこの訂正テーブルを一切参照しないため、賭けの結果には
+    影響しない。"""
+    now = time.monotonic()
+    with _anomaly_scan_lock:
+        last = _anomaly_scan_cache.get(name)
+        if last is not None and now - last < ANOMALY_SCAN_INTERVAL_SECONDS:
+            return
+        _anomaly_scan_cache[name] = now
+    if not WEATHER_DB_PATH.exists():
+        return
+    try:
+        _, phenom_df, station_names = fog_data.load_river_fog_data()
+    except Exception as e:
+        log.warning("Anomaly scan failed to load data for %s: %s", name, e)
+        return
+    if name not in phenom_df.columns:
+        return
+    recent = phenom_df[["datetime", name]].dropna(subset=["datetime"]).tail(ANOMALY_SCAN_LOOKBACK_HOURS)
+    recent = recent.reset_index(drop=True)
+    raw_codes = [encode_phenomena_cell(v) for v in recent[name]]
+    conn = _users_conn()
+    try:
+        for i in range(1, len(raw_codes) - 1):
+            prev_raw, cur_raw, next_raw = raw_codes[i - 1], raw_codes[i], raw_codes[i + 1]
+            if any(c != c for c in (prev_raw, cur_raw, next_raw)):  # NaNを含む区間はスキップ
+                continue
+            prev_c, cur_c, next_c = int(prev_raw), int(cur_raw), int(next_raw)
+            if prev_c != next_c or cur_c == prev_c:
+                continue
+            target_dt = recent.iloc[i]["datetime"]
+            target_dt_str = (
+                target_dt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(target_dt, "strftime") else str(target_dt)
+            )
+            if name in users.get_phenomena_corrections_for_datetime(conn, target_dt_str):
+                continue  # 既に訂正済み(自動・人力いずれか)
+            now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+            note = f"前後の観測({prev_c})に基づき自動訂正"
+            users.add_phenomena_correction(
+                conn, name, target_dt_str, cur_c, prev_c, None, now_str, source="auto",
+            )
+            users.log_auto_resolved_observation_report(conn, name, target_dt_str, cur_c, prev_c, now_str, note)
+            _record_audit(
+                "観測異常の自動検知・訂正",
+                f"{name} {target_dt_str}: {cur_c} → {prev_c}({note})",
+            )
+    finally:
+        conn.close()
+
+
+@app.route("/stations/<name>/report", methods=["POST"])
+def station_report_observation(name):
+    """現在表示中の観測(現象判定)が間違っていると思う場合、ログイン中のユーザーなら
+    誰でも管理者へ報告できる。データは直接書き換えず、確認待ちキューに積むだけ。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    name = _validate_station(name)
+    observations = _latest_observations()
+    if not observations:
+        return _finish("station_detail", "現在参照できる観測データがありません。", success=False, name=name)
+    current = {s["name"]: s for s in observations["stations"]}.get(name)
+    if current is None or current.get("code") is None:
+        return _finish("station_detail", "この地点の観測データがありません。", success=False, name=name)
+    target_dt_str = observations["datetime"]
+    if hasattr(target_dt_str, "strftime"):
+        target_dt_str = target_dt_str.strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        created = users.create_observation_report(
+            conn, name, target_dt_str, current["code"], my_id, now_str, source="user",
+        )
+        if created:
+            _record_audit("観測報告を受信", f"{name} {target_dt_str}: コード{current['code']}")
+    finally:
+        conn.close()
+    message = "報告を受け付けました。管理者が確認します。" if created else "この観測は既に報告済みです。"
+    return _finish("station_detail", message, name=name)
+
+
+@app.route("/admin/observation_reports")
+@requires_admin
+def admin_observation_reports():
+    conn = _users_conn()
+    try:
+        reports = users.list_pending_observation_reports(conn)
+    finally:
+        conn.close()
+    return render_template(
+        "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
+    )
+
+
+@app.route("/admin/observation_reports/<int:report_id>/resolve", methods=["POST"])
+@requires_admin
+def admin_observation_report_resolve(report_id):
+    my_id = session.get("user_id")
+    conn = _users_conn()
+    try:
+        report = users.get_observation_report(conn, report_id)
+        if report is None or report["status"] != "pending":
+            abort(404)
+        corrected_code = request.form.get("corrected_code", type=int)
+        if corrected_code is None or not (0 <= corrected_code <= 10):
+            return _finish("admin_observation_reports", "訂正後の現象コードを選んでください。", success=False)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.add_phenomena_correction(
+            conn, report["station_name"], report["target_datetime"],
+            report["reported_code"], corrected_code, my_id, now_str, source="human",
+        )
+        users.resolve_observation_report(
+            conn, report_id, "resolved", my_id, now_str, f"{corrected_code}に訂正",
+        )
+        _record_audit(
+            "観測報告を確認・訂正",
+            f"{report['station_name']} {report['target_datetime']}: "
+            f"{report['reported_code']} → {corrected_code}",
+        )
+    finally:
+        conn.close()
+    return _finish("admin_observation_reports", "訂正しました。")
+
+
+@app.route("/admin/observation_reports/<int:report_id>/dismiss", methods=["POST"])
+@requires_admin
+def admin_observation_report_dismiss(report_id):
+    my_id = session.get("user_id")
+    conn = _users_conn()
+    try:
+        report = users.get_observation_report(conn, report_id)
+        if report is None or report["status"] != "pending":
+            abort(404)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.resolve_observation_report(conn, report_id, "dismissed", my_id, now_str, "問題なしと判断")
+        _record_audit("観測報告を却下", f"{report['station_name']} {report['target_datetime']}")
+    finally:
+        conn.close()
+    return _finish("admin_observation_reports", "却下しました。")
+
+
 @app.route("/stations/<name>")
 def station_detail(name):
     name = _validate_station(name)
+    try:
+        _scan_and_autocorrect_station_anomalies(name)
+    except Exception as e:
+        log.warning("Anomaly scan error for %s: %s", name, e)
 
     observations = _latest_observations()
     current = None

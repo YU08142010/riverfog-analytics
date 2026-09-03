@@ -175,6 +175,22 @@ CREATE TABLE IF NOT EXISTS phenomena_corrections (
     corrected_at TEXT NOT NULL,
     UNIQUE(station_name, target_datetime)
 );
+CREATE TABLE IF NOT EXISTS observation_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_name TEXT NOT NULL,
+    target_datetime TEXT NOT NULL,
+    reported_code INTEGER,
+    reported_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reported_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TEXT,
+    resolution_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_observation_reports_status ON observation_reports(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_reports_pending_unique
+    ON observation_reports(station_name, target_datetime) WHERE status = 'pending';
 CREATE TABLE IF NOT EXISTS dm_conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -402,6 +418,26 @@ def _ensure_fog_bets_columns(conn):
         conn.execute("ALTER TABLE fog_bets ADD COLUMN insurance INTEGER NOT NULL DEFAULT 0")
 
 
+def _migrate_phenomena_corrections_nullable_source(conn):
+    """自動異常検知がcorrected_by=NULL(source='auto')で記録できるよう、既存の
+    corrected_by NOT NULL制約を緩和し、source列(human/auto)を追加する。
+    SQLiteはALTER TABLEでNOT NULLを外せないため、テーブルを作り直す。"""
+    cols = conn.execute("PRAGMA table_info(phenomena_corrections)").fetchall()
+    corrected_by_col = next((c for c in cols if c[1] == "corrected_by"), None)
+    if corrected_by_col is None or corrected_by_col[3] == 0:
+        return  # 列が無い、または既にNOT NULLが外れている(移行済み)
+    with conn:
+        conn.execute("ALTER TABLE phenomena_corrections RENAME TO phenomena_corrections_old_mig")
+        conn.execute("CREATE TABLE phenomena_corrections (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    station_name TEXT NOT NULL,\n    target_datetime TEXT NOT NULL,\n    original_code INTEGER,\n    corrected_code INTEGER NOT NULL,\n    corrected_by INTEGER REFERENCES users(id) ON DELETE CASCADE,\n    corrected_at TEXT NOT NULL,\n    source TEXT NOT NULL DEFAULT 'human',\n    UNIQUE(station_name, target_datetime)\n)")
+        conn.execute(
+            "INSERT INTO phenomena_corrections "
+            "(id, station_name, target_datetime, original_code, corrected_code, corrected_by, corrected_at) "
+            "SELECT id, station_name, target_datetime, original_code, corrected_code, corrected_by, corrected_at "
+            "FROM phenomena_corrections_old_mig"
+        )
+        conn.execute("DROP TABLE phenomena_corrections_old_mig")
+
+
 def _ensure_login_events_columns(conn):
     """ipは異常ログイン検知(未知IPからの管理者ログイン等)のために後から追加した列。
     login_eventsはFK移行(_migrate_add_foreign_keys)でテーブルごと作り直されることが
@@ -422,6 +458,7 @@ def connect(db_path):
     _ensure_fog_bets_columns(conn)
     _ensure_dm_messages_columns(conn)
     _migrate_add_foreign_keys(conn)
+    _migrate_phenomena_corrections_nullable_source(conn)
     _ensure_login_events_columns(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -1215,19 +1252,19 @@ def available_points(conn, user_id):
     return total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
 
 
-def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at):
-    """カメラ画像の現象判定(Gemini)を人間が訂正した記録を残す。同じ(地点, 日時)を
+def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at, source="human"):
+    """カメラ画像の現象判定(Gemini)を訂正した記録を残す。同じ(地点, 日時)を
     再度訂正した場合は上書きする(訂正の訂正はよくあることなので、履歴は持たず
-    最新の1件だけを残す)。"""
+    最新の1件だけを残す)。user_idはNone(自動異常検知による訂正)を許容する。"""
     with conn:
         conn.execute(
             "INSERT INTO phenomena_corrections "
-            "(station_name, target_datetime, original_code, corrected_code, corrected_by, corrected_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+            "(station_name, target_datetime, original_code, corrected_code, corrected_by, corrected_at, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(station_name, target_datetime) DO UPDATE SET "
             "corrected_code = excluded.corrected_code, corrected_by = excluded.corrected_by, "
-            "corrected_at = excluded.corrected_at",
-            (station_name, target_datetime, original_code, corrected_code, user_id, at),
+            "corrected_at = excluded.corrected_at, source = excluded.source",
+            (station_name, target_datetime, original_code, corrected_code, user_id, at, source),
         )
 
 
@@ -1247,6 +1284,84 @@ def phenomena_correction_counts_by_station(conn):
         "ORDER BY COUNT(*) DESC"
     ).fetchall()
     return [{"station": s, "count": c} for s, c in rows]
+
+
+def create_observation_report(conn, station_name, target_datetime, reported_code, reported_by, reported_at, source="user"):
+    """観測が間違っていると思う場合の報告を1件記録する。同じ(地点, 日時)への保留中の
+    報告が既にあれば新規作成しない(idx_observation_reports_pending_uniqueにより
+    INSERT OR IGNOREが安全に効く)。挿入できたらTrue、既に保留中の報告があればFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO observation_reports "
+            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+            (station_name, target_datetime, reported_code, reported_by, reported_at, source),
+        )
+        return cur.rowcount > 0
+
+
+def log_auto_resolved_observation_report(conn, station_name, target_datetime, reported_code, corrected_code, at, note):
+    """自動異常検知が即座に訂正した記録を、報告一覧からも辿れるよう
+    status='auto_resolved'として残す(常に監査できる形にするため)。"""
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO observation_reports "
+            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status, "
+            "resolved_by, resolved_at, resolution_note) "
+            "VALUES (?, ?, ?, NULL, ?, 'auto', 'auto_resolved', NULL, ?, ?)",
+            (station_name, target_datetime, reported_code, at, at, note),
+        )
+
+
+def list_pending_observation_reports(conn):
+    """保留中の観測報告を、報告者名を添えて新しい順で返す(管理者の確認キュー用)。"""
+    rows = conn.execute(
+        """
+        SELECT r.id, r.station_name, r.target_datetime, r.reported_code, r.reported_by, r.reported_at,
+               r.source, u.name AS reporter_name
+        FROM observation_reports r
+        LEFT JOIN users u ON u.id = r.reported_by
+        WHERE r.status = 'pending'
+        ORDER BY r.reported_at DESC
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "station_name": r[1], "target_datetime": r[2], "reported_code": r[3],
+            "reported_by": r[4], "reported_at": r[5], "source": r[6],
+            "reporter_name": r[7] or "(退会済みユーザー)",
+        }
+        for r in rows
+    ]
+
+
+def pending_observation_report_count(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM observation_reports WHERE status = 'pending'"
+    ).fetchone()[0]
+
+
+def get_observation_report(conn, report_id):
+    row = conn.execute(
+        "SELECT id, station_name, target_datetime, reported_code, status "
+        "FROM observation_reports WHERE id = ?",
+        (report_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "station_name": row[1], "target_datetime": row[2],
+        "reported_code": row[3], "status": row[4],
+    }
+
+
+def resolve_observation_report(conn, report_id, status, resolved_by, resolved_at, note):
+    with conn:
+        conn.execute(
+            "UPDATE observation_reports SET status = ?, resolved_by = ?, resolved_at = ?, resolution_note = ? "
+            "WHERE id = ?",
+            (status, resolved_by, resolved_at, note, report_id),
+        )
 
 
 def owned_frame_ids(conn, user_id):

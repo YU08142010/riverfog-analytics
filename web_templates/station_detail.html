@@ -18,6 +18,12 @@
     <div class="station-chip" style="display:inline-block; background:{{ current.color }}; color:{{ current.text_color }}; padding:0.6rem 1rem; font-size:0.95rem;">
         現在の現象: {{ current.label }}
     </div>
+    {% if current.code is not none and session.get("user_id") %}
+    <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-block; margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測は間違っていると思う</button>
+    </form>
+    {% endif %}
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
     {% endif %}
