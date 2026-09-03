@@ -71,7 +71,6 @@ ADMIN_SESSION_LIFETIME = timedelta(hours=2)
 
 USERS_DB_PATH = BASE_DIR / "data" / "users.db"
 MIN_PASSWORD_LENGTH = 8
-BIO_MAX_LENGTH = 300
 STATION_COMMENT_MAX_LENGTH = 1000
 DM_MESSAGE_MAX_LENGTH = 1000
 
@@ -4475,7 +4474,6 @@ def member_detail(user_id):
         is_self=(session.get("user_id") == user_id),
         heatmap_days=LOGIN_HEATMAP_DAYS,
         avatar_size=AVATAR_SIZE,
-        bio_max_length=BIO_MAX_LENGTH,
         badges=badges,
         points=points,
         online=_is_online(last_active_at),
@@ -4488,7 +4486,7 @@ def member_profile_update(user_id):
     """自己紹介文とお気に入り地点は本人のみが変更できる(アバターと同じ制限)。"""
     if session.get("user_id") != user_id:
         abort(403)
-    bio = request.form.get("bio", "").strip()[:BIO_MAX_LENGTH]
+    bio = request.form.get("bio", "").strip()
     favorite_stations = [s for s in request.form.getlist("favorite_stations") if s in STATION_NAMES]
     conn = _users_conn()
     try:
