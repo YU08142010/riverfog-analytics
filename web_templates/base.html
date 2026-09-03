@@ -295,6 +295,12 @@ function promptModal(message, defaultValue) {
 // メニュー内のbutton要素にはdata-context-actionを付け、"contextmenuaction"カスタム
 // イベント(detail: {action, target})をdocumentに投げるので、各ページはそれを購読するだけでよい
 // (共有ファイルページに限らず、右クリックメニューを使いたいページはこの仕組みに乗せられる)。
+// 一部のトラックパッド(特にmacOSの2本指タップによる右クリック)では、contextmenu
+// イベントの直後に余分な"click"イベントが合成発火することがあり、それが下の
+// 「メニュー外クリックで閉じる」処理に拾われて、開いた直後のメニューが一瞬で
+// 閉じてしまう不具合があった。メニューを開いた直後の短い猶予時間は、その
+// "click"を外側クリックとして扱わないようにして回避する。
+var _lastMenuShownAt = 0;
 document.addEventListener("contextmenu", function(e) {
     var host = e.target.closest("[data-context-menu]");
     if (!host) { return; }
@@ -306,9 +312,11 @@ document.addEventListener("contextmenu", function(e) {
     menu.style.left = e.pageX + "px";
     menu.style.top = e.pageY + "px";
     menu.hidden = false;
+    _lastMenuShownAt = Date.now();
 });
 document.addEventListener("click", function(e) {
     if (e.target.closest(".context-menu")) { return; }
+    if (Date.now() - _lastMenuShownAt < 300) { return; }
     document.querySelectorAll(".context-menu").forEach(function(m) { m.hidden = true; });
 });
 document.addEventListener("click", function(e) {

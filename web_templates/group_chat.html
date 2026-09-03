@@ -141,6 +141,28 @@
         }
     });
 
+    // スクリーンショット等の画像をクリップボードから直接貼り付けて添付できるようにする
+    // (dm_thread.htmlと同じ仕組み)。
+    textarea.addEventListener("paste", function(e) {
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== 0) { continue; }
+            var file = items[i].getAsFile();
+            if (!file) { continue; }
+            try {
+                var dt = new DataTransfer();
+                dt.items.add(new File([file], file.name || "clipboard.png", {type: file.type}));
+                fileInput.files = dt.files;
+                fileNameLabel.textContent = "添付: " + (file.name || "貼り付けた画像");
+                fileNameLabel.hidden = false;
+                e.preventDefault();
+            } catch (err) {
+                // DataTransfer未対応の古いブラウザでは何もせず、通常のテキスト貼り付けに任せる。
+            }
+            break;
+        }
+    });
+
     function scrollToBottom() {
         bubbles.scrollTop = bubbles.scrollHeight;
     }
@@ -465,6 +487,9 @@
             reactionPicker.style.left = (rect.left + window.scrollX) + "px";
             reactionPicker.style.top = (rect.bottom + window.scrollY) + "px";
             reactionPicker.hidden = false;
+            // base.htmlの「メニュー外クリックで閉じる」処理が、開くのに使ったこの
+            // 同じclickイベントで即座に反応してしまうのを防ぐ(dm_thread.html参照)。
+            window._lastMenuShownAt = Date.now();
             return;
         }
         var pill = e.target.closest(".reaction-pill");

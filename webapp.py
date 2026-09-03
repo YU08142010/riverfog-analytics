@@ -3998,20 +3998,42 @@ def _gamble_window_for_bet(target_date, precision_id, hour=None, block_index=Non
     return window_start, window_end
 
 
+# collect.pyの毎時収集は画像取得+Gemini分類を伴うため、その時刻ちょうどに終わるとは限らず、
+# 実測では数十秒〜(まれに)数分かかる(logs/collect.logで確認済み: ある回はwindow_end+26秒、
+# 別の回は+2分46秒で完了していた)。window_endを過ぎた瞬間に答え合わせすると、まだ収集が
+# 終わっていないデータを「霧は観測されなかった」と誤認して外れ扱いにしてしまう
+# (2026-09-03に実際に発生し、window_endのわずか14秒後に3件が誤って「はずれ」判定されていた:
+# 本来は川霧が観測されていたのに、その時点ではまだ該当時刻のデータがweather.dbに
+# 書き込まれておらず、他地点も含め「その時刻の行が1つも無い」状態で判定してしまっていた)。
+# そのため、対象時刻(window_end)のデータがまだ存在しない場合は「まだ判定できない」として
+# 今回は見送り、次にゲーム関連ページが開かれた時に再試行する。収集が恒久的に失敗している
+# (画像取得不能等)ケースに備え、それでも一定時間(GAMBLE_RESOLUTION_GRACE_PERIOD)経っても
+# データが来なければ、やむを得ずその時点のデータだけで判定を確定する。
+GAMBLE_RESOLUTION_GRACE_PERIOD = timedelta(hours=2)
+
+
 def _resolve_pending_fog_bets():
     """window_endが過ぎた賭けの答え合わせをする。バッジ付与(_award_new_badges)と同じく、
     ゲーム関連ページを開いたタイミングで遅延実行する(専用のcronは持たない)。"""
     conn = _users_conn()
     try:
-        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        now = now_jst_naive()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         pending = users.list_pending_fog_bets(conn, now_str)
         if not pending:
             return
         if not WEATHER_DB_PATH.exists():
             return
         main_df, phenom_df, _ = fog_data.load_river_fog_data()
+        collected_datetimes = set(main_df["datetime"])
         for bet in pending:
             station = bet["station_name"]
+            window_end_dt = datetime.strptime(bet["window_end"], "%Y-%m-%d %H:%M:%S")
+            data_ready = window_end_dt in collected_datetimes
+            if not data_ready and (now - window_end_dt) < GAMBLE_RESOLUTION_GRACE_PERIOD:
+                # 対象時刻の収集がまだ終わっていない可能性が高いため、今回は判定を見送る
+                # (猶予期間内は「まだ観測されていない」を「霧が出なかった」と混同しない)。
+                continue
             if station not in phenom_df.columns:
                 # 地点が無くなった等、答え合わせ不能。賭け金は返さずlostとして締める
                 # (無期限pendingのまま残り続けるのを防ぐ)。
@@ -5470,6 +5492,39 @@ def shared_files_page():
     )
 
 
+_TEXT_INDEXABLE_EXTENSIONS = {
+    ".txt": "text/plain", ".log": "text/plain", ".csv": "text/csv",
+    ".md": "text/markdown", ".json": "application/json",
+}
+CONTENT_TEXT_MAX_BYTES = 300 * 1024
+_DATE_TAG_RE = re.compile(r"(\d{4})[-_]?(\d{2})[-_]?(\d{2})")
+
+
+def _auto_tags_for_filename(filename):
+    """アップロードされたファイル名から、地点名(STATION_NAMESとの部分一致)・日付らしき
+    文字列を自動で拾い、"地点:丹過橋,日付:2026-09-03"のようなタグ文字列を組み立てる。
+    捏造は避け、あくまでファイル名自体に既に含まれている情報を拾うだけにとどめる。"""
+    tags = [f"地点:{name}" for name in STATION_NAMES if name and name in filename]
+    m = _DATE_TAG_RE.search(filename)
+    if m:
+        tags.append(f"日付:{m.group(1)}-{m.group(2)}-{m.group(3)}")
+    return ",".join(tags)
+
+
+def _extract_content_text(path, ext):
+    """検索(全文検索)用に、テキスト系ファイルの中身を読み込む。対象拡張子以外は
+    空文字を返す(PDF/画像/xlsx等の中身までは読まない。新規の重い依存ライブラリを
+    増やさない方針のため)。"""
+    if ext not in _TEXT_INDEXABLE_EXTENSIONS:
+        return ""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(CONTENT_TEXT_MAX_BYTES)
+        return raw.decode("utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
 @app.route("/files/upload", methods=["POST"])
 def shared_file_upload():
     my_id = session.get("user_id")
@@ -5484,6 +5539,8 @@ def shared_file_upload():
         return _finish("shared_files_page", error, success=False, folder=folder_id)
     original_name, stored_name, content_type, size = result
     description = request.form.get("description", "").strip()[:200]
+    tags = _auto_tags_for_filename(original_name)
+    content_text = _extract_content_text(SHARED_FILES_DIR / stored_name, Path(original_name).suffix.lower())
     conn = _users_conn()
     try:
         if folder_id is not None and users.get_shared_folder(conn, folder_id) is None:
@@ -5491,6 +5548,7 @@ def shared_file_upload():
         users.add_shared_file(
             conn, original_name, stored_name, content_type, size, my_id,
             now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"), description, folder_id,
+            tags=tags, content_text=content_text,
         )
     finally:
         conn.close()

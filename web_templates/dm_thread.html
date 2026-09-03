@@ -153,6 +153,29 @@
         }
     });
 
+    // スクリーンショット等の画像をクリップボードから直接貼り付けて添付できるようにする
+    // (Slack等と同じUX)。DataTransferで既存のfile inputへFileList相当を差し込むことで、
+    // 送信フォーム側のロジック(_save_uploaded_file等)を一切変えずに済む。
+    textarea.addEventListener("paste", function(e) {
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== 0) { continue; }
+            var file = items[i].getAsFile();
+            if (!file) { continue; }
+            try {
+                var dt = new DataTransfer();
+                dt.items.add(new File([file], file.name || "clipboard.png", {type: file.type}));
+                fileInput.files = dt.files;
+                fileNameLabel.textContent = "添付: " + (file.name || "貼り付けた画像");
+                fileNameLabel.hidden = false;
+                e.preventDefault();
+            } catch (err) {
+                // DataTransfer未対応の古いブラウザでは何もせず、通常のテキスト貼り付けに任せる。
+            }
+            break;
+        }
+    });
+
     function scrollToBottom() {
         bubbles.scrollTop = bubbles.scrollHeight;
     }
@@ -489,6 +512,11 @@
             reactionPicker.style.left = (rect.left + window.scrollX) + "px";
             reactionPicker.style.top = (rect.bottom + window.scrollY) + "px";
             reactionPicker.hidden = false;
+            // base.htmlの「メニュー外クリックで閉じる」処理は、開くのに使った
+            // この同じclickイベントでも即座に反応してしまう(このスクリプトの方が
+            // base.htmlより先に登録されるため、同じイベント内で後から実行される)。
+            // 開いた直後の猶予時間を共有することで、開いた瞬間に閉じるのを防ぐ。
+            window._lastMenuShownAt = Date.now();
             return;
         }
         var pill = e.target.closest(".reaction-pill");
