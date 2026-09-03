@@ -3195,6 +3195,13 @@ def admin_observation_reports():
         reports = users.list_pending_observation_reports(conn)
     finally:
         conn.close()
+    for r in reports:
+        image_date = r["target_datetime"][:10]
+        image_hhmm = r["target_datetime"][11:13] + r["target_datetime"][14:16]
+        image_path = IMAGE_DIR / image_date / image_hhmm / f"{r['station_name']}.jpg"
+        r["image_date"] = image_date
+        r["image_hhmm"] = image_hhmm
+        r["has_image"] = image_path.is_file()
     return render_template(
         "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
     )

@@ -11,10 +11,20 @@
     {% if reports %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>地点</th><th>日時</th><th>現在のコード</th><th>報告者</th><th>報告日時</th><th>対応</th></tr></thead>
+        <thead><tr><th>写真</th><th>地点</th><th>日時</th><th>現在のコード</th><th>報告者</th><th>報告日時</th><th>対応</th></tr></thead>
         <tbody>
         {% for r in reports %}
         <tr>
+            <td>
+                {% if r.has_image %}
+                {% set image_url = url_for('images_file', date=r.image_date, hhmm=r.image_hhmm, filename=r.station_name ~ '.jpg') %}
+                <a href="{{ image_url }}" target="_blank" rel="noopener">
+                    <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}のカメラ画像" style="width:100px; height:auto; border-radius:4px;">
+                </a>
+                {% else %}
+                <span class="muted">画像なし</span>
+                {% endif %}
+            </td>
             <td>{{ r.station_name }}</td>
             <td>{{ r.target_datetime }}</td>
             <td>{{ phenom_labels.get(r.reported_code, "現象なし" if r.reported_code == 0 else "-") }}</td>
