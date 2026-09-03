@@ -1021,6 +1021,20 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 }
 .station-chip-checkbox input[type="checkbox"] { margin: 0; }
 
+/* 地点名の隣に地域(只見川/会津)を示す小さなラベル。2026-09に会津地方を追加し、
+   統合した地点一覧・地図・お気に入り選択で区別できるようにするために追加。 */
+.region-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background: var(--color-primary-lighter);
+    color: var(--color-primary-dark);
+    vertical-align: middle;
+    margin-left: 0.3rem;
+}
+
 .image-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

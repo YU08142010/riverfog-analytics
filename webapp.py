@@ -41,8 +41,9 @@ import matplotlib.dates as mdates
 from matplotlib import font_manager
 
 from common import (
-    BASE_DIR, CAMERAS_CSV, DATA_XLSX, EXPORT_XLSX_PATH, JST, NETWORK_FAILURE_LOG_PATH,
-    STATION_WEATHER_DB_PATH, TEMPLATE_XLSX, WEATHER_DB_PATH, build_data_backup_zip,
+    AIZU_EXPORT_XLSX_PATH, AIZU_TEMPLATE_XLSX, BASE_DIR, CAMERAS_CSV, DATA_XLSX,
+    EXPORT_XLSX_PATH, JST, NETWORK_FAILURE_LOG_PATH, STATION_WEATHER_DB_PATH,
+    TEMPLATE_XLSX, WEATHER_DB_PATH, build_data_backup_zip, load_camera_regions,
     now_jst_naive, representative_coords, send_alert,
 )
 import announcements
@@ -350,6 +351,16 @@ try:
 except Exception:
     STATION_NAMES = []
 
+try:
+    STATION_REGION = load_camera_regions()
+except Exception:
+    STATION_REGION = {}
+# 只見川.xlsx/会津.xlsxのダウンロードを地域ごとに分けるための、地点名の部分リスト
+# (2026-09の会津地方追加で導入。一覧・地図・比較・ギャンブル等は従来通りSTATION_NAMES
+# を使い、両地域をまとめて扱う)。
+TADAMI_STATION_NAMES = [n for n in STATION_NAMES if STATION_REGION.get(n) == "只見川"]
+AIZU_STATION_NAMES = [n for n in STATION_NAMES if STATION_REGION.get(n) == "会津"]
+
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
 MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
@@ -575,15 +586,25 @@ def _river_go_jp_map_url(cam_id):
     """川の防災情報(国交省 river.go.jp)の地点別地図URLを組み立てる。
     座標データが無いため独自の地図は描けないが、river.go.jpは各カメラIDに対応する
     地図ページを持っており、緯度経度なしでカメラIDのみから直接リンクできる。
-    以下の導出方法は実カメラID2件(101793163, 101793203)についてriver.go.jp側の
+    以下の導出方法は只見川側のカメラID(101793163, 101793203)と、2026-09に追加した
+    会津地方側のカメラID(121527024, 221527001等)をあわせてriver.go.jp側の
     インデックス済みURLを目視確認して検証済み(推測ではない):
-    ownCdは自治体コードで、当システムの全33カメラID(先頭"101793"で始まる)に
-    共通の固定値"1793"。sysCamIdはカメラIDから先頭"10"を除いたもの。
+    カメラID(scamId)の先頭は種別を表す1〜2桁のマーカーで、
+    - "10"で始まる場合: itmkndCd=200、sysCamIdはマーカー2桁を除いた残り
+    - "1"で始まり2桁目が0でない場合: itmkndCd=200、sysCamIdはマーカー1桁を除いた残り
+    - "2"で始まる場合: itmkndCd=100、sysCamIdはマーカー1桁を除いた残り
+    ownCdは自治体コードで、sysCamIdの末尾3桁を除いた部分と一致する。
     """
-    sys_cam_id = cam_id[2:]
+    if cam_id.startswith("10"):
+        itmknd_cd, sys_cam_id = "200", cam_id[2:]
+    elif cam_id.startswith("1"):
+        itmknd_cd, sys_cam_id = "200", cam_id[1:]
+    else:
+        itmknd_cd, sys_cam_id = "100", cam_id[1:]
+    own_cd = sys_cam_id[:-3]
     return (
         "https://www.river.go.jp/kawabou/mb/tm"
-        f"?zm=15&scamId={cam_id}&ownCd=1793&itmkndCd=200&sysCamId={sys_cam_id}"
+        f"?zm=15&scamId={cam_id}&ownCd={own_cd}&itmkndCd={itmknd_cd}&sysCamId={sys_cam_id}"
     )
 
 
@@ -2762,10 +2783,28 @@ def download_xlsx():
         abort(404)
     conn = weather_store.connect(WEATHER_DB_PATH)
     try:
-        weather_store.export_to_xlsx(conn, EXPORT_XLSX_PATH, CAMERAS_CSV, TEMPLATE_XLSX)
+        weather_store.export_to_xlsx(
+            conn, EXPORT_XLSX_PATH, CAMERAS_CSV, TEMPLATE_XLSX, station_names=TADAMI_STATION_NAMES,
+        )
     finally:
         conn.close()
     return send_file(EXPORT_XLSX_PATH, as_attachment=True, download_name="只見川.xlsx")
+
+
+@app.route("/download/xlsx/aizu")
+def download_xlsx_aizu():
+    """会津地方(2026-09追加)分の観測データ。只見川.xlsxと同じ列レイアウトだが、
+    地点名の列は会津の20地点だけになる(download_xlsx()の会津版)。"""
+    if not WEATHER_DB_PATH.exists():
+        abort(404)
+    conn = weather_store.connect(WEATHER_DB_PATH)
+    try:
+        weather_store.export_to_xlsx(
+            conn, AIZU_EXPORT_XLSX_PATH, CAMERAS_CSV, AIZU_TEMPLATE_XLSX, station_names=AIZU_STATION_NAMES,
+        )
+    finally:
+        conn.close()
+    return send_file(AIZU_EXPORT_XLSX_PATH, as_attachment=True, download_name="会津.xlsx")
 
 
 @app.route("/images")
@@ -2942,6 +2981,7 @@ def stations_list():
         current_by_name = {s["name"]: s for s in observations["stations"]}
     return render_template(
         "stations_list.html", station_names=STATION_NAMES, current_by_name=current_by_name,
+        station_region=STATION_REGION,
     )
 
 
@@ -2998,6 +3038,7 @@ def map_page():
         google_url = _google_maps_search_url(lat, lon) if lat is not None and lon is not None else None
         entries.append({
             "name": name,
+            "region": STATION_REGION.get(name),
             "current": current,
             "river_gov_url": _river_go_jp_map_url(cam_id) if cam_id else None,
             "google_url": google_url,
@@ -4704,6 +4745,7 @@ def member_detail(user_id):
         streak=streak,
         favorite_stations=favorite_stations,
         station_names=STATION_NAMES,
+        station_region=STATION_REGION,
         first_login=history[-1] if history else None,
         last_login=history[0] if history else None,
         has_avatar=has_avatar,

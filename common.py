@@ -27,6 +27,11 @@ WEATHER_DB_PATH = BASE_DIR / "data" / "weather.db"
 # 移行前の只見川.xlsx(DATA_XLSX)は移行時点のスナップショットとしてそのまま残し、
 # 以後はこちらだけを更新する。
 EXPORT_XLSX_PATH = BASE_DIR / "data" / "只見川_エクスポート.xlsx"
+# 会津地方(2026-09追加)向けのテンプレート・エクスポート出力先。只見川側と同じ仕組みを
+# 地域ごとに分けて用意する(header_template_aizu.xlsxは只見川用と気象列は同一で、
+# 地点名の列だけ会津の20地点に差し替えたもの)。
+AIZU_TEMPLATE_XLSX = BASE_DIR / "template" / "header_template_aizu.xlsx"
+AIZU_EXPORT_XLSX_PATH = BASE_DIR / "data" / "会津_エクスポート.xlsx"
 
 JST = timezone(timedelta(hours=9))
 
@@ -51,16 +56,20 @@ _JAPAN_LAT_RANGE = (20.0, 46.0)
 _JAPAN_LON_RANGE = (122.0, 154.0)
 
 
-def load_camera_coords(cameras_csv=CAMERAS_CSV):
+def load_camera_coords(cameras_csv=CAMERAS_CSV, region=None):
     """cameras.csvから {地点名: (緯度, 経度)} を読む。緯度・経度の列が無い/空の行はスキップする
     （2026-08-28にriver.go.jpの公開GeoJSONから実測値を追加した列。それより前のcameras.csvには無い）。
     日本国内の大まかな範囲から外れる値は、桁間違い等の異常値とみなし警告して除外する
     （representative_coordsの重心計算等が1地点の異常値で大きく狂うのを防ぐため）。
+    regionを指定すると、cameras.csvの「地域」列がそれと一致する行だけに絞り込む
+    （2026-09に会津地方を追加した際、地域ごとの代表座標を分けて計算できるようにするため）。
     """
     coords = {}
     with open(cameras_csv, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if region is not None and row.get("地域") != region:
+                continue
             lat, lon = row.get("緯度"), row.get("経度")
             if not (lat and lon):
                 continue
@@ -76,13 +85,27 @@ def load_camera_coords(cameras_csv=CAMERAS_CSV):
     return coords
 
 
-def representative_coords(cameras_csv=CAMERAS_CSV):
-    """全33地点の座標の重心を返す。cross_rates計算やプールド救済モデルが使う
+def load_camera_regions(cameras_csv=CAMERAS_CSV):
+    """cameras.csvから {地点名: 地域} を読む（「地域」列が無い古い形式のcameras.csvでは
+    全地点を"只見川"扱いにする。2026-09の会津地方追加より前のcameras.csvとの互換用）。
+    """
+    regions = {}
+    with open(cameras_csv, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            regions[row["地点名"]] = row.get("地域") or "只見川"
+    return regions
+
+
+def representative_coords(cameras_csv=CAMERAS_CSV, region="只見川"):
+    """指定地域(既定は只見川)の座標の重心を返す。cross_rates計算やプールド救済モデルが使う
     共有気象データ("代表地点"の気象)の取得地点として使う。
     2026-08-28以前はWEATHER_LAT/WEATHER_LON環境変数で固定の1地点(只見町役場)を
     指定していたが、全地点の実測座標が揃ったため、その重心に置き換えた。
+    2026-09に会津地方を追加した際、地域ごとに重心が大きく異なるため(会津側を含めて
+    平均すると只見川側の代表地点が実態から外れてしまう)、regionで対象地域を絞れるようにした。
     """
-    coords = load_camera_coords(cameras_csv)
+    coords = load_camera_coords(cameras_csv, region=region)
     if not coords:
         return 37.34861, 139.31583
     lats = [lat for lat, _ in coords.values()]

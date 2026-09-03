@@ -30,10 +30,16 @@ from fog_features import (
 )
 
 
-def load_station_names(cameras_csv=CAMERAS_CSV):
+def load_station_names(cameras_csv=CAMERAS_CSV, region=None):
+    """cameras.csvから地点名の一覧を返す。regionを指定すると「地域」列がそれと一致する
+    行だけに絞り込む(2026-09に会津地方を追加した際、只見川.xlsx/会津.xlsxの
+    エクスポート対象を分けるために追加)。指定しなければ全地域分をまとめて返す。"""
     with open(cameras_csv, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        return [row["地点名"] for row in reader]
+        return [
+            row["地点名"] for row in reader
+            if region is None or row.get("地域") == region
+        ]
 
 
 # webapp.py側のほぼ全ページがリクエストのたびにload_river_fog_data()を呼ぶため、

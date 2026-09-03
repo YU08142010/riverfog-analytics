@@ -16,7 +16,9 @@
     <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
     <ul class="tile-list" id="station-tiles">
         {% for name in station_names %}
-        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
+        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}
+            {% if station_region.get(name) %}<span class="region-badge">{{ station_region.get(name) }}</span>{% endif %}
+        </a></li>
         {% endfor %}
     </ul>
     <p class="muted" id="station-empty" hidden>該当する地点がありません。</p>
@@ -48,7 +50,7 @@
     <h2>地点を比較する</h2>
     <p class="muted">比較したい地点にチェックを入れて「比較する」を押してください。</p>
     <form action="{{ url_for('compare_stations') }}" method="get" id="compare-form">
-        {{ station_checkboxes(station_names, "station_cb") }}
+        {{ station_checkboxes(station_names, "station_cb", station_region=station_region) }}
         <input type="hidden" name="stations" id="compare-stations-field">
         <button type="submit" class="button" style="margin-top:1rem;">比較する</button>
     </form>

@@ -182,11 +182,14 @@ def import_from_xlsx(conn, xlsx_path, cameras_csv):
     return n_rows, len(station_names)
 
 
-def export_to_xlsx(conn, dest_path, cameras_csv, template_xlsx):
+def export_to_xlsx(conn, dest_path, cameras_csv, template_xlsx, station_names=None):
     """このSQLiteストアの全データを、只見川.xlsxと同じ列レイアウトのxlsxとして書き出す。
     QI(品質情報)・均質番号は元データに常に一定値(QUALITY_INFO_VALUE/HOMOGENEITY_NUMBER_VALUE)
     しか入っておらず、fog_data.py等のどの読み込み処理からも参照されていないため、
     ここでは「値があれば付与、無ければ空欄」という同じ規則で書き出し時に再現する。
+    station_namesを渡すと、cameras.csv全体ではなくその地点名だけを対象に書き出す
+    (2026-09の会津地方追加で只見川.xlsx/会津.xlsxを地域ごとに分けて出力するため。
+    渡す場合、対応するtemplate_xlsxもその地点名の並びに合わせたヘッダーである必要がある)。
     """
     import shutil
 
@@ -194,8 +197,9 @@ def export_to_xlsx(conn, dest_path, cameras_csv, template_xlsx):
 
     from common import COL_DATETIME, COL_PHENOM_START, set_weather_measures
 
-    with open(cameras_csv, encoding="utf-8", newline="") as f:
-        station_names = [row["地点名"] for row in csv.DictReader(f)]
+    if station_names is None:
+        with open(cameras_csv, encoding="utf-8", newline="") as f:
+            station_names = [row["地点名"] for row in csv.DictReader(f)]
 
     shutil.copy(template_xlsx, dest_path)
     wb = openpyxl.load_workbook(dest_path)

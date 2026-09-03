@@ -224,7 +224,7 @@
         <textarea name="bio" rows="3" style="width:100%; max-width:480px; margin-top:0.3rem; padding:0.5rem; font-family:inherit;">{{ member.bio }}</textarea>
         <p class="muted" style="font-size:0.85rem; margin-top:1rem; margin-bottom:0.3rem;">お気に入り地点</p>
         <div style="max-width:640px;">
-        {{ station_checkboxes(station_names, "favorite_stations", favorite_stations) }}
+        {{ station_checkboxes(station_names, "favorite_stations", favorite_stations, station_region=station_region) }}
         </div>
         <button type="submit" class="button" style="margin-top:1rem;">プロフィールを保存</button>
     </form>

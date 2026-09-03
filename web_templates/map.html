@@ -28,6 +28,7 @@
     <thead>
     <tr>
         <th>地点</th>
+        <th>地域</th>
         <th>現在の現象</th>
         <th>座標</th>
         <th>国交省の地図</th>
@@ -38,6 +39,7 @@
     {% for e in entries %}
     <tr>
         <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
+        <td>{{ e.region or "-" }}</td>
         <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
             {{ e.current.label if e.current else "-" }}
         </td>

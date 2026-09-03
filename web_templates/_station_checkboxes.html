@@ -3,12 +3,12 @@
    マークアップが個別にコピーされていた。
    checkbox_name: 各チェックボックスのname属性
    checked_names: 初期状態でチェックしておく地点名の集合/リスト(無ければ空でよい) #}
-{% macro station_checkboxes(station_names, checkbox_name, checked_names=[]) %}
+{% macro station_checkboxes(station_names, checkbox_name, checked_names=[], station_region={}) %}
 <div class="station-grid">
     {% for name in station_names %}
     <label class="station-chip station-chip-checkbox">
         <input type="checkbox" name="{{ checkbox_name }}" value="{{ name }}" {{ "checked" if name in checked_names }}>
-        <span>{{ name }}</span>
+        <span>{{ name }}{% if station_region.get(name) %}<span class="region-badge">{{ station_region.get(name) }}</span>{% endif %}</span>
     </label>
     {% endfor %}
 </div>
