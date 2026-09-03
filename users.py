@@ -197,6 +197,11 @@ CREATE TABLE IF NOT EXISTS dm_read_state (
     last_read_message_id INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conversation_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS dm_pinned_conversations (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, conversation_id)
+);
 CREATE TABLE IF NOT EXISTS dm_attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
@@ -1536,6 +1541,40 @@ def total_dm_unread(conn, user_id):
     return sum(dm_unread_counts(conn, user_id).values())
 
 
+def mark_dm_unread(conn, conversation_id, user_id):
+    """受信箱のクイック操作「未読にする」用。既読位置を0に戻す(会話全体が
+    未読扱いになる。1件だけを未読に戻す繊細な制御はせず、単純な状態に倒す)。"""
+    with conn:
+        conn.execute(
+            "INSERT INTO dm_read_state (conversation_id, user_id, last_read_message_id) VALUES (?, ?, 0) "
+            "ON CONFLICT(conversation_id, user_id) DO UPDATE SET last_read_message_id = 0",
+            (conversation_id, user_id),
+        )
+
+
+def toggle_pinned_conversation(conn, user_id, conversation_id):
+    """会話(受信箱の1行)のピン留めをトグルする。ピン留め後の状態(True/False)を返す。"""
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM dm_pinned_conversations WHERE user_id = ? AND conversation_id = ?",
+            (user_id, conversation_id),
+        )
+        if cur.rowcount > 0:
+            return False
+        conn.execute(
+            "INSERT INTO dm_pinned_conversations (user_id, conversation_id) VALUES (?, ?)",
+            (user_id, conversation_id),
+        )
+        return True
+
+
+def pinned_conversation_ids(conn, user_id):
+    rows = conn.execute(
+        "SELECT conversation_id FROM dm_pinned_conversations WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
 def add_dm_attachment(conn, message_id, filename, stored_name, content_type, size_bytes, uploaded_at):
     with conn:
         cur = conn.execute(
@@ -2024,7 +2063,9 @@ __all__ = [
     "resolve_daily_fog_quiz", "get_daily_fog_quiz_stats", "update_daily_fog_quiz_stats",
     "place_daily_phenom_quiz_answer", "get_daily_phenom_quiz", "get_point_event_amount",
     "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
-    "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
+    "list_dm_messages", "list_dm_conversations", "mark_dm_read", "mark_dm_unread",
+    "dm_unread_counts", "total_dm_unread",
+    "toggle_pinned_conversation", "pinned_conversation_ids",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
     "get_dm_message", "get_dm_message_attachment_stored_names", "delete_dm_message",
     "edit_dm_message", "pin_dm_message", "list_pinned_dm_messages", "search_dm_messages",

@@ -17,13 +17,20 @@
     {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
 ]) }}
 <div class="card">
-    <h2 style="margin-top:0;">メッセージ</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <h2 style="margin:0;">メッセージ</h2>
+        <div>
+            <button type="button" class="ranking-toggle-btn active" id="inbox-sort-default">通常</button>
+            <button type="button" class="ranking-toggle-btn" id="inbox-sort-unread">未読優先</button>
+            <button type="button" class="ranking-toggle-btn" id="inbox-sort-pinned">ピン留め優先</button>
+        </div>
+    </div>
     {% if not entries %}
     <div class="empty-state">{{ icon("empty") }}<span>他のメンバーがいません。</span></div>
     {% else %}
-    <ul class="dm-thread-list">
+    <ul class="dm-thread-list" id="dm-thread-list">
         {% for e in entries %}
-        <li>
+        <li data-unread="{{ e.unread }}" data-pinned="{{ '1' if e.pinned else '0' }}" data-order="{{ loop.index0 }}">
             <a class="dm-thread-item" href="{{ url_for('dm_thread', user_id=e.other.id) }}">
                 {% set avatar_url = member_avatar_url(e.other.id) %}
                 {% call avatar_frame(e.other.equipped_frame) %}
@@ -37,6 +44,7 @@
                     <div class="dm-thread-name" style="display:flex; align-items:center; gap:0.35rem;">
                         <span class="sidebar-dot" style="background: {{ '#2ecc71' if e.online else 'var(--color-border)' }};" title="{{ 'オンライン' if e.online else 'オフライン' }}"></span>
                         {{ e.other.name }}
+                        {% if e.pinned %}<span title="ピン留め済み">📌</span>{% endif %}
                     </div>
                     <div class="dm-thread-snippet">{{ e.last_message_at }}</div>
                 </div>
@@ -44,9 +52,81 @@
                 <span class="nav-unread-badge">{{ e.unread }}</span>
                 {% endif %}
             </a>
+            {% if e.conversation_id %}
+            <div class="dm-thread-quick-actions">
+                <button type="button" class="dm-quick-action-btn" data-quick-action="mark-unread" data-user-id="{{ e.other.id }}" title="未読にする">✉</button>
+                <button type="button" class="dm-quick-action-btn" data-quick-action="toggle-pin" data-user-id="{{ e.other.id }}" title="ピン留め切替">📌</button>
+            </div>
+            {% endif %}
         </li>
         {% endfor %}
     </ul>
     {% endif %}
 </div>
+<script>
+(function() {
+    var list = document.getElementById("dm-thread-list");
+    if (!list) { return; }
+    var items = Array.prototype.slice.call(list.children);
+    var btnDefault = document.getElementById("inbox-sort-default");
+    var btnUnread = document.getElementById("inbox-sort-unread");
+    var btnPinned = document.getElementById("inbox-sort-pinned");
+
+    function sortBy(mode) {
+        var sorted = items.slice();
+        if (mode === "unread") {
+            sorted.sort(function(a, b) { return parseInt(b.dataset.unread, 10) - parseInt(a.dataset.unread, 10); });
+        } else if (mode === "pinned") {
+            sorted.sort(function(a, b) { return parseInt(b.dataset.pinned, 10) - parseInt(a.dataset.pinned, 10); });
+        } else {
+            sorted.sort(function(a, b) { return parseInt(a.dataset.order, 10) - parseInt(b.dataset.order, 10); });
+        }
+        sorted.forEach(function(li) { list.appendChild(li); });
+        [btnDefault, btnUnread, btnPinned].forEach(function(b) { b.classList.remove("active"); });
+        (mode === "unread" ? btnUnread : mode === "pinned" ? btnPinned : btnDefault).classList.add("active");
+    }
+    btnDefault.addEventListener("click", function() { sortBy("default"); });
+    btnUnread.addEventListener("click", function() { sortBy("unread"); });
+    btnPinned.addEventListener("click", function() { sortBy("pinned"); });
+
+    document.querySelectorAll(".dm-quick-action-btn").forEach(function(btn) {
+        btn.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var userId = btn.dataset.userId;
+            var action = btn.dataset.quickAction;
+            var url = action === "mark-unread"
+                ? "/messages/" + userId + "/mark_unread"
+                : "/messages/" + userId + "/pin_conversation";
+            fetch(url, {
+                method: "POST",
+                headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.success) {
+                        showToast(data.message || "操作できませんでした。", true);
+                        return;
+                    }
+                    if (action === "mark-unread") {
+                        showToast("未読にしました。");
+                        var li = btn.closest("li");
+                        var badge = li.querySelector(".nav-unread-badge");
+                        if (!badge) {
+                            badge = document.createElement("span");
+                            badge.className = "nav-unread-badge";
+                            li.querySelector(".dm-thread-item").appendChild(badge);
+                        }
+                        badge.textContent = "1";
+                        li.dataset.unread = "1";
+                    } else {
+                        showToast(data.pinned ? "ピン留めしました。" : "ピン留めを解除しました。");
+                        setTimeout(function() { window.location.reload(); }, 500);
+                    }
+                })
+                .catch(function() { showToast("操作できませんでした。", true); });
+        });
+    });
+})();
+</script>
 {% endblock %}

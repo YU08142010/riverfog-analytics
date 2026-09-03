@@ -183,6 +183,20 @@ body {
 .dm-thread-info { flex: 1 1 auto; min-width: 0; }
 .dm-thread-name { font-weight: 600; }
 .dm-thread-snippet { font-size: 0.8rem; color: var(--color-text-muted); }
+/* 受信箱の各行: リンク本体+クイック操作ボタンを横並びにする(スワイプ操作の代替、
+   タッチ環境でも常に見えるボタンとして提供する)。 */
+.dm-thread-list > li { display: flex; align-items: center; gap: 0.3rem; }
+.dm-thread-list > li > .dm-thread-item { flex: 1 1 auto; }
+.dm-thread-quick-actions { display: flex; flex-direction: column; gap: 0.2rem; flex: 0 0 auto; }
+.dm-quick-action-btn {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0.15rem 0.35rem;
+}
+.dm-quick-action-btn:hover { background: var(--color-bg); }
 .dm-bubbles {
     display: flex;
     flex-direction: column;

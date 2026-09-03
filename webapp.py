@@ -5108,6 +5108,7 @@ def dm_inbox():
     try:
         conversations = users.list_dm_conversations(conn, my_id)
         unread = users.dm_unread_counts(conn, my_id)
+        pinned_ids = users.pinned_conversation_ids(conn, my_id)
         others = users.get_users_by_ids(conn, [c["other_id"] for c in conversations])
         all_users = users.list_users(conn)
         last_active = users.last_active_all(conn)
@@ -5116,8 +5117,10 @@ def dm_inbox():
     entries = [
         {
             "other": others.get(c["other_id"]),
+            "conversation_id": c["id"],
             "last_message_at": c["last_message_at"],
             "unread": unread.get(c["id"], 0),
+            "pinned": c["id"] in pinned_ids,
             "online": _is_online(last_active.get(c["other_id"])),
         }
         for c in conversations
@@ -5125,11 +5128,55 @@ def dm_inbox():
     ]
     started_ids = {c["other_id"] for c in conversations}
     entries += [
-        {"other": u, "last_message_at": "", "unread": 0, "online": _is_online(last_active.get(u["id"]))}
+        {
+            "other": u, "conversation_id": None, "last_message_at": "", "unread": 0, "pinned": False,
+            "online": _is_online(last_active.get(u["id"])),
+        }
         for u in all_users
         if u["id"] != my_id and u["id"] not in started_ids
     ]
     return render_template("dm_inbox.html", entries=entries)
+
+
+@app.route("/messages/<int:user_id>/mark_unread", methods=["POST"])
+def dm_mark_unread(user_id):
+    """受信箱のクイック操作「未読にする」。まだ会話が無い相手には無意味なので、
+    会話が存在する場合のみ処理する。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        a, b = sorted((my_id, user_id))
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        if row is not None:
+            users.mark_dm_unread(conn, row[0], my_id)
+    finally:
+        conn.close()
+    return jsonify({"success": True})
+
+
+@app.route("/messages/<int:user_id>/pin_conversation", methods=["POST"])
+def dm_pin_conversation(user_id):
+    """受信箱のクイック操作「ピン留め」。会話がまだ無い相手はピン留めできない
+    (ピン留めは会話単位の概念のため)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        a, b = sorted((my_id, user_id))
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        if row is None:
+            return jsonify({"success": False, "message": "まだ会話がありません。"}), 400
+        pinned = users.toggle_pinned_conversation(conn, my_id, row[0])
+    finally:
+        conn.close()
+    return jsonify({"success": True, "pinned": pinned})
 
 
 @app.route("/messages/<int:user_id>")
