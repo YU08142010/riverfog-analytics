@@ -12,7 +12,7 @@
 {% endblock %}
 {% block content %}
 <div class="card">
-    <div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem; flex-wrap:wrap;">
+    <div class="thread-header-row">
         {% set avatar_url = member_avatar_url(other.id) %}
         {% call avatar_frame(other.equipped_frame) %}
         {% if avatar_url %}
@@ -21,15 +21,15 @@
         <span class="avatar-circle-fallback">{{ other.name[0] }}</span>
         {% endif %}
         {% endcall %}
-        <h2 style="margin:0; display:flex; align-items:center; gap:0.5rem; flex:1;">
+        <h2 class="thread-header-title">
             <a href="{{ url_for('member_detail', user_id=other.id) }}">{{ other.name }}</a>
             <span id="dm-other-status" style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.72rem; font-weight:normal;" class="muted">
                 <span id="dm-other-status-dot" class="sidebar-dot" data-user-id="{{ other.id }}" style="background: {{ '#2ecc71' if other_online else 'var(--color-border)' }};"></span>
                 <span id="dm-other-status-label">{{ "オンライン" if other_online else "オフライン" }}</span>
             </span>
         </h2>
-        <div style="display:flex; align-items:center; gap:0.3rem;">
-            <input type="search" id="dm-search-input" placeholder="メッセージ内を検索" style="padding:0.3rem 0.5rem; font-size:0.82rem; width:9em;">
+        <div class="thread-search-wrap">
+            <input type="search" id="dm-search-input" placeholder="メッセージ内を検索">
             <div id="dm-search-results" class="context-menu" style="max-height:260px; overflow-y:auto; width:280px;" hidden></div>
         </div>
     </div>

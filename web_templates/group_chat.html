@@ -17,10 +17,10 @@
     {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
 ]) }}
 <div class="card">
-    <div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem; flex-wrap:wrap;">
-        <h2 style="margin:0; flex:1;">📢 グループチャット</h2>
-        <div style="display:flex; align-items:center; gap:0.3rem;">
-            <input type="search" id="group-search-input" placeholder="メッセージ内を検索" style="padding:0.3rem 0.5rem; font-size:0.82rem; width:9em;">
+    <div class="thread-header-row">
+        <h2 class="thread-header-title">📢 グループチャット</h2>
+        <div class="thread-search-wrap">
+            <input type="search" id="group-search-input" placeholder="メッセージ内を検索">
             <div id="group-search-results" class="context-menu" style="max-height:260px; overflow-y:auto; width:280px;" hidden></div>
         </div>
     </div>

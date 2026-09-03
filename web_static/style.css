@@ -91,6 +91,19 @@
 
 * { box-sizing: border-box; }
 
+/* フォーム要素はブラウザの既定でbodyのfont-familyを継承しないため、明示的に指定する。
+   font-sizeを16px未満のままにすると、iOS Safariでは入力欄タップ時にページが自動的に
+   拡大表示されてしまい(ズームしたまま戻し忘れる・入力しづらい、という苦情の主因)、
+   個別に小さいfont-sizeを指定している箇所は下の@media(max-width:640px)で16pxまで
+   引き上げる(PC表示での見た目はそのまま、モバイルでのズーム誘発だけを防ぐ)。 */
+input, textarea, select, button {
+    font-family: inherit;
+}
+input[type="text"], input[type="email"], input[type="password"], input[type="search"],
+input[type="number"], input[type="date"], input[type="tel"], input[type="url"], textarea, select {
+    font-size: 16px;
+}
+
 body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
@@ -269,6 +282,26 @@ body {
     border: 1px solid var(--color-border);
     font-family: inherit;
     font-size: 0.9rem;
+}
+/* 添付ボタン(ファイル添付アイコンのlabel)・送信ボタンは、テキスト入力欄が伸びる際に
+   一緒に縮んでタップしづらくなることがあったため、縮まないようにする。 */
+.dm-compose label, .dm-compose button[type="submit"] { flex-shrink: 0; }
+
+/* DM/グループチャットのスレッドヘッダー(アバター・名前・検索欄)。以前はdm_thread.html・
+   group_chat.htmlにほぼ同じインラインstyleが重複していた。検索欄はwidthを固定していたため、
+   狭い画面だと折り返さずに縮んで読めなくなる不具合があった(タイトル側にmin-widthを設けて
+   検索欄側を確実に折り返させ、折り返した先では検索欄いっぱいに広げる)。 */
+.thread-header-row { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.thread-header-title { margin: 0; display: flex; align-items: center; gap: 0.5rem; flex: 1 1 auto; min-width: 9em; }
+.thread-search-wrap { display: flex; align-items: center; gap: 0.3rem; flex: 0 1 auto; }
+.thread-search-wrap input[type="search"] { padding: 0.3rem 0.5rem; font-size: 0.82rem; width: 9em; }
+@media (max-width: 560px) {
+    /* min-widthだけでは、他の要素と合計してもたまたま1行に収まってしまう画面幅では
+       折り返しが発生しない(検索欄が縮んだまま表示される)。560px以下では
+       flex-basis:100%で必ず単独行にする(header navの折り返し不具合修正と同じ考え方)。 */
+    .thread-header-title { flex: 1 1 100%; min-width: 0; }
+    .thread-search-wrap { flex: 1 1 100%; }
+    .thread-search-wrap input[type="search"] { width: 100%; }
 }
 .notif-panel {
     position: absolute;
@@ -495,12 +528,18 @@ header nav a .icon { vertical-align: -3px; margin-right: 0.3rem; }
     header nav {
         display: none;
         flex-direction: column;
+        /* 幅広画面用のflex:1 1 0(flex-basis:0)がここでも生きたままだと、折り返し判定は
+           このflex-basis基準で行われるため、ヘッダー1行目の残り僅かな余白に収まる扱いに
+           なってしまい、幅がほぼ0pxに縮んだ上でリンクの文字だけが右にはみ出す不具合になる。
+           flex-basisを100%にして、必ず単独の行として折り返させ、幅も確実に確保する。 */
+        flex: 1 1 100%;
+        min-width: 100%;
         width: 100%;
         order: 3;
         overflow-x: visible;
     }
     header nav.open { display: flex; }
-    header .theme-toggle, header .header-user, header .notif-bell-wrap { order: 4; }
+    header .theme-toggle, header .header-user, header .notif-bell-wrap { order: 4; flex: 0 0 auto; }
 }
 
 main {
@@ -645,7 +684,7 @@ main {
 
 .muted { color: var(--color-text-muted); font-size: 0.9rem; }
 
-a.button, button.button {
+a.button, button.button, label.button {
     display: inline-block;
     background: var(--color-primary);
     color: #fff;
@@ -660,8 +699,8 @@ a.button, button.button {
     transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
     box-shadow: 0 1px 2px rgba(16, 42, 67, 0.15);
 }
-a.button:hover, button.button:hover { background: var(--color-primary-dark); box-shadow: 0 2px 6px rgba(16, 42, 67, 0.22); }
-a.button:active, button.button:active { transform: scale(0.97); }
+a.button:hover, button.button:hover, label.button:hover { background: var(--color-primary-dark); box-shadow: 0 2px 6px rgba(16, 42, 67, 0.22); }
+a.button:active, button.button:active, label.button:active { transform: scale(0.97); }
 
 /* 削除・拒否・再起動など取り消しにくい/影響の大きい操作用の共通ボタン色。
    以前はページごとにstyle="background:#c0392b;"等を直書きしていて、ダークモード用の
@@ -2103,4 +2142,15 @@ table.obs-table th.sticky-col { z-index: 3; }
 .files-table .file-icon { margin-right: 0.4rem; }
 .files-table .file-name-link { font-weight: 500; text-decoration: none; }
 .files-table .file-name-link:hover { text-decoration: underline; }
+
+/* モバイルでのタップ時ズーム防止用のfont-size:16px引き上げ(冒頭のグローバルルール参照)。
+   同じ詳細度の場合、後方のルールが勝つ(メディアクエリの内外は関係ない)ため、
+   16px未満を個別指定している各コンポーネントのルールより後ろに置く必要がある。 */
+@media (max-width: 640px) {
+    .thread-search-wrap input[type="search"],
+    .dm-compose textarea,
+    .chat-form textarea {
+        font-size: 16px;
+    }
+}
 
