@@ -25,8 +25,9 @@
     {% if share_targets %}
     <form method="post" action="{{ url_for('station_share', name=name) }}" style="margin-top:0.8rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label class="muted" style="font-size:0.85rem;">メンバーに共有:</label>
+        <label class="muted" style="font-size:0.85rem;">共有先:</label>
         <select name="user_id">
+            <option value="group">📢 グループチャット</option>
             {% for u in share_targets %}
             <option value="{{ u.id }}">{{ u.name }}</option>
             {% endfor %}

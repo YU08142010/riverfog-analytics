@@ -1,0 +1,17 @@
+{% macro station_card(card) %}
+<div class="station-card"{% if card.color %} style="border-left-color: {{ card.color }};"{% endif %}>
+    <div class="station-card-title">{{ card.station }}</div>
+    {% if card.label %}
+    <span class="station-card-badge" style="background: {{ card.color }}; color: {{ card.text_color }};">{{ card.label }}</span>
+    {% endif %}
+    {% if card.thumbnail_url %}
+    <img class="station-card-thumb" src="{{ card.thumbnail_url }}" alt="{{ card.station }}のカメラ画像">
+    {% endif %}
+    {% if card.datetime %}
+    <div class="muted" style="font-size:0.72rem;">{{ card.datetime }} 時点</div>
+    {% endif %}
+    {% if card.url %}
+    <a href="{{ card.url }}">地点ページを見る</a>
+    {% endif %}
+</div>
+{% endmacro %}

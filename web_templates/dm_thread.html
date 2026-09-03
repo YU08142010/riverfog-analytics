@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_avatar.html" import avatar_frame %}
 {% from "_icons.html" import icon %}
+{% from "_message_card.html" import station_card %}
 {% block title %}{{ other.name }}とのメッセージ{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -11,7 +12,7 @@
 {% endblock %}
 {% block content %}
 <div class="card">
-    <div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem;">
+    <div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(other.id) %}
         {% call avatar_frame(other.equipped_frame) %}
         {% if avatar_url %}
@@ -20,27 +21,77 @@
         <span class="avatar-circle-fallback">{{ other.name[0] }}</span>
         {% endif %}
         {% endcall %}
-        <h2 style="margin:0; display:flex; align-items:center; gap:0.5rem;">
+        <h2 style="margin:0; display:flex; align-items:center; gap:0.5rem; flex:1;">
             <a href="{{ url_for('member_detail', user_id=other.id) }}">{{ other.name }}</a>
             <span id="dm-other-status" style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.72rem; font-weight:normal;" class="muted">
                 <span id="dm-other-status-dot" class="sidebar-dot" style="background: {{ '#2ecc71' if other_online else 'var(--color-border)' }};"></span>
                 <span id="dm-other-status-label">{{ "オンライン" if other_online else "オフライン" }}</span>
             </span>
         </h2>
+        <div style="display:flex; align-items:center; gap:0.3rem;">
+            <input type="search" id="dm-search-input" placeholder="メッセージ内を検索" style="padding:0.3rem 0.5rem; font-size:0.82rem; width:9em;">
+            <div id="dm-search-results" class="context-menu" style="max-height:260px; overflow-y:auto; width:280px;" hidden></div>
+        </div>
     </div>
+
+    {% if pinned %}
+    <div class="pinned-bar" id="dm-pinned-bar">
+        <button type="button" class="pinned-bar-toggle" id="dm-pinned-toggle">📌 ピン留め({{ pinned|length }})</button>
+        <div class="pinned-bar-list" id="dm-pinned-list" hidden>
+            {% for p in pinned %}
+            <div class="pinned-bar-item" data-jump-to="{{ p.id }}">
+                <strong>{{ p.sender_name }}</strong>: {{ p.body[:80] }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 
     <div class="dm-bubbles" id="dm-bubbles">
         {% for m in messages -%}
-        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}" id="dm-bubble-row-{{ m.id }}"{% if m.sender_id == my_id %} data-context-menu="dm-message-context-menu" data-context-target-id="{{ m.id }}"{% endif %}><div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else other_dm_theme_class }}">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
-            {%- for a in m.attachments -%}
-            <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">{{ icon("attach", size=13) }} {{ a.filename }}</a></div>
-            {%- endfor -%}
-            <span class="dm-bubble-time">{{ m.created_at }}</span></div></div>
+        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}" id="dm-bubble-row-{{ m.id }}"
+             data-message-id="{{ m.id }}" data-pinned="{{ '1' if m.pinned else '0' }}" data-body="{{ m.body }}"
+             data-sender-name="{{ m.sender_name }}" data-mine="{{ '1' if m.sender_id == my_id else '0' }}"
+             data-context-menu="dm-message-context-menu" data-context-target-id="{{ m.id }}">
+            <div class="dm-bubble-wrap">
+                {% if m.reply_preview %}
+                <div class="reply-preview" data-jump-to="{{ m.reply_preview.id }}">
+                    <strong>{{ m.reply_preview.sender_name }}</strong>: {{ m.reply_preview.snippet }}
+                </div>
+                {% endif %}
+                <div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else other_dm_theme_class }}">
+                    {% if m.card %}
+                    {{ station_card(m.card) }}
+                    {% elif m.body %}
+                    <span class="dm-bubble-text" data-raw-body="{{ m.body }}">{{ m.body|richbody(m.mentioned_names) }}</span>
+                    {% endif %}
+                    {%- for a in m.attachments -%}
+                    <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">{{ icon("attach", size=13) }} {{ a.filename }}</a></div>
+                    {%- endfor -%}
+                    <span class="dm-bubble-time">{{ m.created_at }}{% if m.edited_at %} <span class="muted">(編集済み)</span>{% endif %}</span>
+                    {% if m.sender_id == my_id %}
+                    <span class="dm-read-receipt" data-message-id="{{ m.id }}">{{ "既読" if other_read >= m.id else "" }}</span>
+                    {% endif %}
+                </div>
+                <div class="reaction-row" data-message-id="{{ m.id }}">
+                    {% for r in m.reactions %}
+                    <button type="button" class="reaction-pill {{ 'mine' if r.mine }}" data-emoji="{{ r.emoji }}">{{ r.emoji }} {{ r.count }}</button>
+                    {% endfor %}
+                    <button type="button" class="reaction-add-btn" title="リアクション">🙂</button>
+                </div>
+            </div>
+        </div>
         {%- endfor %}
     </div>
+    <p class="muted" id="dm-typing-indicator" style="font-size:0.78rem; min-height:1.2em;"></p>
 
+    <div id="dm-reply-banner" class="reply-banner" hidden>
+        <span class="muted">返信先: <strong id="dm-reply-name"></strong> <span id="dm-reply-snippet"></span></span>
+        <button type="button" id="dm-reply-cancel">&times;</button>
+    </div>
     <form id="dm-send-form" class="dm-compose" action="{{ url_for('dm_send', user_id=other.id) }}" method="post" enctype="multipart/form-data" data-ajax>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="reply_to_id" id="dm-reply-to-id" value="">
         <textarea name="body" id="dm-send-body" rows="1" maxlength="{{ dm_message_max_length }}" placeholder="メッセージを入力..."></textarea>
         <label class="button cancel" style="cursor:pointer; display:inline-flex; align-items:center;" title="ファイルを添付">
             {{ icon("attach", size=16) }}<input type="file" name="attachment" id="dm-send-file" style="display:none;">
@@ -51,22 +102,42 @@
 </div>
 
 <div id="dm-message-context-menu" class="context-menu" hidden>
+    <button type="button" data-context-action="reply-message">↩ 返信</button>
+    <button type="button" data-context-action="pin-message">📌 ピン留め/解除</button>
+    <button type="button" data-context-action="edit-message">✏ 編集</button>
     <button type="button" data-context-action="delete-message">削除</button>
+</div>
+<div id="dm-reaction-picker" class="context-menu" hidden>
+    {% for emoji in reaction_emojis %}
+    <button type="button" data-emoji-pick="{{ emoji }}">{{ emoji }}</button>
+    {% endfor %}
 </div>
 
 <script>
 (function() {
     var myDmThemeClass = {{ my_dm_theme_class|tojson }};
+    var otherDmThemeClass = {{ other_dm_theme_class|tojson }};
+    var reactionEmojis = {{ reaction_emojis|tojson }};
     var bubbles = document.getElementById("dm-bubbles");
     var form = document.getElementById("dm-send-form");
     var textarea = document.getElementById("dm-send-body");
     var fileInput = document.getElementById("dm-send-file");
     var fileNameLabel = document.getElementById("dm-file-name");
     var pollUrl = "{{ url_for('dm_poll', user_id=other.id) }}";
-    var deleteUrlBase = "/messages/{{ other.id }}/";
+    var typingUrl = "{{ url_for('dm_typing', user_id=other.id) }}";
+    var searchUrl = "{{ url_for('dm_search', user_id=other.id) }}";
+    var urlBase = "/messages/{{ other.id }}/";
     var lastId = {{ (messages[-1].id if messages else 0) }};
+    var otherRead = {{ other_read }};
     var statusDot = document.getElementById("dm-other-status-dot");
     var statusLabel = document.getElementById("dm-other-status-label");
+    var replyBanner = document.getElementById("dm-reply-banner");
+    var replyName = document.getElementById("dm-reply-name");
+    var replySnippet = document.getElementById("dm-reply-snippet");
+    var replyToIdInput = document.getElementById("dm-reply-to-id");
+    var typingIndicator = document.getElementById("dm-typing-indicator");
+    var reactionPicker = document.getElementById("dm-reaction-picker");
+    var reactionPickerTarget = null;
 
     function updateOnlineStatus(online) {
         statusDot.style.background = online ? "#2ecc71" : "var(--color-border)";
@@ -87,100 +158,418 @@
     }
     scrollToBottom();
 
-    function appendBubble(id, body, createdAt, mine, attachment) {
+    function renderReactions(container, reactions) {
+        container.querySelectorAll(".reaction-pill").forEach(function(el) { el.remove(); });
+        var addBtn = container.querySelector(".reaction-add-btn");
+        (reactions || []).forEach(function(r) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "reaction-pill" + (r.mine ? " mine" : "");
+            btn.dataset.emoji = r.emoji;
+            btn.textContent = r.emoji + " " + r.count;
+            container.insertBefore(btn, addBtn);
+        });
+    }
+
+    function renderCard(card) {
+        var wrap = document.createElement("div");
+        wrap.className = "station-card";
+        if (card.color) { wrap.style.borderLeftColor = card.color; }
+        var title = document.createElement("div");
+        title.className = "station-card-title";
+        title.textContent = card.station || "";
+        wrap.appendChild(title);
+        if (card.label) {
+            var badge = document.createElement("span");
+            badge.className = "station-card-badge";
+            badge.style.background = card.color || "";
+            badge.style.color = card.text_color || "";
+            badge.textContent = card.label;
+            wrap.appendChild(badge);
+        }
+        if (card.thumbnail_url) {
+            var img = document.createElement("img");
+            img.className = "station-card-thumb";
+            img.src = card.thumbnail_url;
+            wrap.appendChild(img);
+        }
+        if (card.datetime) {
+            var dt = document.createElement("div");
+            dt.className = "muted";
+            dt.style.fontSize = "0.72rem";
+            dt.textContent = card.datetime + " 時点";
+            wrap.appendChild(dt);
+        }
+        if (card.url) {
+            var a = document.createElement("a");
+            a.href = card.url;
+            a.textContent = "地点ページを見る";
+            wrap.appendChild(a);
+        }
+        return wrap;
+    }
+
+    function appendBubble(m, mine) {
         var row = document.createElement("div");
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
-        if (id) {
-            row.id = "dm-bubble-row-" + id;
-            if (mine) {
-                row.dataset.contextMenu = "dm-message-context-menu";
-                row.dataset.contextTargetId = id;
-            }
+        row.dataset.messageId = m.id;
+        row.dataset.pinned = "0";
+        row.dataset.body = m.body || "";
+        row.dataset.senderName = mine ? {{ session.get("name", "")|tojson }} : {{ other.name|tojson }};
+        row.dataset.mine = mine ? "1" : "0";
+        if (m.id) {
+            row.id = "dm-bubble-row-" + m.id;
+            row.dataset.contextMenu = "dm-message-context-menu";
+            row.dataset.contextTargetId = m.id;
         }
+        var wrap = document.createElement("div");
+        wrap.className = "dm-bubble-wrap";
         var bubble = document.createElement("div");
-        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : "");
-        if (body) {
+        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : (!mine && otherDmThemeClass ? " " + otherDmThemeClass : ""));
+        if (m.card) {
+            bubble.appendChild(renderCard(m.card));
+        } else if (m.body) {
             var textSpan = document.createElement("span");
             textSpan.className = "dm-bubble-text";
-            textSpan.textContent = body;
+            textSpan.dataset.rawBody = m.body;
+            textSpan.textContent = m.body;
             bubble.appendChild(textSpan);
         }
-        if (attachment) {
+        if (m.attachment) {
             var div = document.createElement("div");
             div.className = "dm-attachment";
             var a = document.createElement("a");
-            a.href = "/messages/attachments/" + attachment.id;
-            a.textContent = "添付: " + attachment.filename;
+            a.href = "/messages/attachments/" + m.attachment.id;
+            a.textContent = "添付: " + m.attachment.filename;
             div.appendChild(a);
             bubble.appendChild(div);
         }
         var time = document.createElement("span");
         time.className = "dm-bubble-time";
-        time.textContent = createdAt;
+        time.textContent = m.created_at;
         bubble.appendChild(time);
-        row.appendChild(bubble);
+        if (mine) {
+            var receipt = document.createElement("span");
+            receipt.className = "dm-read-receipt";
+            receipt.dataset.messageId = m.id;
+            bubble.appendChild(receipt);
+        }
+        wrap.appendChild(bubble);
+        var reactionRow = document.createElement("div");
+        reactionRow.className = "reaction-row";
+        reactionRow.dataset.messageId = m.id;
+        var addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "reaction-add-btn";
+        addBtn.title = "リアクション";
+        addBtn.textContent = "🙂";
+        reactionRow.appendChild(addBtn);
+        renderReactions(reactionRow, m.reactions);
+        wrap.appendChild(reactionRow);
+        row.appendChild(wrap);
         bubbles.appendChild(row);
         scrollToBottom();
+    }
+
+    function clearReply() {
+        replyToIdInput.value = "";
+        replyBanner.hidden = true;
     }
 
     document.addEventListener("ajaxformsuccess", function(e) {
         if (e.detail.form !== form) { return; }
         var data = e.detail.data || {};
         if (data.id) {
-            appendBubble(data.id, data.body || "", data.created_at || "", true, data.attachment);
+            appendBubble(data, true);
             lastId = data.id;
         }
         textarea.value = "";
         fileInput.value = "";
         fileNameLabel.hidden = true;
+        clearReply();
     });
 
     // このアプリには汎用のリアルタイム配信基盤が無いため、スレッドを開いている間
-    // だけ数秒おきにポーリングして相手からの新着を拾う(タブが非表示の間は止める)。
+    // だけ数秒おきにポーリングして相手からの新着・入力中・既読状況を拾う。
     var pollTimer = setInterval(function() {
         if (document.visibilityState !== "visible") { return; }
         fetch(pollUrl + "?after=" + lastId, {headers: {"X-Requested-With": "XMLHttpRequest"}})
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 (data.messages || []).forEach(function(m) {
-                    var att = (m.attachments && m.attachments[0]) || null;
-                    appendBubble(m.id, m.body, m.created_at, false, att);
+                    m.attachment = (m.attachments && m.attachments[0]) || null;
+                    appendBubble(m, false);
                     lastId = m.id;
                 });
                 if (typeof data.other_online === "boolean") {
                     updateOnlineStatus(data.other_online);
+                }
+                if (typeof data.other_read === "number" && data.other_read !== otherRead) {
+                    otherRead = data.other_read;
+                    document.querySelectorAll(".dm-read-receipt").forEach(function(el) {
+                        var mid = parseInt(el.dataset.messageId, 10);
+                        el.textContent = mid <= otherRead ? "既読" : "";
+                    });
+                }
+                if (Array.isArray(data.typing_names)) {
+                    typingIndicator.textContent = data.typing_names.length
+                        ? data.typing_names.join("、") + "さんが入力中..." : "";
                 }
             })
             .catch(function() {});
     }, 4000);
     window.addEventListener("beforeunload", function() { clearInterval(pollTimer); });
 
-    // 右クリックメニュー(base.htmlの汎用フレームワーク)からの「削除」。
-    // 自分が送信したメッセージにしかメニュー自体を出していないので、ここでは
-    // サーバー側にPOSTして成功したら該当の吹き出しをDOMから消すだけでよい。
+    // 入力中表示: keyupのたびに送るとサーバー負荷が無駄なので、2秒に1回までに間引く。
+    var lastTypingPing = 0;
+    textarea.addEventListener("keyup", function() {
+        var now = Date.now();
+        if (now - lastTypingPing < 2000) { return; }
+        lastTypingPing = now;
+        fetch(typingUrl, {
+            method: "POST",
+            headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+        }).catch(function() {});
+    });
+
+    function jumpTo(messageId) {
+        var row = document.getElementById("dm-bubble-row-" + messageId);
+        if (!row) { return; }
+        row.scrollIntoView({behavior: "smooth", block: "center"});
+        row.classList.add("jump-highlight");
+        setTimeout(function() { row.classList.remove("jump-highlight"); }, 1500);
+    }
+
+    document.querySelectorAll("[data-jump-to]").forEach(function(el) {
+        el.addEventListener("click", function() { jumpTo(el.dataset.jumpTo); });
+    });
+
+    var pinnedToggle = document.getElementById("dm-pinned-toggle");
+    if (pinnedToggle) {
+        pinnedToggle.addEventListener("click", function() {
+            var list = document.getElementById("dm-pinned-list");
+            list.hidden = !list.hidden;
+        });
+    }
+
+    // 編集・削除は自分のメッセージにしか意味が無いため、右クリックメニューを開く瞬間に
+    // 対象行が自分のものかどうかでボタンの表示/非表示を切り替える
+    // (base.htmlの汎用フレームワークはメニュー内容を対象ごとに変えないため、ここで補う)。
+    var dmContextMenu = document.getElementById("dm-message-context-menu");
+    var editBtn = dmContextMenu.querySelector('[data-context-action="edit-message"]');
+    var deleteBtn = dmContextMenu.querySelector('[data-context-action="delete-message"]');
+    document.addEventListener("contextmenu", function(e) {
+        var host = e.target.closest('[data-context-menu="dm-message-context-menu"]');
+        if (!host) { return; }
+        var mine = host.dataset.mine === "1";
+        editBtn.hidden = !mine;
+        deleteBtn.hidden = !mine;
+    }, true);
+
+    // 右クリックメニュー(base.htmlの汎用フレームワーク)からの各種操作。
     document.addEventListener("contextmenuaction", function(e) {
-        if (e.detail.action !== "delete-message") { return; }
         var messageId = e.detail.targetId;
-        confirmModal("このメッセージを削除しますか？").then(function(ok) {
-            if (!ok) { return; }
-            fetch(deleteUrlBase + messageId + "/delete", {
+        var row = document.getElementById("dm-bubble-row-" + messageId);
+        if (!row) { return; }
+        var action = e.detail.action;
+
+        if (action === "reply-message") {
+            replyToIdInput.value = messageId;
+            replyName.textContent = row.dataset.senderName;
+            var body = row.dataset.body || "";
+            replySnippet.textContent = body.slice(0, 60) + (body.length > 60 ? "…" : "");
+            replyBanner.hidden = false;
+            textarea.focus();
+            return;
+        }
+        if (action === "pin-message") {
+            var newPinned = row.dataset.pinned !== "1";
+            fetch(urlBase + messageId + "/pin", {
                 method: "POST",
-                headers: {
-                    "X-Requested-With": "XMLHttpRequest",
-                    "X-CSRF-Token": "{{ csrf_token() }}",
-                },
+                headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+                body: new URLSearchParams({pinned: newPinned ? "1" : "0"}),
             })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.success) {
-                        var row = document.getElementById("dm-bubble-row-" + messageId);
-                        if (row) { row.remove(); }
+                        row.dataset.pinned = newPinned ? "1" : "0";
+                        showToast(newPinned ? "ピン留めしました。" : "ピン留めを解除しました。");
                     } else {
-                        showToast(data.message || "削除できませんでした。", true);
+                        showToast(data.message || "操作できませんでした。", true);
                     }
                 })
-                .catch(function() { showToast("削除できませんでした。", true); });
+                .catch(function() { showToast("操作できませんでした。", true); });
+            return;
+        }
+        if (action === "edit-message") {
+            var bubble = row.querySelector(".dm-bubble");
+            var textSpan = bubble.querySelector(".dm-bubble-text");
+            if (!textSpan) { showToast("このメッセージは編集できません。", true); return; }
+            var currentBody = textSpan.dataset.rawBody || textSpan.textContent;
+            var editArea = document.createElement("textarea");
+            editArea.className = "dm-edit-textarea";
+            editArea.value = currentBody;
+            var saveBtn = document.createElement("button");
+            saveBtn.type = "button";
+            saveBtn.className = "button";
+            saveBtn.textContent = "保存";
+            var cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = "button cancel";
+            cancelBtn.textContent = "キャンセル";
+            var actions = document.createElement("div");
+            actions.style.marginTop = "0.3rem";
+            actions.appendChild(saveBtn);
+            actions.appendChild(cancelBtn);
+            textSpan.replaceWith(editArea);
+            bubble.insertBefore(actions, editArea.nextSibling);
+            editArea.focus();
+            cancelBtn.addEventListener("click", function() {
+                editArea.replaceWith(textSpan);
+                actions.remove();
+            });
+            saveBtn.addEventListener("click", function() {
+                var newBody = editArea.value.trim();
+                if (!newBody) { return; }
+                fetch(urlBase + messageId + "/edit", {
+                    method: "POST",
+                    headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+                    body: new URLSearchParams({body: newBody}),
+                })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            textSpan.textContent = data.body;
+                            textSpan.dataset.rawBody = data.body;
+                            editArea.replaceWith(textSpan);
+                            actions.remove();
+                            row.dataset.body = data.body;
+                            if (!bubble.querySelector(".dm-bubble-time .muted")) {
+                                var timeEl = bubble.querySelector(".dm-bubble-time");
+                                var note = document.createElement("span");
+                                note.className = "muted";
+                                note.textContent = " (編集済み)";
+                                timeEl.appendChild(note);
+                            }
+                        } else {
+                            showToast(data.message || "編集できませんでした。", true);
+                        }
+                    })
+                    .catch(function() { showToast("編集できませんでした。", true); });
+            });
+            return;
+        }
+        if (action === "delete-message") {
+            confirmModal("このメッセージを削除しますか？").then(function(ok) {
+                if (!ok) { return; }
+                fetch(urlBase + messageId + "/delete", {
+                    method: "POST",
+                    headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+                })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            row.remove();
+                        } else {
+                            showToast(data.message || "削除できませんでした。", true);
+                        }
+                    })
+                    .catch(function() { showToast("削除できませんでした。", true); });
+            });
+            return;
+        }
+    });
+
+    // リアクション: 🙂ボタンでピッカーを開閉し、選んだ絵文字をトグル送信する。
+    document.addEventListener("click", function(e) {
+        var addBtn = e.target.closest(".reaction-add-btn");
+        if (addBtn) {
+            reactionPickerTarget = addBtn.closest(".reaction-row").dataset.messageId;
+            var rect = addBtn.getBoundingClientRect();
+            reactionPicker.style.left = (rect.left + window.scrollX) + "px";
+            reactionPicker.style.top = (rect.bottom + window.scrollY) + "px";
+            reactionPicker.hidden = false;
+            return;
+        }
+        var pill = e.target.closest(".reaction-pill");
+        if (pill) {
+            var mid = pill.closest(".reaction-row").dataset.messageId;
+            postReaction(mid, pill.dataset.emoji);
+            return;
+        }
+        if (!e.target.closest("#dm-reaction-picker")) {
+            reactionPicker.hidden = true;
+        }
+    });
+    reactionPicker.querySelectorAll("[data-emoji-pick]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            if (reactionPickerTarget) { postReaction(reactionPickerTarget, btn.dataset.emojiPick); }
+            reactionPicker.hidden = true;
         });
+    });
+
+    function postReaction(messageId, emoji) {
+        fetch(urlBase + messageId + "/react", {
+            method: "POST",
+            headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+            body: new URLSearchParams({emoji: emoji}),
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var row = document.querySelector('.reaction-row[data-message-id="' + messageId + '"]');
+                    if (row) { renderReactions(row, data.reactions); }
+                } else {
+                    showToast(data.message || "反応できませんでした。", true);
+                }
+            })
+            .catch(function() { showToast("反応できませんでした。", true); });
+    }
+
+    document.getElementById("dm-reply-cancel").addEventListener("click", clearReply);
+
+    // メッセージ内検索
+    var searchInput = document.getElementById("dm-search-input");
+    var searchResults = document.getElementById("dm-search-results");
+    var searchTimer = null;
+    searchInput.addEventListener("input", function() {
+        clearTimeout(searchTimer);
+        var q = searchInput.value.trim();
+        if (!q) { searchResults.hidden = true; return; }
+        searchTimer = setTimeout(function() {
+            fetch(searchUrl + "?q=" + encodeURIComponent(q), {headers: {"X-Requested-With": "XMLHttpRequest"}})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    searchResults.innerHTML = "";
+                    (data.results || []).forEach(function(m) {
+                        var btn = document.createElement("button");
+                        btn.type = "button";
+                        btn.style.display = "block";
+                        btn.style.width = "100%";
+                        btn.style.textAlign = "left";
+                        btn.textContent = m.created_at + ": " + m.body.slice(0, 60);
+                        btn.addEventListener("click", function() {
+                            searchResults.hidden = true;
+                            jumpTo(m.id);
+                        });
+                        searchResults.appendChild(btn);
+                    });
+                    if (!(data.results || []).length) {
+                        var none = document.createElement("div");
+                        none.className = "muted";
+                        none.style.padding = "0.4rem";
+                        none.textContent = "見つかりませんでした。";
+                        searchResults.appendChild(none);
+                    }
+                    searchResults.hidden = false;
+                })
+                .catch(function() {});
+        }, 300);
+    });
+    document.addEventListener("click", function(e) {
+        if (!e.target.closest("#dm-search-results") && e.target !== searchInput) {
+            searchResults.hidden = true;
+        }
     });
 })();
 </script>

@@ -34,7 +34,7 @@
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith('/observations') or request.path.startswith('/images') or request.path.startswith('/predictions') else '' }}">{{ icon("data") }}観測アーカイブ</a>
         <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') or request.path.startswith('/river-fog-histogram') or request.path.startswith('/accuracy') else '' }}">{{ icon("report") }}分析</a>
         {% if session.get('user_id') %}
-        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') else '' }}">{{ icon("members") }}コミュニティ{% if dm_unread_count() %}<span class="nav-unread-badge">{{ dm_unread_count() }}</span>{% endif %}</a>
+        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') or request.path.startswith('/group') else '' }}">{{ icon("members") }}コミュニティ{% set community_unread = dm_unread_count() + group_unread_count() %}{% if community_unread %}<span class="nav-unread-badge">{{ community_unread }}</span>{% endif %}</a>
         <a href="{{ url_for('game_home') }}" class="{{ 'active' if request.path.startswith('/game') else '' }}">{{ icon("game") }}ゲーム</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
         {% endif %}

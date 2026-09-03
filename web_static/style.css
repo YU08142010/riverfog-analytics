@@ -1725,3 +1725,151 @@ table.obs-table th.sticky-col { z-index: 3; }
     background: #d9f7ee; color: #0d4a37; border-color: #7fd9bc;
 }
 
+/* --- メッセージ機能拡張(グループチャット・DM共通): 返信/リアクション/ピン留め/
+   メンション/既読/地点共有カード。var(--color-*)トークンを使い、ダークモードでは
+   :root側の変数切り替えだけで自動的にコントラストが保たれるようにしている。 */
+.dm-bubble-wrap { display: flex; flex-direction: column; max-width: 70%; }
+.dm-bubble-row.mine .dm-bubble-wrap { align-items: flex-end; }
+.dm-bubble-row .dm-bubble-wrap .dm-bubble { max-width: 100%; }
+.group-sender-name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    margin-bottom: 0.15rem;
+    padding-left: 0.2rem;
+}
+.reply-preview {
+    font-size: 0.74rem;
+    color: var(--color-text-muted);
+    background: var(--color-bg);
+    border-left: 3px solid var(--color-border);
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.3rem;
+    margin-bottom: 0.2rem;
+    cursor: pointer;
+    max-width: 100%;
+}
+.reply-preview:hover { background: var(--color-primary-light); }
+.reply-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    margin-top: 0.5rem;
+    font-size: 0.82rem;
+}
+.reply-banner button {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--color-text-muted);
+}
+.reaction-row { display: flex; gap: 0.25rem; margin-top: 0.2rem; flex-wrap: wrap; }
+.reaction-pill {
+    font-size: 0.72rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 1rem;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    cursor: pointer;
+}
+.reaction-pill.mine { border-color: var(--color-primary); background: var(--color-primary-light); }
+.reaction-add-btn {
+    font-size: 0.78rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 1rem;
+    border: 1px dashed var(--color-border);
+    background: none;
+    cursor: pointer;
+    opacity: 0.6;
+}
+.reaction-add-btn:hover { opacity: 1; }
+.dm-read-receipt {
+    display: block;
+    font-size: 0.65rem;
+    text-align: right;
+    opacity: 0.75;
+    margin-top: 0.1rem;
+}
+.mention-tag {
+    background: var(--color-warning);
+    color: #1c2733;
+    border-radius: 0.25rem;
+    padding: 0 0.15rem;
+    font-weight: 600;
+}
+.pinned-bar {
+    background: var(--color-primary-light);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+}
+.pinned-bar-toggle {
+    background: none;
+    border: none;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-text);
+    cursor: pointer;
+    padding: 0;
+}
+.pinned-bar-list { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.pinned-bar-item {
+    font-size: 0.78rem;
+    background: var(--color-surface);
+    border-radius: 0.3rem;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+}
+.pinned-bar-item:hover { background: var(--color-bg); }
+.dm-edit-textarea {
+    width: 100%;
+    min-height: 2.4rem;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0.3rem 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    background: var(--color-surface);
+}
+.jump-highlight { animation: jump-flash 1.5s ease; }
+@keyframes jump-flash {
+    0% { background: var(--color-warning); border-radius: 0.5rem; }
+    100% { background: transparent; }
+}
+.station-card {
+    border-left: 4px solid var(--color-border);
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.4rem;
+    background: var(--color-surface);
+    color: var(--color-text);
+    min-width: 160px;
+}
+.station-card-title { font-weight: 700; margin-bottom: 0.2rem; }
+.station-card-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 1rem;
+    margin-bottom: 0.3rem;
+}
+.station-card-thumb {
+    display: block;
+    width: 100%;
+    max-width: 220px;
+    border-radius: 0.3rem;
+    margin: 0.3rem 0;
+}
+.station-card a { display: inline-block; margin-top: 0.2rem; font-size: 0.82rem; }
+@media (prefers-reduced-motion: reduce) {
+    .jump-highlight { animation: none; }
+}
+

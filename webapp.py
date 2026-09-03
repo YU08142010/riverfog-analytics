@@ -3228,33 +3228,70 @@ def station_comment_delete(name, comment_id):
     return _finish("station_detail", "コメントを削除しました。", name=name)
 
 
+def _latest_station_thumbnail_url(name):
+    """地点共有カード用の、直近取得済みのカメラ画像URL(無ければNone)。
+    dashboard()と同じ「最新日付→最新時刻フォルダ」の辿り方をそのまま使う。"""
+    latest_image_date = next(iter(_sorted_subdirs(IMAGE_DIR)), None)
+    if not latest_image_date:
+        return None
+    latest_image_hour = next(iter(_sorted_subdirs(IMAGE_DIR / latest_image_date)), None)
+    if not latest_image_hour:
+        return None
+    if not (IMAGE_DIR / latest_image_date / latest_image_hour / f"{name}.jpg").exists():
+        return None
+    return url_for("images_file", date=latest_image_date, hhmm=latest_image_hour, filename=f"{name}.jpg")
+
+
 @app.route("/stations/<name>/share", methods=["POST"])
 def station_share(name):
-    """地点の現在の様子+リンクを定型メッセージにして、選んだメンバーにDMでワンタップ共有する。"""
+    """地点の現在の様子をリッチカード(地点名・現象色・サムネイル)として、選んだメンバー
+    へのDM、またはグループチャットへワンタップ共有する。"""
     my_id = session.get("user_id")
     if not my_id:
         abort(403)
     name = _validate_station(name)
-    user_id = request.form.get("user_id", type=int)
-    if not user_id or user_id == my_id:
-        return _finish("station_detail", "共有先のメンバーを選んでください。", success=False, name=name)
+    target_raw = request.form.get("user_id", "")
+    to_group = target_raw == "group"
+    user_id = None if to_group else (int(target_raw) if target_raw.isdigit() else None)
+    if not to_group and (not user_id or user_id == my_id):
+        return _finish("station_detail", "共有先を選んでください。", success=False, name=name)
+
+    observations = _latest_observations()
+    current = None
+    if observations:
+        current = {s["name"]: s for s in observations["stations"]}.get(name)
+    card_data = json.dumps({
+        "station": name,
+        "label": current["label"] if current else None,
+        "color": current["color"] if current else None,
+        "text_color": current["text_color"] if current else None,
+        "datetime": observations["datetime"].strftime("%Y/%m/%d %H:%M") if observations else None,
+        "thumbnail_url": _latest_station_thumbnail_url(name),
+        "url": url_for("station_detail", name=name),
+    })
+    body = f"{name}、{current['label']}です！" if current else f"{name}の様子を見てください。"
+    created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+
     conn = _users_conn()
     try:
-        target = users.get_user_by_id(conn, user_id)
-        if target is None:
-            return _finish("station_detail", "共有先のメンバーが見つかりません。", success=False, name=name)
-        observations = _latest_observations()
-        current = None
-        if observations:
-            current = {s["name"]: s for s in observations["stations"]}.get(name)
-        url = url_for("station_detail", name=name, _external=True)
-        body = f"{name}、{current['label']}です！ {url}" if current else f"{name}の様子を見てください！ {url}"
-        created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-        conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
-        message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at)
-        users.mark_dm_read(conn, conversation_id, my_id, message_id)
+        if to_group:
+            message_id = users.send_group_message(
+                conn, my_id, body, created_at, card_type="station", card_data=card_data,
+            )
+            users.mark_group_read(conn, my_id, message_id)
+        else:
+            target = users.get_user_by_id(conn, user_id)
+            if target is None:
+                return _finish("station_detail", "共有先のメンバーが見つかりません。", success=False, name=name)
+            conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
+            message_id = users.send_dm_message(
+                conn, conversation_id, my_id, body, created_at, card_type="station", card_data=card_data,
+            )
+            users.mark_dm_read(conn, conversation_id, my_id, message_id)
     finally:
         conn.close()
+    if to_group:
+        return _finish("group_home", "グループチャットに共有しました。")
     return _finish("dm_thread", f"{target['name']}さんに共有しました。", user_id=user_id)
 
 
@@ -3449,6 +3486,27 @@ def linkify(text):
     return Markup(html)
 
 
+@app.template_filter("richbody")
+def richbody(text, mentioned_names=None):
+    """linkifyと同じ「エスケープしてから安全に組み立てる」パターンで、URLのリンク化と
+    @メンション対象の表示名の太字ハイライトを1回の処理でまとめて行う(別々に適用すると
+    二重エスケープになるため)。"""
+    from markupsafe import Markup, escape
+    mentioned_names = sorted(mentioned_names or [], key=len, reverse=True)
+    parts = _URL_RE.split(text or "")
+    out = []
+    for p in parts:
+        if _URL_RE.fullmatch(p):
+            out.append(f'<a href="{escape(p)}" target="_blank" rel="noopener">{escape(p)}</a>')
+            continue
+        escaped = str(escape(p))
+        for name in mentioned_names:
+            token = f"@{escape(name)}"
+            escaped = escaped.replace(str(token), f'<span class="mention-tag">{token}</span>')
+        out.append(escaped)
+    return Markup("".join(out))
+
+
 @app.context_processor
 def _inject_dm_unread_count():
     """base.htmlのナビに「メッセージ」の未読バッジを出すため。通知ベルと同じく
@@ -3463,6 +3521,21 @@ def _inject_dm_unread_count():
         finally:
             conn.close()
     return {"dm_unread_count": dm_unread_count}
+
+
+@app.context_processor
+def _inject_group_unread_count():
+    """base.htmlのナビに「グループ」の未読バッジを出すため(dm_unread_countと同じ形)。"""
+    def group_unread_count():
+        user_id = session.get("user_id")
+        if not user_id:
+            return 0
+        conn = _users_conn()
+        try:
+            return users.group_unread_count(conn, user_id)
+        finally:
+            conn.close()
+    return {"group_unread_count": group_unread_count}
 
 
 # メンバーページの実績バッジ。未達成のものもロック表示するため、達成条件を関数として
@@ -4655,6 +4728,351 @@ def game_daily_lottery_draw():
     return _finish("game_daily", f"デイリーくじ: {amount}pt獲得！")
 
 
+# --- メッセージ機能共通(DM・グループチャット両方で使う) ------------------------------
+REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+MESSAGE_SEARCH_LIMIT = 50
+
+# 入力中表示: 専用テーブルは持たず、_png_cache等と同じ「モジュールレベルのdict+Lock」で
+# 一時的な状態として保持する(プロセス再起動で消えても実害が無いため永続化不要)。
+# キーは(channel_key, user_id)。channel_keyはDMなら"dm:<conversation_id>"、
+# グループチャットなら固定文字列"group"。
+_typing_state = {}
+_typing_state_lock = threading.Lock()
+TYPING_INDICATOR_TTL_SECONDS = 6
+
+
+def _mark_typing(channel_key, user_id):
+    with _typing_state_lock:
+        _typing_state[(channel_key, user_id)] = time.monotonic()
+
+
+def _typing_user_ids(channel_key, exclude_user_id=None):
+    now = time.monotonic()
+    with _typing_state_lock:
+        stale = [k for k, t in _typing_state.items() if now - t > TYPING_INDICATOR_TTL_SECONDS]
+        for k in stale:
+            del _typing_state[k]
+        return [uid for (key, uid) in _typing_state if key == channel_key and uid != exclude_user_id]
+
+
+_MENTION_TOKEN_RE = re.compile(r"@([^\s@]+)")
+
+
+def _parse_mentions(body, name_to_id):
+    """本文中の`@表示名`を、既存ユーザー名(name_to_id: {name: user_id})と照合する。
+    表示名に空白は使えない前提のため、@の後ろの非空白トークンに対し、長い名前から
+    順に前方一致を試す(短い名前が長い名前の一部になっているケースの誤爆を避けるため)。"""
+    matched = set()
+    names_by_length = sorted(name_to_id.keys(), key=len, reverse=True)
+    for m in _MENTION_TOKEN_RE.finditer(body):
+        token = m.group(1)
+        for name in names_by_length:
+            if token.startswith(name):
+                matched.add(name_to_id[name])
+                break
+    return matched
+
+
+def _reaction_summary(reactions, my_id):
+    """[{"emoji":, "user_id":}, ...] を [{"emoji":, "count":, "mine": bool}, ...] に集計する
+    (絵文字が最初に現れた順を保つ)。"""
+    counts = {}
+    order = []
+    mine = set()
+    for r in reactions:
+        emoji = r["emoji"]
+        if emoji not in counts:
+            counts[emoji] = 0
+            order.append(emoji)
+        counts[emoji] += 1
+        if r["user_id"] == my_id:
+            mine.add(emoji)
+    return [{"emoji": e, "count": counts[e], "mine": e in mine} for e in order]
+
+
+def _attach_message_extras(messages, reactions_by_id, mentions_by_id, name_by_id, reply_by_id, my_id):
+    """メッセージ辞書のリストに、リアクション集計・メンション表示名・返信先の要約を
+    その場で追加する(DM・グループ両方の描画で共通に使う)。"""
+    for m in messages:
+        m["reactions"] = _reaction_summary(reactions_by_id.get(m["id"], []), my_id)
+        mention_ids = mentions_by_id.get(m["id"], [])
+        m["mentioned_names"] = [name_by_id[uid] for uid in mention_ids if uid in name_by_id]
+        try:
+            m["card"] = json.loads(m["card_data"]) if m.get("card_data") else None
+        except (TypeError, ValueError):
+            m["card"] = None
+        reply = reply_by_id.get(m.get("reply_to_id"))
+        if reply:
+            snippet = reply["body"][:60] + ("…" if len(reply["body"]) > 60 else "")
+            m["reply_preview"] = {
+                "id": reply["id"],
+                "sender_name": name_by_id.get(reply["sender_id"], "(退会済みユーザー)"),
+                "snippet": snippet,
+            }
+        else:
+            m["reply_preview"] = None
+    return messages
+
+
+@app.route("/group")
+def group_home():
+    """全員参加のグループチャット。参加者管理は無く、全登録ユーザーが常にメンバー。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        messages = users.list_group_messages(conn)
+        message_ids = [m["id"] for m in messages]
+        attachments_by_id = users.get_group_attachments_for_messages(conn, message_ids)
+        reactions_by_id = users.get_group_reactions_for_messages(conn, message_ids)
+        mentions_by_id = users.get_group_mentions_for_messages(conn, message_ids)
+        all_users = users.list_users(conn)
+        pinned = users.list_pinned_group_messages(conn)
+        if messages:
+            users.mark_group_read(conn, my_id, messages[-1]["id"])
+        me = users.get_user_by_id(conn, my_id)
+    finally:
+        conn.close()
+    name_by_id = {u["id"]: u["name"] for u in all_users}
+    reply_by_id = {m["id"]: m for m in messages}
+    for m in messages:
+        m["attachments"] = attachments_by_id.get(m["id"], [])
+        m["sender_name"] = name_by_id.get(m["sender_id"], "(退会済みユーザー)")
+    _attach_message_extras(messages, reactions_by_id, mentions_by_id, name_by_id, reply_by_id, my_id)
+    for p in pinned:
+        p["sender_name"] = name_by_id.get(p["sender_id"], "(退会済みユーザー)")
+    my_dm_theme_class = DM_THEME_BY_ID.get(me["equipped_dm_theme"], {}).get("css_class", "") if me else ""
+    return render_template(
+        "group_chat.html", messages=messages, pinned=pinned, my_id=my_id,
+        dm_message_max_length=DM_MESSAGE_MAX_LENGTH, reaction_emojis=REACTION_EMOJIS,
+        member_names=sorted(name_by_id.values()), my_dm_theme_class=my_dm_theme_class,
+    )
+
+
+@app.route("/group/send", methods=["POST"])
+def group_send():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
+    reply_to_id = request.form.get("reply_to_id", type=int)
+    file = request.files.get("attachment")
+    has_file = bool(file and file.filename)
+    if not body and not has_file:
+        return _finish("group_home", "メッセージまたは添付ファイルを指定してください。", success=False)
+    attachment_info = None
+    if has_file:
+        result, error = _save_uploaded_file(file, DM_ATTACHMENT_DIR)
+        if error:
+            return _finish("group_home", error, success=False)
+        attachment_info = result
+    created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        if reply_to_id is not None and users.get_group_message(conn, reply_to_id) is None:
+            reply_to_id = None
+        message_id = users.send_group_message(conn, my_id, body, created_at, reply_to_id=reply_to_id)
+        attachment_id = None
+        if attachment_info:
+            original_name, stored_name, content_type, size = attachment_info
+            attachment_id = users.add_group_attachment(
+                conn, message_id, original_name, stored_name, content_type, size, created_at,
+            )
+        all_users = users.list_users(conn)
+        name_to_id = {u["name"]: u["id"] for u in all_users if u["id"] != my_id}
+        mention_ids = _parse_mentions(body, name_to_id)
+        users.record_group_mentions(conn, message_id, mention_ids)
+        users.mark_group_read(conn, my_id, message_id)
+    finally:
+        conn.close()
+    with _typing_state_lock:
+        _typing_state.pop(("group", my_id), None)
+    if _wants_json():
+        return jsonify({
+            "message": "送信しました。", "success": True,
+            "id": message_id, "body": body, "created_at": created_at,
+            "attachment": (
+                {"id": attachment_id, "filename": attachment_info[0]} if attachment_info else None
+            ),
+        })
+    return redirect(url_for("group_home"))
+
+
+@app.route("/group/poll")
+def group_poll():
+    """dm_pollと同じ4秒ポーリング方式。新着メッセージに加え、入力中の相手・既読状況も返す。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    after_id = request.args.get("after", 0, type=int)
+    conn = _users_conn()
+    try:
+        messages = users.list_group_messages(conn, after_id)
+        message_ids = [m["id"] for m in messages]
+        attachments_by_id = users.get_group_attachments_for_messages(conn, message_ids)
+        reactions_by_id = users.get_group_reactions_for_messages(conn, message_ids)
+        mentions_by_id = users.get_group_mentions_for_messages(conn, message_ids)
+        all_users = users.list_users(conn)
+        if messages:
+            users.mark_group_read(conn, my_id, messages[-1]["id"])
+        read_states = users.all_group_read_states(conn)
+    finally:
+        conn.close()
+    name_by_id = {u["id"]: u["name"] for u in all_users}
+    for m in messages:
+        m["attachments"] = attachments_by_id.get(m["id"], [])
+        m["sender_name"] = name_by_id.get(m["sender_id"], "(退会済みユーザー)")
+        m["reactions"] = _reaction_summary(reactions_by_id.get(m["id"], []), my_id)
+        mention_ids = mentions_by_id.get(m["id"], [])
+        m["mentioned_names"] = [name_by_id[uid] for uid in mention_ids if uid in name_by_id]
+        try:
+            m["card"] = json.loads(m["card_data"]) if m.get("card_data") else None
+        except (TypeError, ValueError):
+            m["card"] = None
+        m["read_count"] = sum(
+            1 for uid, last_read in read_states.items() if uid != m["sender_id"] and last_read >= m["id"]
+        )
+    typing_names = [
+        name_by_id[uid] for uid in _typing_user_ids("group", exclude_user_id=my_id) if uid in name_by_id
+    ]
+    return jsonify({"messages": messages, "typing_names": typing_names})
+
+
+@app.route("/group/typing", methods=["POST"])
+def group_typing():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    _mark_typing("group", my_id)
+    return jsonify({"success": True})
+
+
+@app.route("/group/search")
+def group_search():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    keyword = request.args.get("q", "").strip()
+    if not keyword:
+        return jsonify({"results": []})
+    conn = _users_conn()
+    try:
+        matches = users.search_group_messages(conn, keyword, limit=MESSAGE_SEARCH_LIMIT)
+        name_by_id = {u["id"]: u["name"] for u in users.list_users(conn)}
+    finally:
+        conn.close()
+    for m in matches:
+        m["sender_name"] = name_by_id.get(m["sender_id"], "(退会済みユーザー)")
+    return jsonify({"results": matches})
+
+
+@app.route("/group/attachments/<int:attachment_id>")
+def group_attachment_file(attachment_id):
+    if not session.get("user_id"):
+        abort(403)
+    conn = _users_conn()
+    try:
+        att = users.get_group_attachment(conn, attachment_id)
+    finally:
+        conn.close()
+    if att is None:
+        abort(404)
+    return send_from_directory(
+        DM_ATTACHMENT_DIR, att["stored_name"], as_attachment=True, download_name=att["filename"],
+    )
+
+
+@app.route("/group/<int:message_id>/delete", methods=["POST"])
+def group_message_delete(message_id):
+    """自分が送信したメッセージ、または管理者は誰のメッセージでも削除できる
+    (荒らし・誤爆投稿を全員が見えるチャンネルから消せるようにするため)。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        msg = users.get_group_message(conn, message_id)
+        if msg is None:
+            abort(404)
+        if msg["sender_id"] != my_id and session.get("role") != "admin":
+            return jsonify({"success": False, "message": "自分が送信したメッセージのみ削除できます。"}), 403
+        stored_names = users.get_group_message_attachment_stored_names(conn, message_id)
+        users.delete_group_message(conn, message_id)
+    finally:
+        conn.close()
+    for stored_name in stored_names:
+        (DM_ATTACHMENT_DIR / stored_name).unlink(missing_ok=True)
+    return jsonify({"success": True, "message_id": message_id})
+
+
+@app.route("/group/<int:message_id>/edit", methods=["POST"])
+def group_message_edit(message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
+    if not body:
+        return jsonify({"success": False, "message": "本文を入力してください。"}), 400
+    conn = _users_conn()
+    try:
+        msg = users.get_group_message(conn, message_id)
+        if msg is None:
+            abort(404)
+        if msg["sender_id"] != my_id:
+            return jsonify({"success": False, "message": "自分が送信したメッセージのみ編集できます。"}), 403
+        edited_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.edit_group_message(conn, message_id, body, edited_at)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message_id": message_id, "body": body, "edited_at": edited_at})
+
+
+@app.route("/group/<int:message_id>/pin", methods=["POST"])
+def group_message_pin(message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    pinned = request.form.get("pinned") == "1"
+    conn = _users_conn()
+    try:
+        msg = users.get_group_message(conn, message_id)
+        if msg is None:
+            abort(404)
+        if msg["sender_id"] != my_id and session.get("role") != "admin":
+            return jsonify({"success": False, "message": "投稿者本人か管理者のみピン留めできます。"}), 403
+        users.pin_group_message(conn, message_id, pinned)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message_id": message_id, "pinned": pinned})
+
+
+@app.route("/group/<int:message_id>/react", methods=["POST"])
+def group_message_react(message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    emoji = request.form.get("emoji", "")
+    if emoji not in REACTION_EMOJIS:
+        abort(400)
+    conn = _users_conn()
+    try:
+        if users.get_group_message(conn, message_id) is None:
+            abort(404)
+        existing = users.get_group_reactions_for_messages(conn, [message_id]).get(message_id, [])
+        already = any(r["user_id"] == my_id and r["emoji"] == emoji for r in existing)
+        if already:
+            users.remove_group_reaction(conn, message_id, my_id, emoji)
+        else:
+            users.add_group_reaction(
+                conn, message_id, my_id, emoji, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        reactions = users.get_group_reactions_for_messages(conn, [message_id]).get(message_id, [])
+    finally:
+        conn.close()
+    return jsonify({"success": True, "reactions": _reaction_summary(reactions, my_id)})
+
+
 @app.route("/messages")
 def dm_inbox():
     """自分が参加している会話(直近やり取りが新しい順、未読件数付き)を先頭に、
@@ -4711,14 +5129,27 @@ def dm_thread(user_id):
             "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
         ).fetchone()
         messages = []
+        pinned = []
+        other_read = 0
         if row is not None:
             conversation_id = row[0]
             messages = users.list_dm_messages(conn, conversation_id)
-            attachments_by_message = users.get_dm_attachments_for_messages(conn, [m["id"] for m in messages])
+            message_ids = [m["id"] for m in messages]
+            attachments_by_message = users.get_dm_attachments_for_messages(conn, message_ids)
+            reactions_by_id = users.get_dm_reactions_for_messages(conn, message_ids)
+            mentions_by_id = users.get_dm_mentions_for_messages(conn, message_ids)
+            pinned = users.list_pinned_dm_messages(conn, conversation_id)
+            name_by_id = {my_id: session.get("name", ""), user_id: other["name"]}
+            reply_by_id = {m["id"]: m for m in messages}
             for m in messages:
                 m["attachments"] = attachments_by_message.get(m["id"], [])
+                m["sender_name"] = name_by_id.get(m["sender_id"], "")
+            _attach_message_extras(messages, reactions_by_id, mentions_by_id, name_by_id, reply_by_id, my_id)
+            for p in pinned:
+                p["sender_name"] = name_by_id.get(p["sender_id"], "")
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
+            other_read = users.get_dm_read_state(conn, conversation_id, user_id)
         else:
             conversation_id = None
         other_online = _is_online(users.last_active(conn, user_id))
@@ -4731,6 +5162,7 @@ def dm_thread(user_id):
         "dm_thread.html", other=other, messages=messages, conversation_id=conversation_id,
         my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH, other_online=other_online,
         my_dm_theme_class=my_dm_theme_class, other_dm_theme_class=other_dm_theme_class,
+        pinned=pinned, other_read=other_read, reaction_emojis=REACTION_EMOJIS,
     )
 
 
@@ -4742,6 +5174,7 @@ def dm_send(user_id):
     if user_id == my_id:
         abort(404)
     body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
+    reply_to_id = request.form.get("reply_to_id", type=int)
     file = request.files.get("attachment")
     has_file = bool(file and file.filename)
     if not body and not has_file:
@@ -4756,20 +5189,30 @@ def dm_send(user_id):
         attachment_info = result
     conn = _users_conn()
     try:
-        if users.get_user_by_id(conn, user_id) is None:
+        other = users.get_user_by_id(conn, user_id)
+        if other is None:
             abort(404)
         created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
-        message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at)
+        if reply_to_id is not None:
+            reply_msg = users.get_dm_message(conn, reply_to_id)
+            if reply_msg is None or reply_msg["conversation_id"] != conversation_id:
+                reply_to_id = None
+        message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at, reply_to_id=reply_to_id)
         attachment_id = None
         if attachment_info:
             original_name, stored_name, content_type, size = attachment_info
             attachment_id = users.add_dm_attachment(
                 conn, message_id, original_name, stored_name, content_type, size, created_at,
             )
+        name_to_id = {other["name"]: user_id}
+        mention_ids = _parse_mentions(body, name_to_id)
+        users.record_dm_mentions(conn, message_id, mention_ids)
         users.mark_dm_read(conn, conversation_id, my_id, message_id)
     finally:
         conn.close()
+    with _typing_state_lock:
+        _typing_state.pop((f"dm:{conversation_id}", my_id), None)
     if _wants_json():
         return jsonify({
             "message": "送信しました。", "success": True,
@@ -4792,23 +5235,46 @@ def dm_poll(user_id):
     after_id = request.args.get("after", 0, type=int)
     conn = _users_conn()
     try:
+        other = users.get_user_by_id(conn, user_id)
         a, b = sorted((my_id, user_id))
         row = conn.execute(
             "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
         ).fetchone()
         messages = []
+        other_read = 0
+        conversation_id = row[0] if row is not None else None
         if row is not None:
-            conversation_id = row[0]
             messages = users.list_dm_messages(conn, conversation_id, after_id)
-            attachments_by_message = users.get_dm_attachments_for_messages(conn, [m["id"] for m in messages])
+            message_ids = [m["id"] for m in messages]
+            attachments_by_message = users.get_dm_attachments_for_messages(conn, message_ids)
+            reactions_by_id = users.get_dm_reactions_for_messages(conn, message_ids)
+            mentions_by_id = users.get_dm_mentions_for_messages(conn, message_ids)
+            name_by_id = {my_id: session.get("name", ""), user_id: other["name"] if other else ""}
             for m in messages:
                 m["attachments"] = attachments_by_message.get(m["id"], [])
+                m["sender_name"] = name_by_id.get(m["sender_id"], "")
+                m["reactions"] = _reaction_summary(reactions_by_id.get(m["id"], []), my_id)
+                mention_ids = mentions_by_id.get(m["id"], [])
+                m["mentioned_names"] = [name_by_id[uid] for uid in mention_ids if uid in name_by_id]
+                try:
+                    m["card"] = json.loads(m["card_data"]) if m.get("card_data") else None
+                except (TypeError, ValueError):
+                    m["card"] = None
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
+            other_read = users.get_dm_read_state(conn, conversation_id, user_id)
         other_online = _is_online(users.last_active(conn, user_id))
     finally:
         conn.close()
-    return jsonify({"messages": messages, "other_online": other_online})
+    typing_names = []
+    if conversation_id is not None and other is not None:
+        typing_ids = _typing_user_ids(f"dm:{conversation_id}", exclude_user_id=my_id)
+        if user_id in typing_ids:
+            typing_names = [other["name"]]
+    return jsonify({
+        "messages": messages, "other_online": other_online, "other_read": other_read,
+        "typing_names": typing_names,
+    })
 
 
 @app.route("/messages/attachments/<int:attachment_id>")
@@ -4853,6 +5319,114 @@ def dm_message_delete(user_id, message_id):
     for stored_name in stored_names:
         (DM_ATTACHMENT_DIR / stored_name).unlink(missing_ok=True)
     return jsonify({"success": True, "message_id": message_id})
+
+
+@app.route("/messages/<int:user_id>/<int:message_id>/edit", methods=["POST"])
+def dm_message_edit(user_id, message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    body = request.form.get("body", "").strip()[:DM_MESSAGE_MAX_LENGTH]
+    if not body:
+        return jsonify({"success": False, "message": "本文を入力してください。"}), 400
+    conn = _users_conn()
+    try:
+        msg = users.get_dm_message(conn, message_id)
+        if msg is None or my_id not in (msg["user_a_id"], msg["user_b_id"]):
+            abort(404)
+        if msg["sender_id"] != my_id:
+            return jsonify({"success": False, "message": "自分が送信したメッセージのみ編集できます。"}), 403
+        edited_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.edit_dm_message(conn, message_id, body, edited_at)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message_id": message_id, "body": body, "edited_at": edited_at})
+
+
+@app.route("/messages/<int:user_id>/<int:message_id>/pin", methods=["POST"])
+def dm_message_pin(user_id, message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    pinned = request.form.get("pinned") == "1"
+    conn = _users_conn()
+    try:
+        msg = users.get_dm_message(conn, message_id)
+        if msg is None or my_id not in (msg["user_a_id"], msg["user_b_id"]):
+            abort(404)
+        users.pin_dm_message(conn, message_id, pinned)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message_id": message_id, "pinned": pinned})
+
+
+@app.route("/messages/<int:user_id>/<int:message_id>/react", methods=["POST"])
+def dm_message_react(user_id, message_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    emoji = request.form.get("emoji", "")
+    if emoji not in REACTION_EMOJIS:
+        abort(400)
+    conn = _users_conn()
+    try:
+        msg = users.get_dm_message(conn, message_id)
+        if msg is None or my_id not in (msg["user_a_id"], msg["user_b_id"]):
+            abort(404)
+        existing = users.get_dm_reactions_for_messages(conn, [message_id]).get(message_id, [])
+        already = any(r["user_id"] == my_id and r["emoji"] == emoji for r in existing)
+        if already:
+            users.remove_dm_reaction(conn, message_id, my_id, emoji)
+        else:
+            users.add_dm_reaction(conn, message_id, my_id, emoji, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+        reactions = users.get_dm_reactions_for_messages(conn, [message_id]).get(message_id, [])
+    finally:
+        conn.close()
+    return jsonify({"success": True, "reactions": _reaction_summary(reactions, my_id)})
+
+
+@app.route("/messages/<int:user_id>/typing", methods=["POST"])
+def dm_typing(user_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    a, b = sorted((my_id, user_id))
+    conn = _users_conn()
+    try:
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        if row is None:
+            created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+            conversation_id = users.get_or_create_dm_conversation(conn, my_id, user_id, created_at)
+        else:
+            conversation_id = row[0]
+    finally:
+        conn.close()
+    _mark_typing(f"dm:{conversation_id}", my_id)
+    return jsonify({"success": True})
+
+
+@app.route("/messages/<int:user_id>/search")
+def dm_search(user_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    keyword = request.args.get("q", "").strip()
+    if not keyword:
+        return jsonify({"results": []})
+    a, b = sorted((my_id, user_id))
+    conn = _users_conn()
+    try:
+        row = conn.execute(
+            "SELECT id FROM dm_conversations WHERE user_a_id = ? AND user_b_id = ?", (a, b),
+        ).fetchone()
+        if row is None:
+            return jsonify({"results": []})
+        matches = users.search_dm_messages(conn, row[0], keyword, limit=MESSAGE_SEARCH_LIMIT)
+    finally:
+        conn.close()
+    return jsonify({"results": matches})
 
 
 _PREVIEWABLE_XLSX_CONTENT_TYPES = {
