@@ -3220,10 +3220,18 @@ def admin_observation_report_resolve(report_id):
         users.resolve_observation_report(
             conn, report_id, "resolved", my_id, now_str, f"{corrected_code}に訂正",
         )
+        reward_note = ""
+        if report["source"] == "user" and report["reported_by"] and corrected_code != report["reported_code"]:
+            granted = users.grant_points(
+                conn, report["reported_by"], f"observation_report_reward:{report_id}",
+                OBSERVATION_REPORT_REWARD_POINTS, now_str,
+            )
+            if granted:
+                reward_note = f"(報告者に{OBSERVATION_REPORT_REWARD_POINTS}pt付与)"
         _record_audit(
             "観測報告を確認・訂正",
             f"{report['station_name']} {report['target_datetime']}: "
-            f"{report['reported_code']} → {corrected_code}",
+            f"{report['reported_code']} → {corrected_code} {reward_note}".strip(),
         )
     finally:
         conn.close()
@@ -4179,6 +4187,7 @@ PHENOM_QUIZ_CATEGORIES = [
     {"id": "nashi", "label": "現象なし", "codes": {0}},
 ]
 PHENOM_QUIZ_POINTS = 15
+OBSERVATION_REPORT_REWARD_POINTS = 50
 PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
 
 

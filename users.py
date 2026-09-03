@@ -1343,7 +1343,7 @@ def pending_observation_report_count(conn):
 
 def get_observation_report(conn, report_id):
     row = conn.execute(
-        "SELECT id, station_name, target_datetime, reported_code, status "
+        "SELECT id, station_name, target_datetime, reported_code, status, reported_by, source "
         "FROM observation_reports WHERE id = ?",
         (report_id,),
     ).fetchone()
@@ -1351,7 +1351,7 @@ def get_observation_report(conn, report_id):
         return None
     return {
         "id": row[0], "station_name": row[1], "target_datetime": row[2],
-        "reported_code": row[3], "status": row[4],
+        "reported_code": row[3], "status": row[4], "reported_by": row[5], "source": row[6],
     }
 
 
