@@ -829,6 +829,52 @@ def login_counts_since(conn, since_str):
     return {uid: c for uid, c in rows}
 
 
+def comment_counts_since(conn, since_str):
+    """指定日時以降の地点コメント投稿数を1クエリでまとめて返す(月間ランキング用)。"""
+    rows = conn.execute(
+        "SELECT user_id, COUNT(*) FROM station_comments WHERE created_at >= ? GROUP BY user_id",
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
+def message_counts_since(conn, since_str):
+    """指定日時以降のDM・グループチャット送信数の合計を1クエリでまとめて返す
+    (月間ランキング用)。"""
+    rows = conn.execute(
+        """
+        SELECT sender_id, COUNT(*) FROM (
+            SELECT sender_id, created_at FROM dm_messages
+            UNION ALL
+            SELECT sender_id, created_at FROM group_messages
+        ) WHERE created_at >= ?
+        GROUP BY sender_id
+        """,
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
+def won_bet_counts_since(conn, since_str):
+    """指定日時以降に決着した川霧ギャンブルの勝利数を1クエリでまとめて返す
+    (月間ランキング用。的中したタイミングであるresolved_atで絞る)。"""
+    rows = conn.execute(
+        "SELECT user_id, COUNT(*) FROM fog_bets WHERE status = 'won' AND resolved_at >= ? GROUP BY user_id",
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
+def points_earned_since(conn, since_str):
+    """指定日時以降にpoint_events経由で獲得したポイント合計を1クエリでまとめて返す
+    (月間ランキング用。実績バッジ分は含まない)。"""
+    rows = conn.execute(
+        "SELECT user_id, SUM(amount) FROM point_events WHERE amount > 0 AND created_at >= ? GROUP BY user_id",
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
 def login_counts_between(conn, since_str, until_str):
     """[since_str, until_str)の半開区間でのログイン回数を1クエリでまとめて返す
     ({user_id: count})。月間ランキング報酬のように「確定した1か月分」を

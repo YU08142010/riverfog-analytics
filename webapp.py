@@ -4516,6 +4516,10 @@ def members_list():
         all_users = users.list_users(conn)
         login_counts = users.login_counts_all(conn)
         month_login_counts = users.login_counts_since(conn, month_start)
+        month_comment_counts = users.comment_counts_since(conn, month_start)
+        month_message_counts = users.message_counts_since(conn, month_start)
+        month_gamble_win_counts = users.won_bet_counts_since(conn, month_start)
+        month_points_earned = users.points_earned_since(conn, month_start)
         last_logins = users.last_logins_all(conn)
         streaks = users.login_streaks_all(conn, today)
         last_active = users.last_active_all(conn)
@@ -4527,6 +4531,10 @@ def members_list():
             "has_avatar": _avatar_path(u["id"]).exists(),
             "login_count": login_counts.get(u["id"], 0),
             "month_login_count": month_login_counts.get(u["id"], 0),
+            "month_comment_count": month_comment_counts.get(u["id"], 0),
+            "month_message_count": month_message_counts.get(u["id"], 0),
+            "month_gamble_win_count": month_gamble_win_counts.get(u["id"], 0),
+            "month_points_earned": month_points_earned.get(u["id"], 0),
             "last_login": last_logins.get(u["id"]),
             "streak": streaks.get(u["id"], 0),
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
@@ -4547,8 +4555,44 @@ def members_list():
     month_ranking = sorted(
         [m for m in members if m["month_login_count"] > 0], key=lambda m: -m["month_login_count"]
     )[:5]
+    # ログイン以外のランキング種別は報酬が絡まないため、シンプルに今月分のみ用意する。
+    extra_rankings = [
+        {
+            "id": "comment", "label": "コメント投稿数", "unit": "件",
+            "count_key": "month_comment_count",
+            "entries": sorted(
+                [m for m in members if m["month_comment_count"] > 0],
+                key=lambda m: -m["month_comment_count"],
+            )[:5],
+        },
+        {
+            "id": "message", "label": "メッセージ送信数", "unit": "件",
+            "count_key": "month_message_count",
+            "entries": sorted(
+                [m for m in members if m["month_message_count"] > 0],
+                key=lambda m: -m["month_message_count"],
+            )[:5],
+        },
+        {
+            "id": "gamble_win", "label": "ギャンブル勝利数", "unit": "回",
+            "count_key": "month_gamble_win_count",
+            "entries": sorted(
+                [m for m in members if m["month_gamble_win_count"] > 0],
+                key=lambda m: -m["month_gamble_win_count"],
+            )[:5],
+        },
+        {
+            "id": "points", "label": "獲得ポイント", "unit": "pt",
+            "count_key": "month_points_earned",
+            "entries": sorted(
+                [m for m in members if m["month_points_earned"] > 0],
+                key=lambda m: -m["month_points_earned"],
+            )[:5],
+        },
+    ]
     return render_template(
         "members_list.html", members=members, ranking=ranking, month_ranking=month_ranking,
+        extra_rankings=extra_rankings,
     )
 
 

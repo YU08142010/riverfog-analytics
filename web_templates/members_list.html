@@ -16,7 +16,7 @@
     {"label": "メッセージ", "url": url_for('dm_inbox'), "active": request.path.startswith('/messages'), "badge": dm_unread_count()},
     {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
 ]) }}
-{% macro render_ranking(items, count_key) %}
+{% macro render_ranking(items, count_key, unit="回", show_streak=True) %}
 <ol class="ranking-list">
     {% for m in items %}
     <li class="ranking-item rank-{{ loop.index }}">
@@ -36,8 +36,8 @@
             </div>
         </div>
         <div class="ranking-stats">
-            <span class="ranking-count">{{ m[count_key] }}回</span>
-            {% if m.streak > 1 %}
+            <span class="ranking-count">{{ m[count_key] }}{{ unit }}</span>
+            {% if show_streak and m.streak > 1 %}
             <span class="ranking-streak">連続{{ m.streak }}日</span>
             {% endif %}
         </div>
@@ -45,45 +45,79 @@
     {% endfor %}
 </ol>
 {% endmacro %}
-{% if ranking or month_ranking %}
+{% if ranking or month_ranking or extra_rankings %}
 <div class="card">
     <h2>
-        ログイン回数ランキング
+        ランキング
         <span style="font-weight:normal; margin-left:0.6rem;">
-            <button type="button" class="ranking-toggle-btn" id="ranking-toggle-all">全期間</button>
-            <button type="button" class="ranking-toggle-btn active" id="ranking-toggle-month">今月</button>
+            <button type="button" class="ranking-toggle-btn active" data-ranking-type="login">ログイン回数</button>
+            {% for r in extra_rankings %}
+            <button type="button" class="ranking-toggle-btn" data-ranking-type="{{ r.id }}">{{ r.label }}</button>
+            {% endfor %}
         </span>
     </h2>
-    <div id="ranking-view-all" hidden>
-        {% if ranking %}
-        {{ render_ranking(ranking, "login_count") }}
+    <div id="ranking-type-login">
+        <p style="margin:0 0 0.6rem;">
+            <button type="button" class="ranking-toggle-btn" id="ranking-toggle-all">全期間</button>
+            <button type="button" class="ranking-toggle-btn active" id="ranking-toggle-month">今月</button>
+        </p>
+        <div id="ranking-view-all" hidden>
+            {% if ranking %}
+            {{ render_ranking(ranking, "login_count") }}
+            {% else %}
+            <p class="muted">まだログイン記録がありません。</p>
+            {% endif %}
+        </div>
+        <div id="ranking-view-month">
+            <p class="muted" style="font-size:0.8rem;">月末時点の上位3名には、翌月に月間ランキング報酬(1位5000pt・2位2000pt・3位500pt)が贈られます。</p>
+            {% if month_ranking %}
+            {{ render_ranking(month_ranking, "month_login_count") }}
+            {% else %}
+            <p class="muted">今月はまだログイン記録がありません。</p>
+            {% endif %}
+        </div>
+    </div>
+    {% for r in extra_rankings %}
+    <div id="ranking-type-{{ r.id }}" hidden>
+        {% if r.entries %}
+        {{ render_ranking(r.entries, r.count_key, unit=r.unit, show_streak=False) }}
         {% else %}
-        <p class="muted">まだログイン記録がありません。</p>
+        <p class="muted">今月はまだ記録がありません。</p>
         {% endif %}
     </div>
-    <div id="ranking-view-month">
-        <p class="muted" style="font-size:0.8rem;">月末時点の上位3名には、翌月に月間ランキング報酬(1位5000pt・2位2000pt・3位500pt)が贈られます。</p>
-        {% if month_ranking %}
-        {{ render_ranking(month_ranking, "month_login_count") }}
-        {% else %}
-        <p class="muted">今月はまだログイン記録がありません。</p>
-        {% endif %}
-    </div>
+    {% endfor %}
 </div>
 <script>
 (function() {
+    var typeButtons = Array.prototype.slice.call(document.querySelectorAll("[data-ranking-type]"));
+    var typeViews = {};
+    typeButtons.forEach(function(btn) {
+        typeViews[btn.dataset.rankingType] = document.getElementById("ranking-type-" + btn.dataset.rankingType);
+    });
+    function showType(type) {
+        typeButtons.forEach(function(btn) {
+            btn.classList.toggle("active", btn.dataset.rankingType === type);
+        });
+        Object.keys(typeViews).forEach(function(key) {
+            if (typeViews[key]) { typeViews[key].hidden = key !== type; }
+        });
+    }
+    typeButtons.forEach(function(btn) {
+        btn.addEventListener("click", function() { showType(btn.dataset.rankingType); });
+    });
+
     var btnAll = document.getElementById("ranking-toggle-all");
     var btnMonth = document.getElementById("ranking-toggle-month");
     var viewAll = document.getElementById("ranking-view-all");
     var viewMonth = document.getElementById("ranking-view-month");
-    function show(which) {
+    function showPeriod(which) {
         viewAll.hidden = which !== "all";
         viewMonth.hidden = which !== "month";
         btnAll.classList.toggle("active", which === "all");
         btnMonth.classList.toggle("active", which === "month");
     }
-    btnAll.addEventListener("click", function() { show("all"); });
-    btnMonth.addEventListener("click", function() { show("month"); });
+    btnAll.addEventListener("click", function() { showPeriod("all"); });
+    btnMonth.addEventListener("click", function() { showPeriod("month"); });
 })();
 </script>
 {% endif %}
