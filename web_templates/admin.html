@@ -33,6 +33,10 @@
             <div class="stat-label">学習済みモデル数</div>
             <div class="stat-value">{{ overview.model_count }}<span class="stat-unit">地点</span></div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">経済異常アラート(24h)</div>
+            <div class="stat-value" style="{{ 'color: var(--color-danger);' if overview.economy_anomalies_24h else '' }}">{{ overview.economy_anomalies_24h }}<span class="stat-unit">件</span></div>
+        </div>
     </div>
     <p class="muted" style="margin-top:0.8rem;">
         最終学習日時: {{ overview.last_trained_at if overview.last_trained_at else "-" }}

@@ -2622,6 +2622,10 @@ def _simulator_defaults(name):
 
 @app.route("/")
 def dashboard():
+    try:
+        _check_economy_anomalies()
+    except Exception as e:
+        log.warning("Economy anomaly check failed: %s", e)
     latest_image_date = next(iter(_sorted_subdirs(IMAGE_DIR)), None)
     latest_image_hour = None
     latest_images = []
@@ -4900,6 +4904,52 @@ def game_shop_equip_cosmetic(category):
     )
 
 
+def _gacha_is_jackpot(weighted):
+    """福袋の当たり判定。確率は常に1/GACHA_BIG_REFUND_WEIGHTに固定する(アイテム側の
+    重みをそのまま分母に混ぜると、アイテムの価格帯によって当たり確率が事実上100%近くまで
+    ぶれてしまうバグが過去にあったため、確率計算とアイテム抽選の重み計算を分離してある)。
+    test_economy_sanity.pyがモンテカルロで確率を検証するため、判定だけを取り出した
+    独立関数にしている(この関数の中身を変えるならそのテストも見直すこと)。"""
+    return not weighted or random.random() < (1.0 / GACHA_BIG_REFUND_WEIGHT)
+
+
+ECONOMY_ANOMALY_CHECK_INTERVAL_SECONDS = 1800
+ECONOMY_ANOMALY_WINDOW_MINUTES = 60
+ECONOMY_ANOMALY_POINT_THRESHOLD = 50000
+_economy_anomaly_check_state = {"at": 0.0}
+_economy_anomaly_check_lock = threading.Lock()
+
+
+def _check_economy_anomalies():
+    """直近ECONOMY_ANOMALY_WINDOW_MINUTES分でECONOMY_ANOMALY_POINT_THRESHOLDpt以上を
+    獲得したユーザーがいないかを軽く見張る(福袋バグのような無限増殖系の不正を、誰かが
+    気づく前に自動で検知するため)。よく踏まれるページから間引いて呼ぶだけの簡易版で、
+    専用のバッチ処理は用意していない。検知したら操作ログとアラートWebhookの両方に残す
+    (Webhook未設定でも操作ログには必ず残るようにしている)。"""
+    now = time.monotonic()
+    with _economy_anomaly_check_lock:
+        if now - _economy_anomaly_check_state["at"] < ECONOMY_ANOMALY_CHECK_INTERVAL_SECONDS:
+            return
+        _economy_anomaly_check_state["at"] = now
+    conn = _users_conn()
+    try:
+        cutoff = (now_jst_naive() - timedelta(minutes=ECONOMY_ANOMALY_WINDOW_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute(
+            "SELECT user_id, SUM(amount) FROM point_events WHERE created_at >= ? AND amount > 0 "
+            "GROUP BY user_id HAVING SUM(amount) >= ?",
+            (cutoff, ECONOMY_ANOMALY_POINT_THRESHOLD),
+        ).fetchall()
+    finally:
+        conn.close()
+    for user_id, total in rows:
+        message = (
+            f"user_id={user_id}が直近{ECONOMY_ANOMALY_WINDOW_MINUTES}分で{total}pt獲得しています"
+            f"(閾値{ECONOMY_ANOMALY_POINT_THRESHOLD}pt)。ポイント無限増殖バグの疑いがあるため確認してください。"
+        )
+        _record_audit("経済異常検知", message)
+        _send_alert_throttled(f"economy_anomaly_user_{user_id}", message)
+
+
 @app.route("/game/shop/gacha", methods=["POST"])
 def game_shop_gacha():
     """福袋: 固定ポイントで、未所持コスメの中からランダムに1つ交換するか、ポイントを
@@ -4927,10 +4977,7 @@ def game_shop_gacha():
                     continue
                 candidates.append((category, cosmetic_category, label, item))
         weighted = [(c, cc, lb, it, 1.0 / max(it["cost"], 1)) for c, cc, lb, it in candidates]
-        # 当たり確率は1/GACHA_BIG_REFUND_WEIGHT に固定する(アイテム側の重みをそのまま
-        # 分母に混ぜると、アイテムの価格帯によって当たり確率が事実上100%近くまで
-        # ぶれてしまうバグがあったため、確率とアイテム抽選の重み計算を分離した)。
-        if not weighted or random.random() < (1.0 / GACHA_BIG_REFUND_WEIGHT):
+        if _gacha_is_jackpot(weighted):
             # 参加費(GACHA_COST)はconsumable_purchases経由で記録し(total_spent_pointsの
             # 集計対象)、当たり分だけを別途grant_pointsで加算する(二重計上にならない)。
             users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
@@ -6616,6 +6663,14 @@ def _admin_overview():
             "frequent_restarts",
             f"直近{RESTART_ALERT_WINDOW_HOURS}時間でwebappが{restart_count}回起動しています",
         )
+    conn = _users_conn()
+    try:
+        since_24h = (now_jst_naive() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        economy_anomalies_24h = sum(
+            1 for e in users.list_audit_log_since(conn, since_24h) if e["action"] == "経済異常検知"
+        )
+    finally:
+        conn.close()
     return {
         "web_active": web_state == "active",
         "collect_timer_active": collect_timer_state == "active",
@@ -6625,6 +6680,7 @@ def _admin_overview():
         "last_trained_at": last_trained_at,
         "model_count": len(model_state),
         "recent_restart_count": restart_count,
+        "economy_anomalies_24h": economy_anomalies_24h,
     }
 
 
