@@ -221,6 +221,7 @@
     }
 
     function appendBubble(m, mine) {
+        if (m.id && document.getElementById("group-bubble-row-" + m.id)) { return; }
         var row = document.createElement("div");
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
         row.dataset.messageId = m.id;

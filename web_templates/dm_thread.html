@@ -129,6 +129,7 @@
     var typingUrl = "{{ url_for('dm_typing', user_id=other.id) }}";
     var searchUrl = "{{ url_for('dm_search', user_id=other.id) }}";
     var urlBase = "/messages/{{ other.id }}/";
+    var myId = {{ my_id }};
     var lastId = {{ (messages[-1].id if messages else 0) }};
     var otherRead = {{ other_read }};
     var statusDot = document.getElementById("dm-other-status-dot");
@@ -235,12 +236,13 @@
     }
 
     function appendBubble(m, mine) {
+        if (m.id && document.getElementById("dm-bubble-row-" + m.id)) { return; }
         var row = document.createElement("div");
         row.className = "dm-bubble-row" + (mine ? " mine" : "");
         row.dataset.messageId = m.id;
         row.dataset.pinned = "0";
         row.dataset.body = m.body || "";
-        row.dataset.senderName = mine ? {{ session.get("name", "")|tojson }} : {{ other.name|tojson }};
+        row.dataset.senderName = mine ? {{ session.get("name", "")|tojson }} : (m.sender_name || {{ other.name|tojson }});
         row.dataset.mine = mine ? "1" : "0";
         if (m.id) {
             row.id = "dm-bubble-row-" + m.id;
@@ -334,7 +336,7 @@
             .then(function(data) {
                 (data.messages || []).forEach(function(m) {
                     m.attachment = (m.attachments && m.attachments[0]) || null;
-                    appendBubble(m, false);
+                    appendBubble(m, m.sender_id === myId);
                     lastId = m.id;
                 });
                 if (typeof data.other_online === "boolean") {
