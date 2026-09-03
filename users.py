@@ -206,6 +206,62 @@ CREATE TABLE IF NOT EXISTS dm_attachments (
     size_bytes INTEGER NOT NULL,
     uploaded_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dm_message_reactions (
+    message_id INTEGER NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE TABLE IF NOT EXISTS dm_message_mentions (
+    message_id INTEGER NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, user_id)
+);
+-- 全員参加のグループチャット(単一チャンネル、参加者管理なし)。dm_messages/dm_attachments/
+-- dm_read_stateと対になる構造だが、宛先が固定(全員)なので会話ID(dm_conversations相当)を持たない。
+CREATE TABLE IF NOT EXISTS group_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    edited_at TEXT,
+    reply_to_id INTEGER REFERENCES group_messages(id) ON DELETE SET NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    card_type TEXT,
+    card_data TEXT
+);
+CREATE TABLE IF NOT EXISTS group_message_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES group_messages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_read_state (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    last_read_message_id INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS group_message_reactions (
+    message_id INTEGER NOT NULL REFERENCES group_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE TABLE IF NOT EXISTS group_message_mentions (
+    message_id INTEGER NOT NULL REFERENCES group_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS shared_file_stars (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file_id INTEGER NOT NULL REFERENCES shared_files(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, file_id)
+);
 CREATE TABLE IF NOT EXISTS shared_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT NOT NULL,
@@ -303,12 +359,32 @@ def _ensure_profile_columns(conn):
 
 
 def _ensure_shared_files_columns(conn):
-    """folder_idはフォルダ機能を後から追加した列。無ければ足す。"""
+    """folder_idはフォルダ機能を後から追加した列。tags(自動タグ付け)・content_text
+    (検索用に読み込んだテキスト系ファイルの中身)も後から追加した列。無ければ足す。"""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(shared_files)").fetchall()}
     if "folder_id" not in cols:
         conn.execute(
             "ALTER TABLE shared_files ADD COLUMN folder_id INTEGER REFERENCES shared_folders(id)"
         )
+    if "tags" not in cols:
+        conn.execute("ALTER TABLE shared_files ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+    if "content_text" not in cols:
+        conn.execute("ALTER TABLE shared_files ADD COLUMN content_text TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_dm_messages_columns(conn):
+    """返信・編集・ピン留め・地点共有カードは後から追加した列。無ければ足す。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(dm_messages)").fetchall()}
+    if "reply_to_id" not in cols:
+        conn.execute("ALTER TABLE dm_messages ADD COLUMN reply_to_id INTEGER REFERENCES dm_messages(id)")
+    if "edited_at" not in cols:
+        conn.execute("ALTER TABLE dm_messages ADD COLUMN edited_at TEXT")
+    if "pinned" not in cols:
+        conn.execute("ALTER TABLE dm_messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    if "card_type" not in cols:
+        conn.execute("ALTER TABLE dm_messages ADD COLUMN card_type TEXT")
+    if "card_data" not in cols:
+        conn.execute("ALTER TABLE dm_messages ADD COLUMN card_data TEXT")
 
 
 def _ensure_fog_bets_columns(conn):
@@ -337,6 +413,7 @@ def connect(db_path):
     _ensure_profile_columns(conn)
     _ensure_shared_files_columns(conn)
     _ensure_fog_bets_columns(conn)
+    _ensure_dm_messages_columns(conn)
     _migrate_add_foreign_keys(conn)
     _ensure_login_events_columns(conn)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -1280,11 +1357,13 @@ def get_dm_conversation(conn, conversation_id):
     return {"id": row[0], "user_a_id": row[1], "user_b_id": row[2], "last_message_at": row[3]}
 
 
-def send_dm_message(conn, conversation_id, sender_id, body, created_at):
+def send_dm_message(conn, conversation_id, sender_id, body, created_at, reply_to_id=None,
+                     card_type=None, card_data=None):
     with conn:
         cur = conn.execute(
-            "INSERT INTO dm_messages (conversation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)",
-            (conversation_id, sender_id, body, created_at),
+            "INSERT INTO dm_messages (conversation_id, sender_id, body, created_at, reply_to_id, "
+            "card_type, card_data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (conversation_id, sender_id, body, created_at, reply_to_id, card_type, card_data),
         )
         conn.execute(
             "UPDATE dm_conversations SET last_message_at = ? WHERE id = ?", (created_at, conversation_id),
@@ -1296,11 +1375,115 @@ def list_dm_messages(conn, conversation_id, after_id=0):
     """after_idより新しいメッセージだけを返す(0なら全件。スレッド表示の初回取得と
     ポーリングでの差分取得の両方に使う)。"""
     rows = conn.execute(
-        "SELECT id, sender_id, body, created_at FROM dm_messages "
-        "WHERE conversation_id = ? AND id > ? ORDER BY id",
+        "SELECT id, sender_id, body, created_at, reply_to_id, edited_at, pinned, card_type, card_data "
+        "FROM dm_messages WHERE conversation_id = ? AND id > ? ORDER BY id",
         (conversation_id, after_id),
     ).fetchall()
+    return [
+        {
+            "id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3], "reply_to_id": r[4],
+            "edited_at": r[5], "pinned": bool(r[6]), "card_type": r[7], "card_data": r[8],
+        }
+        for r in rows
+    ]
+
+
+def edit_dm_message(conn, message_id, body, edited_at):
+    with conn:
+        conn.execute(
+            "UPDATE dm_messages SET body = ?, edited_at = ? WHERE id = ?", (body, edited_at, message_id),
+        )
+
+
+def pin_dm_message(conn, message_id, pinned):
+    with conn:
+        conn.execute("UPDATE dm_messages SET pinned = ? WHERE id = ?", (1 if pinned else 0, message_id))
+
+
+def list_pinned_dm_messages(conn, conversation_id):
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at FROM dm_messages "
+        "WHERE conversation_id = ? AND pinned = 1 ORDER BY id",
+        (conversation_id,),
+    ).fetchall()
     return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
+
+
+def search_dm_messages(conn, conversation_id, keyword, limit=50):
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at FROM dm_messages "
+        "WHERE conversation_id = ? AND body LIKE ? ORDER BY id DESC LIMIT ?",
+        (conversation_id, f"%{keyword}%", limit),
+    ).fetchall()
+    return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
+
+
+def get_dm_read_state(conn, conversation_id, user_id):
+    row = conn.execute(
+        "SELECT last_read_message_id FROM dm_read_state WHERE conversation_id = ? AND user_id = ?",
+        (conversation_id, user_id),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def add_dm_reaction(conn, message_id, user_id, emoji, created_at):
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO dm_message_reactions (message_id, user_id, emoji, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (message_id, user_id, emoji, created_at),
+        )
+
+
+def remove_dm_reaction(conn, message_id, user_id, emoji):
+    with conn:
+        conn.execute(
+            "DELETE FROM dm_message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+            (message_id, user_id, emoji),
+        )
+
+
+def get_dm_reactions_for_messages(conn, message_ids):
+    """{message_id: [{"emoji":, "user_id":}, ...]} を返す(集計・自分の反応判定は
+    呼び出し側で行う。get_dm_attachments_for_messagesと同じ、まとめ引きパターン)。"""
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT message_id, emoji, user_id FROM dm_message_reactions WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[0], []).append({"emoji": r[1], "user_id": r[2]})
+    return result
+
+
+def record_dm_mentions(conn, message_id, user_ids):
+    ids = sorted(set(user_ids))
+    if not ids:
+        return
+    with conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO dm_message_mentions (message_id, user_id) VALUES (?, ?)",
+            [(message_id, uid) for uid in ids],
+        )
+
+
+def get_dm_mentions_for_messages(conn, message_ids):
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT message_id, user_id FROM dm_message_mentions WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[0], []).append(r[1])
+    return result
 
 
 def list_dm_conversations(conn, user_id):
@@ -1438,16 +1621,229 @@ def delete_dm_message(conn, message_id):
         conn.execute("DELETE FROM dm_messages WHERE id = ?", (message_id,))
 
 
+def count_users(conn):
+    row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+    return row[0] if row else 0
+
+
+# --- 全員参加グループチャット ------------------------------------------------------
+# dm_messages系の関数と対になる構造(会話IDが無い点だけが違う)。単一チャンネルのため
+# 参加者管理・招待の概念自体を持たない(全登録ユーザーが暗黙のメンバー)。
+def send_group_message(conn, sender_id, body, created_at, reply_to_id=None, card_type=None, card_data=None):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO group_messages (sender_id, body, created_at, reply_to_id, card_type, card_data) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sender_id, body, created_at, reply_to_id, card_type, card_data),
+        )
+        return cur.lastrowid
+
+
+def list_group_messages(conn, after_id=0):
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at, reply_to_id, edited_at, pinned, card_type, card_data "
+        "FROM group_messages WHERE id > ? ORDER BY id",
+        (after_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3], "reply_to_id": r[4],
+            "edited_at": r[5], "pinned": bool(r[6]), "card_type": r[7], "card_data": r[8],
+        }
+        for r in rows
+    ]
+
+
+def get_group_message(conn, message_id):
+    row = conn.execute(
+        "SELECT id, sender_id FROM group_messages WHERE id = ?", (message_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "sender_id": row[1]}
+
+
+def edit_group_message(conn, message_id, body, edited_at):
+    with conn:
+        conn.execute(
+            "UPDATE group_messages SET body = ?, edited_at = ? WHERE id = ?", (body, edited_at, message_id),
+        )
+
+
+def pin_group_message(conn, message_id, pinned):
+    with conn:
+        conn.execute("UPDATE group_messages SET pinned = ? WHERE id = ?", (1 if pinned else 0, message_id))
+
+
+def list_pinned_group_messages(conn):
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at FROM group_messages WHERE pinned = 1 ORDER BY id"
+    ).fetchall()
+    return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
+
+
+def search_group_messages(conn, keyword, limit=50):
+    rows = conn.execute(
+        "SELECT id, sender_id, body, created_at FROM group_messages WHERE body LIKE ? ORDER BY id DESC LIMIT ?",
+        (f"%{keyword}%", limit),
+    ).fetchall()
+    return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
+
+
+def get_group_message_attachment_stored_names(conn, message_id):
+    rows = conn.execute(
+        "SELECT stored_name FROM group_message_attachments WHERE message_id = ?", (message_id,)
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def delete_group_message(conn, message_id):
+    with conn:
+        conn.execute("DELETE FROM group_messages WHERE id = ?", (message_id,))
+
+
+def add_group_attachment(conn, message_id, filename, stored_name, content_type, size_bytes, uploaded_at):
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO group_message_attachments "
+            "(message_id, filename, stored_name, content_type, size_bytes, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (message_id, filename, stored_name, content_type, size_bytes, uploaded_at),
+        )
+        return cur.lastrowid
+
+
+def get_group_attachment(conn, attachment_id):
+    row = conn.execute(
+        "SELECT id, filename, stored_name, content_type, size_bytes FROM group_message_attachments WHERE id = ?",
+        (attachment_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0], "filename": row[1], "stored_name": row[2], "content_type": row[3], "size_bytes": row[4],
+    }
+
+
+def get_group_attachments_for_messages(conn, message_ids):
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT id, message_id, filename, size_bytes FROM group_message_attachments "
+        f"WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[1], []).append({"id": r[0], "filename": r[2], "size_bytes": r[3]})
+    return result
+
+
+def mark_group_read(conn, user_id, last_read_message_id):
+    with conn:
+        conn.execute(
+            "INSERT INTO group_read_state (user_id, last_read_message_id) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET last_read_message_id = "
+            "MAX(last_read_message_id, excluded.last_read_message_id)",
+            (user_id, last_read_message_id),
+        )
+
+
+def get_group_read_state(conn, user_id):
+    row = conn.execute(
+        "SELECT last_read_message_id FROM group_read_state WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def group_unread_count(conn, user_id):
+    last_read = get_group_read_state(conn, user_id)
+    row = conn.execute(
+        "SELECT COUNT(*) FROM group_messages WHERE id > ? AND sender_id != ?", (last_read, user_id)
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def all_group_read_states(conn):
+    """{user_id: last_read_message_id}(読んだことのあるユーザーのみ、無い場合は暗黙で0)。
+    グループチャットの「既読 n人」表示で、メッセージごとにクエリを発行しないための
+    まとめ取得(会話数が少ないグループチャットでは全件を1回読んでPython側で集計する
+    方が、メッセージ数だけクエリを発行するより安い)。"""
+    rows = conn.execute("SELECT user_id, last_read_message_id FROM group_read_state").fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def add_group_reaction(conn, message_id, user_id, emoji, created_at):
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO group_message_reactions (message_id, user_id, emoji, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (message_id, user_id, emoji, created_at),
+        )
+
+
+def remove_group_reaction(conn, message_id, user_id, emoji):
+    with conn:
+        conn.execute(
+            "DELETE FROM group_message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+            (message_id, user_id, emoji),
+        )
+
+
+def get_group_reactions_for_messages(conn, message_ids):
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT message_id, emoji, user_id FROM group_message_reactions WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[0], []).append({"emoji": r[1], "user_id": r[2]})
+    return result
+
+
+def record_group_mentions(conn, message_id, user_ids):
+    ids = sorted(set(user_ids))
+    if not ids:
+        return
+    with conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO group_message_mentions (message_id, user_id) VALUES (?, ?)",
+            [(message_id, uid) for uid in ids],
+        )
+
+
+def get_group_mentions_for_messages(conn, message_ids):
+    ids = sorted(set(message_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT message_id, user_id FROM group_message_mentions WHERE message_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    result = {}
+    for r in rows:
+        result.setdefault(r[0], []).append(r[1])
+    return result
+
+
 def add_shared_file(
     conn, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at,
-    description="", folder_id=None,
+    description="", folder_id=None, tags="", content_text="",
 ):
     with conn:
         cur = conn.execute(
             "INSERT INTO shared_files "
-            "(filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id),
+            "(filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description, "
+            "folder_id, tags, content_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, description,
+             folder_id, tags, content_text),
         )
         return cur.lastrowid
 
@@ -1456,19 +1852,39 @@ def list_shared_files(conn, folder_id=None):
     """folder_id=Noneは最上位(フォルダに属さない)ファイルだけを返す。"""
     if folder_id is None:
         rows = conn.execute(
-            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id "
-            "FROM shared_files WHERE folder_id IS NULL ORDER BY uploaded_at DESC"
+            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, "
+            "folder_id, tags FROM shared_files WHERE folder_id IS NULL ORDER BY uploaded_at DESC"
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, folder_id "
-            "FROM shared_files WHERE folder_id = ? ORDER BY uploaded_at DESC",
+            "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, "
+            "folder_id, tags FROM shared_files WHERE folder_id = ? ORDER BY uploaded_at DESC",
             (folder_id,),
         ).fetchall()
     return [
         {
             "id": r[0], "filename": r[1], "content_type": r[2], "size_bytes": r[3],
-            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6], "folder_id": r[7],
+            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6], "folder_id": r[7], "tags": r[8],
+        }
+        for r in rows
+    ]
+
+
+def search_shared_files(conn, keyword):
+    """filename・description・tags・content_text(全文検索対象、_save_uploaded_file時に
+    テキスト系ファイルのみ格納済み)を横断検索する。フォルダをまたいで全件を対象にする。"""
+    like = f"%{keyword}%"
+    rows = conn.execute(
+        "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, "
+        "folder_id, tags FROM shared_files "
+        "WHERE filename LIKE ? OR description LIKE ? OR tags LIKE ? OR content_text LIKE ? "
+        "ORDER BY uploaded_at DESC",
+        (like, like, like, like),
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "filename": r[1], "content_type": r[2], "size_bytes": r[3],
+            "uploaded_by": r[4], "uploaded_at": r[5], "description": r[6], "folder_id": r[7], "tags": r[8],
         }
         for r in rows
     ]
@@ -1477,7 +1893,7 @@ def list_shared_files(conn, folder_id=None):
 def get_shared_file(conn, file_id):
     row = conn.execute(
         "SELECT id, filename, stored_name, content_type, size_bytes, uploaded_by, uploaded_at, "
-        "description, folder_id FROM shared_files WHERE id = ?",
+        "description, folder_id, tags FROM shared_files WHERE id = ?",
         (file_id,),
     ).fetchone()
     if row is None:
@@ -1485,13 +1901,38 @@ def get_shared_file(conn, file_id):
     return {
         "id": row[0], "filename": row[1], "stored_name": row[2], "content_type": row[3],
         "size_bytes": row[4], "uploaded_by": row[5], "uploaded_at": row[6], "description": row[7],
-        "folder_id": row[8],
+        "folder_id": row[8], "tags": row[9],
     }
 
 
 def delete_shared_file(conn, file_id):
     with conn:
         conn.execute("DELETE FROM shared_files WHERE id = ?", (file_id,))
+
+
+def move_shared_file(conn, file_id, folder_id):
+    with conn:
+        conn.execute("UPDATE shared_files SET folder_id = ? WHERE id = ?", (folder_id, file_id))
+
+
+def toggle_file_star(conn, user_id, file_id, created_at):
+    """既にお気に入りならお気に入り解除、そうでなければ登録する。登録後の状態(True/False)を返す。"""
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM shared_file_stars WHERE user_id = ? AND file_id = ?", (user_id, file_id),
+        )
+        if cur.rowcount > 0:
+            return False
+        conn.execute(
+            "INSERT INTO shared_file_stars (user_id, file_id, created_at) VALUES (?, ?, ?)",
+            (user_id, file_id, created_at),
+        )
+        return True
+
+
+def starred_file_ids(conn, user_id):
+    rows = conn.execute("SELECT file_id FROM shared_file_stars WHERE user_id = ?", (user_id,)).fetchall()
+    return {r[0] for r in rows}
 
 
 def create_shared_folder(conn, name, parent_id, created_by, created_at):
@@ -1586,7 +2027,19 @@ __all__ = [
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
     "get_dm_message", "get_dm_message_attachment_stored_names", "delete_dm_message",
-    "add_shared_file", "list_shared_files", "get_shared_file", "delete_shared_file",
+    "edit_dm_message", "pin_dm_message", "list_pinned_dm_messages", "search_dm_messages",
+    "get_dm_read_state", "add_dm_reaction", "remove_dm_reaction", "get_dm_reactions_for_messages",
+    "record_dm_mentions", "get_dm_mentions_for_messages",
+    "count_users",
+    "send_group_message", "list_group_messages", "get_group_message", "edit_group_message",
+    "pin_group_message", "list_pinned_group_messages", "search_group_messages",
+    "get_group_message_attachment_stored_names", "delete_group_message",
+    "add_group_attachment", "get_group_attachment", "get_group_attachments_for_messages",
+    "mark_group_read", "get_group_read_state", "group_unread_count", "all_group_read_states",
+    "add_group_reaction", "remove_group_reaction", "get_group_reactions_for_messages",
+    "record_group_mentions", "get_group_mentions_for_messages",
+    "add_shared_file", "list_shared_files", "search_shared_files", "get_shared_file", "delete_shared_file",
+    "move_shared_file", "toggle_file_star", "starred_file_ids",
     "create_shared_folder", "get_shared_folder", "list_shared_folders",
     "shared_folder_breadcrumbs", "shared_folder_is_empty", "delete_shared_folder",
 ]
