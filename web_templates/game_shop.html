@@ -60,7 +60,8 @@
 
 {% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
 {% set owned = item.id in owned_ids %}
-{% set unavailable = (item.available_from and today_str < item.available_from) or (item.available_until and today_str > item.available_until) %}
+{% set admin_locked = item.admin_only and session.get('role') != 'admin' %}
+{% set unavailable = (item.available_from and today_str < item.available_from) or (item.available_until and today_str > item.available_until) or admin_locked %}
 <div class="member-tile" style="cursor:default;" data-shop-category="{{ category }}" data-item-id="{{ item.id }}" data-shop-owned="{{ '1' if owned else '0' }}" data-shop-name="{{ item.label|lower }}">
     {{ caller() }}
     {% if is_new(item) %}<span class="shop-new-badge">NEW</span>{% endif %}
@@ -79,9 +80,9 @@
         <form method="post" action="{{ url_for('game_shop_buy_cosmetic', category=category) }}" data-ajax class="buy-form" style="margin-top:0.4rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="item_id" value="{{ item.id }}">
-            <button type="submit" class="button buy-btn" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost or unavailable }}>{{ item.cost }} ptで交換</button>
+            <button type="submit" class="button buy-btn" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost or unavailable }}>{{ "管理者専用" if admin_locked else (item.cost ~ " ptで交換") }}</button>
         </form>
-        <div class="shop-shortfall" {{ "" if points < item.cost else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
+        <div class="shop-shortfall" {{ "" if (points < item.cost and not admin_locked) else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
     </div>
 </div>
 {% endmacro %}

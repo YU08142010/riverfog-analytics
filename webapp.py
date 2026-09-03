@@ -3798,6 +3798,9 @@ TITLE_DEFINITIONS = [
     {"id": "fog_walker", "label": "霧使い", "cost": 3000},
     {"id": "tadami_master", "label": "只見川マスター", "cost": 8000},
     {"id": "legendary_observer", "label": "伝説の観測者", "cost": 15000},
+    {"id": "dopagaki", "label": "ドパガキ", "cost": 50000},
+    {"id": "legendary_gambler", "label": "伝説のギャンブラー", "cost": 1000000},
+    {"id": "admin_title", "label": "管理人", "cost": 0, "admin_only": True},
 ]
 TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
 
@@ -3968,7 +3971,6 @@ LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
 # (名前どおりの「ギャンブル」として、当てずっぽうの丁半博打にならないよう
 # 難易度に応じた倍率を付ける)。
 GAMBLE_MIN_BET = 10
-GAMBLE_MAX_BET = 500
 GAMBLE_MAX_LEAD_HOURS = 24 * 7  # 1週間先まで賭けられる
 GAMBLE_MULTIPLIER_CAP = 30.0
 GAMBLE_STATION_RARITY_FLOOR = 0.02  # 観測史上ほぼ川霧が出ない地点でも倍率を無限大にしない下限
@@ -4666,6 +4668,8 @@ def game_shop_buy_cosmetic(category):
         return _finish("game_shop", "まだ販売期間ではありません。", success=False)
     if item.get("available_until") and today_str > item["available_until"]:
         return _finish("game_shop", "販売期間が終了しました。", success=False)
+    if item.get("admin_only") and session.get("role") != "admin":
+        return _finish("game_shop", "この称号は管理者のみ入手できます。", success=False)
     conn = _users_conn()
     try:
         if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
@@ -4823,7 +4827,7 @@ def game_gamble():
         "game_gamble.html",
         points=points, bets=bets, station_rows=station_rows,
         station_names=STATION_NAMES, precisions=GAMBLE_PRECISIONS, blocks=GAMBLE_BLOCKS,
-        min_bet=GAMBLE_MIN_BET, max_bet=GAMBLE_MAX_BET,
+        min_bet=GAMBLE_MIN_BET,
         today=now_jst_naive().strftime("%Y-%m-%d"),
         consumables=consumables, consumable_definitions=CONSUMABLE_DEFINITIONS,
         consumable_boost_multiplier=CONSUMABLE_BOOST_MULTIPLIER,
@@ -4883,9 +4887,9 @@ def game_gamble_place():
         return _finish("game_gamble", "時間精度を選んでください。", success=False)
     if not DATE_RE.match(target_date or ""):
         return _finish("game_gamble", "日付が正しくありません。", success=False)
-    if bet_amount is None or not (GAMBLE_MIN_BET <= bet_amount <= GAMBLE_MAX_BET):
+    if bet_amount is None or bet_amount < GAMBLE_MIN_BET:
         return _finish(
-            "game_gamble", f"賭けポイントは{GAMBLE_MIN_BET}〜{GAMBLE_MAX_BET}の範囲で指定してください。",
+            "game_gamble", f"賭けポイントは{GAMBLE_MIN_BET}pt以上で指定してください。",
             success=False,
         )
 
