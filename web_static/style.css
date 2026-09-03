@@ -1776,6 +1776,7 @@ table.obs-table th.sticky-col { z-index: 3; }
     margin-top: 0.5rem;
     font-size: 0.82rem;
 }
+.reply-banner[hidden] { display: none; }
 .reply-banner button {
     background: none;
     border: none;

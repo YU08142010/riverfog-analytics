@@ -52,6 +52,13 @@
     input.focus();
     messages.scrollTop = messages.scrollHeight;
 
+    // Enterで送信、Shift+Enterで改行(IME変換確定のEnterでは送信しない)。
+    input.addEventListener("keydown", function(e) {
+        if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) { return; }
+        e.preventDefault();
+        if (input.value.trim()) { form.requestSubmit(); }
+    });
+
     function addMessage(text, who) {
         var wrap = document.createElement("div");
         wrap.className = "chat-message chat-message-" + who;

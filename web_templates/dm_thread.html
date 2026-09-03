@@ -355,6 +355,13 @@
         }).catch(function() {});
     });
 
+    // Enterで送信、Shift+Enterで改行(IME変換確定のEnterでは送信しない)。
+    textarea.addEventListener("keydown", function(e) {
+        if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) { return; }
+        e.preventDefault();
+        if (textarea.value.trim()) { form.requestSubmit(); }
+    });
+
     function jumpTo(messageId) {
         var row = document.getElementById("dm-bubble-row-" + messageId);
         if (!row) { return; }
