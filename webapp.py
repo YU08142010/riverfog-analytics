@@ -5176,6 +5176,20 @@ def _reaction_summary(reactions, my_id):
     return [{"emoji": e, "count": counts[e], "mine": e in mine} for e in order]
 
 
+def _reply_preview_dict(reply_msg, name_by_id):
+    """返信先メッセージの要約を、送信直後のJSONレスポンスやポーリング応答にも
+    その場で載せられる形にする(ページ再読み込みを待たずに表示するため)。"""
+    if reply_msg is None:
+        return None
+    body = reply_msg["body"]
+    snippet = body[:60] + ("…" if len(body) > 60 else "")
+    return {
+        "id": reply_msg["id"],
+        "sender_name": name_by_id.get(reply_msg["sender_id"], "(退会済みユーザー)"),
+        "snippet": snippet,
+    }
+
+
 def _attach_message_extras(messages, reactions_by_id, mentions_by_id, name_by_id, reply_by_id, my_id):
     """メッセージ辞書のリストに、リアクション集計・メンション表示名・返信先の要約を
     その場で追加する(DM・グループ両方の描画で共通に使う)。"""
@@ -5272,6 +5286,10 @@ def group_send():
         mention_ids = _parse_mentions(body, name_to_id)
         users.record_group_mentions(conn, message_id, mention_ids)
         users.mark_group_read(conn, my_id, message_id)
+        reply_preview = None
+        if reply_to_id is not None:
+            reply_name_by_id = {u["id"]: u["name"] for u in all_users}
+            reply_preview = _reply_preview_dict(users.get_group_message(conn, reply_to_id), reply_name_by_id)
     finally:
         conn.close()
     with _typing_state_lock:
@@ -5283,6 +5301,7 @@ def group_send():
             "attachment": (
                 {"id": attachment_id, "filename": attachment_info[0]} if attachment_info else None
             ),
+            "reply_preview": reply_preview,
         })
     return redirect(url_for("group_home"))
 
@@ -5305,6 +5324,8 @@ def group_poll():
         if messages:
             users.mark_group_read(conn, my_id, messages[-1]["id"])
         read_states = users.all_group_read_states(conn)
+        reply_ids = {m["reply_to_id"] for m in messages if m.get("reply_to_id")}
+        reply_msgs_by_id = {rid: users.get_group_message(conn, rid) for rid in reply_ids}
     finally:
         conn.close()
     name_by_id = {u["id"]: u["name"] for u in all_users}
@@ -5321,6 +5342,7 @@ def group_poll():
         m["read_count"] = sum(
             1 for uid, last_read in read_states.items() if uid != m["sender_id"] and last_read >= m["id"]
         )
+        m["reply_preview"] = _reply_preview_dict(reply_msgs_by_id.get(m.get("reply_to_id")), name_by_id)
     typing_names = [
         name_by_id[uid] for uid in _typing_user_ids("group", exclude_user_id=my_id) if uid in name_by_id
     ]
@@ -5635,7 +5657,10 @@ def dm_send(user_id):
         if reply_to_id is not None:
             reply_msg = users.get_dm_message(conn, reply_to_id)
             if reply_msg is None or reply_msg["conversation_id"] != conversation_id:
+                reply_msg = None
                 reply_to_id = None
+        else:
+            reply_msg = None
         message_id = users.send_dm_message(conn, conversation_id, my_id, body, created_at, reply_to_id=reply_to_id)
         attachment_id = None
         if attachment_info:
@@ -5647,6 +5672,9 @@ def dm_send(user_id):
         mention_ids = _parse_mentions(body, name_to_id)
         users.record_dm_mentions(conn, message_id, mention_ids)
         users.mark_dm_read(conn, conversation_id, my_id, message_id)
+        reply_preview = _reply_preview_dict(
+            reply_msg, {my_id: session.get("name", ""), user_id: other["name"]},
+        )
     finally:
         conn.close()
     with _typing_state_lock:
@@ -5658,6 +5686,7 @@ def dm_send(user_id):
             "attachment": (
                 {"id": attachment_id, "filename": attachment_info[0]} if attachment_info else None
             ),
+            "reply_preview": reply_preview,
         })
     return redirect(url_for("dm_thread", user_id=user_id))
 
@@ -5688,6 +5717,8 @@ def dm_poll(user_id):
             reactions_by_id = users.get_dm_reactions_for_messages(conn, message_ids)
             mentions_by_id = users.get_dm_mentions_for_messages(conn, message_ids)
             name_by_id = {my_id: session.get("name", ""), user_id: other["name"] if other else ""}
+            reply_ids = {m["reply_to_id"] for m in messages if m.get("reply_to_id")}
+            reply_msgs_by_id = {rid: users.get_dm_message(conn, rid) for rid in reply_ids}
             for m in messages:
                 m["attachments"] = attachments_by_message.get(m["id"], [])
                 m["sender_name"] = name_by_id.get(m["sender_id"], "")
@@ -5698,6 +5729,7 @@ def dm_poll(user_id):
                     m["card"] = json.loads(m["card_data"]) if m.get("card_data") else None
                 except (TypeError, ValueError):
                     m["card"] = None
+                m["reply_preview"] = _reply_preview_dict(reply_msgs_by_id.get(m.get("reply_to_id")), name_by_id)
             if messages:
                 users.mark_dm_read(conn, conversation_id, my_id, messages[-1]["id"])
             other_read = users.get_dm_read_state(conn, conversation_id, user_id)

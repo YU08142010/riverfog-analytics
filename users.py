@@ -1758,10 +1758,11 @@ def get_dm_attachments_for_messages(conn, message_ids):
 
 def get_dm_message(conn, message_id):
     """メッセージ本体と、それが属する会話のuser_a_id/user_b_idを一緒に返す
-    (削除時に本人か会話の当事者かをその場で判定できるようにするため)。"""
+    (削除時に本人か会話の当事者かをその場で判定できるようにするため。
+    bodyも合わせて返し、返信プレビュー表示に再利用できるようにしている)。"""
     row = conn.execute(
         """
-        SELECT m.id, m.conversation_id, m.sender_id, c.user_a_id, c.user_b_id
+        SELECT m.id, m.conversation_id, m.sender_id, c.user_a_id, c.user_b_id, m.body
         FROM dm_messages m
         JOIN dm_conversations c ON c.id = m.conversation_id
         WHERE m.id = ?
@@ -1772,7 +1773,7 @@ def get_dm_message(conn, message_id):
         return None
     return {
         "id": row[0], "conversation_id": row[1], "sender_id": row[2],
-        "user_a_id": row[3], "user_b_id": row[4],
+        "user_a_id": row[3], "user_b_id": row[4], "body": row[5],
     }
 
 
@@ -1826,11 +1827,11 @@ def list_group_messages(conn, after_id=0):
 
 def get_group_message(conn, message_id):
     row = conn.execute(
-        "SELECT id, sender_id FROM group_messages WHERE id = ?", (message_id,)
+        "SELECT id, sender_id, body FROM group_messages WHERE id = ?", (message_id,)
     ).fetchone()
     if row is None:
         return None
-    return {"id": row[0], "sender_id": row[1]}
+    return {"id": row[0], "sender_id": row[1], "body": row[2]}
 
 
 def edit_group_message(conn, message_id, body, edited_at):

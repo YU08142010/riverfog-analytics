@@ -239,6 +239,16 @@
             nameEl.textContent = m.sender_name;
             wrap.appendChild(nameEl);
         }
+        if (m.reply_preview) {
+            var replyDiv = document.createElement("div");
+            replyDiv.className = "reply-preview";
+            replyDiv.dataset.jumpTo = m.reply_preview.id;
+            var replyStrong = document.createElement("strong");
+            replyStrong.textContent = m.reply_preview.sender_name;
+            replyDiv.appendChild(replyStrong);
+            replyDiv.appendChild(document.createTextNode(": " + m.reply_preview.snippet));
+            wrap.appendChild(replyDiv);
+        }
         var bubble = document.createElement("div");
         bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : "")
             + (mine && myBubbleStyleClass ? " " + myBubbleStyleClass : "");
