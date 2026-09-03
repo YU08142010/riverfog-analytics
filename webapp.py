@@ -11,6 +11,7 @@ import json
 import logging
 import logging.handlers
 import os
+import random
 import re
 import secrets
 import shutil
@@ -3680,6 +3681,139 @@ GAMBLE_PRECISIONS = [
 ]
 GAMBLE_PRECISION_BY_ID = {p["id"]: p for p in GAMBLE_PRECISIONS}
 
+# --- デイリー霧予報クイズ(無料・スキル型、川霧ギャンブルと違いポイントを賭けない) -------
+# 毎日同じ地点を全員に出題する(日付から決定論的に選ぶ)ことで、その日1回だけの
+# 気軽な予想ゲームにする。的中報酬に連続的中日数のボーナスを付け、継続を後押しする。
+FOG_QUIZ_BASE_POINTS = 10
+FOG_QUIZ_STREAK_BONUS_PER_DAY = 2
+FOG_QUIZ_STREAK_BONUS_CAP_DAYS = 20  # ボーナス上限 = 20日 x 2pt = 40pt
+
+# --- デイリーくじ -------------------------------------------------------------------
+# 専用テーブルは持たず、grant_points()のUNIQUE(user_id, source)制約をそのまま
+# 「1日1回」の判定に使う(users.get_point_event_amount参照)。
+LOTTERY_OUTCOMES = [(50, 10), (30, 30), (15, 100), (4, 300), (1, 1000)]  # (重み, ポイント)
+
+# --- デイリー現象当てクイズ(無料、即時採点) -----------------------------------------
+# 1〜10の細かいコードそのままでは難しすぎるため、フォームUI上は5カテゴリに丸めて出題する
+# (画像判定・訂正機能そのものはこれまで通り0〜10の全コードを扱う。丸めるのはクイズの
+# 表示上だけ)。
+PHENOM_QUIZ_CATEGORIES = [
+    {"id": "kawagiri", "label": "川霧", "codes": {1, 2, 3}},
+    {"id": "zentaigiri", "label": "全体霧", "codes": {4, 5, 6}},
+    {"id": "souun", "label": "層雲", "codes": {7, 8}},
+    {"id": "ame", "label": "霧雨・雨", "codes": {9, 10}},
+    {"id": "nashi", "label": "現象なし", "codes": {0}},
+]
+PHENOM_QUIZ_POINTS = 15
+PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
+
+
+def _phenom_category_id_for_code(code):
+    for cat in PHENOM_QUIZ_CATEGORIES:
+        if code in cat["codes"]:
+            return cat["id"]
+    return None
+
+
+def _daily_fog_quiz_station(date_str):
+    """その日の出題地点を日付から決定論的に選ぶ(全員同じ地点、日付が変われば変わる)。"""
+    return random.Random(f"fog_quiz:{date_str}").choice(STATION_NAMES)
+
+
+_phenom_quiz_candidates_cache = {"data": None, "at": 0.0}
+_phenom_quiz_candidates_lock = threading.Lock()
+
+
+def _phenom_quiz_candidates():
+    """(日付, HHMM, 地点名, 現象コード)のうち、実際に画像ファイルが存在し、かつ
+    現象コードが判明している(未分類でない)組み合わせのリストを返す。画像アーカイブは
+    無期限保存だが実運用開始以降の分しか無いため、対象はその期間に限られる
+    (データが増えるほど出題の幅が自然に広がる)。"""
+    now = time.monotonic()
+    with _phenom_quiz_candidates_lock:
+        cached = _phenom_quiz_candidates_cache["data"]
+        if cached is not None and now - _phenom_quiz_candidates_cache["at"] < PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS:
+            return cached
+    candidates = []
+    if IMAGE_DIR.exists() and WEATHER_DB_PATH.exists():
+        try:
+            image_dates = list(_sorted_subdirs(IMAGE_DIR))
+            if image_dates:
+                _, phenom_df, station_names = fog_data.load_river_fog_data()
+                date_set = set(image_dates)
+                phenom_df = phenom_df[phenom_df["datetime"].dt.strftime("%Y-%m-%d").isin(date_set)]
+                code_lookup = {}
+                for _, row in phenom_df.iterrows():
+                    dt_str = row["datetime"].strftime("%Y-%m-%d %H:%M:%S")
+                    for name in station_names:
+                        code = encode_phenomena_cell(row[name])
+                        if code == code and code >= 0:  # NaN(未分類)・-1(無効画像)を除く
+                            code_lookup[(dt_str, name)] = int(code)
+                for date_dir in image_dates:
+                    for hhmm in _sorted_subdirs(IMAGE_DIR / date_dir):
+                        dt_str = f"{date_dir} {hhmm[:2]}:{hhmm[2:]}:00"
+                        for name in station_names:
+                            code = code_lookup.get((dt_str, name))
+                            if code is None:
+                                continue
+                            if (IMAGE_DIR / date_dir / hhmm / f"{name}.jpg").exists():
+                                candidates.append((date_dir, hhmm, name, code))
+        except Exception as e:
+            log.warning("Failed to build phenom quiz candidates: %s", e)
+    with _phenom_quiz_candidates_lock:
+        _phenom_quiz_candidates_cache["data"] = candidates
+        _phenom_quiz_candidates_cache["at"] = now
+    return candidates
+
+
+def _todays_phenom_quiz_item(date_str):
+    """その日の出題(date_dir, hhmm, station_name, code)を日付から決定論的に選ぶ
+    (候補が無ければNone)。"""
+    candidates = _phenom_quiz_candidates()
+    if not candidates:
+        return None
+    return random.Random(f"phenom_quiz:{date_str}").choice(candidates)
+
+
+def _resolve_pending_daily_fog_quiz():
+    """観測日が終わっている(今日より前の)未解決のデイリー霧予報クイズを答え合わせする。
+    賭けの答え合わせ(_resolve_pending_fog_bets)・バッジ付与と同じく、ゲーム関連ページを
+    開いたタイミングで遅延実行する(専用のcronは持たない)。"""
+    conn = _users_conn()
+    try:
+        today_str = now_jst_naive().strftime("%Y-%m-%d")
+        pending = users.list_pending_daily_fog_quiz(conn, today_str)
+        if not pending:
+            return
+        if not WEATHER_DB_PATH.exists():
+            return
+        _, phenom_df, _ = fog_data.load_river_fog_data()
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        for entry in pending:
+            station = entry["station_name"]
+            quiz_date = entry["quiz_date"]
+            if station not in phenom_df.columns:
+                users.resolve_daily_fog_quiz(conn, entry["user_id"], quiz_date, "incorrect", now_str, 0)
+                continue
+            day_start, day_end = f"{quiz_date} 00:00:00", f"{quiz_date} 23:59:59"
+            window = phenom_df[(phenom_df["datetime"] >= day_start) & (phenom_df["datetime"] <= day_end)]
+            codes = window[station].apply(encode_phenomena_cell)
+            occurred = bool(codes.dropna().isin(SUMMARY_FOG_CODES).any())
+            correct = occurred == entry["guess"]
+            new_streak = users.update_daily_fog_quiz_stats(conn, entry["user_id"], correct)
+            if correct:
+                bonus = min(new_streak, FOG_QUIZ_STREAK_BONUS_CAP_DAYS) * FOG_QUIZ_STREAK_BONUS_PER_DAY
+                payout = FOG_QUIZ_BASE_POINTS + bonus
+                users.grant_points(conn, entry["user_id"], f"fog_quiz:{quiz_date}", payout, now_str)
+                users.resolve_daily_fog_quiz(conn, entry["user_id"], quiz_date, "correct", now_str, payout)
+            else:
+                users.resolve_daily_fog_quiz(conn, entry["user_id"], quiz_date, "incorrect", now_str, 0)
+    except Exception as e:
+        log.warning("Failed to resolve daily fog quiz: %s", e)
+    finally:
+        conn.close()
+
+
 _station_fog_rate_cache = {"data": None, "at": 0.0}
 _station_fog_rate_cache_lock = threading.Lock()
 
@@ -4303,6 +4437,120 @@ def game_gamble_place():
         "game_gamble",
         f"{station}に{bet_amount}pt賭けました(倍率{multiplier}倍)。観測が終わり次第、答え合わせされます。",
     )
+
+
+@app.route("/game/daily")
+def game_daily():
+    """無料のデイリーゲーム(霧予報クイズ・現象当てクイズ・くじ)をまとめたページ。
+    川霧ギャンブルと違いポイントを賭けないため、ポイントが無い新規ユーザーでも遊べる。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    _resolve_pending_daily_fog_quiz()
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    fog_quiz_station = _daily_fog_quiz_station(today_str)
+    phenom_item = _todays_phenom_quiz_item(today_str)
+    phenom_image_url = None
+    if phenom_item:
+        date_dir, hhmm, station, _code = phenom_item
+        phenom_image_url = url_for("images_file", date=date_dir, hhmm=hhmm, filename=f"{station}.jpg")
+
+    conn = _users_conn()
+    try:
+        points = users.available_points(conn, my_id)
+        fog_quiz_today = users.get_daily_fog_quiz(conn, my_id, today_str)
+        fog_quiz_stats = users.get_daily_fog_quiz_stats(conn, my_id)
+        phenom_quiz_today = users.get_daily_phenom_quiz(conn, my_id, today_str)
+        lottery_result = users.get_point_event_amount(conn, my_id, f"daily_lottery:{today_str}")
+    finally:
+        conn.close()
+    return render_template(
+        "game_daily.html",
+        points=points,
+        fog_quiz_station=fog_quiz_station, fog_quiz_today=fog_quiz_today, fog_quiz_stats=fog_quiz_stats,
+        phenom_item=phenom_item, phenom_image_url=phenom_image_url, phenom_quiz_today=phenom_quiz_today,
+        phenom_categories=PHENOM_QUIZ_CATEGORIES, phenom_quiz_points=PHENOM_QUIZ_POINTS,
+        lottery_result=lottery_result, lottery_outcomes=LOTTERY_OUTCOMES,
+        fog_quiz_base_points=FOG_QUIZ_BASE_POINTS, fog_quiz_streak_bonus=FOG_QUIZ_STREAK_BONUS_PER_DAY,
+    )
+
+
+@app.route("/game/daily/fog_quiz/guess", methods=["POST"])
+def game_daily_fog_quiz_guess():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    guess = request.form.get("guess")
+    if guess not in ("yes", "no"):
+        return _finish("game_daily", "予想を選んでください。", success=False)
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    station = _daily_fog_quiz_station(today_str)
+    conn = _users_conn()
+    try:
+        created = users.place_daily_fog_quiz_guess(
+            conn, my_id, today_str, station, guess == "yes",
+            now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+    if not created:
+        return _finish("game_daily", "今日はもう回答済みです。", success=False)
+    return _finish("game_daily", f"「{station}」の予想を受け付けました。観測が終わり次第、答え合わせされます。")
+
+
+@app.route("/game/daily/phenom_quiz/answer", methods=["POST"])
+def game_daily_phenom_quiz_answer():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    item = _todays_phenom_quiz_item(today_str)
+    if item is None:
+        return _finish("game_daily", "今日は出題できる画像がありません。", success=False)
+    _date_dir, _hhmm, _station, code = item
+    category_guess = request.form.get("category", "")
+    if category_guess not in {c["id"] for c in PHENOM_QUIZ_CATEGORIES}:
+        return _finish("game_daily", "選択肢を選んでください。", success=False)
+    correct_category = _phenom_category_id_for_code(code)
+    correct = category_guess == correct_category
+    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        created = users.place_daily_phenom_quiz_answer(conn, my_id, today_str, category_guess, correct, now_str)
+        if created and correct:
+            users.grant_points(conn, my_id, f"phenom_quiz:{today_str}", PHENOM_QUIZ_POINTS, now_str)
+    finally:
+        conn.close()
+    if not created:
+        return _finish("game_daily", "今日はもう回答済みです。", success=False)
+    correct_label = next((c["label"] for c in PHENOM_QUIZ_CATEGORIES if c["id"] == correct_category), "不明")
+    if correct:
+        return _finish("game_daily", f"正解！「{correct_label}」でした。(+{PHENOM_QUIZ_POINTS}pt)")
+    return _finish("game_daily", f"不正解。正解は「{correct_label}」でした。")
+
+
+@app.route("/game/daily/lottery/draw", methods=["POST"])
+def game_daily_lottery_draw():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    source = f"daily_lottery:{today_str}"
+    conn = _users_conn()
+    try:
+        existing = users.get_point_event_amount(conn, my_id, source)
+        if existing is not None:
+            return _finish("game_daily", f"今日はもう引いています(結果: {existing}pt)。", success=False)
+        amount = random.choices(
+            [a for _, a in LOTTERY_OUTCOMES], weights=[w for w, _ in LOTTERY_OUTCOMES], k=1,
+        )[0]
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        if not users.grant_points(conn, my_id, source, amount, now_str):
+            # 直前にほぼ同時の二重送信があった場合、実際に記録された方の金額を表示する
+            amount = users.get_point_event_amount(conn, my_id, source)
+    finally:
+        conn.close()
+    return _finish("game_daily", f"デイリーくじ: {amount}pt獲得！")
 
 
 @app.route("/messages")

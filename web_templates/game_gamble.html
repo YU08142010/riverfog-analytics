@@ -11,6 +11,7 @@
 {% block content %}
 {{ page_tabs([
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
     {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}

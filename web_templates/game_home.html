@@ -10,6 +10,7 @@
 {% block content %}
 {{ page_tabs([
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
     {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
@@ -23,9 +24,15 @@
 </div>
 
 <div class="member-grid">
+    <a class="member-tile" href="{{ url_for('game_daily') }}" style="text-decoration:none;">
+        <div style="font-size:1.1rem; font-weight:600;">デイリー</div>
+        <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">
+            霧予報クイズ・現象当てクイズ・くじ。ポイントを賭けずに毎日無料で遊べます。
+        </p>
+    </a>
     <a class="member-tile" href="{{ url_for('game_shop') }}" style="text-decoration:none;">
         <div style="font-size:1.1rem; font-weight:600;">ショップ</div>
-        <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">ポイントでアバターフレームと交換できます。</p>
+        <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">ポイントでアバターフレームや称号と交換できます。</p>
     </a>
     <a class="member-tile" href="{{ url_for('game_gamble') }}" style="text-decoration:none;">
         <div style="font-size:1.1rem; font-weight:600;">川霧ギャンブル</div>

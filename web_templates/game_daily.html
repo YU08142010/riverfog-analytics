@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}デイリーゲーム{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('game_home') }}">ゲーム</a></li>
+    <li>デイリー</li>
+</ul>
+{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
+    {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
+    {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
+    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+]) }}
+
+<div class="card">
+    <h2 style="margin-top:0;">現在のポイント</h2>
+    <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
+    <p class="muted" style="font-size:0.82rem;">
+        以下はすべて無料で遊べます(ポイントは賭けません)。川霧ギャンブルとは別に、1日1回ずつ挑戦できます。
+    </p>
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">今日の霧予報クイズ</h2>
+    <p class="muted" style="font-size:0.85rem;">
+        今日の観測地点「<strong>{{ fog_quiz_station }}</strong>」に川霧が出るかどうかを無料で予想できます。
+        的中で{{ fog_quiz_base_points }}pt、連続的中日数に応じてボーナス(1日あたり+{{ fog_quiz_streak_bonus }}pt、上限あり)が付きます。
+    </p>
+    <p class="muted" style="font-size:0.8rem;">
+        現在の連続的中: {{ fog_quiz_stats.current_streak }}日(自己ベスト{{ fog_quiz_stats.best_streak }}日) /
+        通算的中 {{ fog_quiz_stats.total_correct }}/{{ fog_quiz_stats.total_played }}回
+    </p>
+    {% if fog_quiz_today %}
+        {% if fog_quiz_today.status == "pending" %}
+        <p>今日の予想:「{{ "霧が出る" if fog_quiz_today.guess else "霧は出ない" }}」で受付済みです。観測が終わり次第、結果がわかります。</p>
+        {% elif fog_quiz_today.status == "correct" %}
+        <p><span class="role-tag admin">的中！ +{{ fog_quiz_today.payout }}pt</span></p>
+        {% else %}
+        <p class="muted">今日の予想は外れでした。また明日挑戦できます。</p>
+        {% endif %}
+    {% else %}
+    <form method="post" action="{{ url_for('game_daily_fog_quiz_guess') }}" data-ajax data-ajax-reload style="display:flex; gap:0.6rem; margin-top:0.6rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" name="guess" value="yes" class="button">霧が出る</button>
+        <button type="submit" name="guess" value="no" class="button cancel">霧は出ない</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">今日の現象当てクイズ</h2>
+    {% if phenom_item %}
+    <p class="muted" style="font-size:0.85rem;">
+        この画像は「川霧・全体霧・層雲・霧雨/雨・現象なし」のどれ？ 正解で{{ phenom_quiz_points }}pt。
+    </p>
+    <img src="{{ phenom_image_url }}" alt="現象当てクイズの画像" style="max-width:360px; width:100%; border-radius: var(--radius-sm); display:block;">
+    {% if phenom_quiz_today %}
+        {% if phenom_quiz_today.correct %}
+        <p style="margin-top:0.5rem;"><span class="role-tag admin">正解！(+{{ phenom_quiz_points }}pt)</span></p>
+        {% else %}
+        <p class="muted" style="margin-top:0.5rem;">不正解でした。また明日挑戦できます。</p>
+        {% endif %}
+    {% else %}
+    <form method="post" action="{{ url_for('game_daily_phenom_quiz_answer') }}" data-ajax data-ajax-reload style="margin-top:0.6rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% for cat in phenom_categories %}
+        <button type="submit" name="category" value="{{ cat.id }}" class="button">{{ cat.label }}</button>
+        {% endfor %}
+    </form>
+    {% endif %}
+    {% else %}
+    <div class="empty-state"><span>今日はまだ出題できる画像がありません。画像アーカイブが増えるとここに問題が出ます。</span></div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">デイリーくじ</h2>
+    <p class="muted" style="font-size:0.85rem;">1日1回、無料でポイントを引けます。低確率で高額ポイントが当たります。</p>
+    {% if lottery_result is not none %}
+    <p>今日の結果: <span style="font-size:1.3rem; font-weight:700; color: var(--color-primary);">{{ lottery_result }}pt</span></p>
+    <p class="muted" style="font-size:0.78rem;">また明日引けます。</p>
+    {% else %}
+    <form method="post" action="{{ url_for('game_daily_lottery_draw') }}" data-ajax data-ajax-reload>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button">くじを引く</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

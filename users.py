@@ -138,6 +138,33 @@ CREATE TABLE IF NOT EXISTS fog_bets (
 );
 CREATE INDEX IF NOT EXISTS idx_fog_bets_user_id ON fog_bets(user_id);
 CREATE INDEX IF NOT EXISTS idx_fog_bets_status ON fog_bets(status);
+CREATE TABLE IF NOT EXISTS daily_fog_quiz (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    quiz_date TEXT NOT NULL,
+    station_name TEXT NOT NULL,
+    guess INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_at TEXT,
+    payout INTEGER,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, quiz_date)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_fog_quiz_status ON daily_fog_quiz(status, quiz_date);
+CREATE TABLE IF NOT EXISTS daily_fog_quiz_stats (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    current_streak INTEGER NOT NULL DEFAULT 0,
+    best_streak INTEGER NOT NULL DEFAULT 0,
+    total_correct INTEGER NOT NULL DEFAULT 0,
+    total_played INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS daily_phenom_quiz (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    quiz_date TEXT NOT NULL,
+    category_guess TEXT NOT NULL,
+    correct INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, quiz_date)
+);
 CREATE TABLE IF NOT EXISTS phenomena_corrections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     station_name TEXT NOT NULL,
@@ -1106,6 +1133,113 @@ def use_consumable(conn, user_id, item_id):
         return cur.rowcount > 0
 
 
+# --- デイリー霧予報クイズ(無料・スキル型) -----------------------------------------
+def place_daily_fog_quiz_guess(conn, user_id, quiz_date, station_name, guess, created_at):
+    """同じ(user_id, quiz_date)への2回目以降の投稿はPRIMARY KEY制約により無視される
+    (1日1回のみ)。新規に記録できればTrue、既に今日の分を出していればFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO daily_fog_quiz (user_id, quiz_date, station_name, guess, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, quiz_date, station_name, 1 if guess else 0, created_at),
+        )
+        return cur.rowcount > 0
+
+
+def get_daily_fog_quiz(conn, user_id, quiz_date):
+    row = conn.execute(
+        "SELECT station_name, guess, status, payout FROM daily_fog_quiz WHERE user_id = ? AND quiz_date = ?",
+        (user_id, quiz_date),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"station_name": row[0], "guess": bool(row[1]), "status": row[2], "payout": row[3]}
+
+
+def list_pending_daily_fog_quiz(conn, before_date):
+    """quiz_date(観測当日)が既に終わっている(before_dateより前)未解決分を返す。"""
+    rows = conn.execute(
+        "SELECT user_id, quiz_date, station_name, guess FROM daily_fog_quiz "
+        "WHERE status = 'pending' AND quiz_date < ?",
+        (before_date,),
+    ).fetchall()
+    return [{"user_id": r[0], "quiz_date": r[1], "station_name": r[2], "guess": bool(r[3])} for r in rows]
+
+
+def resolve_daily_fog_quiz(conn, user_id, quiz_date, status, resolved_at, payout):
+    with conn:
+        conn.execute(
+            "UPDATE daily_fog_quiz SET status = ?, resolved_at = ?, payout = ? "
+            "WHERE user_id = ? AND quiz_date = ?",
+            (status, resolved_at, payout, user_id, quiz_date),
+        )
+
+
+def get_daily_fog_quiz_stats(conn, user_id):
+    row = conn.execute(
+        "SELECT current_streak, best_streak, total_correct, total_played "
+        "FROM daily_fog_quiz_stats WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        return {"current_streak": 0, "best_streak": 0, "total_correct": 0, "total_played": 0}
+    return {"current_streak": row[0], "best_streak": row[1], "total_correct": row[2], "total_played": row[3]}
+
+
+def update_daily_fog_quiz_stats(conn, user_id, correct):
+    """的中ならcurrent_streakを+1、外れなら0に戻す。更新後のcurrent_streakを返す
+    (呼び出し側でストリークボーナスの計算に使う)。"""
+    stats = get_daily_fog_quiz_stats(conn, user_id)
+    new_streak = stats["current_streak"] + 1 if correct else 0
+    best = max(stats["best_streak"], new_streak)
+    total_correct = stats["total_correct"] + (1 if correct else 0)
+    total_played = stats["total_played"] + 1
+    with conn:
+        conn.execute(
+            "INSERT INTO daily_fog_quiz_stats "
+            "(user_id, current_streak, best_streak, total_correct, total_played) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "current_streak = excluded.current_streak, best_streak = excluded.best_streak, "
+            "total_correct = excluded.total_correct, total_played = excluded.total_played",
+            (user_id, new_streak, best, total_correct, total_played),
+        )
+    return new_streak
+
+
+# --- デイリー現象当てクイズ(無料、即時採点) ---------------------------------------
+def place_daily_phenom_quiz_answer(conn, user_id, quiz_date, category_guess, correct, created_at):
+    """1日1回のみ(PRIMARY KEY制約)。新規に記録できればTrue、既に回答済みならFalse。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO daily_phenom_quiz (user_id, quiz_date, category_guess, correct, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, quiz_date, category_guess, 1 if correct else 0, created_at),
+        )
+        return cur.rowcount > 0
+
+
+def get_daily_phenom_quiz(conn, user_id, quiz_date):
+    row = conn.execute(
+        "SELECT category_guess, correct FROM daily_phenom_quiz WHERE user_id = ? AND quiz_date = ?",
+        (user_id, quiz_date),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"category_guess": row[0], "correct": bool(row[1])}
+
+
+# --- デイリーくじ ------------------------------------------------------------------
+# 専用テーブルは持たず、grant_points()のpoint_events(UNIQUE(user_id, source))を
+# そのまま「1日1回」の判定に使う(source="daily_lottery:YYYY-MM-DD")。
+def get_point_event_amount(conn, user_id, source):
+    """指定sourceで既に付与済みなら、その時の金額を返す(無ければNone)。
+    デイリーくじの「今日はもう引いた」表示に、実際に出た金額を再表示するために使う。"""
+    row = conn.execute(
+        "SELECT amount FROM point_events WHERE user_id = ? AND source = ?", (user_id, source)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def _dm_pair(user_a_id, user_b_id):
     """2人のuser_idを常に同じ順序に正規化する(dm_conversationsのUNIQUE制約が
     「AさんとBさん」と「BさんとAさん」を別会話として二重作成しないようにするため)。"""
@@ -1435,6 +1569,9 @@ __all__ = [
     "owned_cosmetic_ids", "purchase_cosmetic", "set_equipped_cosmetic",
     "buy_consumable", "consumable_quantities", "use_consumable",
     "login_counts_between",
+    "place_daily_fog_quiz_guess", "get_daily_fog_quiz", "list_pending_daily_fog_quiz",
+    "resolve_daily_fog_quiz", "get_daily_fog_quiz_stats", "update_daily_fog_quiz_stats",
+    "place_daily_phenom_quiz_answer", "get_daily_phenom_quiz", "get_point_event_amount",
     "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",
