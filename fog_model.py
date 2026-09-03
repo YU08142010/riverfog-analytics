@@ -27,6 +27,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 
 from common import BASE_DIR, JST, request_with_dns_fallback
 import station_weather
+from fog_advection import ADVECTION_FOG_FEATURE, compute_advection_fog_index
 
 try:
     from xgboost import XGBClassifier
@@ -135,6 +136,12 @@ STATION_RATE_SMOOTHING = 20
 # ほど厳密ではなくなるが、無いよりは直近の広域的な傾向を反映できる）。
 CROSS_STATION_FOG_LAG_HOURS = 1
 CROSS_STATION_FOG_FEATURE = "広域霧指数"
+
+# 上のCROSS_STATION_FOG_FEATUREは地理・風向を一切見ない単純平均のため、「どちらから
+# どちらへ流れているか」を表せない。fog_advection.pyの移流霧指数(ADVECTION_FOG_FEATURE)は
+# 実測座標(cameras.csv)と実測風向風速から風上側の地点を推定し、その延長として追加した
+# 特徴量。互いに排他ではなく両方を特徴量として与え、どちらがどれだけ効くかはモデルの
+# 学習(および回帰検知の自動ロールバック)に委ねる。
 
 # 短い欠測（視程・降水量が単発で欠けている等）は行ごと捨てず時間方向に補間して活かす。
 # これを超える欠測はこれまで通り除外する。
@@ -778,6 +785,9 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
     merged = pd.merge(main_df, targets, on="datetime", how="inner")
     merged = merged.sort_values("datetime").reset_index(drop=True)
     cross_rates = _compute_cross_station_fog_rates(merged, phenom_cols)
+    advection_idx = compute_advection_fog_index(
+        merged, phenom_cols, camera_coords or {}, COL_WIND_DIR_DEG, COL_WIND_SPEED,
+    )
 
     merged, feature_names, shared_medians = prepare_features(merged, lat, lon)
     # 短い欠測は時間方向に補間して活かす（視程・降水量が単発で欠けているだけで行ごと
@@ -786,7 +796,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
         method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
     )
     merged = merged.dropna(subset=feature_names)
-    feature_names = feature_names + [CROSS_STATION_FOG_FEATURE]
+    feature_names = feature_names + [CROSS_STATION_FOG_FEATURE, ADVECTION_FOG_FEATURE]
 
     log.info("Training location models: per-station best-model auto-selection, features=%s", feature_names)
 
@@ -820,6 +830,10 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
     for col in phenom_cols:
         col_merged, col_features, col_medians = station_frames.get(col, (merged, feature_names, shared_medians))
         col_merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(col_merged.index).to_numpy()
+        # 風が弱く移流方向の推定自体が信頼できない時間帯はNaNになるため(_compute_cross_station_fog_rates
+        # と異なりCROSS_STATION_FOG_FEATUREよりずっと高頻度に発生する)、_collect_location_xyのdropnaで
+        # 行ごと大量に失われないよう「追加の上流リスク信号なし」として0.0で埋める。
+        col_merged[ADVECTION_FOG_FEATURE] = advection_idx[col].reindex(col_merged.index).fillna(0.0).to_numpy()
         sub, X, y = _collect_location_xy(col_merged, col, col_features)
         if len(sub) < MIN_ROWS_PER_LOCATION:
             continue
@@ -872,11 +886,14 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
             "hybrid_only": hybrid_only, "rf_lgbm_only": rf_lgbm_only, "triple_only": triple_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
+            "advection_index_last": _last_valid_value(advection_idx[col]),
             "measure_medians": col_medians,
         }
 
     n_individual = len(models)
-    _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians)
+    _rescue_with_pooled_model(
+        models, merged, phenom_cols, feature_names, cross_rates, shared_medians, advection_idx,
+    )
 
     n_pooled = len(models) - n_individual
     n_unmodeled = len(phenom_cols) - len(models)
@@ -927,7 +944,7 @@ def _last_valid_value(series, default=0.0):
     return float(s.iloc[-1]) if len(s) else default
 
 
-def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians):
+def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians, advection_idx):
     """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
 
     気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
@@ -942,6 +959,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
     total_k, total_n = 0.0, 0
     for col in phenom_cols:
         merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(merged.index).to_numpy()
+        merged[ADVECTION_FOG_FEATURE] = advection_idx[col].reindex(merged.index).fillna(0.0).to_numpy()
         sub, X, y = _collect_location_xy(merged, col, feature_names)
         if sub.empty:
             continue
@@ -1035,6 +1053,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
             "hybrid_only": hybrid_only2, "rf_lgbm_only": rf_lgbm_only2, "triple_only": triple_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
+            "advection_index_last": _last_valid_value(advection_idx[col]),
             "measure_medians": shared_medians,
         }
         rescued += 1
@@ -1173,6 +1192,8 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
             # 予報期間中は他地点の実測が存在しないため、直近の実測時点での値を
             # 一定値として引き継ぐ近似値を使う（train_location_modelsのコメント参照）。
             X[CROSS_STATION_FOG_FEATURE] = info.get("cross_fog_index_last", 0.0)
+        if ADVECTION_FOG_FEATURE in feature_names:
+            X[ADVECTION_FOG_FEATURE] = info.get("advection_index_last", 0.0)
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X)
         snapshot = X.copy()
@@ -1207,6 +1228,8 @@ def simulate_station(info, lat, lon, weather, dt):
         # 予報時(build_location_forecast_codes)と同じく、他地点の実測が無い分は
         # 直近の実測時点での値を一定値として引き継ぐ近似を使う。
         X[CROSS_STATION_FOG_FEATURE] = info.get("cross_fog_index_last", 0.0)
+    if ADVECTION_FOG_FEATURE in feature_names:
+        X[ADVECTION_FOG_FEATURE] = info.get("advection_index_last", 0.0)
 
     pipe = info["pipe"]
     proba = np.asarray(pipe.predict_proba(X))[0]

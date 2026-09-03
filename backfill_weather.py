@@ -18,8 +18,9 @@ collect.py の毎時収集は、DNS障害等でその回の気象取得（Open-M
 30日以上前の行がそれでも埋まらない場合は、毎日ログに個別出力せず件数のみ集計する
 （恒久的に取得できない古い欠測でログが埋もれるのを防ぐため）。
 
-collect.py と同じ時間帯に同時実行されると xlsx の書き込みが競合するため、
-cron 等で定期実行する場合は毎時収集(04:00-19:00台の00分)を避けたタイミングにすること。
+以前は只見川.xlsxを直接読み書きしており、collect.pyと同じ時間帯の同時実行を避ける必要が
+あった。weather_store.py(SQLite)移行後はbusy_timeoutが書き込み競合を吸収するため必須では
+ないが、念のため引き続き毎時収集(04:00-19:00台の00分)を避けたタイミングでの実行を推奨する。
 """
 import csv
 import logging
@@ -28,22 +29,17 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-import openpyxl
 import requests
 from dotenv import load_dotenv
 
+import weather_store
 from common import (
     BASE_DIR,
-    COL_DATETIME,
-    COL_TEMP,
-    DATA_XLSX,
     JST,
-    XlsxLockTimeout,
+    WEATHER_DB_PATH,
     record_network_failure,
     representative_coords,
     request_with_dns_fallback,
-    set_weather_measures,
-    xlsx_write_lock,
 )
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
@@ -215,28 +211,21 @@ def fetch_weather_for_date(date_obj, lat, lon):
     return result
 
 
-def find_missing_rows(ws):
-    """気温列が空の行を「気象データ欠測」とみなして (行番号, 日時) のリストを返す。"""
-    missing = []
-    for row in range(2, ws.max_row + 1):
-        dt = ws.cell(row=row, column=COL_DATETIME).value
-        if dt is None:
-            continue
-        if ws.cell(row=row, column=COL_TEMP).value is None:
-            missing.append((row, dt))
-    return missing
+def find_missing_datetimes(conn):
+    """気温が欠測している既存行の日時を「気象データ欠測」とみなして返す。"""
+    rows = conn.execute(
+        "SELECT datetime FROM weather_observations WHERE temperature IS NULL ORDER BY datetime"
+    ).fetchall()
+    return [datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S") for r in rows]
 
 
-def find_fully_missing_rows(ws):
+def find_fully_missing_datetimes(conn):
     """観測時間帯(4〜19時)の中で、行自体が存在しない時刻を検出する。
     collect.pyが気象取得より前の段階で異常終了した場合（例: OS再起動によるプロセス強制終了）に
     発生しうる。初日については、実際に収集が始まった時刻より前は「欠測」として扱わない。
     """
-    existing = set()
-    for row in range(2, ws.max_row + 1):
-        dt = ws.cell(row=row, column=COL_DATETIME).value
-        if isinstance(dt, datetime):
-            existing.add(dt)
+    rows = conn.execute("SELECT datetime FROM weather_observations").fetchall()
+    existing = {datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S") for r in rows}
     if not existing:
         return []
 
@@ -258,42 +247,22 @@ def find_fully_missing_rows(ws):
     return missing
 
 
-def find_insert_position(ws, dt_naive):
-    """dt_naiveを時系列順に挿入すべき行番号（既存行の直後）を返す。"""
-    insert_at = 2
-    for row in range(2, ws.max_row + 1):
-        existing_dt = ws.cell(row=row, column=COL_DATETIME).value
-        if not isinstance(existing_dt, datetime):
-            continue
-        if existing_dt < dt_naive:
-            insert_at = row + 1
-        else:
-            break
-    return insert_at
-
-
 def main():
     load_dotenv(BASE_DIR / ".env")
     dry_run = "--dry-run" in sys.argv[1:]
 
     lat, lon = representative_coords()
 
-    if not DATA_XLSX.exists():
-        log.info("xlsx not found, nothing to backfill: %s", DATA_XLSX)
+    if not WEATHER_DB_PATH.exists():
+        log.info("weather.db not found, nothing to backfill: %s", WEATHER_DB_PATH)
         return
 
     log.info("=== Backfill started%s ===", " (dry-run)" if dry_run else "")
-
-    try:
-        with xlsx_write_lock():
-            _run_backfill(dry_run, lat, lon)
-    except XlsxLockTimeout as e:
-        log.error("%s; skipping this run (collect.py or another backfill is likely writing)", e)
+    _run_backfill(dry_run, lat, lon)
 
 
 def _run_backfill(dry_run, lat, lon):
-    wb = openpyxl.load_workbook(DATA_XLSX)
-    ws = wb.active
+    conn = weather_store.connect(WEATHER_DB_PATH)
 
     today = datetime.now(JST).date()
     date_cache = {}
@@ -309,33 +278,30 @@ def _run_backfill(dry_run, lat, lon):
     backfilled_datetimes = []
 
     # 1) 既存行のうち気象データのみ欠測している行を埋める
-    missing = find_missing_rows(ws)
+    missing = find_missing_datetimes(conn)
     filled = 0
     if missing:
         log.info("Found %d row(s) with missing weather data", len(missing))
-        for row, dt in missing:
+        for dt in missing:
             entry = weather_for(dt)
             if entry is None:
                 if (today - dt.date()).days <= GIVE_UP_AFTER_DAYS:
-                    log.info("Still unavailable, skipped: row %d (%s)", row, dt)
+                    log.info("Still unavailable, skipped: %s", dt)
                 else:
                     gave_up += 1
                 continue
             weather, source = entry
             if not dry_run:
-                set_weather_measures(ws, row, weather)
+                weather_store.record_weather(conn, dt.strftime("%Y-%m-%d %H:%M:%S"), weather)
                 backfilled_datetimes.append(dt)
             filled += 1
-            log.info("Backfilled: row %d (%s) via %s%s", row, dt, source, " [dry-run]" if dry_run else "")
+            log.info("Backfilled: %s via %s%s", dt, source, " [dry-run]" if dry_run else "")
     else:
-        log.info("No missing weather rows found (%d data row(s) checked)", ws.max_row - 1)
-
-    if filled and not dry_run:
-        wb.save(DATA_XLSX)
+        log.info("No missing weather rows found")
 
     # 2) 行自体が丸ごと存在しない時刻を検出し、気象データのみで行を新規挿入する
     #    （現象コード列は画像が存在しないため空のままにする）
-    fully_missing = find_fully_missing_rows(ws)
+    fully_missing = find_fully_missing_datetimes(conn)
     inserted = 0
     if fully_missing:
         log.warning(
@@ -353,10 +319,7 @@ def _run_backfill(dry_run, lat, lon):
                 continue
             weather, source = entry
             if not dry_run:
-                insert_at = find_insert_position(ws, dt)
-                ws.insert_rows(insert_at)
-                ws.cell(row=insert_at, column=COL_DATETIME).value = dt
-                set_weather_measures(ws, insert_at, weather)
+                weather_store.record_weather(conn, dt.strftime("%Y-%m-%d %H:%M:%S"), weather)
                 backfilled_datetimes.append(dt)
             inserted += 1
             log.warning(
@@ -364,8 +327,8 @@ def _run_backfill(dry_run, lat, lon):
                 "%s via %s%s",
                 dt, source, " [dry-run]" if dry_run else "",
             )
-        if inserted and not dry_run:
-            wb.save(DATA_XLSX)
+
+    conn.close()
 
     if gave_up:
         log.info(

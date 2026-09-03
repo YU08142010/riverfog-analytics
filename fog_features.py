@@ -222,14 +222,16 @@ def prepare_features(df, lat, lon, feature_names=None, medians=None):
 def build_location_class_targets(phenom_df, phenom_cols):
     """地点それぞれの現象コード（0="/"、1〜10、欠測はNaN）を作る。
 
-    雨・霧雨(9・10)は学習ターゲットとしては0(現象なし)に丸める。雨予報は
-    別途一般の天気予報で足りるため、この霧予測モデルでは雨そのものを予測対象に
-    しない（学習データに9・10が出てこなくなるため、scikit-learnの分類器も
-    自然にそれらのクラスを一切予測しなくなる）。実況分類(collect.py)側は
-    引き続き9・10を判定・記録し、霧との誤認別を防ぐ。
+    以前は雨・霧雨(9・10)を学習ターゲットとして0(現象なし)に丸めていたが、これは
+    「降水あり時の的中率が降水なし時より20pt以上低い」という精度分析(accuracy.html)の
+    結果につながっていた: predicted_code(常に0〜8のいずれか)がactual_code(実況では
+    9・10も記録される)と完全一致するかで的中率を測っているため、雨天時は原理的に
+    的中しようがなかった。9・10も他のクラスと同様にそのまま学習ターゲットに残すことで、
+    モデルが「雨・霧雨っぽい気象条件」と「本当に何も無い(0)」・「霧(1〜3)」を区別する
+    手がかりを学習データから奪わないようにする。霧である確率(_fog_probability)は
+    SUMMARY_FOG_CODESの列だけを合算するため、この変更の影響を受けない。
     """
     codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
-    codes = codes.replace({9: 0, 10: 0})
     targets = codes.copy()
     targets.insert(0, "datetime", phenom_df["datetime"].values)
     return targets

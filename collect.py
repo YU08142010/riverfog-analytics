@@ -1,6 +1,6 @@
 """只見川流域33地点の川霧観測・自動収集（毎時実行）。
 
-画像取得 -> Gemini分類（現象コード + 画像自体の有効性判定） -> Open-Meteo気象取得 -> xlsx追記 を1回分行う。
+画像取得 -> Gemini分類（現象コード + 画像自体の有効性判定） -> Open-Meteo気象取得 -> weather.db追記 を1回分行う。
 サーバー1単独運用。データは /opt/river-fog/data にローカル保存し、Samba共有で公開する。
 
 スケジューリングはsystemdタイマー(river-fog-collect.timer/.service)で行っており、
@@ -20,7 +20,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Literal
 
-import openpyxl
 import requests
 from dotenv import load_dotenv
 from PIL import Image, ImageChops
@@ -29,22 +28,18 @@ from pydantic import BaseModel
 from common import (
     BASE_DIR,
     CAMERAS_CSV,
-    COL_DATETIME,
-    COL_PHENOM_START,
-    DATA_XLSX,
     DEFAULT_GEMINI_MODEL,
     JST,
     STATION_WEATHER_DB_PATH,
-    TEMPLATE_XLSX,
+    WEATHER_DB_PATH,
     load_camera_coords,
     record_network_failure,
     representative_coords,
     request_with_dns_fallback,
     send_alert,
-    set_weather_measures,
-    xlsx_write_lock,
 )
 import station_weather
+import weather_store
 
 CAM_IMAGE_URL = "https://cam.river.go.jp/cam/now/{cam_id}.jpg"
 CAM_HEADERS = {
@@ -1096,61 +1091,21 @@ def record_station_weather(run_time):
         log.exception("Failed to record per-station weather")
 
 
-def ensure_workbook():
-    DATA_XLSX.parent.mkdir(parents=True, exist_ok=True)
-    if not DATA_XLSX.exists():
-        shutil.copy(TEMPLATE_XLSX, DATA_XLSX)
-        log.info("Created new workbook from template: %s", DATA_XLSX)
-
-
-# 直近何行を重複チェック対象にするか。backfill_weather.pyが欠測行を途中に挿入することが
-# あり、末尾付近の行順が通常のhourly実行だけの場合より前後することがあるため、
-# 以前の5行では見逃す余地があった。48行(2日分)あれば十分な余裕がある。
-FIND_EXISTING_ROW_LOOKBACK = 48
-
-
-def find_existing_row(ws, run_time_naive):
-    """同じ日時の行が既に存在すればその行番号を返す（直近数行のみ確認、無ければNone）。"""
-    max_row = ws.max_row
-    for row in range(max_row, max(max_row - FIND_EXISTING_ROW_LOOKBACK, 1), -1):
-        if ws.cell(row=row, column=COL_DATETIME).value == run_time_naive:
-            return row
-    return None
-
-
 def append_row(cameras, phenom_by_name, weather, run_time):
-    ensure_workbook()
-    # backfill_weather.py・backfill_images.pyと同じxlsxを読み書きするため、
-    # load_workbook〜saveの間は排他ロックを取る(common.xlsx_write_lock参照)。
-    with xlsx_write_lock():
-        wb = openpyxl.load_workbook(DATA_XLSX)
-        ws = wb.active
-        # Excelはtzinfoつきのdatetimeを書き込めないため、ローカル時刻の値のまま外す
-        run_time_naive = run_time.replace(tzinfo=None)
+    """今回の観測1時間分をweather.db(weather_store.py)に記録する。同じdatetimeは
+    上書き(UPSERT)されるため、以前のxlsx版のような「既存行を探す」処理は不要。"""
+    # Excelとの互換用にtzinfoつきのdatetimeは保存しない(以前のxlsx版と同じ、ローカル時刻の値)。
+    run_time_naive = run_time.replace(tzinfo=None)
+    dt_str = run_time_naive.strftime("%Y-%m-%d %H:%M:%S")
+    phenom_full = {name: phenom_by_name.get(name) for name, _cam_id in cameras}
 
-        existing_row = find_existing_row(ws, run_time_naive)
-        if existing_row is not None:
-            row = existing_row
-            log.warning("Row for %s already exists (row %d); overwriting instead of appending", run_time_naive, row)
-        else:
-            row = ws.max_row + 1
-
-        ws.cell(row=row, column=COL_DATETIME).value = run_time_naive
-        set_weather_measures(ws, row, weather)
-
-        for i, (name, _cam_id) in enumerate(cameras):
-            col = COL_PHENOM_START + i
-            code = phenom_by_name.get(name)
-            if code is None:
-                ws.cell(row=row, column=col).value = None
-            elif code == 0:
-                ws.cell(row=row, column=col).value = "/"
-            else:
-                ws.cell(row=row, column=col).value = code
-
-        wb.save(DATA_XLSX)
-    action = "Overwrote" if existing_row is not None else "Appended"
-    log.info("%s row in xlsx: row %d (%s)", action, row, run_time_naive)
+    conn = weather_store.connect(WEATHER_DB_PATH)
+    try:
+        weather_store.record_weather(conn, dt_str, weather)
+        weather_store.record_phenomena(conn, dt_str, phenom_full)
+    finally:
+        conn.close()
+    log.info("Recorded observation in weather.db: %s", run_time_naive)
 
 
 def main():

@@ -40,13 +40,15 @@ import matplotlib.dates as mdates
 from matplotlib import font_manager
 
 from common import (
-    BASE_DIR, CAMERAS_CSV, DATA_XLSX, JST, NETWORK_FAILURE_LOG_PATH,
-    STATION_WEATHER_DB_PATH, build_data_backup_zip, now_jst_naive, representative_coords, send_alert,
+    BASE_DIR, CAMERAS_CSV, DATA_XLSX, EXPORT_XLSX_PATH, JST, NETWORK_FAILURE_LOG_PATH,
+    STATION_WEATHER_DB_PATH, TEMPLATE_XLSX, WEATHER_DB_PATH, build_data_backup_zip,
+    now_jst_naive, representative_coords, send_alert,
 )
 import announcements
 import users
 import fog_data
 import fog_model
+import weather_store
 import prediction_log
 import station_weather
 from fog_features import (
@@ -251,7 +253,8 @@ DISK_USAGE_PARTS = [
     ("カメラ画像 (images/)", IMAGE_DIR),
     ("予測結果 (predictions/)", PRED_DIR),
     ("予測DB (predictions.db)", DB_PATH),
-    ("観測データ (只見川.xlsx)", DATA_XLSX),
+    ("観測データ (weather.db)", WEATHER_DB_PATH),
+    ("観測データ旧形式 (只見川.xlsx、移行後は更新されない)", DATA_XLSX),
     ("モデル (models/)", BASE_DIR / "data" / "models"),
 ]
 RESTORE_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
@@ -2387,7 +2390,7 @@ def _accuracy_by_weather_safe():
         cached = _accuracy_by_weather_cache["data"]
         if cached is not None and now - _accuracy_by_weather_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
             return cached
-    if not DB_PATH.exists() or not DATA_XLSX.exists():
+    if not DB_PATH.exists() or not WEATHER_DB_PATH.exists():
         return None
     try:
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
@@ -2445,7 +2448,7 @@ def _accuracy_by_weather_safe():
 
 def _latest_observations():
     """最新時刻の観測(気象値+地点ごとの現象コード)を返す。データが無ければNoneを返す。"""
-    if not DATA_XLSX.exists():
+    if not WEATHER_DB_PATH.exists():
         return None
     try:
         main_df, phenom_df, station_names = fog_data.load_river_fog_data()
@@ -2618,7 +2621,7 @@ def dashboard():
 
 @app.route("/observations")
 def observations_dates():
-    if not DATA_XLSX.exists():
+    if not WEATHER_DB_PATH.exists():
         return render_template("observations_dates.html", dates=[])
     try:
         main_df, _, _ = fog_data.load_river_fog_data()
@@ -2686,9 +2689,14 @@ def observations_date_chart(date):
 
 @app.route("/download/xlsx")
 def download_xlsx():
-    if not DATA_XLSX.exists():
+    if not WEATHER_DB_PATH.exists():
         abort(404)
-    return send_file(DATA_XLSX, as_attachment=True, download_name="只見川.xlsx")
+    conn = weather_store.connect(WEATHER_DB_PATH)
+    try:
+        weather_store.export_to_xlsx(conn, EXPORT_XLSX_PATH, CAMERAS_CSV, TEMPLATE_XLSX)
+    finally:
+        conn.close()
+    return send_file(EXPORT_XLSX_PATH, as_attachment=True, download_name="只見川.xlsx")
 
 
 @app.route("/images")
@@ -2733,7 +2741,7 @@ def _phenom_codes_for_datetime(target_dt_str):
     コードを返す((codes_by_station, corrections_by_station)、いずれも{地点名: コード})。
     images_hour()と後述のimages_hour_correct()の両方から使う共通処理。"""
     codes_by_station = {}
-    if DATA_XLSX.exists():
+    if WEATHER_DB_PATH.exists():
         try:
             _, phenom_df, station_names = fog_data.load_river_fog_data()
             row = phenom_df[phenom_df["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S") == target_dt_str]
@@ -3094,7 +3102,7 @@ def weather_fog_graph_page():
 def weather_fog_graph_png():
     station = _validate_station(request.args.get("station", STATION_NAMES[0]))
     main_df = phenom_df = None
-    if DATA_XLSX.exists():
+    if WEATHER_DB_PATH.exists():
         try:
             main_df, phenom_df, _ = fog_data.load_river_fog_data()
         except Exception as e:
@@ -3120,7 +3128,7 @@ def river_fog_histogram_page():
 def weather_fog_histogram_png():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。"""
     main_df = phenom_df = station_names = None
-    if DATA_XLSX.exists():
+    if WEATHER_DB_PATH.exists():
         try:
             main_df, phenom_df, station_names = fog_data.load_river_fog_data()
         except Exception as e:
@@ -3572,7 +3580,7 @@ def _station_fog_rates():
         cached = _station_fog_rate_cache["data"]
         if cached is not None and now - _station_fog_rate_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
             return cached
-    if not DATA_XLSX.exists():
+    if not WEATHER_DB_PATH.exists():
         return {}
     try:
         main_df, phenom_df, station_names = fog_data.load_river_fog_data()
@@ -3639,7 +3647,7 @@ def _resolve_pending_fog_bets():
         pending = users.list_pending_fog_bets(conn, now_str)
         if not pending:
             return
-        if not DATA_XLSX.exists():
+        if not WEATHER_DB_PATH.exists():
             return
         main_df, phenom_df, _ = fog_data.load_river_fog_data()
         for bet in pending:

@@ -20,6 +20,13 @@ DATA_XLSX_LOCK_PATH = BASE_DIR / "data" / ".只見川.xlsx.lock"
 TEMPLATE_XLSX = BASE_DIR / "template" / "header_template.xlsx"
 CAMERAS_CSV = BASE_DIR / "cameras.csv"
 STATION_WEATHER_DB_PATH = BASE_DIR / "data" / "station_weather.db"
+# 只見川.xlsxに代わる代表地点気象・現象コードの実データストア(weather_store.py参照)。
+# 只見川.xlsx自体は削除せず、人がExcelで見たい時のエクスポート出力先として残す。
+WEATHER_DB_PATH = BASE_DIR / "data" / "weather.db"
+# ダウンロード時にweather_store.export_to_xlsx()でその場に書き出すエクスポート専用ファイル。
+# 移行前の只見川.xlsx(DATA_XLSX)は移行時点のスナップショットとしてそのまま残し、
+# 以後はこちらだけを更新する。
+EXPORT_XLSX_PATH = BASE_DIR / "data" / "只見川_エクスポート.xlsx"
 
 JST = timezone(timedelta(hours=9))
 

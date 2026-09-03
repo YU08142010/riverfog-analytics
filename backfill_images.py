@@ -12,15 +12,16 @@ cam.river.go.jp/cam/history/{YYYYMMDDHHMM}/{camId}.jpg から該当時刻のス�
 範囲を5分刻みで近い順に探す（河川・霧の状況は数分では大きく変わらないため、
 近い時刻のスナップショットでも実用上十分）。
 
-取得できた画像は、collect.pyと同じGeminiモデル・プロンプトで分類し直し、xlsxの該当セルと
-confidence_log.csvを埋める。Geminiが「実際の写真ではない」（-1）と判定した場合は
-プレースホルダーのまま維持する（元々写真として成立していなかった可能性が高いため）。
+取得できた画像は、collect.pyと同じGeminiモデル・プロンプトで分類し直し、weather.db
+(weather_store.py)の該当行とconfidence_log.csvを埋める。Geminiが「実際の写真ではない」
+（-1）と判定した場合はプレースホルダーのまま維持する（元々写真として成立していなかった
+可能性が高いため）。
 
-collect.pyと同時に実行すると画像アーカイブ・confidence_log.csv・xlsxの書き込みが競合するため、
-毎時収集(04:00-19:00台の00分)を避けたタイミングでcron等から定期実行すること
-（backfill_weather.pyと同じ注意点）。また同じxlsxファイルをbackfill_weather.pyも書き換えるため、
-両者が同時に走らないよう実行時刻をずらすこと（crontabではbackfill_weather.py 19:20、
-predict.py 19:30の後、本スクリプトは19:45に設定している）。
+以前は只見川.xlsxを直接読み書きしており、collect.py・backfill_weather.pyと実行時刻を
+ずらす必要があった。weather_store.py移行後はSQLiteのbusy_timeoutが競合を吸収するため
+必須ではないが、画像アーカイブ・confidence_log.csvの競合は変わらず残るため、
+引き続き毎時収集と時間帯をずらして実行することを推奨する（crontabではbackfill_weather.py
+19:20、predict.py 19:30の後、本スクリプトは19:45に設定している）。
 """
 import logging
 import logging.handlers
@@ -28,22 +29,18 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-import openpyxl
 import requests
 from dotenv import load_dotenv
 
 import collect
+import weather_store
 from common import (
     BASE_DIR,
-    COL_DATETIME,
-    COL_PHENOM_START,
-    DATA_XLSX,
     DEFAULT_GEMINI_MODEL,
     JST,
-    XlsxLockTimeout,
+    WEATHER_DB_PATH,
     record_network_failure,
     request_with_dns_fallback,
-    xlsx_write_lock,
 )
 
 HISTORY_URL = "https://cam.river.go.jp/cam/history/{ts}/{cam_id}.jpg"
@@ -155,37 +152,16 @@ def find_missing_slots():
     return slots
 
 
-def _row_index_map(ws):
-    """datetime -> 行番号 の対応表を作る（全行を一度だけ走査）。"""
-    idx = {}
-    for row in range(2, ws.max_row + 1):
-        dt = ws.cell(row=row, column=COL_DATETIME).value
-        if isinstance(dt, datetime):
-            idx[dt] = row
-    return idx
-
-
 def main():
     load_dotenv(BASE_DIR / ".env")
     dry_run = "--dry-run" in sys.argv[1:]
     log.info("=== Backfill started%s ===", " (dry-run)" if dry_run else "")
-
-    # xlsxへの書き込み(load_workbook〜save)はcollect.py・backfill_weather.pyとも競合しうるため
-    # 排他ロックを取る(common.xlsx_write_lock参照)。この関数は画像取得・Gemini分類など
-    # xlsxに触れない処理も多いが、途中で書き込みが発生するかどうかは事前に分からないため、
-    # 実行全体を通してロックを保持する(バックグラウンドバッチ処理なので多少長く保持しても
-    # 実害は小さいと判断)。
-    try:
-        with xlsx_write_lock():
-            _run_backfill(dry_run)
-    except XlsxLockTimeout as e:
-        log.error("%s; skipping this run (collect.py or backfill_weather.py is likely writing)", e)
+    _run_backfill(dry_run)
 
 
 def _run_backfill(dry_run):
     cameras = collect.load_cameras()
     cam_id_by_name = dict(cameras)
-    col_by_name = {name: COL_PHENOM_START + i for i, (name, _cam_id) in enumerate(cameras)}
 
     slots = find_missing_slots()
     if not slots:
@@ -203,9 +179,7 @@ def _run_backfill(dry_run):
     if not api_keys:
         log.warning("GEMINI_API_KEY is not set; recovered images will be saved but not classified")
 
-    wb = None
-    ws = None
-    row_index = None
+    conn = weather_store.connect(WEATHER_DB_PATH)
     filled = 0
     recovered_but_invalid = 0
     still_missing = 0
@@ -277,24 +251,21 @@ def _run_backfill(dry_run):
             code = phenom_by_name.get(name)
             if code is None:
                 continue
-            if wb is None:
-                wb = openpyxl.load_workbook(DATA_XLSX)
-                ws = wb.active
-                row_index = _row_index_map(ws)
-            row = row_index.get(target_dt)
-            if row is None:
-                log.warning("No xlsx row found for %s, image saved but phenomenon code not recorded", target_dt)
+            dt_str = target_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if not weather_store.weather_row_exists(conn, dt_str):
+                log.warning(
+                    "No weather.db row found for %s, image saved but phenomenon code not recorded", target_dt,
+                )
                 continue
             if not dry_run:
-                ws.cell(row=row, column=col_by_name[name]).value = "/" if code == 0 else code
+                weather_store.record_phenomena(conn, dt_str, {name: code})
             filled += 1
             conf = confidence_by_name.get(name)
             if conf:
                 confidence_updates.setdefault(target_dt, {})[name] = conf
                 reasoning_updates.setdefault(target_dt, {})[name] = reasoning_by_name.get(name, "")
 
-    if wb is not None and filled and not dry_run:
-        wb.save(DATA_XLSX)
+    conn.close()
 
     if confidence_updates and not dry_run:
         for dt, conf_map in confidence_updates.items():
