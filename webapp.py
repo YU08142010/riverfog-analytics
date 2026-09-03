@@ -3990,7 +3990,6 @@ TITLE_DEFINITIONS = [
     {"id": "legendary_observer", "label": "伝説の観測者", "cost": 15000},
     {"id": "dopagaki", "label": "ドパガキ", "cost": 50000},
     {"id": "legendary_gambler", "label": "伝説のギャンブラー", "cost": 1000000},
-    {"id": "admin_title", "label": "管理人", "cost": 0, "admin_only": True},
 ]
 TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
 
@@ -4177,7 +4176,7 @@ GAMBLE_PRECISION_BY_ID = {p["id"]: p for p in GAMBLE_PRECISIONS}
 # --- デイリー霧予報クイズ(無料・スキル型、川霧ギャンブルと違いポイントを賭けない) -------
 # 毎日同じ地点を全員に出題する(日付から決定論的に選ぶ)ことで、その日1回だけの
 # 気軽な予想ゲームにする。的中報酬に連続的中日数のボーナスを付け、継続を後押しする。
-FOG_QUIZ_BASE_POINTS = 10
+FOG_QUIZ_BASE_POINTS = 500
 FOG_QUIZ_STREAK_BONUS_PER_DAY = 2
 FOG_QUIZ_STREAK_BONUS_CAP_DAYS = 20  # ボーナス上限 = 20日 x 2pt = 40pt
 
@@ -4197,7 +4196,7 @@ PHENOM_QUIZ_CATEGORIES = [
     {"id": "ame", "label": "霧雨・雨", "codes": {9, 10}},
     {"id": "nashi", "label": "現象なし", "codes": {0}},
 ]
-PHENOM_QUIZ_POINTS = 15
+PHENOM_QUIZ_POINTS = 500
 OBSERVATION_REPORT_REWARD_POINTS = 2000
 PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
 
