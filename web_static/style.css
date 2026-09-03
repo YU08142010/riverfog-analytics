@@ -1873,3 +1873,41 @@ table.obs-table th.sticky-col { z-index: 3; }
     .jump-highlight { animation: none; }
 }
 
+/* --- ファイル共有拡張: 全文検索・お気に入り・自動タグ・一括操作(webapp.pyの
+   shared_file_upload/shared_file_star/shared_file_bulk_*と対応)。 */
+.bulk-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--color-primary-light);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.7rem;
+    margin-top: 0.6rem;
+    flex-wrap: wrap;
+}
+.star-toggle-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: var(--color-warning);
+    padding: 0 0.2rem;
+    vertical-align: middle;
+}
+.file-tag-chip {
+    display: inline-block;
+    font-size: 0.68rem;
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    padding: 0.05rem 0.45rem;
+    margin: 0.1rem 0.2rem 0 0;
+}
+[data-folder-drop-target].drop-target-hover {
+    background: var(--color-primary-light);
+    outline: 2px dashed var(--color-primary);
+    outline-offset: -2px;
+}
+[data-file-row] { cursor: grab; }
+

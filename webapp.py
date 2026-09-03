@@ -5462,17 +5462,30 @@ _PREVIEW_MAX_COLS = 30
 def shared_files_page():
     """班の共有ファイル置き場(誰でもアップロード・ダウンロードできる、Teamsの「ファイル」
     タブに相当)。ログイン済みなら誰でも見られる。?folder=<id>でフォルダの中を表示する
-    (省略時は最上位)。"""
+    (省略時は最上位)。?q=キーワードを指定すると、フォルダをまたいで全文検索する
+    (ファイル名・説明・自動タグ・テキスト系ファイルの中身が対象)。?starred=1で
+    お気に入りのみに絞り込める(検索と併用可能)。"""
     if not session.get("user_id"):
         return redirect(url_for("login", next=request.path))
+    my_id = session["user_id"]
     folder_id = request.args.get("folder", type=int)
+    query = request.args.get("q", "").strip()
+    starred_only = request.args.get("starred") == "1"
     conn = _users_conn()
     try:
-        if folder_id is not None and users.get_shared_folder(conn, folder_id) is None:
-            abort(404)
-        folders = users.list_shared_folders(conn, folder_id)
-        files = users.list_shared_files(conn, folder_id)
-        breadcrumbs = users.shared_folder_breadcrumbs(conn, folder_id) if folder_id else []
+        starred_ids = users.starred_file_ids(conn, my_id)
+        if query:
+            folders = []
+            files = users.search_shared_files(conn, query)
+            breadcrumbs = []
+        else:
+            if folder_id is not None and users.get_shared_folder(conn, folder_id) is None:
+                abort(404)
+            folders = users.list_shared_folders(conn, folder_id)
+            files = users.list_shared_files(conn, folder_id)
+            breadcrumbs = users.shared_folder_breadcrumbs(conn, folder_id) if folder_id else []
+        if starred_only:
+            files = [f for f in files if f["id"] in starred_ids]
         creators = users.get_users_by_ids(
             conn, [f["uploaded_by"] for f in files] + [fo["created_by"] for fo in folders]
         )
@@ -5484,11 +5497,13 @@ def shared_files_page():
             f["content_type"].startswith("image/") or f["content_type"] == "application/pdf"
             or f["content_type"] in _PREVIEWABLE_XLSX_CONTENT_TYPES
         )
+        f["tag_list"] = [t for t in f["tags"].split(",") if t]
+        f["starred"] = f["id"] in starred_ids
     for fo in folders:
         fo["created_by_name"] = creators.get(fo["created_by"], {}).get("name", "(退会済みユーザー)")
     return render_template(
         "shared_files.html", files=files, folders=folders, breadcrumbs=breadcrumbs,
-        current_folder_id=folder_id,
+        current_folder_id=folder_id, query=query, starred_only=starred_only,
     )
 
 
@@ -5697,6 +5712,129 @@ def shared_file_delete(file_id):
     stored_path = SHARED_FILES_DIR / f["stored_name"]
     stored_path.unlink(missing_ok=True)
     return _finish("shared_files_page", "削除しました。", folder=folder_id)
+
+
+@app.route("/files/<int:file_id>/star", methods=["POST"])
+def shared_file_star(file_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        f = users.get_shared_file(conn, file_id)
+        if f is None:
+            abort(404)
+        starred = users.toggle_file_star(conn, my_id, file_id, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+    finally:
+        conn.close()
+    if _wants_json():
+        return jsonify({"success": True, "starred": starred})
+    return _finish("shared_files_page", "お気に入りに追加しました。" if starred else "お気に入りを解除しました。")
+
+
+def _bulk_file_ids_from_form():
+    ids = request.form.getlist("file_ids", type=int)
+    return sorted(set(i for i in ids if i))
+
+
+@app.route("/files/bulk/move", methods=["POST"])
+def shared_file_bulk_move():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    file_ids = _bulk_file_ids_from_form()
+    target_folder_id = request.form.get("target_folder_id", type=int)
+    if not file_ids:
+        return jsonify({"success": False, "message": "移動するファイルを選択してください。"}), 400
+    conn = _users_conn()
+    try:
+        if target_folder_id is not None and users.get_shared_folder(conn, target_folder_id) is None:
+            return jsonify({"success": False, "message": "移動先フォルダが見つかりません。"}), 404
+        moved = 0
+        for file_id in file_ids:
+            f = users.get_shared_file(conn, file_id)
+            if f is None:
+                continue
+            if f["uploaded_by"] != my_id and session.get("role") != "admin":
+                continue
+            users.move_shared_file(conn, file_id, target_folder_id)
+            moved += 1
+    finally:
+        conn.close()
+    skipped = len(file_ids) - moved
+    message = f"{moved}件移動しました。" + (f"({skipped}件は権限がなくスキップしました)" if skipped else "")
+    return jsonify({"success": True, "message": message})
+
+
+@app.route("/files/bulk/delete", methods=["POST"])
+def shared_file_bulk_delete():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    file_ids = _bulk_file_ids_from_form()
+    if not file_ids:
+        return jsonify({"success": False, "message": "削除するファイルを選択してください。"}), 400
+    conn = _users_conn()
+    try:
+        deleted = 0
+        stored_paths = []
+        for file_id in file_ids:
+            f = users.get_shared_file(conn, file_id)
+            if f is None:
+                continue
+            if f["uploaded_by"] != my_id and session.get("role") != "admin":
+                continue
+            users.delete_shared_file(conn, file_id)
+            stored_paths.append(SHARED_FILES_DIR / f["stored_name"])
+            deleted += 1
+    finally:
+        conn.close()
+    for p in stored_paths:
+        p.unlink(missing_ok=True)
+    skipped = len(file_ids) - deleted
+    message = f"{deleted}件削除しました。" + (f"({skipped}件は権限がなくスキップしました)" if skipped else "")
+    return jsonify({"success": True, "message": message})
+
+
+@app.route("/files/bulk/download")
+def shared_file_bulk_download():
+    """複数選択したファイルをまとめてZIPでダウンロードする。build_data_backup_zip
+    (バックアップ機能)と同じzipfile標準ライブラリを使う。"""
+    if not session.get("user_id"):
+        abort(403)
+    file_ids = sorted(set(request.args.getlist("file_ids", type=int)))
+    if not file_ids:
+        abort(400)
+    conn = _users_conn()
+    try:
+        files = [users.get_shared_file(conn, fid) for fid in file_ids]
+    finally:
+        conn.close()
+    files = [f for f in files if f is not None]
+    if not files:
+        abort(404)
+    buf = io.BytesIO()
+    used_names = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            path = SHARED_FILES_DIR / f["stored_name"]
+            if not path.exists():
+                continue
+            arcname = f["filename"]
+            # 同名ファイルが複数選択された場合、ZIP内で上書きされないように連番を振る。
+            n = 1
+            base_arcname = arcname
+            while arcname in used_names:
+                stem, dot, ext = base_arcname.rpartition(".")
+                arcname = f"{stem or base_arcname}_{n}{dot}{ext}" if dot else f"{base_arcname}_{n}"
+                n += 1
+            used_names.add(arcname)
+            zf.write(path, arcname=arcname)
+    buf.seek(0)
+    return Response(
+        buf.getvalue(), mimetype="application/zip",
+        headers={"Content-Disposition": "attachment; filename=shared_files.zip"},
+    )
 
 
 @app.route("/members/<int:user_id>/avatar", methods=["POST"])

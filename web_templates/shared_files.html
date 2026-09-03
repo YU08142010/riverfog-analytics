@@ -29,16 +29,39 @@
         </form>
     </div>
 
+    <form method="get" action="{{ url_for('shared_files_page') }}" style="margin-top:0.7rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+        <input type="search" name="q" value="{{ query }}" placeholder="ファイル名・タグ・中身を検索" style="padding:0.35rem 0.6rem; flex:1 1 200px; min-width:160px;">
+        <label style="font-size:0.85rem; display:flex; align-items:center; gap:0.3rem;">
+            <input type="checkbox" name="starred" value="1" {{ "checked" if starred_only }}>
+            ★お気に入りのみ
+        </label>
+        <button type="submit" class="button">検索</button>
+        {% if query or starred_only %}
+        <a href="{{ url_for('shared_files_page', folder=current_folder_id) }}" class="button cancel">クリア</a>
+        {% endif %}
+    </form>
+    {% if query %}
+    <p class="muted" style="font-size:0.82rem; margin-top:0.5rem;">「{{ query }}」の検索結果: {{ files|length }}件(全フォルダ横断)</p>
+    {% endif %}
+
+    <div id="bulk-toolbar" class="bulk-toolbar" hidden>
+        <span id="bulk-count" class="muted" style="font-size:0.82rem;"></span>
+        <button type="button" class="button" id="bulk-download-btn">⬇ ZIPでダウンロード</button>
+        <button type="button" class="button" id="bulk-move-btn">📁 移動</button>
+        <button type="button" class="button cancel" id="bulk-delete-btn">削除</button>
+    </div>
+
     <div id="files-drop-area" data-context-menu="bg-context-menu" style="margin-top:0.8rem; min-height:120px;">
     {% if not folders and not files %}
-    <div class="empty-state">{{ icon("empty") }}<span>ここは空です(右クリックでフォルダを作成できます)</span></div>
+    <div class="empty-state">{{ icon("empty") }}<span>{{ "見つかりませんでした。" if query else "ここは空です(右クリックでフォルダを作成できます)" }}</span></div>
     {% else %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>名前</th><th>アップロード者</th><th>日時</th><th>サイズ</th><th></th></tr></thead>
+        <thead><tr><th style="width:2em;"></th><th>名前</th><th>アップロード者</th><th>日時</th><th>サイズ</th><th></th></tr></thead>
         <tbody>
         {% for fo in folders %}
-        <tr data-context-menu="folder-context-menu" data-context-target-id="{{ fo.id }}">
+        <tr data-context-menu="folder-context-menu" data-context-target-id="{{ fo.id }}" data-folder-drop-target="{{ fo.id }}">
+            <td></td>
             <td><a href="{{ url_for('shared_files_page', folder=fo.id) }}">📁 {{ fo.name }}</a></td>
             <td>{{ fo.created_by_name }}</td>
             <td>{{ fo.created_at }}</td>
@@ -46,13 +69,31 @@
             <td></td>
         </tr>
         {% endfor %}
+        {% if current_folder_id and not query %}
+        <tr data-folder-drop-target="">
+            <td></td>
+            <td colspan="5" class="muted" style="font-size:0.8rem;">⬆ ここにドラッグすると最上位フォルダへ移動します</td>
+        </tr>
+        {% endif %}
         {% for f in files %}
-        <tr data-context-menu="file-context-menu" data-context-target-id="{{ f.id }}" data-preview-url="{{ url_for('shared_file_preview', file_id=f.id) if f.previewable else '' }}" data-download-url="{{ url_for('shared_file_download', file_id=f.id) }}" data-can-delete="{{ '1' if f.uploaded_by == session.get('user_id') or session.get('role') == 'admin' else '' }}">
+        <tr data-context-menu="file-context-menu" data-context-target-id="{{ f.id }}" data-file-row="{{ f.id }}" draggable="true"
+            data-preview-url="{{ url_for('shared_file_preview', file_id=f.id) if f.previewable else '' }}"
+            data-download-url="{{ url_for('shared_file_download', file_id=f.id) }}"
+            data-can-delete="{{ '1' if f.uploaded_by == session.get('user_id') or session.get('role') == 'admin' else '' }}">
+            <td><input type="checkbox" class="file-select-checkbox" value="{{ f.id }}"></td>
             <td>
                 {% if f.previewable %}
                 <a href="{{ url_for('shared_file_preview', file_id=f.id) }}">{{ f.filename }}</a>
                 {% else %}
                 <a href="{{ url_for('shared_file_download', file_id=f.id) }}">{{ f.filename }}</a>
+                {% endif %}
+                <button type="button" class="star-toggle-btn" data-file-id="{{ f.id }}" title="お気に入り">{{ "★" if f.starred else "☆" }}</button>
+                {% if f.tag_list %}
+                <div style="margin-top:0.2rem;">
+                    {% for tag in f.tag_list %}
+                    <span class="file-tag-chip">{{ tag }}</span>
+                    {% endfor %}
+                </div>
                 {% endif %}
             </td>
             <td>{{ f.uploader_name }}</td>
@@ -78,8 +119,15 @@
 <div id="file-context-menu" class="context-menu" hidden>
     <button type="button" data-context-action="preview-file">プレビュー</button>
     <button type="button" data-context-action="download-file">ダウンロード</button>
+    <button type="button" data-context-action="toggle-star">⭐ お気に入り切替</button>
     <button type="button" data-context-action="share-file">🔗 共有(リンクをコピー)</button>
     <button type="button" data-context-action="delete-file">削除</button>
+</div>
+<div id="folder-picker-menu" class="context-menu" hidden style="max-height:260px; overflow-y:auto;">
+    <button type="button" data-folder-pick="">📁(最上位)</button>
+    {% for fo in folders %}
+    <button type="button" data-folder-pick="{{ fo.id }}">📁 {{ fo.name }}</button>
+    {% endfor %}
 </div>
 
 <script>
@@ -101,9 +149,31 @@
         f.submit();
     }
 
-    function findRow(fileOrFolderId, selectorPrefix) {
+    function findRow(fileOrFolderId) {
         return document.querySelector('[data-context-target-id="' + fileOrFolderId + '"]');
     }
+
+    function toggleStar(fileId) {
+        fetch("/files/" + fileId + "/star", {
+            method: "POST",
+            headers: {"X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}"},
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) { showToast("操作できませんでした。", true); return; }
+                var btn = document.querySelector('.star-toggle-btn[data-file-id="' + fileId + '"]');
+                if (btn) { btn.textContent = data.starred ? "★" : "☆"; }
+            })
+            .catch(function() { showToast("操作できませんでした。", true); });
+    }
+
+    document.querySelectorAll(".star-toggle-btn").forEach(function(btn) {
+        btn.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleStar(btn.dataset.fileId);
+        });
+    });
 
     document.addEventListener("contextmenuaction", function(e) {
         var action = e.detail.action;
@@ -141,6 +211,10 @@
             window.location.href = row.dataset.downloadUrl;
             return;
         }
+        if (action === "toggle-star") {
+            toggleStar(targetId);
+            return;
+        }
         if (action === "share-file") {
             var url = window.location.origin + (row.dataset.previewUrl || row.dataset.downloadUrl);
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -162,6 +236,119 @@
             });
             return;
         }
+    });
+
+    // --- 一括操作: チェックボックスで選択したファイルのダウンロード(ZIP)/移動/削除 ---
+    var toolbar = document.getElementById("bulk-toolbar");
+    var countLabel = document.getElementById("bulk-count");
+    var checkboxes = Array.prototype.slice.call(document.querySelectorAll(".file-select-checkbox"));
+
+    function selectedIds() {
+        return checkboxes.filter(function(cb) { return cb.checked; }).map(function(cb) { return cb.value; });
+    }
+    function updateToolbar() {
+        var ids = selectedIds();
+        toolbar.hidden = ids.length === 0;
+        countLabel.textContent = ids.length + "件選択中";
+    }
+    checkboxes.forEach(function(cb) { cb.addEventListener("change", updateToolbar); });
+
+    document.getElementById("bulk-download-btn").addEventListener("click", function() {
+        var ids = selectedIds();
+        if (!ids.length) { return; }
+        var params = new URLSearchParams();
+        ids.forEach(function(id) { params.append("file_ids", id); });
+        window.location.href = "/files/bulk/download?" + params.toString();
+    });
+
+    var folderPickerMenu = document.getElementById("folder-picker-menu");
+    document.getElementById("bulk-move-btn").addEventListener("click", function(e) {
+        if (!selectedIds().length) { return; }
+        var rect = e.target.getBoundingClientRect();
+        folderPickerMenu.style.left = (rect.left + window.scrollX) + "px";
+        folderPickerMenu.style.top = (rect.bottom + window.scrollY) + "px";
+        folderPickerMenu.hidden = false;
+        window._lastMenuShownAt = Date.now();
+    });
+    function moveSelectedTo(folderId) {
+        var ids = selectedIds();
+        if (!ids.length) { return; }
+        var body = new URLSearchParams();
+        body.append("csrf_token", "{{ csrf_token() }}");
+        body.append("target_folder_id", folderId);
+        ids.forEach(function(id) { body.append("file_ids", id); });
+        fetch("/files/bulk/move", {
+            method: "POST", headers: {"X-Requested-With": "XMLHttpRequest"}, body: body,
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                showToast(data.message || (data.success ? "移動しました。" : "移動できませんでした。"), !data.success);
+                if (data.success) { setTimeout(function() { window.location.reload(); }, 600); }
+            })
+            .catch(function() { showToast("移動できませんでした。", true); });
+    }
+    folderPickerMenu.querySelectorAll("[data-folder-pick]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            folderPickerMenu.hidden = true;
+            moveSelectedTo(btn.dataset.folderPick);
+        });
+    });
+
+    document.getElementById("bulk-delete-btn").addEventListener("click", function() {
+        var ids = selectedIds();
+        if (!ids.length) { return; }
+        confirmModal(ids.length + "件のファイルを削除しますか？").then(function(ok) {
+            if (!ok) { return; }
+            var body = new URLSearchParams();
+            body.append("csrf_token", "{{ csrf_token() }}");
+            ids.forEach(function(id) { body.append("file_ids", id); });
+            fetch("/files/bulk/delete", {
+                method: "POST", headers: {"X-Requested-With": "XMLHttpRequest"}, body: body,
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    showToast(data.message || (data.success ? "削除しました。" : "削除できませんでした。"), !data.success);
+                    if (data.success) { setTimeout(function() { window.location.reload(); }, 600); }
+                })
+                .catch(function() { showToast("削除できませんでした。", true); });
+        });
+    });
+
+    // --- ドラッグ&ドロップでフォルダへ移動 ---
+    var draggingFileId = null;
+    document.querySelectorAll("[data-file-row]").forEach(function(row) {
+        row.addEventListener("dragstart", function(e) {
+            draggingFileId = row.dataset.fileRow;
+            e.dataTransfer.effectAllowed = "move";
+        });
+    });
+    document.querySelectorAll("[data-folder-drop-target]").forEach(function(row) {
+        row.addEventListener("dragover", function(e) {
+            if (draggingFileId === null) { return; }
+            e.preventDefault();
+            row.classList.add("drop-target-hover");
+        });
+        row.addEventListener("dragleave", function() { row.classList.remove("drop-target-hover"); });
+        row.addEventListener("drop", function(e) {
+            e.preventDefault();
+            row.classList.remove("drop-target-hover");
+            if (draggingFileId === null) { return; }
+            var folderId = row.dataset.folderDropTarget;
+            var body = new URLSearchParams();
+            body.append("csrf_token", "{{ csrf_token() }}");
+            body.append("target_folder_id", folderId);
+            body.append("file_ids", draggingFileId);
+            fetch("/files/bulk/move", {
+                method: "POST", headers: {"X-Requested-With": "XMLHttpRequest"}, body: body,
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    showToast(data.message || (data.success ? "移動しました。" : "移動できませんでした。"), !data.success);
+                    if (data.success) { setTimeout(function() { window.location.reload(); }, 600); }
+                })
+                .catch(function() { showToast("移動できませんでした。", true); });
+            draggingFileId = null;
+        });
     });
 })();
 </script>
