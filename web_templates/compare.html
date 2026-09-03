@@ -65,7 +65,7 @@
     {% for e in entries %}
     {% if e.forecast_file %}
     <h3>{{ e.name }}</h3>
-    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;" alt="{{ e.name }}の予測グラフ">
+    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;" loading="lazy" alt="{{ e.name }}の予測グラフ">
     {% endif %}
     {% endfor %}
 </div>

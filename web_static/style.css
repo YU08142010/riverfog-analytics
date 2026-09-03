@@ -1227,6 +1227,17 @@ table.obs-table th.sticky-col { z-index: 3; }
 .theme-yuuyake { --frame-c1: #ff9a56; --frame-c2: #e0526a; --frame-c3: #ffd39a; }
 .theme-yuki { --frame-c1: #eaf6ff; --frame-c2: #a9d6f5; --frame-c3: #ffffff; }
 .theme-hoshizora { --frame-c1: #2e2a6e; --frame-c2: #7b4fd6; --frame-c3: #f4d35e; }
+.theme-momiji { --frame-c1: #d94f2b; --frame-c2: #f2a13a; --frame-c3: #7a1f10; }
+.theme-sakura { --frame-c1: #ffd1e3; --frame-c2: #ff8fb3; --frame-c3: #fff0f5; }
+.theme-hanabi { --frame-c1: #ff5da2; --frame-c2: #45d1ff; --frame-c3: #fff066; }
+.theme-mangetsu { --frame-c1: #fff6c9; --frame-c2: #e8d878; --frame-c3: #2b2b45; }
+.theme-aurora { --frame-c1: #34e6c1; --frame-c2: #7b6bff; --frame-c3: #d0fff2; }
+/* legendグレードは最上位のplatinumよりさらに太い縁取り・強い発光・速いアニメーションにする。 */
+.frame-legend {
+    --frame-ring: 5px;
+    --frame-glow: 0 0 22px rgba(255, 90, 160, 0.85);
+    --frame-anim: avatar-frame-shimmer 1.6s ease-in-out infinite;
+}
 @keyframes avatar-frame-shimmer {
     0%, 100% { filter: brightness(1); }
     50% { filter: brightness(1.35); }
@@ -1251,10 +1262,11 @@ table.obs-table th.sticky-col { z-index: 3; }
     background: linear-gradient(180deg, var(--frame-c1, transparent) 0%, transparent 12%);
     background-blend-mode: overlay;
 }
-.profile-card-frame.frame-silver, .profile-card-frame.frame-gold, .profile-card-frame.frame-platinum {
+.profile-card-frame.frame-silver, .profile-card-frame.frame-gold,
+.profile-card-frame.frame-platinum, .profile-card-frame.frame-legend {
     box-shadow: var(--frame-glow, none);
 }
-.profile-card-frame.frame-gold, .profile-card-frame.frame-platinum {
+.profile-card-frame.frame-gold, .profile-card-frame.frame-platinum, .profile-card-frame.frame-legend {
     animation: var(--frame-anim, none);
 }
 
@@ -1614,4 +1626,75 @@ table.obs-table th.sticky-col { z-index: 3; }
 .sidebar-group.collapsed .sidebar-list { max-height: 0; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
     .sidebar-list { transition: none; }
+}
+
+/* --- ショップ品: 名前の色(webapp.pyのNAME_COLOR_DEFINITIONS) ---------------------
+   ライト/ダーク両方である程度読める中間的な彩度・明度の色を選んでいる。 */
+.name-color-red { color: #d33f3f; }
+.name-color-blue { color: #2a72c8; }
+.name-color-green { color: #2f9e58; }
+.name-color-gold { color: #b8860b; }
+.name-color-rainbow {
+    background: linear-gradient(90deg, #ff5252, #ffb02e, #ffe135, #4caf50, #2196f3, #9c27b0, #ff5252);
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: name-color-rainbow-shift 4s linear infinite;
+}
+@keyframes name-color-rainbow-shift {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .name-color-rainbow { animation: none; }
+}
+
+/* --- ショップ品: ダッシュボード配色(webapp.pyのDASHBOARD_THEME_DEFINITIONS) -------
+   ページ全体の背景を塗り替えるのではなく、control下地に薄いグラデーションを重ねる
+   だけにして、既存のカード・文字コントラストを崩さないようにしている。 */
+.dash-theme-yuuyake, .dash-theme-hoshizora, .dash-theme-shinryoku, .dash-theme-yukigesho {
+    border-radius: var(--radius-md, 12px);
+    padding: 0.8rem;
+    margin: -0.8rem -0.8rem 0.8rem;
+}
+.dash-theme-yuuyake { background: linear-gradient(180deg, rgba(255, 154, 86, 0.16), transparent 60%); }
+.dash-theme-hoshizora { background: linear-gradient(180deg, rgba(46, 42, 110, 0.18), transparent 60%); }
+.dash-theme-shinryoku { background: linear-gradient(180deg, rgba(64, 160, 90, 0.16), transparent 60%); }
+.dash-theme-yukigesho { background: linear-gradient(180deg, rgba(169, 214, 245, 0.20), transparent 60%); }
+
+/* --- ショップ品: プロフィールカードの演出(webapp.pyのEFFECT_DEFINITIONS) --------- */
+.fx-fog-drift { position: relative; overflow: hidden; }
+.fx-fog-drift::before {
+    content: "";
+    position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.35) 45%, transparent 55%);
+    background-size: 250% 100%;
+    animation: fx-fog-drift-move 6s ease-in-out infinite;
+}
+@keyframes fx-fog-drift-move {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+.fx-sparkle { position: relative; overflow: hidden; }
+.fx-sparkle::after {
+    content: "\2728"; position: absolute; top: 0.5rem; right: 0.8rem;
+    font-size: 1.1rem; opacity: 0.85;
+    animation: fx-sparkle-twinkle 1.8s ease-in-out infinite;
+}
+@keyframes fx-sparkle-twinkle {
+    0%, 100% { opacity: 0.3; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+.fx-aurora-glow {
+    position: relative;
+    box-shadow: 0 0 24px rgba(52, 230, 193, 0.35), 0 0 40px rgba(123, 107, 255, 0.25);
+    animation: fx-aurora-pulse 3.5s ease-in-out infinite;
+}
+@keyframes fx-aurora-pulse {
+    0%, 100% { box-shadow: 0 0 24px rgba(52, 230, 193, 0.35), 0 0 40px rgba(123, 107, 255, 0.25); }
+    50% { box-shadow: 0 0 32px rgba(52, 230, 193, 0.55), 0 0 56px rgba(123, 107, 255, 0.45); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .fx-fog-drift::before, .fx-sparkle::after, .fx-aurora-glow { animation: none; }
 }

@@ -89,6 +89,30 @@ CREATE TABLE IF NOT EXISTS user_frames (
     UNIQUE(user_id, frame_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_frames_user_id ON user_frames(user_id);
+CREATE TABLE IF NOT EXISTS user_cosmetics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    acquired_at TEXT NOT NULL,
+    UNIQUE(user_id, category, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_cosmetics_user_id ON user_cosmetics(user_id);
+CREATE TABLE IF NOT EXISTS user_consumables (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS consumable_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    purchased_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_consumable_purchases_user_id ON consumable_purchases(user_id);
 CREATE TABLE IF NOT EXISTS point_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -243,6 +267,9 @@ def _ensure_profile_columns(conn):
         conn.execute("ALTER TABLE users ADD COLUMN equipped_frame TEXT NOT NULL DEFAULT ''")
     if "locked_at" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN locked_at TEXT")
+    for col in ("equipped_title", "equipped_name_color", "equipped_dashboard_theme", "equipped_effect"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
 
 def _ensure_shared_files_columns(conn):
@@ -252,6 +279,14 @@ def _ensure_shared_files_columns(conn):
         conn.execute(
             "ALTER TABLE shared_files ADD COLUMN folder_id INTEGER REFERENCES shared_folders(id)"
         )
+
+
+def _ensure_fog_bets_columns(conn):
+    """insuranceは保険チケット(ハズレても賭け金の半額を払い戻す消費アイテム)を使った
+    賭けかどうかのフラグ。後から追加した列なので無ければ足す。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(fog_bets)").fetchall()}
+    if "insurance" not in cols:
+        conn.execute("ALTER TABLE fog_bets ADD COLUMN insurance INTEGER NOT NULL DEFAULT 0")
 
 
 def _ensure_login_events_columns(conn):
@@ -271,6 +306,7 @@ def connect(db_path):
     conn.executescript(SCHEMA)
     _ensure_profile_columns(conn)
     _ensure_shared_files_columns(conn)
+    _ensure_fog_bets_columns(conn)
     _migrate_add_foreign_keys(conn)
     _ensure_login_events_columns(conn)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -282,7 +318,8 @@ def _norm_email(email):
 
 
 _USER_COLUMNS = (
-    "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame, locked_at"
+    "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame, locked_at, "
+    "equipped_title, equipped_name_color, equipped_dashboard_theme, equipped_effect"
 )
 
 
@@ -291,7 +328,8 @@ def _user_row_to_dict(row):
         "id": row[0], "name": row[1], "email": row[2],
         "password_hash": row[3], "role": row[4], "created_at": row[5],
         "bio": row[6], "favorite_stations": row[7], "equipped_frame": row[8],
-        "locked_at": row[9],
+        "locked_at": row[9], "equipped_title": row[10], "equipped_name_color": row[11],
+        "equipped_dashboard_theme": row[12], "equipped_effect": row[13],
     }
 
 
@@ -632,6 +670,18 @@ def login_counts_since(conn, since_str):
     return {uid: c for uid, c in rows}
 
 
+def login_counts_between(conn, since_str, until_str):
+    """[since_str, until_str)の半開区間でのログイン回数を1クエリでまとめて返す
+    ({user_id: count})。月間ランキング報酬のように「確定した1か月分」を
+    集計する場合に使う(login_counts_sinceは期間の終わりを区切れないため)。"""
+    rows = conn.execute(
+        "SELECT user_id, COUNT(*) FROM login_events WHERE logged_in_at >= ? AND logged_in_at < ? "
+        "GROUP BY user_id",
+        (since_str, until_str),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
 def last_login(conn, user_id):
     row = conn.execute(
         "SELECT MAX(logged_in_at) FROM login_events WHERE user_id = ?", (user_id,)
@@ -845,25 +895,35 @@ def total_earned_points(conn, user_id):
 
 
 def total_spent_points(conn, user_id):
-    """フレーム交換で使った分(user_frames)と、川霧ギャンブルで賭けた分(fog_bets、
-    勝敗に関わらず賭けた時点で「使った」扱いにする。勝った場合の払い戻しはgrant_points
-    経由でtotal_earned_points側に加算されるので二重計上にはならない)の合計。"""
+    """フレーム交換(user_frames)・称号や名前の色等の装備品(user_cosmetics)・
+    ギャンブルの消費アイテム購入(consumable_purchases)で使った分と、川霧ギャンブルで
+    賭けた分(fog_bets、勝敗に関わらず賭けた時点で「使った」扱いにする。勝った場合の
+    払い戻しはgrant_points経由でtotal_earned_points側に加算されるので二重計上には
+    ならない)の合計。"""
     row = conn.execute(
         "SELECT COALESCE(SUM(cost), 0) FROM user_frames WHERE user_id = ?", (user_id,)
     ).fetchone()
     row2 = conn.execute(
         "SELECT COALESCE(SUM(bet_amount), 0) FROM fog_bets WHERE user_id = ?", (user_id,)
     ).fetchone()
-    return row[0] + row2[0]
+    row3 = conn.execute(
+        "SELECT COALESCE(SUM(cost), 0) FROM user_cosmetics WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    row4 = conn.execute(
+        "SELECT COALESCE(SUM(cost), 0) FROM consumable_purchases WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] + row2[0] + row3[0] + row4[0]
 
 
-def place_fog_bet(conn, user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at):
+def place_fog_bet(conn, user_id, station_name, precision, window_start, window_end, bet_amount, multiplier,
+                   placed_at, insurance=False):
     with conn:
         cur = conn.execute(
             "INSERT INTO fog_bets "
-            "(user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at),
+            "(user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at, "
+            "insurance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, station_name, precision, window_start, window_end, bet_amount, multiplier, placed_at,
+             1 if insurance else 0),
         )
         return cur.lastrowid
 
@@ -872,14 +932,14 @@ def list_pending_fog_bets(conn, up_to):
     """window_endが過ぎた(=答え合わせに必要な観測データが出揃っているはずの)未決済の
     賭けを返す。"""
     rows = conn.execute(
-        "SELECT id, user_id, station_name, window_start, window_end, bet_amount, multiplier "
+        "SELECT id, user_id, station_name, window_start, window_end, bet_amount, multiplier, insurance "
         "FROM fog_bets WHERE status = 'pending' AND window_end <= ?",
         (up_to,),
     ).fetchall()
     return [
         {
             "id": r[0], "user_id": r[1], "station_name": r[2], "window_start": r[3],
-            "window_end": r[4], "bet_amount": r[5], "multiplier": r[6],
+            "window_end": r[4], "bet_amount": r[5], "multiplier": r[6], "insurance": bool(r[7]),
         }
         for r in rows
     ]
@@ -896,7 +956,7 @@ def resolve_fog_bet(conn, bet_id, status, resolved_at, payout):
 def list_fog_bets_for_user(conn, user_id, limit=30):
     rows = conn.execute(
         "SELECT id, station_name, precision, window_start, window_end, bet_amount, multiplier, "
-        "status, resolved_at, payout, placed_at FROM fog_bets WHERE user_id = ? "
+        "status, resolved_at, payout, placed_at, insurance FROM fog_bets WHERE user_id = ? "
         "ORDER BY placed_at DESC LIMIT ?",
         (user_id, limit),
     ).fetchall()
@@ -904,7 +964,7 @@ def list_fog_bets_for_user(conn, user_id, limit=30):
         {
             "id": r[0], "station_name": r[1], "precision": r[2], "window_start": r[3],
             "window_end": r[4], "bet_amount": r[5], "multiplier": r[6], "status": r[7],
-            "resolved_at": r[8], "payout": r[9], "placed_at": r[10],
+            "resolved_at": r[8], "payout": r[9], "placed_at": r[10], "insurance": bool(r[11]),
         }
         for r in rows
     ]
@@ -971,6 +1031,79 @@ def set_equipped_frame(conn, user_id, frame_id):
     """frame_idに空文字を渡すと「フレームなし」の状態に戻せる。"""
     with conn:
         conn.execute("UPDATE users SET equipped_frame = ? WHERE id = ?", (frame_id or "", user_id))
+
+
+# --- 称号・名前の色・ダッシュボード配色・演出(まとめてuser_cosmeticsで管理) ------------
+# フレームと違い、これらは装備先(usersテーブルの列)が4通りあるだけで購入・所持の
+# 仕組み自体は共通なので、種類ごとにuser_frames相当のテーブルを4つ作らず、
+# category列で区別する1つのテーブルにまとめている。
+_COSMETIC_EQUIP_COLUMNS = {
+    "title": "equipped_title",
+    "name_color": "equipped_name_color",
+    "dashboard_theme": "equipped_dashboard_theme",
+    "effect": "equipped_effect",
+}
+
+
+def owned_cosmetic_ids(conn, user_id, category):
+    rows = conn.execute(
+        "SELECT item_id FROM user_cosmetics WHERE user_id = ? AND category = ?", (user_id, category)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def purchase_cosmetic(conn, user_id, category, item_id, cost, acquired_at):
+    """ポイント残高が足りているかは呼び出し側で確認してから使うこと。既に所持している
+    アイテムの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。"""
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_cosmetics (user_id, category, item_id, cost, acquired_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, category, item_id, cost, acquired_at),
+        )
+
+
+def set_equipped_cosmetic(conn, user_id, category, item_id):
+    """item_idに空文字を渡すと「未装備」の状態に戻せる。categoryは_COSMETIC_EQUIP_COLUMNSの
+    キーである必要がある(SQL列名を組み立てる前に検証し、任意の列名注入を防ぐ)。"""
+    column = _COSMETIC_EQUIP_COLUMNS.get(category)
+    if column is None:
+        raise ValueError(f"unknown cosmetic category: {category}")
+    with conn:
+        conn.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (item_id or "", user_id))
+
+
+# --- 川霧ギャンブルの消費アイテム(保険チケット・倍率ブーストチケット) ------------------
+# フレーム・称号等の装備品と違い、買った分だけ在庫が増え、使うたびに1個減る消費型アイテム。
+def buy_consumable(conn, user_id, item_id, cost, purchased_at):
+    with conn:
+        conn.execute(
+            "INSERT INTO user_consumables (user_id, item_id, quantity) VALUES (?, ?, 1) "
+            "ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1",
+            (user_id, item_id),
+        )
+        conn.execute(
+            "INSERT INTO consumable_purchases (user_id, item_id, cost, purchased_at) VALUES (?, ?, ?, ?)",
+            (user_id, item_id, cost, purchased_at),
+        )
+
+
+def consumable_quantities(conn, user_id):
+    rows = conn.execute(
+        "SELECT item_id, quantity FROM user_consumables WHERE user_id = ? AND quantity > 0", (user_id,)
+    ).fetchall()
+    return {item_id: q for item_id, q in rows}
+
+
+def use_consumable(conn, user_id, item_id):
+    """在庫が1個以上あれば1個消費してTrueを返す。在庫が無ければ何もせずFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "UPDATE user_consumables SET quantity = quantity - 1 "
+            "WHERE user_id = ? AND item_id = ? AND quantity > 0",
+            (user_id, item_id),
+        )
+        return cur.rowcount > 0
 
 
 def _dm_pair(user_a_id, user_b_id):
@@ -1299,6 +1432,9 @@ __all__ = [
     "delete_station_comment", "comment_count",
     "award_badge", "grant_points", "total_earned_points", "total_spent_points", "available_points",
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
+    "owned_cosmetic_ids", "purchase_cosmetic", "set_equipped_cosmetic",
+    "buy_consumable", "consumable_quantities", "use_consumable",
+    "login_counts_between",
     "get_or_create_dm_conversation", "get_dm_conversation", "send_dm_message",
     "list_dm_messages", "list_dm_conversations", "mark_dm_read", "dm_unread_counts", "total_dm_unread",
     "add_dm_attachment", "get_dm_attachment", "get_dm_attachments_for_messages",

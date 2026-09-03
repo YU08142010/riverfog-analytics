@@ -12,7 +12,7 @@
 {% endblock %}
 {% block content %}
 {% set frame_cls = "profile-card-frame frame-" ~ member.equipped_frame.split('_', 1)[0] ~ " theme-" ~ member.equipped_frame.split('_', 1)[1] if member.equipped_frame else "" %}
-<div class="card {{ frame_cls }}">
+<div class="card {{ frame_cls }} {{ effect_class }}">
     <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap;">
         {% set avatar_url = member_avatar_url(member.id) %}
         {% call avatar_frame(member.equipped_frame) %}
@@ -24,9 +24,12 @@
         {% endcall %}
         <div>
             <h2 style="margin-bottom:0.3rem;">
-                {{ member.name }}
+                <span class="{{ name_color_class }}">{{ member.name }}</span>
                 <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
             </h2>
+            {% if title_label %}
+            <p class="muted" style="margin:0 0 0.3rem; font-size:0.85rem;">{{ title_label }}</p>
+            {% endif %}
             <p class="muted" style="margin:0 0 0.2rem; display:flex; align-items:center; gap:0.4rem;">
                 <span class="sidebar-dot" style="background: {{ '#2ecc71' if online else 'var(--color-border)' }};"></span>
                 {{ "オンライン" if online else "オフライン" }}

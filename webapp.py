@@ -904,6 +904,34 @@ def requires_admin(view):
     return wrapped
 
 
+# matplotlibでのグラフ描画はこの古いCPUではそれなりに重く、元データ(weather.db・
+# predictions.db)はcollect.py/predict.pyが書き込む時しか変わらないのに、以前は
+# アクセスのたびに毎回ゼロから再描画していた。fog_data.load_river_fog_data()の
+# mtimeキャッシュと同じ考え方で、監視対象ファイルのmtimeが変わるまでPNGバイト列自体を
+# キャッシュする(サーバー全体で共有、ユーザーごとではない)。
+_png_cache_lock = threading.Lock()
+_png_cache = {}
+
+
+def _safe_mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _cached_png(cache_key, watch_paths, render_fn):
+    mtimes = tuple(_safe_mtime(p) for p in watch_paths)
+    with _png_cache_lock:
+        cached = _png_cache.get(cache_key)
+        if cached is not None and cached[0] == mtimes:
+            return cached[1]
+    data = render_fn()
+    with _png_cache_lock:
+        _png_cache[cache_key] = (mtimes, data)
+    return data
+
+
 def _render_line_chart_png(dates, rates, title):
     """日付ごとの的中率(%)を折れ線グラフのPNGバイト列にして返す。"""
     fig, ax = plt.subplots(figsize=(9, 3.2))
@@ -2602,8 +2630,21 @@ def dashboard():
             conn.close()
 
     ai_summary = _load_ai_summary()
+    dashboard_theme_class = ""
+    my_id = session.get("user_id")
+    if my_id:
+        conn = _users_conn()
+        try:
+            me = users.get_user_by_id(conn, my_id)
+        finally:
+            conn.close()
+        if me:
+            theme = DASHBOARD_THEME_BY_ID.get(me.get("equipped_dashboard_theme", ""))
+            if theme:
+                dashboard_theme_class = theme["css_class"]
     return render_template(
         "dashboard.html",
+        dashboard_theme_class=dashboard_theme_class,
         observations=_latest_observations(),
         accuracy=_accuracy_summary_safe(),
         alerts=_upcoming_fog_alerts_safe(),
@@ -3101,13 +3142,17 @@ def weather_fog_graph_page():
 @app.route("/graphs/weather-fog.png")
 def weather_fog_graph_png():
     station = _validate_station(request.args.get("station", STATION_NAMES[0]))
-    main_df = phenom_df = None
-    if WEATHER_DB_PATH.exists():
-        try:
-            main_df, phenom_df, _ = fog_data.load_river_fog_data()
-        except Exception as e:
-            log.warning("Failed to load data for weather-fog graph: %s", e)
-    png = _render_weather_fog_boxplot_png(main_df, phenom_df, station)
+
+    def render():
+        main_df = phenom_df = None
+        if WEATHER_DB_PATH.exists():
+            try:
+                main_df, phenom_df, _ = fog_data.load_river_fog_data()
+            except Exception as e:
+                log.warning("Failed to load data for weather-fog graph: %s", e)
+        return _render_weather_fog_boxplot_png(main_df, phenom_df, station)
+
+    png = _cached_png(f"weather_fog_graph:{station}", [WEATHER_DB_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -3127,13 +3172,16 @@ def river_fog_histogram_page():
 @app.route("/graphs/weather-fog-histogram.png")
 def weather_fog_histogram_png():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。"""
-    main_df = phenom_df = station_names = None
-    if WEATHER_DB_PATH.exists():
-        try:
-            main_df, phenom_df, station_names = fog_data.load_river_fog_data()
-        except Exception as e:
-            log.warning("Failed to load data for river-fog histogram: %s", e)
-    png = _render_river_fog_histogram_png(main_df, phenom_df, station_names or STATION_NAMES)
+    def render():
+        main_df = phenom_df = station_names = None
+        if WEATHER_DB_PATH.exists():
+            try:
+                main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+            except Exception as e:
+                log.warning("Failed to load data for river-fog histogram: %s", e)
+        return _render_river_fog_histogram_png(main_df, phenom_df, station_names or STATION_NAMES)
+
+    png = _cached_png("weather_fog_histogram", [WEATHER_DB_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -3238,10 +3286,14 @@ def station_timelapse_json(name):
 @app.route("/stations/<name>/chart.png")
 def station_chart(name):
     name = _validate_station(name)
-    trend = _accuracy_trend_safe(station=name)
-    dates = [r["date"] for r in trend if r["n"] > 0]
-    rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-    png = _render_line_chart_png(dates, rates, f"{name} の的中率推移")
+
+    def render():
+        trend = _accuracy_trend_safe(station=name)
+        dates = [r["date"] for r in trend if r["n"] > 0]
+        rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
+        return _render_line_chart_png(dates, rates, f"{name} の的中率推移")
+
+    png = _cached_png(f"station_chart:{name}", [DB_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -3254,10 +3306,13 @@ def accuracy_page():
 
 @app.route("/accuracy/chart.png")
 def accuracy_chart():
-    trend = _accuracy_trend_safe()
-    dates = [r["date"] for r in trend if r["n"] > 0]
-    rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-    png = _render_line_chart_png(dates, rates, "全地点の的中率推移")
+    def render():
+        trend = _accuracy_trend_safe()
+        dates = [r["date"] for r in trend if r["n"] > 0]
+        rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
+        return _render_line_chart_png(dates, rates, "全地点の的中率推移")
+
+    png = _cached_png("accuracy_chart", [DB_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -3526,6 +3581,7 @@ FRAME_GRADES = [
     {"id": "silver", "label": "銀", "cost": 2500},
     {"id": "gold", "label": "金", "cost": 5000},
     {"id": "platinum", "label": "虹", "cost": 10000},
+    {"id": "legend", "label": "伝説", "cost": 20000},
 ]
 FRAME_THEMES = [
     {"id": "kiri", "label": "霧"},
@@ -3533,6 +3589,11 @@ FRAME_THEMES = [
     {"id": "yuuyake", "label": "夕焼け"},
     {"id": "yuki", "label": "雪"},
     {"id": "hoshizora", "label": "星空"},
+    {"id": "momiji", "label": "紅葉"},
+    {"id": "sakura", "label": "桜"},
+    {"id": "hanabi", "label": "花火"},
+    {"id": "mangetsu", "label": "満月"},
+    {"id": "aurora", "label": "オーロラ"},
 ]
 FRAME_DEFINITIONS = [
     {
@@ -3544,6 +3605,57 @@ FRAME_DEFINITIONS = [
     for grade in FRAME_GRADES for theme in FRAME_THEMES
 ]
 FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
+
+# --- 称号・名前の色・ダッシュボード配色・演出 ---------------------------------------
+# フレーム以外のショップ品。装備の仕組みはusers.py側で共通化しているが(user_cosmetics、
+# category列で区別)、カタログ(何が買えるか)はここに種類ごとに定義する。
+TITLE_DEFINITIONS = [
+    {"id": "regular", "label": "常連さん", "cost": 500},
+    {"id": "early_riser", "label": "早起き名人", "cost": 1200},
+    {"id": "fog_walker", "label": "霧使い", "cost": 3000},
+    {"id": "tadami_master", "label": "只見川マスター", "cost": 8000},
+    {"id": "legendary_observer", "label": "伝説の観測者", "cost": 15000},
+]
+TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
+
+NAME_COLOR_DEFINITIONS = [
+    {"id": "red", "label": "赤", "cost": 800, "css_class": "name-color-red"},
+    {"id": "blue", "label": "青", "cost": 800, "css_class": "name-color-blue"},
+    {"id": "green", "label": "緑", "cost": 800, "css_class": "name-color-green"},
+    {"id": "gold", "label": "金", "cost": 2000, "css_class": "name-color-gold"},
+    {"id": "rainbow", "label": "虹色", "cost": 5000, "css_class": "name-color-rainbow"},
+]
+NAME_COLOR_BY_ID = {c["id"]: c for c in NAME_COLOR_DEFINITIONS}
+
+DASHBOARD_THEME_DEFINITIONS = [
+    {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dash-theme-yuuyake"},
+    {"id": "hoshizora", "label": "星空", "cost": 2500, "css_class": "dash-theme-hoshizora"},
+    {"id": "shinryoku", "label": "新緑", "cost": 1500, "css_class": "dash-theme-shinryoku"},
+    {"id": "yukigesho", "label": "雪景色", "cost": 1500, "css_class": "dash-theme-yukigesho"},
+]
+DASHBOARD_THEME_BY_ID = {d["id"]: d for d in DASHBOARD_THEME_DEFINITIONS}
+
+EFFECT_DEFINITIONS = [
+    {"id": "fog_drift", "label": "霧の揺らめき", "cost": 4000, "css_class": "fx-fog-drift"},
+    {"id": "sparkle", "label": "きらめき", "cost": 4000, "css_class": "fx-sparkle"},
+    {"id": "aurora_glow", "label": "オーロラの光", "cost": 6000, "css_class": "fx-aurora-glow"},
+]
+EFFECT_BY_ID = {e["id"]: e for e in EFFECT_DEFINITIONS}
+
+# --- 川霧ギャンブルの消費アイテム ---------------------------------------------------
+CONSUMABLE_DEFINITIONS = [
+    {
+        "id": "insurance_ticket", "label": "保険チケット", "cost": 300,
+        "desc": "この賭けがハズレても、賭けたポイントの半額が払い戻されます。",
+    },
+    {
+        "id": "boost_ticket", "label": "倍率ブーストチケット", "cost": 250,
+        "desc": "この賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
+    },
+]
+CONSUMABLE_BY_ID = {c["id"]: c for c in CONSUMABLE_DEFINITIONS}
+CONSUMABLE_BOOST_MULTIPLIER = 1.1
+CONSUMABLE_INSURANCE_REFUND_RATIO = 0.5
 
 # --- 川霧ギャンブル ---------------------------------------------------------------
 # 「この地点でこの時刻に川霧が出るか」にポイントを賭けるゲーム。
@@ -3668,7 +3780,11 @@ def _resolve_pending_fog_bets():
                 users.resolve_fog_bet(conn, bet["id"], "won", now_str, payout)
                 users.grant_points(conn, bet["user_id"], f"gamble_win:{bet['id']}", payout, now_str)
             else:
-                users.resolve_fog_bet(conn, bet["id"], "lost", now_str, 0)
+                refund = 0
+                if bet.get("insurance"):
+                    refund = int(round(bet["bet_amount"] * CONSUMABLE_INSURANCE_REFUND_RATIO))
+                    users.grant_points(conn, bet["user_id"], f"gamble_insurance:{bet['id']}", refund, now_str)
+                users.resolve_fog_bet(conn, bet["id"], "lost", now_str, refund)
     except Exception as e:
         log.warning("Failed to resolve pending fog bets: %s", e)
     finally:
@@ -3698,6 +3814,47 @@ def _award_new_badges(conn, user_id, badges):
             users.award_badge(conn, user_id, b["id"], b["points"], awarded_at)
 
 
+# 月間(先月分)ログインランキング上位3名への報酬。members_list()を開くたびに
+# _award_monthly_ranking_rewards()から呼ばれるが、grant_points()のUNIQUE(user_id, source)
+# 制約により実際の付与は月initial回だけ(以後は何もしない、バッジ付与と同じ遅延実行方式)。
+MONTHLY_RANKING_REWARDS = [(1, 5000), (2, 2000), (3, 500)]
+
+
+def _award_monthly_ranking_rewards(conn):
+    """先月分の月間ログイン回数ランキング上位3名に、未付与ならポイントを付与する。"""
+    today = datetime.now(JST).date()
+    this_month_start = today.replace(day=1)
+    last_month_end_day = this_month_start - timedelta(days=1)
+    last_month_start = last_month_end_day.replace(day=1)
+    since_str = last_month_start.strftime("%Y-%m-%d 00:00:00")
+    until_str = this_month_start.strftime("%Y-%m-%d 00:00:00")
+
+    counts = users.login_counts_between(conn, since_str, until_str)
+    if not counts:
+        return
+    # 集計後にアカウントが削除されている場合(login_eventsは残るがusersからは消える)、
+    # grant_pointsのFOREIGN KEY制約で例外になってしまうため、現存するユーザーだけに絞る。
+    existing_ids = set(users.get_users_by_ids(conn, list(counts.keys())).keys())
+    ranked = sorted(
+        ((uid, c) for uid, c in counts.items() if uid in existing_ids),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    month_label = last_month_start.strftime("%Y-%m")
+    for rank, points in MONTHLY_RANKING_REWARDS:
+        if rank > len(ranked):
+            break
+        user_id, count = ranked[rank - 1]
+        if count <= 0:
+            continue
+        source = f"monthly_login_ranking_{month_label}_{rank}"
+        if users.grant_points(conn, user_id, source, points, now_str):
+            log.info(
+                "Granted %d points to user %d for monthly login ranking #%d (%s, %d logins)",
+                points, user_id, rank, month_label, count,
+            )
+
+
 @app.route("/members")
 def members_list():
     """ログイン中の全ユーザーが見られるメンバー一覧。個々のログイン履歴・
@@ -3706,6 +3863,7 @@ def members_list():
     month_start = today.replace(day=1).strftime("%Y-%m-%d 00:00:00")
     conn = _users_conn()
     try:
+        _award_monthly_ranking_rewards(conn)
         all_users = users.list_users(conn)
         login_counts = users.login_counts_all(conn)
         month_login_counts = users.login_counts_since(conn, month_start)
@@ -3725,6 +3883,8 @@ def members_list():
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
             "equipped_frame": u["equipped_frame"],
             "online": _is_online(last_active.get(u["id"])),
+            "title_label": TITLE_BY_ID.get(u["equipped_title"], {}).get("label", ""),
+            "name_color_class": NAME_COLOR_BY_ID.get(u["equipped_name_color"], {}).get("css_class", ""),
         }
         for u in all_users
     ]
@@ -3792,9 +3952,15 @@ def member_detail(user_id):
         points = users.available_points(points_conn, user_id)
     finally:
         points_conn.close()
+    title_label = TITLE_BY_ID.get(target["equipped_title"], {}).get("label", "")
+    name_color_class = NAME_COLOR_BY_ID.get(target["equipped_name_color"], {}).get("css_class", "")
+    effect_class = EFFECT_BY_ID.get(target["equipped_effect"], {}).get("css_class", "")
     return render_template(
         "member_detail.html",
         member=target,
+        title_label=title_label,
+        name_color_class=name_color_class,
+        effect_class=effect_class,
         history=history,
         counts_by_day=counts_by_day,
         total_logins=total_logins,
@@ -3848,7 +4014,8 @@ def game_home():
 
 @app.route("/game/shop")
 def game_shop():
-    """ポイントでアバターフレームと交換する画面。"""
+    """ポイントでアバターフレーム・称号・名前の色・ダッシュボード配色・演出・
+    ギャンブル用消費アイテムと交換する画面。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -3857,6 +4024,11 @@ def game_shop():
         member = users.get_user_by_id(conn, my_id)
         points = users.available_points(conn, my_id)
         owned = users.owned_frame_ids(conn, my_id)
+        owned_titles = users.owned_cosmetic_ids(conn, my_id, "title")
+        owned_name_colors = users.owned_cosmetic_ids(conn, my_id, "name_color")
+        owned_dashboard_themes = users.owned_cosmetic_ids(conn, my_id, "dashboard_theme")
+        owned_effects = users.owned_cosmetic_ids(conn, my_id, "effect")
+        consumables = users.consumable_quantities(conn, my_id)
     finally:
         conn.close()
     return render_template(
@@ -3867,6 +4039,16 @@ def game_shop():
         frame_grades=FRAME_GRADES,
         frame_themes=FRAME_THEMES,
         frame_definitions=FRAME_DEFINITIONS,
+        title_definitions=TITLE_DEFINITIONS,
+        owned_titles=owned_titles,
+        name_color_definitions=NAME_COLOR_DEFINITIONS,
+        owned_name_colors=owned_name_colors,
+        dashboard_theme_definitions=DASHBOARD_THEME_DEFINITIONS,
+        owned_dashboard_themes=owned_dashboard_themes,
+        effect_definitions=EFFECT_DEFINITIONS,
+        owned_effects=owned_effects,
+        consumable_definitions=CONSUMABLE_DEFINITIONS,
+        consumables=consumables,
     )
 
 
@@ -3909,6 +4091,83 @@ def game_shop_equip():
     return _finish("game_shop", message)
 
 
+# category(URLの<category>) -> (カタログのdict, users.pyに渡すcategory名, 表示用ラベル)
+COSMETIC_CATALOGS = {
+    "title": (TITLE_BY_ID, "title", "称号"),
+    "name_color": (NAME_COLOR_BY_ID, "name_color", "名前の色"),
+    "dashboard_theme": (DASHBOARD_THEME_BY_ID, "dashboard_theme", "ダッシュボード配色"),
+    "effect": (EFFECT_BY_ID, "effect", "演出"),
+}
+
+
+@app.route("/game/shop/buy/<category>", methods=["POST"])
+def game_shop_buy_cosmetic(category):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    entry = COSMETIC_CATALOGS.get(category)
+    if entry is None:
+        abort(404)
+    catalog, cosmetic_category, label = entry
+    item = catalog.get(request.form.get("item_id", ""))
+    if item is None:
+        abort(404)
+    conn = _users_conn()
+    try:
+        if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
+            return _finish("game_shop", f"その{label}は既に持っています。", success=False)
+        if users.available_points(conn, my_id) < item["cost"]:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
+        users.purchase_cosmetic(
+            conn, my_id, cosmetic_category, item["id"], item["cost"],
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+    return _finish("game_shop", f"「{item['label']}」と交換しました。")
+
+
+@app.route("/game/shop/equip/<category>", methods=["POST"])
+def game_shop_equip_cosmetic(category):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    entry = COSMETIC_CATALOGS.get(category)
+    if entry is None:
+        abort(404)
+    catalog, cosmetic_category, label = entry
+    item_id = request.form.get("item_id", "").strip()
+    conn = _users_conn()
+    try:
+        if item_id and item_id not in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
+            abort(400)
+        users.set_equipped_cosmetic(conn, my_id, cosmetic_category, item_id)
+    finally:
+        conn.close()
+    message = f"{label}を装着しました。" if item_id else f"{label}を外しました。"
+    return _finish("game_shop", message)
+
+
+@app.route("/game/shop/buy_consumable", methods=["POST"])
+def game_shop_buy_consumable():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    item = CONSUMABLE_BY_ID.get(request.form.get("item_id", ""))
+    if item is None:
+        abort(404)
+    conn = _users_conn()
+    try:
+        if users.available_points(conn, my_id) < item["cost"]:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
+        users.buy_consumable(
+            conn, my_id, item["id"], item["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    finally:
+        conn.close()
+    return _finish("game_shop", f"「{item['label']}」を購入しました。")
+
+
 @app.route("/game/gamble")
 def game_gamble():
     """川霧ギャンブル: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
@@ -3920,6 +4179,7 @@ def game_gamble():
     try:
         points = users.available_points(conn, my_id)
         bets = users.list_fog_bets_for_user(conn, my_id)
+        consumables = users.consumable_quantities(conn, my_id)
     finally:
         conn.close()
     fog_rates = _station_fog_rates()
@@ -3940,6 +4200,8 @@ def game_gamble():
         station_names=STATION_NAMES, precisions=GAMBLE_PRECISIONS, blocks=GAMBLE_BLOCKS,
         min_bet=GAMBLE_MIN_BET, max_bet=GAMBLE_MAX_BET,
         today=now_jst_naive().strftime("%Y-%m-%d"),
+        consumables=consumables, consumable_definitions=CONSUMABLE_DEFINITIONS,
+        consumable_boost_multiplier=CONSUMABLE_BOOST_MULTIPLIER,
     )
 
 
@@ -3984,6 +4246,8 @@ def game_gamble_place():
     hour = request.form.get("hour", type=int)
     block_index = request.form.get("block_index", type=int)
     bet_amount = request.form.get("bet_amount", type=int)
+    use_insurance = request.form.get("use_insurance") == "1"
+    use_boost = request.form.get("use_boost") == "1"
 
     if station not in STATION_NAMES:
         return _finish("game_gamble", "地点を選んでください。", success=False)
@@ -4016,9 +4280,22 @@ def game_gamble_place():
     try:
         if users.available_points(conn, my_id) < bet_amount:
             return _finish("game_gamble", "ポイントが足りません。", success=False)
+        owned = users.consumable_quantities(conn, my_id)
+        if use_insurance and owned.get("insurance_ticket", 0) < 1:
+            return _finish("game_gamble", "保険チケットを持っていません。", success=False)
+        if use_boost and owned.get("boost_ticket", 0) < 1:
+            return _finish("game_gamble", "倍率ブーストチケットを持っていません。", success=False)
+
+        if use_boost:
+            users.use_consumable(conn, my_id, "boost_ticket")
+            multiplier = round(multiplier * CONSUMABLE_BOOST_MULTIPLIER, 2)
+        if use_insurance:
+            users.use_consumable(conn, my_id, "insurance_ticket")
+
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         users.place_fog_bet(
             conn, my_id, station, precision_id, window_start, window_end, bet_amount, multiplier, now_str,
+            insurance=use_insurance,
         )
     finally:
         conn.close()

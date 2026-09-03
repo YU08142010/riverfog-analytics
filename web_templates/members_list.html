@@ -29,7 +29,7 @@
         {% endif %}
         {% endcall %}
         <div class="ranking-info">
-            <a href="{{ url_for('member_detail', user_id=m.id) }}" class="ranking-name">{{ m.name }}</a>
+            <a href="{{ url_for('member_detail', user_id=m.id) }}" class="ranking-name {{ m.name_color_class }}">{{ m.name }}</a>
             <div class="ranking-bar-track">
                 <div class="ranking-bar-fill" style="width: {{ (100.0 * m[count_key] / items[0][count_key]) | round(1) }}%;"></div>
             </div>
@@ -61,6 +61,7 @@
         {% endif %}
     </div>
     <div id="ranking-view-month">
+        <p class="muted" style="font-size:0.8rem;">月末時点の上位3名には、翌月に月間ランキング報酬(1位5000pt・2位2000pt・3位500pt)が贈られます。</p>
         {% if month_ranking %}
         {{ render_ranking(month_ranking, "month_login_count") }}
         {% else %}
@@ -103,8 +104,11 @@
             {% endcall %}
             <div style="margin-top:0.5rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:0.35rem;">
                 <span class="sidebar-dot" style="background: {{ '#2ecc71' if m.online else 'var(--color-border)' }};" title="{{ 'オンライン' if m.online else 'オフライン' }}"></span>
-                {{ m.name }}
+                <span class="{{ m.name_color_class }}">{{ m.name }}</span>
             </div>
+            {% if m.title_label %}
+            <div class="muted" style="font-size:0.72rem; margin-top:0.1rem;">{{ m.title_label }}</div>
+            {% endif %}
             <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
             <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">
                 ログイン{{ m.login_count }}回{% if m.streak > 1 %}・連続{{ m.streak }}日{% endif %}
