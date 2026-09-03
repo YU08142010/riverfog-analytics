@@ -381,6 +381,8 @@ def _check_maintenance():
     state = _maintenance_state()
     if not state["enabled"]:
         return None
+    if session.get("role") == "admin":
+        return None
     return render_template("maintenance.html", message=state["message"]), 503
 
 
@@ -5233,6 +5235,7 @@ def group_home():
         pinned = users.list_pinned_group_messages(conn)
         if messages:
             users.mark_group_read(conn, my_id, messages[-1]["id"])
+        read_states = users.all_group_read_states(conn)
         me = users.get_user_by_id(conn, my_id)
     finally:
         conn.close()
@@ -5241,6 +5244,9 @@ def group_home():
     for m in messages:
         m["attachments"] = attachments_by_id.get(m["id"], [])
         m["sender_name"] = name_by_id.get(m["sender_id"], "(退会済みユーザー)")
+        m["read_count"] = sum(
+            1 for uid, last_read in read_states.items() if uid != m["sender_id"] and last_read >= m["id"]
+        )
     _attach_message_extras(messages, reactions_by_id, mentions_by_id, name_by_id, reply_by_id, my_id)
     for p in pinned:
         p["sender_name"] = name_by_id.get(p["sender_id"], "(退会済みユーザー)")
@@ -5252,6 +5258,12 @@ def group_home():
         member_names=sorted(name_by_id.values()), my_dm_theme_class=my_dm_theme_class,
         my_bubble_style_class=my_bubble_style_class,
     )
+
+
+def _serializable_read_states(read_states):
+    """dictのキーがintのままだとjsonify後にJS側でstringキーになるため、
+    グループチャットの既読数リアルタイム更新ではキーを文字列化して明示的に渡す。"""
+    return {str(uid): last_read for uid, last_read in read_states.items()}
 
 
 @app.route("/group/send", methods=["POST"])
@@ -5348,7 +5360,10 @@ def group_poll():
     typing_names = [
         name_by_id[uid] for uid in _typing_user_ids("group", exclude_user_id=my_id) if uid in name_by_id
     ]
-    return jsonify({"messages": messages, "typing_names": typing_names})
+    return jsonify({
+        "messages": messages, "typing_names": typing_names,
+        "read_states": _serializable_read_states(read_states),
+    })
 
 
 @app.route("/group/typing", methods=["POST"])

@@ -325,6 +325,16 @@
                     appendBubble(m, m.sender_id === myId);
                     lastId = m.id;
                 });
+                if (data.read_states) {
+                    document.querySelectorAll(".dm-read-receipt").forEach(function(el) {
+                        var mid = parseInt(el.dataset.messageId, 10);
+                        var count = 0;
+                        for (var uid in data.read_states) {
+                            if (uid !== String(myId) && data.read_states[uid] >= mid) { count++; }
+                        }
+                        el.textContent = count ? "既読 " + count + "人" : "";
+                    });
+                }
                 if (Array.isArray(data.typing_names)) {
                     typingIndicator.textContent = data.typing_names.length
                         ? data.typing_names.join("、") + "さんが入力中..." : "";
