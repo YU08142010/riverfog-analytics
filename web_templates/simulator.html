@@ -40,6 +40,7 @@
                 </select>
             </p>
         </div>
+        <p class="muted">空欄の項目は、下のグレー表示(初期値)を使って試算します。すべての項目を埋める必要はありません。</p>
         <div class="sim-form-grid">
             {% for f in fields %}
             <p>
@@ -48,7 +49,8 @@
                 </label><br>
                 <input type="number" id="sim-{{ f.key }}" name="{{ f.key }}"
                        min="{{ f.min }}" max="{{ f.max }}" step="any"
-                       value="{{ values[f.key] }}" style="width:100%; box-sizing:border-box;">
+                       value="{{ values[f.key] if f.key in explicit_fields else '' }}"
+                       placeholder="{{ values[f.key] }}" style="width:100%; box-sizing:border-box;">
             </p>
             {% endfor %}
         </div>
