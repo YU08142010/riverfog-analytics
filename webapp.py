@@ -3643,20 +3643,61 @@ EFFECT_DEFINITIONS = [
 ]
 EFFECT_BY_ID = {e["id"]: e for e in EFFECT_DEFINITIONS}
 
-# --- 川霧ギャンブルの消費アイテム ---------------------------------------------------
+BANNER_DEFINITIONS = [
+    {"id": "kiri", "label": "霧景色", "cost": 2000, "css_class": "banner-kiri"},
+    {"id": "yuuyake", "label": "夕焼け", "cost": 2000, "css_class": "banner-yuuyake"},
+    {"id": "yukigesho", "label": "雪景色", "cost": 2000, "css_class": "banner-yukigesho"},
+    {"id": "hoshizora", "label": "星空", "cost": 3000, "css_class": "banner-hoshizora"},
+]
+BANNER_BY_ID = {b["id"]: b for b in BANNER_DEFINITIONS}
+
+DM_THEME_DEFINITIONS = [
+    {"id": "kiri", "label": "霧", "cost": 1500, "css_class": "dm-theme-kiri"},
+    {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dm-theme-yuuyake"},
+    {"id": "mint", "label": "ミント", "cost": 1500, "css_class": "dm-theme-mint"},
+]
+DM_THEME_BY_ID = {d["id"]: d for d in DM_THEME_DEFINITIONS}
+
+# 名前の色と同じCSSクラス(name-color-*)をそのまま流用する(色の見た目自体は
+# 用途によらず共通なので、称号用に別のクラスを増やす必要が無い)。
+TITLE_COLOR_DEFINITIONS = [
+    {"id": "red", "label": "赤", "cost": 600, "css_class": "name-color-red"},
+    {"id": "blue", "label": "青", "cost": 600, "css_class": "name-color-blue"},
+    {"id": "green", "label": "緑", "cost": 600, "css_class": "name-color-green"},
+    {"id": "gold", "label": "金", "cost": 1500, "css_class": "name-color-gold"},
+    {"id": "rainbow", "label": "虹色", "cost": 4000, "css_class": "name-color-rainbow"},
+]
+TITLE_COLOR_BY_ID = {c["id"]: c for c in TITLE_COLOR_DEFINITIONS}
+
+MARKER_DEFINITIONS = [
+    {"id": "hall_of_fame", "label": "殿堂入り章", "cost": 25000, "icon": "★"},
+]
+MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
+
+# --- 川霧ギャンブル・デイリーゲーム共通の消費アイテム ---------------------------------
 CONSUMABLE_DEFINITIONS = [
     {
         "id": "insurance_ticket", "label": "保険チケット", "cost": 300,
-        "desc": "この賭けがハズレても、賭けたポイントの半額が払い戻されます。",
+        "desc": "川霧ギャンブルの賭けがハズレても、賭けたポイントの半額が払い戻されます。",
     },
     {
         "id": "boost_ticket", "label": "倍率ブーストチケット", "cost": 250,
-        "desc": "この賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
+        "desc": "川霧ギャンブルの賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
+    },
+    {
+        "id": "lottery_luck_ticket", "label": "ラッキーチケット", "cost": 200,
+        "desc": "デイリーくじを引く時に使うと、高額ポイントの出やすさが上がります。",
+    },
+    {
+        "id": "quiz_hint_ticket", "label": "クイズヒントチケット", "cost": 150,
+        "desc": "現象当てクイズで、誤った選択肢を1つ消せます。",
     },
 ]
 CONSUMABLE_BY_ID = {c["id"]: c for c in CONSUMABLE_DEFINITIONS}
 CONSUMABLE_BOOST_MULTIPLIER = 1.1
 CONSUMABLE_INSURANCE_REFUND_RATIO = 0.5
+# ラッキーチケット使用時、100pt以上の枠の重みをこの倍率で底上げする(重みの再配分)。
+LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
 
 # --- 川霧ギャンブル ---------------------------------------------------------------
 # 「この地点でこの時刻に川霧が出るか」にポイントを賭けるゲーム。
@@ -4019,6 +4060,8 @@ def members_list():
             "online": _is_online(last_active.get(u["id"])),
             "title_label": TITLE_BY_ID.get(u["equipped_title"], {}).get("label", ""),
             "name_color_class": NAME_COLOR_BY_ID.get(u["equipped_name_color"], {}).get("css_class", ""),
+            "title_color_class": TITLE_COLOR_BY_ID.get(u["equipped_title_color"], {}).get("css_class", ""),
+            "marker_icon": MARKER_BY_ID.get(u["equipped_marker"], {}).get("icon", ""),
         }
         for u in all_users
     ]
@@ -4089,12 +4132,18 @@ def member_detail(user_id):
     title_label = TITLE_BY_ID.get(target["equipped_title"], {}).get("label", "")
     name_color_class = NAME_COLOR_BY_ID.get(target["equipped_name_color"], {}).get("css_class", "")
     effect_class = EFFECT_BY_ID.get(target["equipped_effect"], {}).get("css_class", "")
+    banner_class = BANNER_BY_ID.get(target["equipped_banner"], {}).get("css_class", "")
+    title_color_class = TITLE_COLOR_BY_ID.get(target["equipped_title_color"], {}).get("css_class", "")
+    marker_icon = MARKER_BY_ID.get(target["equipped_marker"], {}).get("icon", "")
     return render_template(
         "member_detail.html",
         member=target,
         title_label=title_label,
         name_color_class=name_color_class,
         effect_class=effect_class,
+        banner_class=banner_class,
+        title_color_class=title_color_class,
+        marker_icon=marker_icon,
         history=history,
         counts_by_day=counts_by_day,
         total_logins=total_logins,
@@ -4162,6 +4211,10 @@ def game_shop():
         owned_name_colors = users.owned_cosmetic_ids(conn, my_id, "name_color")
         owned_dashboard_themes = users.owned_cosmetic_ids(conn, my_id, "dashboard_theme")
         owned_effects = users.owned_cosmetic_ids(conn, my_id, "effect")
+        owned_banners = users.owned_cosmetic_ids(conn, my_id, "banner")
+        owned_dm_themes = users.owned_cosmetic_ids(conn, my_id, "dm_theme")
+        owned_title_colors = users.owned_cosmetic_ids(conn, my_id, "title_color")
+        owned_markers = users.owned_cosmetic_ids(conn, my_id, "marker")
         consumables = users.consumable_quantities(conn, my_id)
     finally:
         conn.close()
@@ -4181,6 +4234,14 @@ def game_shop():
         owned_dashboard_themes=owned_dashboard_themes,
         effect_definitions=EFFECT_DEFINITIONS,
         owned_effects=owned_effects,
+        banner_definitions=BANNER_DEFINITIONS,
+        owned_banners=owned_banners,
+        dm_theme_definitions=DM_THEME_DEFINITIONS,
+        owned_dm_themes=owned_dm_themes,
+        title_color_definitions=TITLE_COLOR_DEFINITIONS,
+        owned_title_colors=owned_title_colors,
+        marker_definitions=MARKER_DEFINITIONS,
+        owned_markers=owned_markers,
         consumable_definitions=CONSUMABLE_DEFINITIONS,
         consumables=consumables,
     )
@@ -4231,6 +4292,10 @@ COSMETIC_CATALOGS = {
     "name_color": (NAME_COLOR_BY_ID, "name_color", "名前の色"),
     "dashboard_theme": (DASHBOARD_THEME_BY_ID, "dashboard_theme", "ダッシュボード配色"),
     "effect": (EFFECT_BY_ID, "effect", "演出"),
+    "banner": (BANNER_BY_ID, "banner", "プロフィールバナー"),
+    "dm_theme": (DM_THEME_BY_ID, "dm_theme", "メッセージ配色"),
+    "title_color": (TITLE_COLOR_BY_ID, "title_color", "称号の色"),
+    "marker": (MARKER_BY_ID, "marker", "殿堂入り章"),
 }
 
 
@@ -4462,6 +4527,7 @@ def game_daily():
         fog_quiz_stats = users.get_daily_fog_quiz_stats(conn, my_id)
         phenom_quiz_today = users.get_daily_phenom_quiz(conn, my_id, today_str)
         lottery_result = users.get_point_event_amount(conn, my_id, f"daily_lottery:{today_str}")
+        consumables = users.consumable_quantities(conn, my_id)
     finally:
         conn.close()
     return render_template(
@@ -4472,6 +4538,7 @@ def game_daily():
         phenom_categories=PHENOM_QUIZ_CATEGORIES, phenom_quiz_points=PHENOM_QUIZ_POINTS,
         lottery_result=lottery_result, lottery_outcomes=LOTTERY_OUTCOMES,
         fog_quiz_base_points=FOG_QUIZ_BASE_POINTS, fog_quiz_streak_bonus=FOG_QUIZ_STREAK_BONUS_PER_DAY,
+        consumables=consumables,
     )
 
 
@@ -4496,6 +4563,33 @@ def game_daily_fog_quiz_guess():
     if not created:
         return _finish("game_daily", "今日はもう回答済みです。", success=False)
     return _finish("game_daily", f"「{station}」の予想を受け付けました。観測が終わり次第、答え合わせされます。")
+
+
+@app.route("/game/daily/phenom_quiz/hint", methods=["POST"])
+def game_daily_phenom_quiz_hint():
+    """クイズヒントチケットを1個消費し、誤った選択肢を1つランダムに選んで返す
+    (どれが正解かは明かさない)。フォーム送信ではなくボタンクリックからfetchで
+    直接呼ぶため、_finish()は使わずJSONを返す。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    today_str = now_jst_naive().strftime("%Y-%m-%d")
+    item = _todays_phenom_quiz_item(today_str)
+    if item is None:
+        return jsonify({"success": False, "message": "今日は出題できる画像がありません。"})
+    _date_dir, _hhmm, _station, code = item
+    correct_category = _phenom_category_id_for_code(code)
+    conn = _users_conn()
+    try:
+        if users.get_daily_phenom_quiz(conn, my_id, today_str) is not None:
+            return jsonify({"success": False, "message": "今日はもう回答済みです。"})
+        if not users.use_consumable(conn, my_id, "quiz_hint_ticket"):
+            return jsonify({"success": False, "message": "クイズヒントチケットを持っていません。"})
+        wrong_ids = [c["id"] for c in PHENOM_QUIZ_CATEGORIES if c["id"] != correct_category]
+        eliminate = random.choice(wrong_ids)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "eliminate": eliminate})
 
 
 @app.route("/game/daily/phenom_quiz/answer", methods=["POST"])
@@ -4536,14 +4630,22 @@ def game_daily_lottery_draw():
         abort(403)
     today_str = now_jst_naive().strftime("%Y-%m-%d")
     source = f"daily_lottery:{today_str}"
+    use_luck = request.form.get("use_luck") == "1"
     conn = _users_conn()
     try:
         existing = users.get_point_event_amount(conn, my_id, source)
         if existing is not None:
             return _finish("game_daily", f"今日はもう引いています(結果: {existing}pt)。", success=False)
-        amount = random.choices(
-            [a for _, a in LOTTERY_OUTCOMES], weights=[w for w, _ in LOTTERY_OUTCOMES], k=1,
-        )[0]
+        used_luck = False
+        if use_luck:
+            if users.consumable_quantities(conn, my_id).get("lottery_luck_ticket", 0) < 1:
+                return _finish("game_daily", "ラッキーチケットを持っていません。", success=False)
+            used_luck = users.use_consumable(conn, my_id, "lottery_luck_ticket")
+        weights = [
+            w * LOTTERY_LUCK_WEIGHT_MULTIPLIER if used_luck and a >= 100 else w
+            for w, a in LOTTERY_OUTCOMES
+        ]
+        amount = random.choices([a for _, a in LOTTERY_OUTCOMES], weights=weights, k=1)[0]
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         if not users.grant_points(conn, my_id, source, amount, now_str):
             # 直前にほぼ同時の二重送信があった場合、実際に記録された方の金額を表示する
@@ -4620,11 +4722,15 @@ def dm_thread(user_id):
         else:
             conversation_id = None
         other_online = _is_online(users.last_active(conn, user_id))
+        me = users.get_user_by_id(conn, my_id)
     finally:
         conn.close()
+    my_dm_theme_class = DM_THEME_BY_ID.get(me["equipped_dm_theme"], {}).get("css_class", "") if me else ""
+    other_dm_theme_class = DM_THEME_BY_ID.get(other["equipped_dm_theme"], {}).get("css_class", "")
     return render_template(
         "dm_thread.html", other=other, messages=messages, conversation_id=conversation_id,
         my_id=my_id, dm_message_max_length=DM_MESSAGE_MAX_LENGTH, other_online=other_online,
+        my_dm_theme_class=my_dm_theme_class, other_dm_theme_class=other_dm_theme_class,
     )
 
 

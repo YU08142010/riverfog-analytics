@@ -65,12 +65,15 @@
         <p class="muted" style="margin-top:0.5rem;">不正解でした。また明日挑戦できます。</p>
         {% endif %}
     {% else %}
-    <form method="post" action="{{ url_for('game_daily_phenom_quiz_answer') }}" data-ajax data-ajax-reload style="margin-top:0.6rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <form method="post" action="{{ url_for('game_daily_phenom_quiz_answer') }}" id="phenom-quiz-form" data-ajax data-ajax-reload style="margin-top:0.6rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% for cat in phenom_categories %}
-        <button type="submit" name="category" value="{{ cat.id }}" class="button">{{ cat.label }}</button>
+        <button type="submit" name="category" value="{{ cat.id }}" class="button" id="phenom-cat-{{ cat.id }}">{{ cat.label }}</button>
         {% endfor %}
     </form>
+    <button type="button" class="button cancel" id="phenom-hint-btn" style="margin-top:0.5rem;" {{ "disabled" if consumables.get('quiz_hint_ticket', 0) < 1 }}>
+        クイズヒントチケットを使う(残り{{ consumables.get('quiz_hint_ticket', 0) }}個)
+    </button>
     {% endif %}
     {% else %}
     <div class="empty-state"><span>今日はまだ出題できる画像がありません。画像アーカイブが増えるとここに問題が出ます。</span></div>
@@ -86,8 +89,42 @@
     {% else %}
     <form method="post" action="{{ url_for('game_daily_lottery_draw') }}" data-ajax data-ajax-reload>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label style="display:block; font-size:0.85rem; margin-bottom:0.5rem; {{ 'opacity:0.5;' if consumables.get('lottery_luck_ticket', 0) < 1 }}">
+            <input type="checkbox" name="use_luck" value="1" {{ "disabled" if consumables.get('lottery_luck_ticket', 0) < 1 }}>
+            ラッキーチケットを使う(残り{{ consumables.get('lottery_luck_ticket', 0) }}個、高額枠が出やすくなります)
+        </label>
         <button type="submit" class="button">くじを引く</button>
     </form>
     {% endif %}
 </div>
+
+<script>
+(function() {
+    var hintBtn = document.getElementById("phenom-hint-btn");
+    if (!hintBtn) { return; }
+    hintBtn.addEventListener("click", function() {
+        hintBtn.disabled = true;
+        fetch("{{ url_for('game_daily_phenom_quiz_hint') }}", {
+            method: "POST",
+            body: new URLSearchParams({csrf_token: "{{ csrf_token() }}"}),
+            headers: {"X-Requested-With": "XMLHttpRequest"},
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                var btn = document.getElementById("phenom-cat-" + data.eliminate);
+                if (btn) { btn.disabled = true; btn.style.opacity = "0.4"; }
+                hintBtn.textContent = "ヒントを使いました";
+            } else {
+                hintBtn.disabled = false;
+                showToast(data.message, true);
+            }
+        })
+        .catch(function() {
+            hintBtn.disabled = false;
+            showToast("通信エラーが発生しました。", true);
+        });
+    });
+})();
+</script>
 {% endblock %}

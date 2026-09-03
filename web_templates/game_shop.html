@@ -180,6 +180,85 @@
 </div>
 
 <div class="card">
+    <h2 style="margin-top:0;">プロフィールバナー</h2>
+    <p class="muted" style="font-size:0.85rem;">プロフィールカード上部に飾る風景バナーです。</p>
+    <div class="member-grid">
+        {% for item in banner_definitions %}
+        {% call cosmetic_item("banner", item, owned_banners, member.equipped_banner) %}
+        <div class="{{ item.css_class }}" style="height:36px; border-radius:6px; margin-bottom:0.3rem;"></div>
+        <div style="font-weight:600;">{{ item.label }}</div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+    {% if member.equipped_banner %}
+    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='banner') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="item_id" value="">
+        <button type="submit" class="button cancel">バナーを外す</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">メッセージ配色</h2>
+    <p class="muted" style="font-size:0.85rem;">自分が送るDMの吹き出しの色を変えられます(相手にも見えます)。</p>
+    <div class="member-grid">
+        {% for item in dm_theme_definitions %}
+        {% call cosmetic_item("dm_theme", item, owned_dm_themes, member.equipped_dm_theme) %}
+        <div class="dm-bubble {{ item.css_class }}" style="display:inline-block; padding:0.4rem 0.7rem; margin-bottom:0.3rem; font-size:0.75rem;">プレビュー</div>
+        <div style="font-weight:600;">{{ item.label }}</div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+    {% if member.equipped_dm_theme %}
+    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='dm_theme') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="item_id" value="">
+        <button type="submit" class="button cancel">メッセージ配色を元に戻す</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">称号の色</h2>
+    <p class="muted" style="font-size:0.85rem;">称号(未購入の場合はまず「称号」から購入してください)の表示色を変えられます。</p>
+    <div class="member-grid">
+        {% for item in title_color_definitions %}
+        {% call cosmetic_item("title_color", item, owned_title_colors, member.equipped_title_color) %}
+        <div class="{{ item.css_class }}" style="font-weight:700;">{{ item.label }}</div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+    {% if member.equipped_title_color %}
+    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='title_color') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="item_id" value="">
+        <button type="submit" class="button cancel">称号の色を元に戻す</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">殿堂入り章</h2>
+    <p class="muted" style="font-size:0.85rem;">名前の横に特別なマークが付きます。</p>
+    <div class="member-grid">
+        {% for item in marker_definitions %}
+        {% call cosmetic_item("marker", item, owned_markers, member.equipped_marker) %}
+        <div style="font-size:1.5rem;">{{ item.icon }}</div>
+        <div style="font-weight:600;">{{ item.label }}</div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+    {% if member.equipped_marker %}
+    <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category='marker') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="item_id" value="">
+        <button type="submit" class="button cancel">殿堂入り章を外す</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
     <h2 style="margin-top:0;">川霧ギャンブル用アイテム</h2>
     <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、ギャンブルで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
     <div class="member-grid">

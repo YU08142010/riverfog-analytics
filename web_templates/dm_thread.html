@@ -31,7 +31,7 @@
 
     <div class="dm-bubbles" id="dm-bubbles">
         {% for m in messages -%}
-        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}" id="dm-bubble-row-{{ m.id }}"{% if m.sender_id == my_id %} data-context-menu="dm-message-context-menu" data-context-target-id="{{ m.id }}"{% endif %}><div class="dm-bubble">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
+        <div class="dm-bubble-row {{ 'mine' if m.sender_id == my_id else '' }}" id="dm-bubble-row-{{ m.id }}"{% if m.sender_id == my_id %} data-context-menu="dm-message-context-menu" data-context-target-id="{{ m.id }}"{% endif %}><div class="dm-bubble {{ my_dm_theme_class if m.sender_id == my_id else other_dm_theme_class }}">{%- if m.body %}<span class="dm-bubble-text">{{ m.body|linkify }}</span>{% endif -%}
             {%- for a in m.attachments -%}
             <div class="dm-attachment"><a href="{{ url_for('dm_attachment_file', attachment_id=a.id) }}">{{ icon("attach", size=13) }} {{ a.filename }}</a></div>
             {%- endfor -%}
@@ -56,6 +56,7 @@
 
 <script>
 (function() {
+    var myDmThemeClass = {{ my_dm_theme_class|tojson }};
     var bubbles = document.getElementById("dm-bubbles");
     var form = document.getElementById("dm-send-form");
     var textarea = document.getElementById("dm-send-body");
@@ -97,7 +98,7 @@
             }
         }
         var bubble = document.createElement("div");
-        bubble.className = "dm-bubble";
+        bubble.className = "dm-bubble" + (mine && myDmThemeClass ? " " + myDmThemeClass : "");
         if (body) {
             var textSpan = document.createElement("span");
             textSpan.className = "dm-bubble-text";

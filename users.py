@@ -294,7 +294,10 @@ def _ensure_profile_columns(conn):
         conn.execute("ALTER TABLE users ADD COLUMN equipped_frame TEXT NOT NULL DEFAULT ''")
     if "locked_at" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN locked_at TEXT")
-    for col in ("equipped_title", "equipped_name_color", "equipped_dashboard_theme", "equipped_effect"):
+    for col in (
+        "equipped_title", "equipped_name_color", "equipped_dashboard_theme", "equipped_effect",
+        "equipped_banner", "equipped_dm_theme", "equipped_title_color", "equipped_marker",
+    ):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
@@ -346,7 +349,8 @@ def _norm_email(email):
 
 _USER_COLUMNS = (
     "id, name, email, password_hash, role, created_at, bio, favorite_stations, equipped_frame, locked_at, "
-    "equipped_title, equipped_name_color, equipped_dashboard_theme, equipped_effect"
+    "equipped_title, equipped_name_color, equipped_dashboard_theme, equipped_effect, "
+    "equipped_banner, equipped_dm_theme, equipped_title_color, equipped_marker"
 )
 
 
@@ -357,6 +361,8 @@ def _user_row_to_dict(row):
         "bio": row[6], "favorite_stations": row[7], "equipped_frame": row[8],
         "locked_at": row[9], "equipped_title": row[10], "equipped_name_color": row[11],
         "equipped_dashboard_theme": row[12], "equipped_effect": row[13],
+        "equipped_banner": row[14], "equipped_dm_theme": row[15],
+        "equipped_title_color": row[16], "equipped_marker": row[17],
     }
 
 
@@ -1069,6 +1075,10 @@ _COSMETIC_EQUIP_COLUMNS = {
     "name_color": "equipped_name_color",
     "dashboard_theme": "equipped_dashboard_theme",
     "effect": "equipped_effect",
+    "banner": "equipped_banner",
+    "dm_theme": "equipped_dm_theme",
+    "title_color": "equipped_title_color",
+    "marker": "equipped_marker",
 }
 
 

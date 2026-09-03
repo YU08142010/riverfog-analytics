@@ -1698,3 +1698,30 @@ table.obs-table th.sticky-col { z-index: 3; }
 @media (prefers-reduced-motion: reduce) {
     .fx-fog-drift::before, .fx-sparkle::after, .fx-aurora-glow { animation: none; }
 }
+
+/* --- ショップ品: プロフィールバナー(webapp.pyのBANNER_DEFINITIONS) ---------------
+   プロフィールカードの上端に敷く帯。アバター・本文の上に独立した帯として置くだけで、
+   既存レイアウトのgap・flexには影響しない。 */
+.profile-banner {
+    height: 64px;
+    margin: -1.3rem -1.5rem 1rem;
+    border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
+}
+.banner-kiri { background: linear-gradient(135deg, #c7cdd6, #8b95a5); }
+.banner-yuuyake { background: linear-gradient(135deg, #ff9a56, #e0526a); }
+.banner-yukigesho { background: linear-gradient(135deg, #eaf6ff, #a9d6f5); }
+.banner-hoshizora { background: linear-gradient(135deg, #2e2a6e, #7b4fd6); }
+
+/* --- ショップ品: メッセージ配色(webapp.pyのDM_THEME_DEFINITIONS) -----------------
+   .dm-bubble-row.mine .dm-bubbleの既定色(3クラス分の詳細度)より優先させる必要が
+   あるため、同じ形の4クラスセレクタも一緒に定義している。 */
+.dm-bubble.dm-theme-kiri, .dm-bubble-row.mine .dm-bubble.dm-theme-kiri {
+    background: #eef1f4; color: #1c2733; border-color: #c7cdd6;
+}
+.dm-bubble.dm-theme-yuuyake, .dm-bubble-row.mine .dm-bubble.dm-theme-yuuyake {
+    background: linear-gradient(135deg, #ff9a56, #e0526a); color: #fff; border-color: #e0526a;
+}
+.dm-bubble.dm-theme-mint, .dm-bubble-row.mine .dm-bubble.dm-theme-mint {
+    background: #d9f7ee; color: #0d4a37; border-color: #7fd9bc;
+}
+
