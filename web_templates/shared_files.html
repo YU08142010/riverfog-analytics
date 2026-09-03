@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_page_tabs.html" import page_tabs %}
+{% macro file_type_icon(filename) -%}
+{%- set ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else '' -%}
+{%- if ext in ['doc', 'docx'] -%}📘
+{%- elif ext in ['xls', 'xlsx', 'csv'] -%}📗
+{%- elif ext in ['ppt', 'pptx'] -%}📙
+{%- elif ext == 'pdf' -%}📕
+{%- elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] -%}🖼️
+{%- elif ext in ['zip', 'rar', '7z'] -%}🗂️
+{%- elif ext in ['mp4', 'mov', 'avi'] -%}🎬
+{%- else -%}📄
+{%- endif -%}
+{%- endmacro %}
 {% block title %}共有ファイル{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -18,30 +30,40 @@
     {"label": "メッセージ", "url": url_for('dm_inbox'), "active": request.path.startswith('/messages'), "badge": dm_unread_count()},
     {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
 ]) }}
-<div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-        <h2 style="margin:0;">共有ファイル</h2>
-        <form method="post" action="{{ url_for('shared_file_upload') }}" enctype="multipart/form-data" data-ajax data-ajax-reload style="display:flex; gap:0.4rem; align-items:center;">
+<div class="card files-teams">
+    <div class="files-toolbar">
+        <div class="files-toolbar-title">
+            <span aria-hidden="true">📁</span>
+            <span>{{ breadcrumbs[-1].name if breadcrumbs else "共有ファイル" }}</span>
+        </div>
+        <form method="post" action="{{ url_for('shared_file_upload') }}" enctype="multipart/form-data" data-ajax data-ajax-reload class="files-upload-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="folder_id" value="{{ current_folder_id or '' }}">
-            <input type="file" name="file" required>
-            <button type="submit" class="button">アップロード</button>
+            <label class="button cancel files-choose-btn" style="cursor:pointer;">
+                <span id="files-chosen-name">ファイルを選択</span>
+                <input type="file" name="file" id="files-upload-input" required style="display:none;">
+            </label>
+            <button type="submit" class="button files-upload-btn">＋ アップロード</button>
         </form>
     </div>
 
-    <form method="get" action="{{ url_for('shared_files_page') }}" style="margin-top:0.7rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-        <input type="search" name="q" value="{{ query }}" placeholder="ファイル名・タグ・中身を検索" style="padding:0.35rem 0.6rem; flex:1 1 200px; min-width:160px;">
-        <label style="font-size:0.85rem; display:flex; align-items:center; gap:0.3rem;">
-            <input type="checkbox" name="starred" value="1" {{ "checked" if starred_only }}>
-            ★お気に入りのみ
-        </label>
-        <button type="submit" class="button">検索</button>
-        {% if query or starred_only %}
-        <a href="{{ url_for('shared_files_page', folder=current_folder_id) }}" class="button cancel">クリア</a>
-        {% endif %}
-    </form>
+    <div class="files-subbar">
+        <div class="files-tabs">
+            <a class="files-tab {{ 'active' if not starred_only }}" href="{{ url_for('shared_files_page', folder=current_folder_id, q=query or none) }}">すべて</a>
+            <a class="files-tab {{ 'active' if starred_only }}" href="{{ url_for('shared_files_page', folder=current_folder_id, q=query or none, starred=1) }}">★ お気に入り</a>
+        </div>
+        <form method="get" action="{{ url_for('shared_files_page') }}" class="files-search-form">
+            {% if current_folder_id %}<input type="hidden" name="folder" value="{{ current_folder_id }}">{% endif %}
+            {% if starred_only %}<input type="hidden" name="starred" value="1">{% endif %}
+            <input type="search" name="q" value="{{ query }}" placeholder="ファイル名・タグ・中身を検索">
+            <button type="submit" class="button files-search-btn" title="検索">🔍</button>
+            {% if query %}
+            <a href="{{ url_for('shared_files_page', folder=current_folder_id, starred=1 if starred_only else none) }}" class="button cancel">クリア</a>
+            {% endif %}
+        </form>
+    </div>
     {% if query %}
-    <p class="muted" style="font-size:0.82rem; margin-top:0.5rem;">「{{ query }}」の検索結果: {{ files|length }}件(全フォルダ横断)</p>
+    <p class="muted" style="font-size:0.82rem; margin-bottom:0.6rem;">「{{ query }}」の検索結果: {{ files|length }}件(全フォルダ横断)</p>
     {% endif %}
 
     <div id="bulk-toolbar" class="bulk-toolbar" hidden>
@@ -51,18 +73,18 @@
         <button type="button" class="button cancel" id="bulk-delete-btn">削除</button>
     </div>
 
-    <div id="files-drop-area" data-context-menu="bg-context-menu" style="margin-top:0.8rem; min-height:120px;">
+    <div id="files-drop-area" data-context-menu="bg-context-menu" style="min-height:120px;">
     {% if not folders and not files %}
     <div class="empty-state">{{ icon("empty") }}<span>{{ "見つかりませんでした。" if query else "ここは空です(右クリックでフォルダを作成できます)" }}</span></div>
     {% else %}
     <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
-        <thead><tr><th style="width:2em;"></th><th>名前</th><th>アップロード者</th><th>日時</th><th>サイズ</th><th></th></tr></thead>
+    <table class="files-table">
+        <thead><tr><th style="width:2em;"></th><th>名前</th><th>アップロード者</th><th>更新日時</th><th>サイズ</th><th></th></tr></thead>
         <tbody>
         {% for fo in folders %}
         <tr data-context-menu="folder-context-menu" data-context-target-id="{{ fo.id }}" data-folder-drop-target="{{ fo.id }}">
             <td></td>
-            <td><a href="{{ url_for('shared_files_page', folder=fo.id) }}">📁 {{ fo.name }}</a></td>
+            <td><a class="file-name-link" href="{{ url_for('shared_files_page', folder=fo.id) }}"><span class="file-icon" aria-hidden="true">📁</span>{{ fo.name }}</a></td>
             <td>{{ fo.created_by_name }}</td>
             <td>{{ fo.created_at }}</td>
             <td></td>
@@ -83,9 +105,9 @@
             <td><input type="checkbox" class="file-select-checkbox" value="{{ f.id }}"></td>
             <td>
                 {% if f.previewable %}
-                <a href="{{ url_for('shared_file_preview', file_id=f.id) }}">{{ f.filename }}</a>
+                <a class="file-name-link" href="{{ url_for('shared_file_preview', file_id=f.id) }}"><span class="file-icon" aria-hidden="true">{{ file_type_icon(f.filename) }}</span>{{ f.filename }}</a>
                 {% else %}
-                <a href="{{ url_for('shared_file_download', file_id=f.id) }}">{{ f.filename }}</a>
+                <a class="file-name-link" href="{{ url_for('shared_file_download', file_id=f.id) }}"><span class="file-icon" aria-hidden="true">{{ file_type_icon(f.filename) }}</span>{{ f.filename }}</a>
                 {% endif %}
                 <button type="button" class="star-toggle-btn" data-file-id="{{ f.id }}" title="お気に入り">{{ "★" if f.starred else "☆" }}</button>
                 {% if f.tag_list %}
@@ -132,6 +154,14 @@
 
 <script>
 (function() {
+    var filesUploadInput = document.getElementById("files-upload-input");
+    var filesChosenName = document.getElementById("files-chosen-name");
+    if (filesUploadInput && filesChosenName) {
+        filesUploadInput.addEventListener("change", function() {
+            filesChosenName.textContent = filesUploadInput.files[0] ? filesUploadInput.files[0].name : "ファイルを選択";
+        });
+    }
+
     function postForm(action, fields) {
         var f = document.createElement("form");
         f.method = "post";
