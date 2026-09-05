@@ -2725,6 +2725,7 @@ def dashboard():
         latest_pred_date=latest_pred_date,
         summary_file=summary_file,
         station_names=STATION_NAMES,
+        station_names_by_region={"只見川": TADAMI_STATION_NAMES, "会津": AIZU_STATION_NAMES},
         announcements_list=active_announcements,
         ai_overall_summary=ai_summary.get("overall") if ai_summary else None,
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
@@ -3716,6 +3717,13 @@ def login():
 
 @app.route("/logout")
 def logout():
+    user_id = session.get("user_id")
+    if user_id:
+        conn = _users_conn()
+        try:
+            users.record_logout(conn, user_id, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+        finally:
+            conn.close()
     session.clear()
     return redirect(url_for("login"))
 
@@ -4758,6 +4766,7 @@ def member_detail(user_id):
         if target is None:
             abort(404)
         history = users.login_history(conn, user_id)
+        first_login_at = users.first_login(conn, user_id)
         counts_by_day = users.login_counts_by_day(conn, user_id)
         total_logins = users.login_count(conn, user_id)
         streak = users.login_streak(conn, user_id, datetime.now(JST).date())
@@ -4859,8 +4868,8 @@ def member_detail(user_id):
         favorite_stations=favorite_stations,
         station_names=STATION_NAMES,
         station_region=STATION_REGION,
-        first_login=history[-1] if history else None,
-        last_login=history[0] if history else None,
+        first_login=first_login_at,
+        last_login=history[0]["logged_in_at"] if history else None,
         has_avatar=has_avatar,
         is_self=(session.get("user_id") == user_id),
         heatmap_days=LOGIN_HEATMAP_DAYS,

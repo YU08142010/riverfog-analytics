@@ -451,11 +451,15 @@ def _migrate_phenomena_corrections_nullable_source(conn):
 
 def _ensure_login_events_columns(conn):
     """ipは異常ログイン検知(未知IPからの管理者ログイン等)のために後から追加した列。
+    logged_out_atはログイン履歴に終了時刻も表示するために後から追加した列
+    (/logoutを踏んだ場合のみ記録される。タイムアウトやタブを閉じただけの場合はNULLのまま)。
     login_eventsはFK移行(_migrate_add_foreign_keys)でテーブルごと作り直されることが
     あるため、移行の後に呼ぶこと。"""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(login_events)").fetchall()}
     if "ip" not in cols:
         conn.execute("ALTER TABLE login_events ADD COLUMN ip TEXT")
+    if "logged_out_at" not in cols:
+        conn.execute("ALTER TABLE login_events ADD COLUMN logged_out_at TEXT")
 
 
 def connect(db_path):
@@ -789,6 +793,18 @@ def record_login(conn, user_id, logged_in_at, ip=None):
         )
 
 
+def record_logout(conn, user_id, logged_out_at):
+    """直近の(終了時刻未記録の)ログインに終了時刻を記録する。/logoutを踏んだ場合のみ
+    呼ばれる(セッションタイムアウトやタブを閉じただけの場合は呼ばれず、終了時刻はNULLのまま)。"""
+    with conn:
+        conn.execute(
+            "UPDATE login_events SET logged_out_at = ? WHERE id = ("
+            "SELECT id FROM login_events WHERE user_id = ? AND logged_out_at IS NULL "
+            "ORDER BY logged_in_at DESC LIMIT 1)",
+            (logged_out_at, user_id),
+        )
+
+
 def has_logged_in_from_ip(conn, user_id, ip):
     """このユーザーが過去にこのIPからログインしたことがあるか(異常検知用)。
     ipがNoneの場合は判定不能として「既知扱い」にする(誤検知でアラートを出さないため)。"""
@@ -800,13 +816,15 @@ def has_logged_in_from_ip(conn, user_id, ip):
     return row is not None
 
 
-def login_history(conn, user_id):
-    """指定ユーザーの全ログイン履歴を新しい順で返す（メンバーページの一覧表示用）。"""
+def login_history(conn, user_id, limit=50):
+    """指定ユーザーの直近ログイン履歴を新しい順で返す（メンバーページの一覧表示用）。
+    件数は際限なく増え続けるため、直近limit件だけに絞る。"""
     rows = conn.execute(
-        "SELECT logged_in_at FROM login_events WHERE user_id = ? ORDER BY logged_in_at DESC",
-        (user_id,),
+        "SELECT logged_in_at, logged_out_at FROM login_events WHERE user_id = ? "
+        "ORDER BY logged_in_at DESC LIMIT ?",
+        (user_id, limit),
     ).fetchall()
-    return [r[0] for r in rows]
+    return [{"logged_in_at": r[0], "logged_out_at": r[1]} for r in rows]
 
 
 def login_counts_by_day(conn, user_id):
@@ -901,6 +919,16 @@ def login_counts_between(conn, since_str, until_str):
 def last_login(conn, user_id):
     row = conn.execute(
         "SELECT MAX(logged_in_at) FROM login_events WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def first_login(conn, user_id):
+    """初回ログイン日時。login_history()は表示件数を直近50件に絞っているため、
+    そちらのhistory[-1]をそのまま「初回」として使うと、50回以上ログインしている
+    ユーザーで実際の初回日時とズレる。MIN()で全期間から直接求める。"""
+    row = conn.execute(
+        "SELECT MIN(logged_in_at) FROM login_events WHERE user_id = ?", (user_id,)
     ).fetchone()
     return row[0] if row and row[0] else None
 
@@ -2409,8 +2437,8 @@ __all__ = [
     "count_admins", "email_taken",
     "create_signup_request", "list_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
-    "record_login", "login_history", "login_counts_by_day", "login_count",
-    "login_counts_all", "login_counts_since", "last_login", "last_logins_all", "login_streak",
+    "record_login", "record_logout", "login_history", "login_counts_by_day", "login_count",
+    "login_counts_all", "login_counts_since", "last_login", "first_login", "last_logins_all", "login_streak",
     "login_dates_all", "login_streaks_all",
     "record_audit", "list_audit_log",
     "add_station_comment", "list_station_comments", "get_station_comment",

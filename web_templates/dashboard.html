@@ -209,12 +209,17 @@ document.addEventListener("ajaxformsuccess", function(e) {
         </div>
         {% endif %}
     </div>
-    <h3 style="margin-bottom:0.5rem;">地点ごとの現象</h3>
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_stations = observations.stations|selectattr("name", "in", station_names_by_region.get(region_label, []))|list %}
+    {% if region_stations %}
+    <h3 style="margin-bottom:0.5rem;">地点ごとの現象({{ region_label }})</h3>
     <div class="station-grid">
-        {% for s in observations.stations %}
+        {% for s in region_stations %}
         <div class="station-chip" style="background:{{ s.color }}; color:{{ s.text_color }};">{{ s.name }}<br>{{ s.label }}</div>
         {% endfor %}
     </div>
+    {% endif %}
+    {% endfor %}
     <p style="margin-top:0.8rem;">
         <a class="button" href="{{ url_for('download_xlsx') }}">只見川.xlsxをダウンロード</a>
         <a class="button" href="{{ url_for('download_xlsx_aizu') }}">会津.xlsxをダウンロード</a>
@@ -228,8 +233,17 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <h2>最新のカメラ画像</h2>
     {% if latest_image_date and latest_image_hour %}
     <p class="muted">{{ latest_image_date }} {{ latest_image_hour[:2] }}:{{ latest_image_hour[2:] }} 撮影</p>
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_files = [] %}
+    {% for f in latest_images %}
+        {% if f.replace('_unavailable.jpg', '').replace('.jpg', '') in station_names_by_region.get(region_label, []) %}
+            {% set _ = region_files.append(f) %}
+        {% endif %}
+    {% endfor %}
+    {% if region_files %}
+    <h3 style="margin-bottom:0.5rem;">{{ region_label }}</h3>
     <div class="image-grid">
-        {% for f in latest_images %}
+        {% for f in region_files %}
         {% set station_name = f.replace('_unavailable.jpg', '').replace('.jpg', '') %}
         <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
             <a href="{{ url_for('station_detail', name=station_name) }}" title="{{ station_name }}の地点別ページを見る">
@@ -242,6 +256,8 @@ document.addEventListener("ajaxformsuccess", function(e) {
         </figure>
         {% endfor %}
     </div>
+    {% endif %}
+    {% endfor %}
     <p>
         <a class="button" href="{{ url_for('images_dates') }}">過去の画像を見る</a>
         <a class="button" href="{{ url_for('images_hour_zip', date=latest_image_date, hhmm=latest_image_hour) }}">この時刻の画像をZIPでダウンロード</a>

@@ -374,15 +374,21 @@
 </script>
 
 <div class="card">
-    <h2>ログイン履歴(全{{ history|length }}件)</h2>
+    <h2>ログイン履歴(最近{{ history|length }}件)</h2>
     {% if history %}
-    <div class="login-history-grid">
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>#</th><th>開始時刻</th><th>終了時刻</th></tr></thead>
+        <tbody>
         {% for h in history %}
-        <div class="login-history-item">
-            <span class="login-history-index">#{{ loop.index }}</span>
-            <span class="login-history-date">{{ h }}</span>
-        </div>
+        <tr>
+            <td class="muted">{{ loop.index }}</td>
+            <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">{{ h.logged_in_at }}</td>
+            <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">{{ h.logged_out_at or "-" }}</td>
+        </tr>
         {% endfor %}
+        </tbody>
+    </table>
     </div>
     {% else %}
     <p class="muted">ログイン履歴がまだありません。</p>

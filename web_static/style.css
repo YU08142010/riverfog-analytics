@@ -1522,26 +1522,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .badge-tile.locked { opacity: 0.45; }
 .badge-tile.locked .badge-icon { background: var(--color-border); color: var(--color-text-muted); }
 
-/* メンバー詳細のログイン履歴。以前は1行1件の縦長テーブルで横幅を持て余していたため、
-   カード幅いっぱいに折り返す複数列のグリッドに変える。 */
-.login-history-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 0.4rem;
-}
-.login-history-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 0.5rem;
-    padding: 0.35rem 0.6rem;
-    border-radius: var(--radius-sm);
-    background: var(--color-bg);
-    font-size: 0.8rem;
-}
-.login-history-index { color: var(--color-text-muted); flex: 0 0 auto; }
-.login-history-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
-
 /* station_detail.htmlの「最新の気象情報」。項目数が少ない縦長テーブルのままだと
    カード幅の大半が余白になるため、login-history-gridと同様に折り返すタイル状にする。 */
 .weather-info-grid {
