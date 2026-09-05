@@ -22,11 +22,17 @@
 
     {% if stations %}
     <h3 style="font-size:0.95rem;">地点ごとの予測グラフ</h3>
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_stations = stations|selectattr("name", "in", station_names_by_region.get(region_label, []))|list %}
+    {% if region_stations %}
+    <p class="muted" style="font-size:0.8rem; font-weight:600; margin:0.6rem 0 0.2rem;">{{ region_label }}</p>
     <ul class="date-list">
-        {% for s in stations %}
-        <li><a href="#station-{{ loop.index }}">{{ s.name }}</a></li>
+        {% for s in region_stations %}
+        <li><a href="#station-{{ stations.index(s) + 1 }}">{{ s.name }}</a></li>
         {% endfor %}
     </ul>
+    {% endif %}
+    {% endfor %}
     {% for s in stations %}
     <h4 id="station-{{ loop.index }}" style="font-size:0.9rem; margin-top:1.4rem;">{{ s.name }}</h4>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=s.file) }}" alt="{{ s.name }}の予測グラフ"></div>

@@ -363,11 +363,19 @@ try:
     STATION_REGION = load_camera_regions()
 except Exception:
     STATION_REGION = {}
-# 只見川.xlsx/会津.xlsxのダウンロードを地域ごとに分けるための、地点名の部分リスト
-# (2026-09の会津地方追加で導入。一覧・地図・比較・ギャンブル等は従来通りSTATION_NAMES
-# を使い、両地域をまとめて扱う)。
+# 只見川.xlsx/会津.xlsxのダウンロードや、地点一覧・観測アーカイブ等サイト全体での
+# 地域ごとの表示分けに使う、地点名の部分リスト(2026-09の会津地方追加で導入)。
 TADAMI_STATION_NAMES = [n for n in STATION_NAMES if STATION_REGION.get(n) == "只見川"]
 AIZU_STATION_NAMES = [n for n in STATION_NAMES if STATION_REGION.get(n) == "会津"]
+_STATION_NAMES_BY_REGION = {"只見川": TADAMI_STATION_NAMES, "会津": AIZU_STATION_NAMES}
+
+
+@app.context_processor
+def _inject_station_names_by_region():
+    """全テンプレートで地点を只見川/会津に分けて表示できるよう、共通で注入する
+    (個々のrender_templateで毎回渡さずに済むようにするため)。station_regionは
+    逆引き(地点名→地域)、station_names_by_regionは正引き(地域→地点名リスト)。"""
+    return {"station_names_by_region": _STATION_NAMES_BY_REGION, "station_region": STATION_REGION}
 
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
@@ -1649,6 +1657,10 @@ CHAT_SYSTEM_INSTRUCTION = (
 def _build_chat_context():
     """現在の観測・予測状況・サーバー状態をテキストにまとめる(チャットのシステムプロンプトに含める)。"""
     lines = [f"【バージョン】v{_app_version()}"]
+    lines.append(
+        f"【観測地点一覧】只見川{len(TADAMI_STATION_NAMES)}地点: " + "、".join(TADAMI_STATION_NAMES)
+        + f" / 会津{len(AIZU_STATION_NAMES)}地点: " + "、".join(AIZU_STATION_NAMES)
+    )
     observations = _latest_observations()
     if observations:
         lines.append(f"【現在の観測】{observations['datetime']} 時点")
@@ -2725,7 +2737,6 @@ def dashboard():
         latest_pred_date=latest_pred_date,
         summary_file=summary_file,
         station_names=STATION_NAMES,
-        station_names_by_region={"只見川": TADAMI_STATION_NAMES, "会津": AIZU_STATION_NAMES},
         announcements_list=active_announcements,
         ai_overall_summary=ai_summary.get("overall") if ai_summary else None,
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,

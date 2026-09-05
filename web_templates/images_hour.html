@@ -15,8 +15,17 @@
     <p><a class="button" href="{{ url_for('images_hour_zip', date=date, hhmm=hhmm) }}">この時刻の画像を全てZIPでダウンロード</a></p>
     {% endif %}
     {% if files %}
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_files = [] %}
+    {% for f in files %}
+        {% if f.replace('_unavailable.jpg', '').replace('.jpg', '') in station_names_by_region.get(region_label, []) %}
+            {% set _ = region_files.append(f) %}
+        {% endif %}
+    {% endfor %}
+    {% if region_files %}
+    <h3 class="station-grid-region-label">{{ region_label }}</h3>
     <div class="image-grid">
-        {% for f in files %}
+        {% for f in region_files %}
         {% set station_name = f.replace('_unavailable.jpg', '').replace('.jpg', '') %}
         {% set is_unavailable = '_unavailable' in f %}
         <figure class="{{ 'unavailable' if is_unavailable else '' }}">
@@ -53,6 +62,8 @@
         </figure>
         {% endfor %}
     </div>
+    {% endif %}
+    {% endfor %}
     {% else %}
     <p class="muted">この時刻の画像はありません。</p>
     {% endif %}

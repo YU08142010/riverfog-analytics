@@ -22,8 +22,15 @@
                 <label for="sim-station">地点</label><br>
                 <select name="station" id="sim-station" style="width:100%;"
                         onchange="location.href='{{ url_for('simulator_page') }}?station=' + encodeURIComponent(this.value)">
-                    {% for name in station_names %}
-                    <option value="{{ name }}" {{ "selected" if name == station else "" }}>{{ name }}</option>
+                    {% for region_label in ["只見川", "会津"] %}
+                    {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+                    {% if region_names %}
+                    <optgroup label="{{ region_label }}">
+                        {% for name in region_names %}
+                        <option value="{{ name }}" {{ "selected" if name == station else "" }}>{{ name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
                     {% endfor %}
                 </select>
             </p>

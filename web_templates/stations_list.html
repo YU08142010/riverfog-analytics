@@ -14,18 +14,23 @@
     {% if station_names %}
     <input type="text" id="station-search" class="search-box" placeholder="地点名で絞り込み..." aria-label="地点名で絞り込み">
     <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
-    <ul class="tile-list" id="station-tiles">
-        {% for name in station_names %}
-        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}
-            {% if station_region.get(name) %}<span class="region-badge">{{ station_region.get(name) }}</span>{% endif %}
-        </a></li>
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+    {% if region_names %}
+    <h3 class="station-grid-region-label">{{ region_label }}({{ region_names|length }}地点)</h3>
+    <ul class="tile-list station-tiles-region">
+        {% for name in region_names %}
+        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
         {% endfor %}
     </ul>
+    {% endif %}
+    {% endfor %}
     <p class="muted" id="station-empty" hidden>該当する地点がありません。</p>
     <script>
     (function() {
         var input = document.getElementById("station-search");
-        var items = document.querySelectorAll("#station-tiles > li");
+        var lists = document.querySelectorAll(".station-tiles-region");
+        var items = document.querySelectorAll(".station-tiles-region > li");
         var countLabel = document.getElementById("station-count");
         var emptyLabel = document.getElementById("station-empty");
         var total = items.length;
@@ -36,6 +41,14 @@
             function(shown) {
                 countLabel.textContent = input.value.trim() ? shown + " / " + total + "地点" : total + "地点";
                 emptyLabel.hidden = shown !== 0;
+                lists.forEach(function(list) {
+                    var hasVisible = Array.prototype.slice.call(list.querySelectorAll(":scope > li")).some(function(li) { return !li.hidden; });
+                    var heading = list.previousElementSibling;
+                    if (heading && heading.classList.contains("station-grid-region-label")) {
+                        heading.hidden = !hasVisible;
+                    }
+                    list.hidden = !hasVisible;
+                });
             }
         );
     })();

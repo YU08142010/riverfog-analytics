@@ -2,8 +2,12 @@
 <div class="sidebar-panel">
     <input type="text" class="sidebar-search" id="sidebar-station-search" placeholder="地点を検索..." aria-label="地点を検索">
     {% if station_names %}
-    <ul class="sidebar-list" id="sidebar-station-list">
-        {% for name in station_names %}
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+    {% if region_names %}
+    <div class="sidebar-group-label-static">{{ region_label }}</div>
+    <ul class="sidebar-list sidebar-station-list-region" id="sidebar-station-list">
+        {% for name in region_names %}
         {% set info = current_by_name.get(name) if current_by_name else None %}
         <li>
             <a href="{{ url_for('station_detail', name=name) }}"
@@ -15,6 +19,8 @@
         </li>
         {% endfor %}
     </ul>
+    {% endif %}
+    {% endfor %}
     <p class="muted sidebar-empty" id="sidebar-station-empty" hidden>該当する地点がありません。</p>
     {% else %}
     <p class="muted sidebar-empty">地点情報が読み込めませんでした。</p>
@@ -23,14 +29,29 @@
 <script>
 (function() {
     var input = document.getElementById("sidebar-station-search");
-    var list = document.getElementById("sidebar-station-list");
-    if (!input || !list) { return; }
+    var lists = document.querySelectorAll(".sidebar-station-list-region");
+    if (!input || !lists.length) { return; }
     var emptyLabel = document.getElementById("sidebar-station-empty");
+    var allItems = [];
+    lists.forEach(function(list) {
+        allItems = allItems.concat(Array.prototype.slice.call(list.querySelectorAll(":scope > li")));
+    });
     wireListFilter(
         input,
-        list.querySelectorAll(":scope > li"),
+        allItems,
         function(li) { return li.querySelector("a").dataset.name; },
-        function(shown) { if (emptyLabel) { emptyLabel.hidden = shown !== 0; } }
+        function(shown) {
+            if (emptyLabel) { emptyLabel.hidden = shown !== 0; }
+            // 検索結果0件の地域は見出しごと隠す
+            lists.forEach(function(list) {
+                var hasVisible = Array.prototype.slice.call(list.querySelectorAll(":scope > li")).some(function(li) { return !li.hidden; });
+                var heading = list.previousElementSibling;
+                if (heading && heading.classList.contains("sidebar-group-label-static")) {
+                    heading.hidden = !hasVisible;
+                }
+                list.hidden = !hasVisible;
+            });
+        }
     );
 })();
 </script>

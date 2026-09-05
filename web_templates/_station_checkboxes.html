@@ -4,12 +4,40 @@
    checkbox_name: 各チェックボックスのname属性
    checked_names: 初期状態でチェックしておく地点名の集合/リスト(無ければ空でよい) #}
 {% macro station_checkboxes(station_names, checkbox_name, checked_names=[], station_region={}) %}
+{% for region_label in ["只見川", "会津"] %}
+{% set region_names = [] %}
+{% for name in station_names %}
+    {% if station_region.get(name) == region_label %}
+        {% set _ = region_names.append(name) %}
+    {% endif %}
+{% endfor %}
+{% if region_names %}
+<h4 class="station-grid-region-label">{{ region_label }}</h4>
 <div class="station-grid">
-    {% for name in station_names %}
+    {% for name in region_names %}
     <label class="station-chip station-chip-checkbox">
         <input type="checkbox" name="{{ checkbox_name }}" value="{{ name }}" {{ "checked" if name in checked_names }}>
-        <span>{{ name }}{% if station_region.get(name) %}<span class="region-badge">{{ station_region.get(name) }}</span>{% endif %}</span>
+        <span>{{ name }}</span>
     </label>
     {% endfor %}
 </div>
+{% endif %}
+{% endfor %}
+{# 地域が判定できない(station_regionが渡されていない/未登録)地点は従来通り一括表示する #}
+{% set unclassified = [] %}
+{% for name in station_names %}
+    {% if not station_region.get(name) %}
+        {% set _ = unclassified.append(name) %}
+    {% endif %}
+{% endfor %}
+{% if unclassified %}
+<div class="station-grid">
+    {% for name in unclassified %}
+    <label class="station-chip station-chip-checkbox">
+        <input type="checkbox" name="{{ checkbox_name }}" value="{{ name }}" {{ "checked" if name in checked_names }}>
+        <span>{{ name }}</span>
+    </label>
+    {% endfor %}
+</div>
+{% endif %}
 {% endmacro %}

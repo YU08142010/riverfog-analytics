@@ -13,8 +13,15 @@
     <h2 style="margin-top:0;">気象条件別の川霧発生状況</h2>
     <label class="muted" style="font-size:0.85rem;">地点</label><br>
     <select onchange="location.href='{{ url_for('weather_fog_graph_page') }}?station=' + encodeURIComponent(this.value)">
-        {% for s in station_names %}
-        <option value="{{ s }}" {{ "selected" if s == station }}>{{ s }}</option>
+        {% for region_label in ["只見川", "会津"] %}
+        {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+        {% if region_names %}
+        <optgroup label="{{ region_label }}">
+            {% for s in region_names %}
+            <option value="{{ s }}" {{ "selected" if s == station }}>{{ s }}</option>
+            {% endfor %}
+        </optgroup>
+        {% endif %}
         {% endfor %}
     </select>
 </div>

@@ -644,7 +644,25 @@ main {
 .chat-sidebar-list { max-height: none; overflow: visible; }
 /* 地点一覧(_station_sidebar.html)も.sidebar-groupの折りたたみを使わず常時全件表示のため、
    同様に600pxでの打ち切りを外す。会津追加で61地点になり上限に達して後半が消えていた。 */
-#sidebar-station-list { max-height: none; overflow: visible; }
+.sidebar-station-list-region { max-height: none; overflow: visible; }
+.sidebar-group-label-static {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.5rem 0.4rem 0.2rem;
+}
+.sidebar-group-label-static:first-of-type { padding-top: 0.1rem; }
+.station-grid-region-label { margin: 0.8rem 0 0.4rem; }
+.station-grid-region-label:first-child { margin-top: 0; }
+.table-region-divider td, .table-region-divider {
+    background: var(--color-bg);
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    padding: 0.35rem 0.6rem;
+}
 .chat-sidebar-list li { display: flex; align-items: center; gap: 0.1rem; }
 .chat-sidebar-list li a { flex: 1 1 auto; min-width: 0; }
 .chat-delete-btn {

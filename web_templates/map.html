@@ -37,6 +37,9 @@
     </thead>
     <tbody>
     {% for e in entries %}
+    {% if e.region and (loop.first or e.region != entries[loop.index0 - 1].region) %}
+    <tr class="table-region-divider"><td colspan="6">{{ e.region }}</td></tr>
+    {% endif %}
     <tr>
         <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
         <td>{{ e.region or "-" }}</td>

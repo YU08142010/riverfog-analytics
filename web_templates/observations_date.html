@@ -10,7 +10,10 @@
 {% block content %}
 <div class="card">
     <h2>{{ date }} の観測値推移</h2>
-    <p><a class="button" href="{{ url_for('download_xlsx') }}">観測データ(Excel)をダウンロード</a></p>
+    <p>
+        <a class="button" href="{{ url_for('download_xlsx') }}">只見川.xlsxをダウンロード</a>
+        <a class="button" href="{{ url_for('download_xlsx_aizu') }}">会津.xlsxをダウンロード</a>
+    </p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}" alt="{{ date }}の観測値推移グラフ"></div>
 </div>
 
@@ -20,11 +23,19 @@
     <table class="obs-table">
         <thead>
         <tr>
-            <th class="sticky-col">時刻</th>
-            <th>気温(℃)</th>
-            <th>湿度(%)</th>
-            <th>降水量(mm)</th>
-            <th>視程(km)</th>
+            <th class="sticky-col" rowspan="2">時刻</th>
+            <th rowspan="2">気温(℃)</th>
+            <th rowspan="2">湿度(%)</th>
+            <th rowspan="2">降水量(mm)</th>
+            <th rowspan="2">視程(km)</th>
+            {% for region_label in ["只見川", "会津"] %}
+            {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+            {% if region_names %}
+            <th colspan="{{ region_names|length }}" class="table-region-divider">{{ region_label }}</th>
+            {% endif %}
+            {% endfor %}
+        </tr>
+        <tr>
             {% for name in station_names %}
             <th>{{ name }}</th>
             {% endfor %}

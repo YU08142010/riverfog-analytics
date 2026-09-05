@@ -32,8 +32,15 @@
                 <label class="muted" style="font-size:0.82rem;">地点</label><br>
                 <select name="station" id="gamble-station" required style="padding:0.4rem;">
                     <option value="">選択してください</option>
-                    {% for name in station_names %}
-                    <option value="{{ name }}">{{ name }}</option>
+                    {% for region_label in ["只見川", "会津"] %}
+                    {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+                    {% if region_names %}
+                    <optgroup label="{{ region_label }}">
+                        {% for name in region_names %}
+                        <option value="{{ name }}">{{ name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
                     {% endfor %}
                 </select>
             </div>
