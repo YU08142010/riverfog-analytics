@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}ログイン{% endblock %} - 只見川霧観測</title>
+<title>{% block title %}ログイン{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
@@ -27,7 +27,7 @@
         <div class="fog-band fog-band-3"></div>
     </div>
     <div class="auth-card">
-        <h1 class="auth-title">只見川霧観測・予測</h1>
+        <h1 class="auth-title">川霧観測・予測</h1>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, m in messages %}

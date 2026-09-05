@@ -1581,7 +1581,7 @@ def _load_station_feature_snapshot(name):
 # ============================================================================
 
 CHAT_SYSTEM_INSTRUCTION = (
-    "あなたは只見川流域の川霧観測・予測システム「只見川霧観測」のAIアシスタントです。"
+    "あなたは只見川・会津地方の川霧観測・予測システム「川霧観測・予測」のAIアシスタントです。"
     "以下に渡す現在の観測状況・今後数日の予測・予測精度・モデルやサーバーの状態・"
     "システムの仕組みをもとに、"
     "利用者からの質問に日本語で簡潔に答えてください。\n"
@@ -1619,8 +1619,8 @@ CHAT_SYSTEM_INSTRUCTION = (
     "必要に応じて伝える。\n"
     "- 安全に関わる最終判断(通行止め・避難等)を促す必要がある場合は、必ず自治体や河川管理者の"
     "公式情報も確認するよう案内する。\n"
-    "- 只見川の霧やこのシステムの仕組みと全く関係のない質問(一般雑学等)には、"
-    "「この機能は只見川の霧観測に関する質問向けです」と丁寧に答える。"
+    "- 川霧やこのシステムの仕組みと全く関係のない質問(一般雑学等)には、"
+    "「この機能は川霧観測・予測に関する質問向けです」と丁寧に答える。"
 )
 
 
@@ -7584,7 +7584,7 @@ def _generate_report_pdf(start_date, end_date):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
         fig = plt.figure(figsize=(8.27, 11.69))
-        fig.text(0.5, 0.62, "只見川霧観測レポート", ha="center", fontsize=24, fontweight="bold")
+        fig.text(0.5, 0.62, "川霧観測・予測レポート", ha="center", fontsize=24, fontweight="bold")
         fig.text(0.5, 0.55, f"{start_date} 〜 {end_date}", ha="center", fontsize=14)
         overall = accuracy["overall"] if accuracy else None
         if overall and overall["n"]:

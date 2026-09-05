@@ -318,6 +318,24 @@ body {
     box-shadow: var(--shadow-card-hover);
     z-index: 20;
 }
+@media (max-width: 640px) {
+    /* right:0は.notif-bell-wrap(ベルアイコン自体の小さな箱)からの相対位置のため、
+       狭い画面でヘッダーが折り返した際にベルの実際の位置次第でパネルが画面外に
+       はみ出す/中途半端な位置に表示されることがある。position:fixedに切り替えて
+       ビューポート基準で確実に収まる位置に固定する(header nav折り返し不具合と同種の
+       「小さな祖先要素からの相対配置が狭い画面で破綻する」問題への対策)。 */
+    .notif-panel {
+        position: fixed;
+        /* --header-h はbase.htmlのJSで実際のヘッダー高さに追従する(折り返しで
+           ヘッダーが高くなっても常にヘッダーのすぐ下に表示される)。 */
+        top: calc(var(--header-h, 4.6rem) + 0.5rem);
+        left: 0.8rem;
+        right: 0.8rem;
+        width: auto;
+        max-width: none;
+        max-height: calc(100vh - var(--header-h, 4.6rem) - 1.5rem);
+    }
+}
 .notif-panel-header {
     padding: 0.7rem 1rem;
     font-weight: 600;

@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}只見川霧観測{% endblock %} - 只見川霧観測</title>
+<title>{% block title %}川霧観測・予測{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
@@ -22,7 +22,7 @@
 </head>
 <body>
 <header>
-    <h1>只見川霧観測・予測</h1>
+    <h1>川霧観測・予測</h1>
     <a href="{{ url_for('changelog_page') }}" style="color:rgba(255,255,255,0.8); font-size:0.8rem; align-self:flex-end; margin-bottom:0.2rem; text-decoration:none;" title="更新履歴を見る">v{{ app_version }}</a>
     <button type="button" class="nav-toggle" id="nav-toggle-btn" aria-label="メニュー" aria-expanded="false">
         {{ icon("menu", size=20) }}
