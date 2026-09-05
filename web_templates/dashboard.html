@@ -230,10 +230,13 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <p class="muted">{{ latest_image_date }} {{ latest_image_hour[:2] }}:{{ latest_image_hour[2:] }} 撮影</p>
     <div class="image-grid">
         {% for f in latest_images %}
+        {% set station_name = f.replace('_unavailable.jpg', '').replace('.jpg', '') %}
         <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
-            <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy" alt="{{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}のカメラ画像">
+            <a href="{{ url_for('station_detail', name=station_name) }}" title="{{ station_name }}の地点別ページを見る">
+                <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy" alt="{{ station_name }}のカメラ画像">
+            </a>
             <figcaption>
-                {{ f.replace('_unavailable.jpg', '').replace('.jpg', '') }}
+                <a href="{{ url_for('station_detail', name=station_name) }}">{{ station_name }}</a>
                 <br><a href="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" download>ダウンロード</a>
             </figcaption>
         </figure>

@@ -6,6 +6,7 @@
     {"label": "気象と川霧", "url": url_for('weather_fog_graph_page'), "active": request.path.startswith('/graphs')},
     {"label": "ヒストグラム", "url": url_for('river_fog_histogram_page'), "active": request.path.startswith('/river-fog-histogram')},
     {"label": "予測精度", "url": url_for('accuracy_page'), "active": request.path.startswith('/accuracy')},
+    {"label": "期間レポート", "url": url_for('period_report'), "active": request.path.startswith('/report')},
 ]) }}
 <div class="card">
     <h2 style="margin-top:0;">全地点合算：川霧発生時の気象条件ヒストグラム</h2>

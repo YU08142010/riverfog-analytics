@@ -33,6 +33,7 @@ from common import (
     STATION_WEATHER_DB_PATH,
     WEATHER_DB_PATH,
     load_camera_coords,
+    load_camera_regions,
     record_network_failure,
     representative_coords,
     request_with_dns_fallback,
@@ -834,10 +835,12 @@ AI_SUMMARY_PATH = BASE_DIR / "data" / "ai_summary.json"
 AI_SUMMARY_MIN_INTERVAL_HOURS = 3
 
 AI_SUMMARY_SYSTEM_INSTRUCTION = (
-    "あなたは只見川流域の霧観測ダッシュボードの解説者です。以下に渡す気象情報と、"
-    "各観測地点の現在の現象を踏まえて、日本語で要約を書いてください。\n"
-    "- overallには、流域全体の状況を2〜3文程度で簡潔にまとめてください"
-    "（霧が出ている地点が多いか少ないか、天候の傾向、注意すべき点など）。\n"
+    "あなたは只見川・会津地方の川霧観測・予測ダッシュボードの解説者です。以下に渡す気象情報と、"
+    "各観測地点の現在の現象を踏まえて、日本語で要約を書いてください。地点は【只見川】【会津】の"
+    "見出しで地域ごとに分けて渡されます。\n"
+    "- overallには、両地域それぞれの状況を踏まえて2〜3文程度で簡潔にまとめてください"
+    "（霧が出ている地点が多いか少ないか、天候の傾向、注意すべき点など。片方の地域にしか"
+    "言及すべき変化が無い場合は、その地域だけに触れれば構いません）。\n"
     "- stationsには、渡された各地点について1つずつ、1〜2文程度の短い説明を書いてください。"
     "現象がない地点についても「現在、目立った現象は見られません」のように簡潔に触れてください。\n"
     "- 数値を断定的に予測したり、渡されていない情報を推測で付け加えたりしないでください。"
@@ -849,21 +852,34 @@ def _build_summary_prompt(cameras, phenom_by_name, weather, run_time):
     if weather:
         w = weather
         lines.append(
-            "気象(代表地点): 気温{temp}℃ 降水量{precip}mm 風速{wind}m/s 湿度{humidity}%".format(
+            "気象(只見川代表地点): 気温{temp}℃ 降水量{precip}mm 風速{wind}m/s 湿度{humidity}%".format(
                 temp=w.get("temperature", "-"), precip=w.get("precipitation", "-"),
                 wind=w.get("wind_speed", "-"), humidity=w.get("humidity", "-"),
             )
         )
-    lines.append("各地点の現在の現象:")
-    for name, _cam_id in cameras:
+    regions = load_camera_regions()
+
+    def phenom_label(name):
         code = phenom_by_name.get(name)
         if code is None:
-            label = "不明(取得失敗)"
-        elif code == 0:
-            label = "現象なし"
-        else:
-            label = PHENOM_LABELS.get(code, f"コード{code}")
-        lines.append(f"- {name}: {label}")
+            return "不明(取得失敗)"
+        if code == 0:
+            return "現象なし"
+        return PHENOM_LABELS.get(code, f"コード{code}")
+
+    for region_label in ("只見川", "会津"):
+        names_in_region = [name for name, _cam_id in cameras if regions.get(name) == region_label]
+        if not names_in_region:
+            continue
+        lines.append(f"【{region_label}】の現在の現象:")
+        for name in names_in_region:
+            lines.append(f"- {name}: {phenom_label(name)}")
+    # 地域列が空/未設定の地点(通常は無いはずだが、cameras.csvの記載漏れ対策)も取りこぼさない。
+    unclassified = [name for name, _cam_id in cameras if not regions.get(name)]
+    if unclassified:
+        lines.append("【地域未設定】の現在の現象:")
+        for name in unclassified:
+            lines.append(f"- {name}: {phenom_label(name)}")
     return "\n".join(lines)
 
 

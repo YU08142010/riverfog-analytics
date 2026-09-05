@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}意見箱{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li>意見箱</li>
+</ul>
+{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "メンバー", "url": url_for('members_list'), "active": request.path.startswith('/members')},
+    {"label": "グループ", "url": url_for('group_home'), "active": request.path.startswith('/group'), "badge": group_unread_count()},
+    {"label": "メッセージ", "url": url_for('dm_inbox'), "active": request.path.startswith('/messages'), "badge": dm_unread_count()},
+    {"label": "共有ファイル", "url": url_for('shared_files_page'), "active": request.path.startswith('/files')},
+    {"label": "意見箱", "url": url_for('community_feedback'), "active": request.path.startswith('/feedback')},
+]) }}
+<div class="card">
+    <h2>意見箱</h2>
+    <p class="muted">不具合報告・新機能のご要望・ご質問など、何でも自由に書いてお送りください。
+        管理者が内容を確認します。</p>
+    <form method="post" action="{{ url_for('community_feedback_submit') }}" data-ajax>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <textarea name="body" rows="6" maxlength="2000" placeholder="例: ○○のページで××が表示されない、△△の機能が欲しい、など" required style="width:100%; box-sizing:border-box;"></textarea>
+        <p><button type="submit" class="button">送信</button></p>
+    </form>
+</div>
+
+<div class="card">
+    <h2>自分の投稿履歴</h2>
+    {% if my_reports %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>投稿日時</th><th>内容</th><th>状況</th></tr></thead>
+        <tbody>
+        {% for r in my_reports %}
+        <tr>
+            <td style="white-space:nowrap;">{{ r.created_at }}</td>
+            <td style="white-space:pre-wrap;">{{ r.body }}</td>
+            <td>{{ "対応済み" if r.status == "reviewed" else "確認待ち" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">まだ投稿はありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

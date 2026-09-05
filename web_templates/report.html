@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}期間レポート{% endblock %}
+{% block breadcrumb %}
+<ul class="breadcrumb">
+    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li>期間レポート</li>
+</ul>
+{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "気象と川霧", "url": url_for('weather_fog_graph_page'), "active": request.path.startswith('/graphs')},
+    {"label": "ヒストグラム", "url": url_for('river_fog_histogram_page'), "active": request.path.startswith('/river-fog-histogram')},
+    {"label": "予測精度", "url": url_for('accuracy_page'), "active": request.path.startswith('/accuracy')},
+    {"label": "期間レポート", "url": url_for('period_report'), "active": request.path.startswith('/report')},
+]) }}
+<div class="card">
+    <h2>期間レポートの生成</h2>
+    <p class="muted">
+        指定した期間の霧発生回数(只見川・会津それぞれ)・現象内訳・気象概況・予測的中率をまとめたPDFレポートを
+        ダウンロードします。観測データ量によっては生成に数秒〜数十秒かかることがあります。
+    </p>
+    <form method="post" action="{{ url_for('period_report') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p>
+            <label>開始日<br>
+                <input type="date" name="start_date" value="{{ default_start }}" required style="padding:0.4rem;">
+            </label>
+        </p>
+        <p>
+            <label>終了日<br>
+                <input type="date" name="end_date" value="{{ default_end }}" required style="padding:0.4rem;">
+            </label>
+        </p>
+        <button type="submit" class="button">PDFを生成してダウンロード</button>
+    </form>
+</div>
+{% endblock %}

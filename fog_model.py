@@ -89,6 +89,13 @@ MIN_ROWS_PER_LOCATION = 200
 MIN_CLASSES_PER_LOCATION = 2
 MIN_TOTAL_ROWS_FOR_POOLING = 500
 MIN_ROWS_FOR_POOLED_RESCUE = 30
+# 追加されたばかりの地点(会津地方など)は、まだMIN_ROWS_FOR_POOLED_RESCUEに満たない・
+# 霧の実例が1件も無い(1クラスのみ)ことがほとんどで、従来のゲートのままだとプーリング
+# モデルにすら乗せられず「その地点だけモデルが存在しない」状態になってしまう。
+# 地点別霧発生率(STATION_FOG_RATE_FEATURE)は少数サンプルでも全体平均に平滑化される設計
+# のため、ごく少数の実測さえあればプーリングモデルへの「配置」自体は問題ない。以下の値を
+# 満たせば、ホールドアウト評価(精度算出)はできなくても実際の予測には使えるようにする。
+MIN_ROWS_FOR_POOLED_DEPLOY = 3
 
 FOG_THRESHOLD_GRID = tuple(round(t, 2) for t in np.arange(0.05, 1.0, 0.05))
 DEFAULT_FOG_THRESHOLD = 0.5
@@ -1008,48 +1015,63 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
     )
 
     rescued = 0
+    deployed_without_eval = 0
     for col in skipped_cols:
         if col not in per_station_xy:
             continue
         sub, X, y = per_station_xy[col]
-        if len(sub) < MIN_ROWS_FOR_POOLED_RESCUE or y.nunique() < 2:
+        if len(sub) < MIN_ROWS_FOR_POOLED_DEPLOY:
             continue
         X2 = X.copy()
         X2[STATION_FOG_RATE_FEATURE] = station_rates[col]
-        X_train2, X_test2, y_train2, y_test2 = _temporal_train_test_split(X2, y)
-        if len(X_test2) == 0:
-            continue
-        y_pred2 = pooled_pipe.predict(X_test2)
-        acc2 = accuracy_score(y_test2, y_pred2)
-        f12 = f1_score(y_test2, y_pred2, average="weighted", zero_division=0)
-        fog_f12 = _fog_class_f1(y_test2, y_pred2)
-        rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
-        xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2) if pooled_xgb is not None else None
-        lgbm_only2 = _evaluate_solo_pipe(pooled_lgbm, X_test2, y_test2) if pooled_lgbm is not None else None
-        hybrid_only2 = None
-        if pooled_xgb is not None and pooled_result["hybrid_weight"] is not None:
-            hybrid_only2 = _evaluate_solo_pipe(
-                HybridFogClassifier(pooled_rf, pooled_xgb, weight=pooled_result["hybrid_weight"], second_kind="xgb"),
-                X_test2, y_test2,
-            )
-        rf_lgbm_only2 = None
-        if pooled_lgbm is not None and pooled_result["hybrid_lgbm_weight"] is not None:
-            rf_lgbm_only2 = _evaluate_solo_pipe(
-                HybridFogClassifier(pooled_rf, pooled_lgbm, weight=pooled_result["hybrid_lgbm_weight"], second_kind="lgbm"),
-                X_test2, y_test2,
-            )
-        triple_only2 = None
-        if pooled_xgb is not None and pooled_lgbm is not None and pooled_result["triple_weights"] is not None:
-            triple_only2 = _evaluate_solo_pipe(
-                TripleBlendFogClassifier(pooled_rf, pooled_xgb, pooled_lgbm, *pooled_result["triple_weights"]),
-                X_test2, y_test2,
-            )
+
+        # 十分な行数・2クラス以上が揃っていればホールドアウト評価付きで救済する。
+        # 揃っていない(追加されたばかりで霧の実例がまだ無い等)場合でも、プーリング
+        # モデル自体は他地点のデータで既に学習済みのため、精度算出は諦めて予測にだけ使う
+        # (accuracy/f1等はNoneのままにする。webapp.py側は既にNoneを「精度不明」として
+        # 扱う設計になっている: 例えば_is_valid_number()での判定やis not Noneでのフィルタ)。
+        can_evaluate = len(sub) >= MIN_ROWS_FOR_POOLED_RESCUE and y.nunique() >= 2
+        acc2 = f12 = fog_f12 = None
+        y_test2 = y_pred2 = None
+        rf_only2 = xgb_only2 = lgbm_only2 = None
+        hybrid_only2 = rf_lgbm_only2 = triple_only2 = None
+
+        if can_evaluate:
+            X_train2, X_test2, y_train2, y_test2 = _temporal_train_test_split(X2, y)
+            if len(X_test2) == 0:
+                can_evaluate = False
+                y_test2 = None
+            else:
+                y_pred2 = pooled_pipe.predict(X_test2)
+                acc2 = accuracy_score(y_test2, y_pred2)
+                f12 = f1_score(y_test2, y_pred2, average="weighted", zero_division=0)
+                fog_f12 = _fog_class_f1(y_test2, y_pred2)
+                rf_only2 = _single_component_metrics(pooled_rf, True, X_test2, y_test2)
+                xgb_only2 = _single_component_metrics(pooled_xgb, False, X_test2, y_test2) if pooled_xgb is not None else None
+                lgbm_only2 = _evaluate_solo_pipe(pooled_lgbm, X_test2, y_test2) if pooled_lgbm is not None else None
+                if pooled_xgb is not None and pooled_result["hybrid_weight"] is not None:
+                    hybrid_only2 = _evaluate_solo_pipe(
+                        HybridFogClassifier(pooled_rf, pooled_xgb, weight=pooled_result["hybrid_weight"], second_kind="xgb"),
+                        X_test2, y_test2,
+                    )
+                if pooled_lgbm is not None and pooled_result["hybrid_lgbm_weight"] is not None:
+                    rf_lgbm_only2 = _evaluate_solo_pipe(
+                        HybridFogClassifier(pooled_rf, pooled_lgbm, weight=pooled_result["hybrid_lgbm_weight"], second_kind="lgbm"),
+                        X_test2, y_test2,
+                    )
+                if pooled_xgb is not None and pooled_lgbm is not None and pooled_result["triple_weights"] is not None:
+                    triple_only2 = _evaluate_solo_pipe(
+                        TripleBlendFogClassifier(pooled_rf, pooled_xgb, pooled_lgbm, *pooled_result["triple_weights"]),
+                        X_test2, y_test2,
+                    )
+
         models[col] = {
             "pipe": pooled_pipe, "accuracy": acc2, "f1": f12, "fog_f1": fog_f12,
             "n": len(sub), "features": feature_names, "station_fog_rate": station_rates[col],
             "model_type": f"pooled({pooled_pipe.model_type})", "blend_weight": pooled_pipe.weight,
             "fog_threshold": pooled_threshold, "pooled": True,
-            "y_test": y_test2.to_numpy(), "y_pred": np.asarray(y_pred2),
+            "y_test": (y_test2.to_numpy() if y_test2 is not None else None),
+            "y_pred": (np.asarray(y_pred2) if y_pred2 is not None else None),
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
             "hybrid_only": hybrid_only2, "rf_lgbm_only": rf_lgbm_only2, "triple_only": triple_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
@@ -1057,7 +1079,12 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
             "measure_medians": shared_medians,
         }
         rescued += 1
-    log.info("Pooled model rescued %d/%d location(s)", rescued, len(skipped_cols))
+        if not can_evaluate:
+            deployed_without_eval += 1
+    log.info(
+        "Pooled model rescued %d/%d location(s) (%d deployed without a reliable evaluation split yet)",
+        rescued, len(skipped_cols), deployed_without_eval,
+    )
 
 
 def _forecast_payload_to_df(hourly):

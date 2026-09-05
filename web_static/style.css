@@ -642,6 +642,9 @@ main {
    600pxで打ち切られると古い会話にアクセスできなくなってしまう。上限を外し、
    親の.sidebar-panel自体のスクロールに任せる。 */
 .chat-sidebar-list { max-height: none; overflow: visible; }
+/* 地点一覧(_station_sidebar.html)も.sidebar-groupの折りたたみを使わず常時全件表示のため、
+   同様に600pxでの打ち切りを外す。会津追加で61地点になり上限に達して後半が消えていた。 */
+#sidebar-station-list { max-height: none; overflow: visible; }
 .chat-sidebar-list li { display: flex; align-items: center; gap: 0.1rem; }
 .chat-sidebar-list li a { flex: 1 1 auto; min-width: 0; }
 .chat-delete-btn {

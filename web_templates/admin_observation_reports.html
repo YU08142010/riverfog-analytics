@@ -5,8 +5,9 @@
 <div class="card">
     <h2>観測報告(未対応 {{ reports|length }}件)</h2>
     <p class="muted">
-        利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測から自動検知・自動訂正された
-        内容(自動訂正は即座に反映済みのため、ここには出ずに操作ログにのみ記録されます)の確認待ちキューです。
+        利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測と食い違う1時間だけの
+        孤立したブレをシステムが自動検知した内容の確認待ちキューです。自動検知分は前後1時間ずつを
+        含む3枚の画像を見比べたうえで、訂正するか却下するか判断してください(自動では訂正されません)。
     </p>
     {% if reports %}
     <div class="table-scroll">
@@ -16,7 +17,27 @@
         {% for r in reports %}
         <tr>
             <td>
-                {% if r.has_image %}
+                {% if r.source == 'auto_detected' %}
+                <div style="display:flex; gap:0.3rem;">
+                    {% for img in [
+                        {'label': '前', 'date': r.prev_image.date, 'hhmm': r.prev_image.hhmm, 'has_image': r.prev_image.has_image},
+                        {'label': '該当', 'date': r.image_date, 'hhmm': r.image_hhmm, 'has_image': r.has_image},
+                        {'label': '次', 'date': r.next_image.date, 'hhmm': r.next_image.hhmm, 'has_image': r.next_image.has_image},
+                    ] %}
+                    <div style="text-align:center;">
+                        {% if img.has_image %}
+                        {% set image_url = url_for('images_file', date=img.date, hhmm=img.hhmm, filename=r.station_name ~ '.jpg') %}
+                        <a href="{{ image_url }}" target="_blank" rel="noopener">
+                            <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}の{{ img.label }}の画像" style="width:80px; height:auto; border-radius:4px;">
+                        </a>
+                        {% else %}
+                        <span class="muted" style="font-size:0.7rem;">画像なし</span>
+                        {% endif %}
+                        <div class="muted" style="font-size:0.7rem;">{{ img.label }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% elif r.has_image %}
                 {% set image_url = url_for('images_file', date=r.image_date, hhmm=r.image_hhmm, filename=r.station_name ~ '.jpg') %}
                 <a href="{{ image_url }}" target="_blank" rel="noopener">
                     <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}のカメラ画像" style="width:100px; height:auto; border-radius:4px;">

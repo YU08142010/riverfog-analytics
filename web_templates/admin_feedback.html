@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}意見箱{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>コミュニティ意見箱(未対応 {{ reports|length }}件)</h2>
+    <p class="muted">
+        利用者がコミュニティの「意見箱」から送った不具合報告・要望・質問です。原文は一切省略していません。
+        Geminiによる整理(要約)は補助的な参考情報で、内容を削らずに読みやすくしたものです
+        (生成に失敗した場合は空欄になります)。
+    </p>
+    {% if reports %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>投稿者</th><th>投稿日時</th><th>原文</th><th>Geminiによる整理</th><th>対応</th></tr></thead>
+        <tbody>
+        {% for r in reports %}
+        <tr>
+            <td style="white-space:nowrap;">{{ r.reporter_name }}</td>
+            <td style="white-space:nowrap;">{{ r.created_at }}</td>
+            <td style="white-space:pre-wrap; min-width:16em;">{{ r.body }}</td>
+            <td style="white-space:pre-wrap; min-width:16em;">{{ r.gemini_summary or "(要約なし)" }}</td>
+            <td style="white-space:nowrap;">
+                <form method="post" action="{{ url_for('admin_feedback_resolve', report_id=r.id) }}" data-ajax style="display:inline-block;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button">対応済みにする</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">未対応の投稿はありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

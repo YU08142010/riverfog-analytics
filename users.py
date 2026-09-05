@@ -191,6 +191,17 @@ CREATE TABLE IF NOT EXISTS observation_reports (
 CREATE INDEX IF NOT EXISTS idx_observation_reports_status ON observation_reports(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_reports_pending_unique
     ON observation_reports(station_name, target_datetime) WHERE status = 'pending';
+CREATE TABLE IF NOT EXISTS feedback_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    gemini_summary TEXT,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_status ON feedback_reports(status);
 CREATE TABLE IF NOT EXISTS dm_conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1346,19 +1357,6 @@ def create_observation_report(conn, station_name, target_datetime, reported_code
         return cur.rowcount > 0
 
 
-def log_auto_resolved_observation_report(conn, station_name, target_datetime, reported_code, corrected_code, at, note):
-    """自動異常検知が即座に訂正した記録を、報告一覧からも辿れるよう
-    status='auto_resolved'として残す(常に監査できる形にするため)。"""
-    with conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO observation_reports "
-            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status, "
-            "resolved_by, resolved_at, resolution_note) "
-            "VALUES (?, ?, ?, NULL, ?, 'auto', 'auto_resolved', NULL, ?, ?)",
-            (station_name, target_datetime, reported_code, at, at, note),
-        )
-
-
 def list_pending_observation_reports(conn):
     """保留中の観測報告を、報告者名を添えて新しい順で返す(管理者の確認キュー用)。"""
     rows = conn.execute(
@@ -1375,7 +1373,9 @@ def list_pending_observation_reports(conn):
         {
             "id": r[0], "station_name": r[1], "target_datetime": r[2], "reported_code": r[3],
             "reported_by": r[4], "reported_at": r[5], "source": r[6],
-            "reporter_name": r[7] or "(退会済みユーザー)",
+            "reporter_name": (
+                "(自動検知)" if r[6] == "auto_detected" else (r[7] or "(退会済みユーザー)")
+            ),
         }
         for r in rows
     ]
@@ -1407,6 +1407,74 @@ def resolve_observation_report(conn, report_id, status, resolved_by, resolved_at
             "UPDATE observation_reports SET status = ?, resolved_by = ?, resolved_at = ?, resolution_note = ? "
             "WHERE id = ?",
             (status, resolved_by, resolved_at, note, report_id),
+        )
+
+
+def create_feedback_report(conn, user_id, body, gemini_summary, created_at):
+    """コミュニティの意見箱への投稿を1件記録する。gemini_summaryはNoneでもよい
+    (要約生成に失敗した場合、管理画面では原文だけを表示する)。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO feedback_reports (user_id, body, gemini_summary, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, body, gemini_summary, created_at),
+        )
+        return cur.lastrowid
+
+
+def list_feedback_reports_by_user(conn, user_id, limit=50):
+    """自分が過去に投稿した意見箱の内容を新しい順で返す(投稿ページの一覧表示用)。"""
+    rows = conn.execute(
+        "SELECT id, body, gemini_summary, created_at, status FROM feedback_reports "
+        "WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    return [
+        {"id": r[0], "body": r[1], "gemini_summary": r[2], "created_at": r[3], "status": r[4]}
+        for r in rows
+    ]
+
+
+def list_pending_feedback_reports(conn):
+    """未対応の意見箱投稿を、投稿者名を添えて新しい順で返す(管理者の確認キュー用)。"""
+    rows = conn.execute(
+        """
+        SELECT f.id, f.body, f.gemini_summary, f.created_at, u.name
+        FROM feedback_reports f
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.status = 'pending'
+        ORDER BY f.created_at DESC
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "body": r[1], "gemini_summary": r[2], "created_at": r[3],
+            "reporter_name": r[4] or "(退会済みユーザー)",
+        }
+        for r in rows
+    ]
+
+
+def pending_feedback_report_count(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM feedback_reports WHERE status = 'pending'"
+    ).fetchone()[0]
+
+
+def get_feedback_report(conn, report_id):
+    row = conn.execute(
+        "SELECT id, status FROM feedback_reports WHERE id = ?", (report_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "status": row[1]}
+
+
+def resolve_feedback_report(conn, report_id, resolved_by, resolved_at):
+    with conn:
+        conn.execute(
+            "UPDATE feedback_reports SET status = 'reviewed', resolved_by = ?, resolved_at = ? WHERE id = ?",
+            (resolved_by, resolved_at, report_id),
         )
 
 

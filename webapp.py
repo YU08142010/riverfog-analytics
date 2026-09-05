@@ -295,6 +295,14 @@ CHAT_DAILY_LIMIT_PER_USER = int(os.environ.get("AI_CHAT_DAILY_LIMIT_PER_USER", "
 CHAT_DAILY_LIMIT_TOTAL = int(os.environ.get("AI_CHAT_DAILY_LIMIT_TOTAL", "50"))
 CHAT_QUESTION_MAX_LENGTH = 300
 
+FEEDBACK_BODY_MAX_LENGTH = 2000
+FEEDBACK_SUMMARY_SYSTEM_INSTRUCTION = (
+    "あなたは「川霧観測・予測」サイトのコミュニティ意見箱に届いた投稿を、管理者が読みやすいように"
+    "整理するアシスタントです。以下の投稿本文を、内容を一切省略・削除せずに、誤字脱字の修正や"
+    "文の整理程度にとどめて要約してください。要望・不具合報告・質問など複数の話題が含まれる場合は、"
+    "箇条書きで分けて構いません。本文に無い情報を推測で付け加えないでください。"
+)
+
 LOG_FILE = BASE_DIR / "logs" / "webapp.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -741,6 +749,20 @@ def _inject_pending_observation_report_count():
         finally:
             conn.close()
     return {"pending_observation_report_count": pending_observation_report_count}
+
+
+@app.context_processor
+def _inject_pending_feedback_report_count():
+    """管理者サイドバーの「意見箱」に未対応件数のバッジを出すため注入する。"""
+    def pending_feedback_report_count():
+        if session.get("role") != "admin":
+            return 0
+        conn = _users_conn()
+        try:
+            return users.pending_feedback_report_count(conn)
+        finally:
+            conn.close()
+    return {"pending_feedback_report_count": pending_feedback_report_count}
 
 
 def _current_user_favorite_stations():
@@ -3150,10 +3172,11 @@ ANOMALY_SCAN_LOOKBACK_HOURS = 48
 
 def _scan_and_autocorrect_station_anomalies(name):
     """孤立した1時間だけのブレ(前後の観測が一致し、その1時間だけ現象コードが違う)を
-    観測・判定ミスの疑いとして扱い、周囲の値に自動で訂正する。地点別ページを開くたびに
-    その地点だけ軽く走査する(全地点を毎回スキャンする専用バッチは持たない)。
-    ギャンブルの払い戻し計算はこの訂正テーブルを一切参照しないため、賭けの結果には
-    影響しない。"""
+    観測・判定ミスの疑いとして検知する。以前は即座に自動訂正していたが、誤検知の
+    リスクがあるため、現在は observation_reports の確認待ちキュー(source="auto_detected")
+    に積むだけにとどめ、実際の訂正は管理者が/admin/observation_reportsで前後の画像を
+    見て判断してから行う。地点別ページを開くたびにその地点だけ軽く走査する
+    (全地点を毎回スキャンする専用バッチは持たない)。"""
     now = time.monotonic()
     with _anomaly_scan_lock:
         last = _anomaly_scan_cache.get(name)
@@ -3186,17 +3209,16 @@ def _scan_and_autocorrect_station_anomalies(name):
                 target_dt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(target_dt, "strftime") else str(target_dt)
             )
             if name in users.get_phenomena_corrections_for_datetime(conn, target_dt_str):
-                continue  # 既に訂正済み(自動・人力いずれか)
+                continue  # 既に訂正済み(人力・過去の承認いずれか)
             now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-            note = f"前後の観測({prev_c})に基づき自動訂正"
-            users.add_phenomena_correction(
-                conn, name, target_dt_str, cur_c, prev_c, None, now_str, source="auto",
+            created = users.create_observation_report(
+                conn, name, target_dt_str, cur_c, None, now_str, source="auto_detected",
             )
-            users.log_auto_resolved_observation_report(conn, name, target_dt_str, cur_c, prev_c, now_str, note)
-            _record_audit(
-                "観測異常の自動検知・訂正",
-                f"{name} {target_dt_str}: {cur_c} → {prev_c}({note})",
-            )
+            if created:
+                _record_audit(
+                    "観測異常を自動検知(承認待ち)",
+                    f"{name} {target_dt_str}: 現在{cur_c}、前後の観測は{prev_c} — 管理者の確認待ち",
+                )
     finally:
         conn.close()
 
@@ -3247,6 +3269,16 @@ def admin_observation_reports():
         r["image_date"] = image_date
         r["image_hhmm"] = image_hhmm
         r["has_image"] = image_path.is_file()
+        if r["source"] == "auto_detected":
+            # 自動検知分は「前後の観測と食い違う1時間だけの孤立したブレか」を管理者が
+            # 目視で判断できるよう、対象時刻の前後1時間分の画像も並べて見せる。
+            target_dt = datetime.strptime(r["target_datetime"], "%Y-%m-%d %H:%M:%S")
+            for offset, key in ((-1, "prev_image"), (1, "next_image")):
+                neighbor_dt = target_dt + timedelta(hours=offset)
+                n_date = neighbor_dt.strftime("%Y-%m-%d")
+                n_hhmm = neighbor_dt.strftime("%H%M")
+                n_path = IMAGE_DIR / n_date / n_hhmm / f"{r['station_name']}.jpg"
+                r[key] = {"date": n_date, "hhmm": n_hhmm, "has_image": n_path.is_file()}
     return render_template(
         "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
     )
@@ -4635,6 +4667,87 @@ def members_list():
         "members_list.html", members=members, ranking=ranking, month_ranking=month_ranking,
         extra_rankings=extra_rankings,
     )
+
+
+def _summarize_feedback_with_gemini(body):
+    """意見箱の投稿本文をGeminiで整理する。失敗時はNoneを返す(投稿自体は原文のまま保存する)。"""
+    api_keys = collect.get_api_keys()
+    if not api_keys:
+        return None
+    try:
+        from google.genai import types
+        model = os.environ.get("GEMINI_MODEL", collect.DEFAULT_GEMINI_MODEL)
+        config = types.GenerateContentConfig(
+            system_instruction=FEEDBACK_SUMMARY_SYSTEM_INSTRUCTION, temperature=0.2,
+        )
+        response = collect._gemini_generate_with_fallback(model, body, config, api_keys, label="feedback_summary")
+        if response is None or not getattr(response, "text", None):
+            return None
+        return response.text.strip()
+    except Exception as e:
+        log.warning("Feedback summary generation failed: %s", e)
+        return None
+
+
+@app.route("/feedback")
+def community_feedback():
+    """コミュニティ意見箱: 不具合報告・要望・質問を自由記述で管理者に送れるページ。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        my_reports = users.list_feedback_reports_by_user(conn, my_id)
+    finally:
+        conn.close()
+    return render_template("community_feedback.html", my_reports=my_reports)
+
+
+@app.route("/feedback/submit", methods=["POST"])
+def community_feedback_submit():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    body = request.form.get("body", "").strip()[:FEEDBACK_BODY_MAX_LENGTH]
+    if not body:
+        return _finish("community_feedback", "内容を入力してください。", success=False)
+    summary = _summarize_feedback_with_gemini(body)
+    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        users.create_feedback_report(conn, my_id, body, summary, now_str)
+        _record_audit("意見箱に投稿", body[:100])
+    finally:
+        conn.close()
+    return _finish("community_feedback", "送信しました。ご協力ありがとうございます。")
+
+
+@app.route("/admin/feedback")
+@requires_admin
+def admin_feedback():
+    conn = _users_conn()
+    try:
+        reports = users.list_pending_feedback_reports(conn)
+    finally:
+        conn.close()
+    return render_template("admin_feedback.html", reports=reports)
+
+
+@app.route("/admin/feedback/<int:report_id>/resolve", methods=["POST"])
+@requires_admin
+def admin_feedback_resolve(report_id):
+    my_id = session.get("user_id")
+    conn = _users_conn()
+    try:
+        report = users.get_feedback_report(conn, report_id)
+        if report is None or report["status"] != "pending":
+            abort(404)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.resolve_feedback_report(conn, report_id, my_id, now_str)
+        _record_audit("意見箱の投稿を対応済みにした", f"report_id={report_id}")
+    finally:
+        conn.close()
+    return _finish("admin_feedback", "対応済みにしました。")
 
 
 @app.route("/members/<int:user_id>")
@@ -7557,62 +7670,154 @@ def admin_accuracy_report():
 
 
 def _generate_report_pdf(start_date, end_date):
-    """指定期間の霧発生状況・予測精度をまとめたPDFレポートを生成し、bytesで返す。
+    """指定期間の霧発生状況・気象概況・予測精度をまとめたPDFレポートを生成し、bytesで返す。
     matplotlibのPdfPages機能を使う(新規ライブラリの追加は不要)。
     """
     from matplotlib.backends.backend_pdf import PdfPages
+    from matplotlib.ticker import MaxNLocator
 
     main_df, phenom_df, station_names = fog_data.load_river_fog_data()
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date, datetime.max.time())
     mask = (phenom_df["datetime"] >= start_dt) & (phenom_df["datetime"] <= end_dt)
     period_df = phenom_df[mask]
+    period_weather_df = main_df[(main_df["datetime"] >= start_dt) & (main_df["datetime"] <= end_dt)]
 
-    fog_counts = {}
+    # 地点ごとのコード系列(0=現象なし、1〜10=PHENOM_LABELS)をまとめて計算しておき、
+    # 霧発生回数の集計・現象内訳の集計の両方で使い回す。
+    codes_by_station = {}
     for name in station_names:
-        if name not in period_df.columns:
-            fog_counts[name] = 0
-            continue
-        codes = period_df[name].map(encode_phenomena_cell)
-        fog_counts[name] = int(codes.isin(SUMMARY_FOG_CODES).sum())
+        if name in period_df.columns:
+            codes_by_station[name] = period_df[name].map(encode_phenomena_cell)
+
+    fog_counts = {name: int(codes.isin(SUMMARY_FOG_CODES).sum()) for name, codes in codes_by_station.items()}
+    for name in station_names:
+        fog_counts.setdefault(name, 0)
     total_slots = len(period_df)
+
+    tadami_stations = [n for n in station_names if STATION_REGION.get(n) == "只見川"]
+    aizu_stations = [n for n in station_names if STATION_REGION.get(n) == "会津"]
+
+    phenom_code_totals = {code: 0 for code in PHENOM_LABELS}
+    for codes in codes_by_station.values():
+        vc = codes.value_counts()
+        for code in PHENOM_LABELS:
+            phenom_code_totals[code] += int(vc.get(code, 0))
 
     accuracy = _accuracy_summary_safe()
     trend = _accuracy_trend_safe()
     trend_in_range = [r for r in trend if start_date.isoformat() <= r["date"] <= end_date.isoformat() and r["n"] > 0]
+    # レポートのタイトルには「その期間の」的中率を出したいため、全期間集計のoverallではなく
+    # 期間内の日別集計(trend_in_range)を合算する(以前はaccuracy["overall"]=全期間累計の値を
+    # 誤って「この期間の」として表示してしまっていた)。
+    period_correct = sum(r["correct"] for r in trend_in_range)
+    period_n = sum(r["n"] for r in trend_in_range)
+
+    def _weather_avg(col):
+        if col not in period_weather_df.columns:
+            return None
+        series = period_weather_df[col].dropna()
+        return float(series.mean()) if len(series) else None
+
+    def _weather_sum(col):
+        if col not in period_weather_df.columns:
+            return None
+        series = period_weather_df[col].dropna()
+        return float(series.sum()) if len(series) else None
 
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
         fig = plt.figure(figsize=(8.27, 11.69))
         fig.text(0.5, 0.62, "川霧観測・予測レポート", ha="center", fontsize=24, fontweight="bold")
         fig.text(0.5, 0.55, f"{start_date} 〜 {end_date}", ha="center", fontsize=14)
-        overall = accuracy["overall"] if accuracy else None
-        if overall and overall["n"]:
+        if period_n:
             fig.text(
                 0.5, 0.48,
-                f"この期間の全体的中率(集計期間全体): {100.0 * overall['correct'] / overall['n']:.1f}% "
-                f"({overall['correct']}/{overall['n']}件)",
+                f"この期間の予測的中率: {100.0 * period_correct / period_n:.1f}% "
+                f"({period_correct}/{period_n}件)",
                 ha="center", fontsize=11,
             )
         fig.text(0.5, 0.08, f"生成日時: {now_jst_naive().strftime('%Y-%m-%d %H:%M')}", ha="center", fontsize=9, color="gray")
         pdf.savefig(fig)
         plt.close(fig)
 
-        if total_slots:
-            sorted_counts = sorted(fog_counts.items(), key=lambda kv: kv[1])
-            names = [n for n, _ in sorted_counts]
+        # 地域別サマリー(観測コマ数・霧発生回数・発生率を只見川/会津それぞれで比較できるように)。
+        fig = plt.figure(figsize=(8.27, 6))
+        fig.text(0.5, 0.92, "地域別サマリー", ha="center", fontsize=16, fontweight="bold")
+        y = 0.75
+        for label, names in (("只見川", tadami_stations), ("会津", aizu_stations)):
+            region_slots = total_slots * len(names)
+            region_fog = sum(fog_counts.get(n, 0) for n in names)
+            rate = (100.0 * region_fog / region_slots) if region_slots else 0.0
+            fig.text(
+                0.5, y,
+                f"【{label}】地点数 {len(names)} / 霧発生 {region_fog}コマ"
+                f"(全{region_slots}コマ中、発生率 {rate:.1f}%)",
+                ha="center", fontsize=12,
+            )
+            y -= 0.12
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        def _station_fog_chart(title, names):
+            if not total_slots or not names:
+                fig = plt.figure(figsize=(8.27, 4))
+                fig.text(0.5, 0.5, "この期間の観測データがありません。", ha="center", fontsize=12)
+                pdf.savefig(fig)
+                plt.close(fig)
+                return
+            sorted_counts = sorted(((n, fog_counts.get(n, 0)) for n in names), key=lambda kv: kv[1])
+            names_sorted = [n for n, _ in sorted_counts]
             counts = [c for _, c in sorted_counts]
             fig, ax = plt.subplots(figsize=(8.27, 11.69))
-            ax.barh(names, counts, color="#1a5276")
+            ax.barh(names_sorted, counts, color="#1a5276")
             ax.set_xlabel(f"霧発生回数(観測コマ数、全{total_slots}コマ中)")
-            ax.set_title("地点別 霧発生回数")
+            ax.set_title(title)
             ax.tick_params(axis="y", labelsize=7)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
             fig.tight_layout()
             pdf.savefig(fig)
             plt.close(fig)
+
+        _station_fog_chart("只見川 地点別 霧発生回数", tadami_stations)
+        _station_fog_chart("会津 地点別 霧発生回数", aizu_stations)
+
+        # 気象概況(代表地点の実況値の期間平均・合計)。
+        fig = plt.figure(figsize=(8.27, 6))
+        fig.text(0.5, 0.92, "期間の気象概況(代表地点)", ha="center", fontsize=16, fontweight="bold")
+        avg_temp = _weather_avg(COL_TEMP)
+        total_precip = _weather_sum(COL_PRECIP)
+        avg_humidity = _weather_avg(COL_HUMIDITY)
+        avg_wind = _weather_avg(COL_WIND_SPEED)
+        total_sunshine = _weather_sum(COL_SUNSHINE)
+        if avg_temp is None:
+            fig.text(0.5, 0.6, "この期間の気象データがありません。", ha="center", fontsize=12)
         else:
-            fig = plt.figure(figsize=(8.27, 4))
-            fig.text(0.5, 0.5, "この期間の観測データがありません。", ha="center", fontsize=12)
+            rows = [
+                f"平均気温: {avg_temp:.1f}℃",
+                f"降水量合計: {total_precip:.1f}mm" if total_precip is not None else "降水量合計: -",
+                f"平均相対湿度: {avg_humidity:.0f}%" if avg_humidity is not None else "平均相対湿度: -",
+                f"平均風速: {avg_wind:.1f}m/s" if avg_wind is not None else "平均風速: -",
+                f"日照時間合計: {total_sunshine:.1f}時間" if total_sunshine is not None else "日照時間合計: -",
+            ]
+            y = 0.75
+            for row in rows:
+                fig.text(0.5, y, row, ha="center", fontsize=12)
+                y -= 0.1
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        # 現象内訳(全地点合算、霧に限らず層雲・霧雨・雨まで含めた内訳)。
+        if total_slots and any(phenom_code_totals.values()):
+            sorted_items = sorted(phenom_code_totals.items(), key=lambda kv: kv[1])
+            labels = [PHENOM_LABELS[c] for c, _ in sorted_items]
+            counts = [c for _, c in sorted_items]
+            colors = [PHENOM_COLORS.get(code, "#1a5276") for code, _ in sorted_items]
+            fig, ax = plt.subplots(figsize=(8.27, 6))
+            ax.barh(labels, counts, color=colors)
+            ax.set_xlabel("発生回数(全地点合算・観測コマ数)")
+            ax.set_title("現象別 発生内訳(全地点合算)")
+            fig.tight_layout()
             pdf.savefig(fig)
             plt.close(fig)
 
@@ -7633,9 +7838,10 @@ def _generate_report_pdf(start_date, end_date):
     return buf.getvalue()
 
 
-@app.route("/admin/report", methods=["GET", "POST"])
-@requires_admin
-def admin_report():
+@app.route("/report", methods=["GET", "POST"])
+def period_report():
+    """期間レポート(PDF)。管理者専用ではなく、地点の分析ページ群と並ぶ一般公開の機能
+    (元々/admin/reportだったが、内容が観測・予測の分析であり管理機能ではないため移動した)。"""
     today = now_jst_naive().date()
     default_start = today - timedelta(days=30)
     if request.method == "POST":
@@ -7644,22 +7850,22 @@ def admin_report():
             end_date = datetime.strptime(request.form.get("end_date", ""), "%Y-%m-%d").date()
         except ValueError:
             flash("開始日・終了日を正しく指定してください。", "error")
-            return redirect(url_for("admin_report"))
+            return redirect(url_for("period_report"))
         if start_date > end_date:
             flash("開始日は終了日より前の日付にしてください。", "error")
-            return redirect(url_for("admin_report"))
+            return redirect(url_for("period_report"))
         try:
             pdf_bytes = _generate_report_pdf(start_date, end_date)
         except Exception:
             log.exception("Report generation failed")
             flash("レポートの生成に失敗しました。詳細はログを確認してください。", "error")
-            return redirect(url_for("admin_report"))
+            return redirect(url_for("period_report"))
         filename = f"river-fog-report_{start_date}_{end_date}.pdf"
         return send_file(
             io.BytesIO(pdf_bytes), mimetype="application/pdf",
             as_attachment=True, download_name=filename,
         )
-    return render_template("admin_report.html", default_start=default_start, default_end=today)
+    return render_template("report.html", default_start=default_start, default_end=today)
 
 
 @app.route("/admin/gemini")
