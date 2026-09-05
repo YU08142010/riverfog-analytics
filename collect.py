@@ -139,9 +139,21 @@ class StationClassification(BaseModel):
 
 
 def load_cameras():
+    """cameras.csvから (地点名, 画像取得用ID) の一覧を返す。
+    通常はカメラID列がそのままcam.river.go.jp/cam/now/{カメラID}.jpgで実画像を返すが、
+    river.go.jp側の一部地点(itmkndCd=100、2026-09に追加した会津地方の馬取川・馬越・山科・
+    南大橋)はこの規則に従わず、カメラID(scamId)とは無関係な別形式の画像ID
+    (例: cctv_070009_41C01420)でしか実画像を取得できない。カメラIDをそのまま使うと
+    毎回プレースホルダー画像(同一サイズのPNG)が返り、地点ごとに区別なく同じ画像を
+    延々分類し続けてしまう。「画像ID」列にその実際の画像IDを入れておき、あればそちらを
+    優先する(river.go.jp側の観測所検索→該当地点クリック→
+    file/files/master/obs/scam/{カメラID}.jsonのcurrProvUrlから確認したもの)。
+    カメラID自体はriver.go.jp側の地図リンク生成(_river_go_jp_map_url)に必要なため、
+    そのまま残す。
+    """
     with open(CAMERAS_CSV, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        return [(row["地点名"], row["カメラID"]) for row in reader]
+        return [(row["地点名"], row.get("画像ID") or row["カメラID"]) for row in reader]
 
 
 def _lens_fog_station_names():
