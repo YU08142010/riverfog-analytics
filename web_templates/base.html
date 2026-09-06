@@ -30,6 +30,10 @@
     <nav id="main-nav">
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
+        {% if session.get('role') in ('admin', 'aizu_observer', 'tadami_observer') and not is_funnel_request() %}
+        {% set obs_pending = pending_observation_report_count() %}
+        <a href="{{ url_for('admin_observation_reports') }}" class="{{ 'active' if request.path.startswith('/admin/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
+        {% endif %}
         <a href="{{ url_for('simulator_page') }}" class="{{ 'active' if request.path.startswith(url_for('simulator_page')) else '' }}">{{ icon("simulator") }}シミュレーター</a>
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith('/observations') or request.path.startswith('/images') or request.path.startswith('/predictions') else '' }}">{{ icon("data") }}観測アーカイブ</a>
         <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') or request.path.startswith('/river-fog-histogram') or request.path.startswith('/accuracy') or request.path.startswith('/report') else '' }}">{{ icon("report") }}分析</a>
@@ -37,10 +41,6 @@
         <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') or request.path.startswith('/group') else '' }}">{{ icon("members") }}コミュニティ{% set community_unread = dm_unread_count() + group_unread_count() %}<span class="nav-unread-badge" id="nav-community-badge" {{ "" if community_unread else "hidden" }}>{{ community_unread }}</span></a>
         <a href="{{ url_for('game_home') }}" class="{{ 'active' if request.path.startswith('/game') else '' }}">{{ icon("game") }}ゲーム</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
-        {% endif %}
-        {% if session.get('role') in ('admin', 'aizu_observer', 'tadami_observer') and not is_funnel_request() %}
-        {% set obs_pending = pending_observation_report_count() %}
-        <a href="{{ url_for('admin_observation_reports') }}" class="{{ 'active' if request.path.startswith('/admin/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
         {% endif %}
         {% if session.get('role') == 'admin' and not is_funnel_request() %}
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
