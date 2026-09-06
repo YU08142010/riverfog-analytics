@@ -538,33 +538,36 @@ def _inject_station_names_by_region():
     return {"station_names_by_region": _STATION_NAMES_BY_REGION, "station_region": STATION_REGION}
 
 
-# --- ロール: 一般(general)/管理者(admin)に加え、地域ごとの観測担当ロールを持つ ------
+# --- ロール: 一般(general)/管理者(admin)に加え、観測報告専用のロールを持つ ---------
 # 会津観測者/只見観測者は、観測報告の確認待ちキュー(管理者と共有、担当地域分のみ)を
 # 見て訂正・却下でき、かつ地点別ページから承認待ちを介さずその場で観測結果を直接
-# 訂正できる(一般ユーザーは「報告」のみ)。それ以外の管理機能(アカウント管理・
-# DB操作等)には一切関与しない、observation_reports専用の限定ロール。
+# 訂正できる(一般ユーザーは「報告」のみ)。観測者(region無し)は同じ権限を
+# 地域を問わず両方に対して持つ(=観測報告に関しては管理者と同等)。
+# これら3ロールはいずれもそれ以外の管理機能(アカウント管理・DB操作等)には
+# 一切関与しない、observation_reports専用の限定ロール(@requires_adminは通せない)。
 OBSERVER_ROLE_REGIONS = {"aizu_observer": "会津", "tadami_observer": "只見川"}
+OBSERVATION_ROLES = ("admin", "observer", *OBSERVER_ROLE_REGIONS)
 ROLE_LABELS = {
-    "admin": "管理者", "general": "一般",
+    "admin": "管理者", "general": "一般", "observer": "観測者",
     "aizu_observer": "会津観測者", "tadami_observer": "只見観測者",
 }
 
 
 def _observer_region_for_role(role):
-    """管理者ならNone(地域を絞らない=全地域)、観測者ロールなら担当地域、
-    一般ロールなど観測権限が無ければNoneを返す(呼び出し側で
+    """地域を絞らない(=全地域を見る)ロールならNoneを返す(管理者・観測者)。
+    会津観測者/只見観測者なら担当地域、観測権限が無ければNoneを返す(呼び出し側で
     _can_manage_observation_reportsと組み合わせて使うこと)。"""
     return OBSERVER_ROLE_REGIONS.get(role)
 
 
 def _can_manage_observation_reports(role):
-    return role == "admin" or role in OBSERVER_ROLE_REGIONS
+    return role in OBSERVATION_ROLES
 
 
 def _can_correct_station(role, station_name):
-    """その地点の観測結果をその場で直接訂正してよいか(管理者は常に可、観測者は
-    担当地域の地点のみ、一般は不可)。"""
-    if role == "admin":
+    """その地点の観測結果をその場で直接訂正してよいか(管理者・観測者は常に可、
+    会津観測者/只見観測者は担当地域の地点のみ、一般は不可)。"""
+    if role in ("admin", "observer"):
         return True
     region = OBSERVER_ROLE_REGIONS.get(role)
     return region is not None and STATION_REGION.get(station_name) == region
@@ -944,17 +947,18 @@ def _inject_pending_signup_count():
 
 @app.context_processor
 def _inject_pending_observation_report_count():
-    """トップバーの「観測報告」に未対応件数のバッジを出すため注入する。管理者は全件、
-    会津観測者/只見観測者は担当地域分だけをカウントする(一般ロールには出さない)。"""
+    """トップバーの「観測報告」に未対応件数のバッジを出すため注入する。管理者・観測者は
+    全件、会津観測者/只見観測者は担当地域分だけをカウントする(それ以外のロールには
+    出さない)。"""
     def pending_observation_report_count():
         role = session.get("role")
+        if not _can_manage_observation_reports(role):
+            return 0
         conn = _users_conn()
         try:
-            if role == "admin":
+            if role in ("admin", "observer"):
                 return users.pending_observation_report_count(conn)
             region = _observer_region_for_role(role)
-            if region is None:
-                return 0
             return users.pending_observation_report_count_for_stations(
                 conn, _STATION_NAMES_BY_REGION.get(region, []),
             )
@@ -3483,7 +3487,7 @@ def station_report_observation(name):
 @app.route("/stations/<name>/correct", methods=["POST"])
 @requires_observer
 def station_correct_observation(name):
-    """会津観測者/只見観測者(担当地域のみ)・管理者が、承認待ちキューを介さず
+    """会津観測者/只見観測者(担当地域のみ)・観測者・管理者が、承認待ちキューを介さず
     その場で現在の観測結果を直接訂正する。一般ユーザーの「報告」と異なり即時反映する。"""
     name = _validate_station(name)
     role = session.get("role")
@@ -7364,11 +7368,11 @@ def admin_accounts_unlock(user_id):
 def admin_accounts_role(user_id):
     """管理者への昇格(general→admin)は、権限昇格の悪用・誤操作を防ぐため即時反映せず、
     別の管理者による承認を必須にする(admin_accounts_role_approve参照)。降格
-    (admin→general)は安全側の変更なので従来どおり即時反映する。会津観測者/只見観測者は
-    観測報告の確認・訂正権限に限られ、他の管理機能には一切関与しないため、
+    (admin→general)は安全側の変更なので従来どおり即時反映する。観測者/会津観測者/
+    只見観測者は観測報告の確認・訂正権限に限られ、他の管理機能には一切関与しないため、
     管理者昇格ほどの慎重さは不要と判断し、即時反映にしている。"""
     role = request.form.get("role")
-    if role not in ("general", "admin", *OBSERVER_ROLE_REGIONS):
+    if role not in ("general", "admin", "observer", *OBSERVER_ROLE_REGIONS):
         abort(400)
     conn = _users_conn()
     try:

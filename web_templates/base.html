@@ -30,7 +30,7 @@
     <nav id="main-nav">
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
-        {% if session.get('role') in ('admin', 'aizu_observer', 'tadami_observer') and not is_funnel_request() %}
+        {% if session.get('role') in ('admin', 'observer', 'aizu_observer', 'tadami_observer') and not is_funnel_request() %}
         {% set obs_pending = pending_observation_report_count() %}
         <a href="{{ url_for('admin_observation_reports') }}" class="{{ 'active' if request.path.startswith('/admin/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
         {% endif %}
