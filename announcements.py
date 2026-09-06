@@ -23,11 +23,11 @@ CREATE TABLE IF NOT EXISTS announcements (
 CREATE TABLE IF NOT EXISTS announcement_responses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
-    visitor_id TEXT NOT NULL,
+    user_id INTEGER,
     choice_index INTEGER,
     answer_text TEXT,
     submitted_at TEXT NOT NULL,
-    UNIQUE(announcement_id, visitor_id)
+    UNIQUE(announcement_id, user_id)
 );
 """
 
@@ -60,6 +60,38 @@ def _migrate_add_foreign_keys(conn):
         conn.execute("DROP TABLE announcement_responses_old_fkmig")
 
 
+def _migrate_visitor_id_to_user_id(conn):
+    """以前はCookie(visitor_id)だけで回答者を区別していたため、誰が答えたか分からなかった。
+    サイト全体がログイン必須になって久しく、回答時には必ずセッションのuser_idが取れるため、
+    以後はuser_idで回答者を識別・重複防止する。過去にvisitor_idだけで記録された回答の
+    投稿者は遡って特定できない(Cookie値から実際のアカウントへの対応表が無い)ため、
+    それらはuser_id=NULLのまま「投稿者不明」として残す。usersテーブルは別DBファイル
+    (users.db)にあるためFK制約は付けられない(webapp.py側でuser_idから名前を引く)。"""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(announcement_responses)").fetchall()]
+    if "user_id" in cols:
+        return  # 既に移行済み
+    with conn:
+        conn.execute("ALTER TABLE announcement_responses RENAME TO announcement_responses_old_uidmig")
+        conn.execute("""
+            CREATE TABLE announcement_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+                user_id INTEGER,
+                choice_index INTEGER,
+                answer_text TEXT,
+                submitted_at TEXT NOT NULL,
+                UNIQUE(announcement_id, user_id)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO announcement_responses "
+            "(id, announcement_id, user_id, choice_index, answer_text, submitted_at) "
+            "SELECT id, announcement_id, NULL, choice_index, answer_text, submitted_at "
+            "FROM announcement_responses_old_uidmig"
+        )
+        conn.execute("DROP TABLE announcement_responses_old_uidmig")
+
+
 def connect(db_path):
     # webapp.pyの複数ワーカースレッドから読み書きされるため、busy_timeoutで
     # 書き込み中の衝突を即座にエラーにせず待たせる(weather_store.pyと同じ対策)。
@@ -69,6 +101,7 @@ def connect(db_path):
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(SCHEMA)
     _migrate_add_foreign_keys(conn)
+    _migrate_visitor_id_to_user_id(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -141,22 +174,36 @@ def delete_announcement(conn, announcement_id):
         conn.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
 
 
-def has_responded(conn, announcement_id, visitor_id):
+def has_responded(conn, announcement_id, user_id):
     row = conn.execute(
-        "SELECT 1 FROM announcement_responses WHERE announcement_id = ? AND visitor_id = ?",
-        (announcement_id, visitor_id),
+        "SELECT 1 FROM announcement_responses WHERE announcement_id = ? AND user_id = ?",
+        (announcement_id, user_id),
     ).fetchone()
     return row is not None
 
 
-def record_response(conn, announcement_id, visitor_id, choice_index, answer_text, submitted_at):
+def record_response(conn, announcement_id, user_id, choice_index, answer_text, submitted_at):
     with conn:
         conn.execute(
             """INSERT OR IGNORE INTO announcement_responses
-               (announcement_id, visitor_id, choice_index, answer_text, submitted_at)
+               (announcement_id, user_id, choice_index, answer_text, submitted_at)
                VALUES (?, ?, ?, ?, ?)""",
-            (announcement_id, visitor_id, choice_index, answer_text, submitted_at),
+            (announcement_id, user_id, choice_index, answer_text, submitted_at),
         )
+
+
+def list_responses(conn, announcement_id):
+    """回答者(user_id)ごとの回答一覧を新しい順で返す(管理画面の結果ページ用)。
+    名前解決はusers.dbが別ファイルのためここでは行わない(webapp.py側で行う)。"""
+    rows = conn.execute(
+        """SELECT user_id, choice_index, answer_text, submitted_at FROM announcement_responses
+           WHERE announcement_id = ? ORDER BY id DESC""",
+        (announcement_id,),
+    ).fetchall()
+    return [
+        {"user_id": uid, "choice_index": ci, "answer_text": text, "submitted_at": s}
+        for uid, ci, text, s in rows
+    ]
 
 
 def response_summary(conn, announcement_id):

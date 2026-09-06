@@ -17,11 +17,30 @@
         </tbody>
     </table>
 </div>
+    <h3 style="margin-top:1.4rem;">回答者一覧</h3>
+    {% if responses %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>回答者</th><th>選択</th><th>回答日時</th></tr></thead>
+        <tbody>
+        {% for r in responses %}
+        <tr>
+            <td>{% if r.respondent_exists %}<a href="{{ url_for('member_detail', user_id=r.user_id) }}">{{ r.respondent_name }}</a>{% else %}{{ r.respondent_name }}{% endif %}</td>
+            <td>{{ r.choice_label }}</td>
+            <td>{{ r.submitted_at }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">まだ回答がありません。</p>
+    {% endif %}
     {% elif ann.kind == "text" %}
-    {% if summary %}
+    {% if responses %}
     <ul>
-        {% for s in summary %}
-        <li>{{ s.text }} <span class="muted">({{ s.submitted_at }})</span></li>
+        {% for r in responses %}
+        <li>{% if r.respondent_exists %}<a href="{{ url_for('member_detail', user_id=r.user_id) }}">{{ r.respondent_name }}</a>{% else %}{{ r.respondent_name }}{% endif %}: {{ r.answer_text }} <span class="muted">({{ r.submitted_at }})</span></li>
         {% endfor %}
     </ul>
     {% else %}

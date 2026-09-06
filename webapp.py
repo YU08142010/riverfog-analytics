@@ -419,8 +419,6 @@ EDITABLE_ENV_KEYS = ["GEMINI_MODEL", "GEMINI_ESCALATION_MODEL"]
 MAINTENANCE_FLAG_PATH = BASE_DIR / "data" / ".maintenance.json"
 
 ANNOUNCEMENTS_DB_PATH = BASE_DIR / "data" / "announcements.db"
-VISITOR_COOKIE_NAME = "visitor_id"
-VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 2  # 2年
 
 CAMERA_HEALTH_DAYS = 7
 GEMINI_LOG_DAYS = 14
@@ -2646,14 +2644,6 @@ def _gemini_log_stats(days=GEMINI_LOG_DAYS):
     return [{"date": d, **by_date[d]} for d in dates]
 
 
-def _get_visitor_id():
-    """アンケートの二重回答防止用に、ブラウザごとのIDをCookieで管理する。"""
-    vid = request.cookies.get(VISITOR_COOKIE_NAME)
-    if vid:
-        return vid, False
-    return str(uuid.uuid4()), True
-
-
 def _announcements_conn():
     return announcements.connect(ANNOUNCEMENTS_DB_PATH)
 
@@ -2922,17 +2912,16 @@ def dashboard():
         summary_file = next((p.name for p in pred_dir.iterdir() if SUMMARY_RE.match(p.name)), None)
 
     active_announcements = _active_announcements_safe()
-    existing_visitor_id = request.cookies.get(VISITOR_COOKIE_NAME)
     if active_announcements:
         conn = None
-        if existing_visitor_id:
+        if session.get("user_id"):
             try:
                 conn = _announcements_conn()
             except Exception as e:
                 log.warning("Failed to open announcements db: %s", e)
         for ann in active_announcements:
             ann["already_responded"] = bool(
-                conn and announcements.has_responded(conn, ann["id"], existing_visitor_id)
+                conn and announcements.has_responded(conn, ann["id"], session.get("user_id"))
             )
         if conn:
             conn.close()
@@ -8402,24 +8391,41 @@ def admin_announcements_results(announcement_id):
         if ann is None:
             abort(404)
         summary = announcements.response_summary(conn, announcement_id)
+        responses = announcements.list_responses(conn, announcement_id)
     finally:
         conn.close()
-    return render_template("admin_announcement_results.html", ann=ann, summary=summary)
+    users_conn = _users_conn()
+    try:
+        names_by_id = users.get_users_by_ids(users_conn, {r["user_id"] for r in responses if r["user_id"]})
+    finally:
+        users_conn.close()
+    for r in responses:
+        u = names_by_id.get(r["user_id"])
+        r["respondent_name"] = u["name"] if u else "(退会済みユーザー)" if r["user_id"] else "(不明)"
+        r["respondent_exists"] = u is not None
+        if ann["kind"] == "choice" and r["choice_index"] is not None:
+            choices = ann["choices"] or []
+            r["choice_label"] = choices[r["choice_index"]] if r["choice_index"] < len(choices) else f"選択肢{r['choice_index']}"
+    return render_template(
+        "admin_announcement_results.html", ann=ann, summary=summary, responses=responses,
+    )
 
 
 @app.route("/announcements/<int:announcement_id>/respond", methods=["POST"])
 def respond_announcement(announcement_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
     conn = _announcements_conn()
     try:
         ann = announcements.get_announcement(conn, announcement_id)
         if ann is None or not ann["active"]:
             abort(404)
-        visitor_id, is_new = _get_visitor_id()
         choice_index = request.form.get("choice_index")
         answer_text = request.form.get("answer_text", "").strip() or None
         submitted_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         announcements.record_response(
-            conn, announcement_id, visitor_id,
+            conn, announcement_id, my_id,
             int(choice_index) if choice_index not in (None, "") else None,
             answer_text, submitted_at,
         )
@@ -8427,13 +8433,9 @@ def respond_announcement(announcement_id):
         conn.close()
     message = "回答ありがとうございました。"
     if _wants_json():
-        response = jsonify({"message": message, "success": True})
-    else:
-        flash(message, "success")
-        response = redirect(request.referrer or url_for("dashboard"))
-    if is_new:
-        response.set_cookie(VISITOR_COOKIE_NAME, visitor_id, max_age=VISITOR_COOKIE_MAX_AGE)
-    return response
+        return jsonify({"message": message, "success": True})
+    flash(message, "success")
+    return redirect(request.referrer or url_for("dashboard"))
 
 
 if __name__ == "__main__":
