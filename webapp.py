@@ -214,6 +214,143 @@ def _scan_file_for_malware(path):
     return result.returncode == 1
 
 
+CLAMAV_DB_DIR = Path("/var/lib/clamav")
+CLAMAV_DB_FILES = ["daily.cvd", "daily.cld", "main.cvd", "main.cld", "bytecode.cvd", "bytecode.cld"]
+CLAMAV_SIGNATURE_STALE_DAYS = 7
+CLAMAV_SELFTEST_DIR = BASE_DIR / "data" / ".clamav_selftest"
+# 本物のウイルスではなく、全アンチウイルス製品が検知するよう業界標準化されたテスト文字列
+# (EICAR)。これを検知できるかどうかで、フェイルオープン設計の_scan_file_for_malware()が
+# 実際にちゃんと機能しているか(ClamAVが落ちていて素通しになっていないか)を確認する。
+EICAR_TEST_STRING = rb"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+CLAMAV_RESCAN_DIRS = [SHARED_FILES_DIR, DM_ATTACHMENT_DIR, AVATAR_DIR]
+CLAMAV_RESCAN_LOG_PATH = BASE_DIR / "logs" / "clamav_rescan.log"
+
+
+def _clamav_db_info():
+    """シグネチャDBのバージョン・最終更新日時をsudo無しで調べる(/var/lib/clamavの
+    .cvd/.cldはworld-readableなためファイルのmtimeで判定できる)。"""
+    newest_mtime = None
+    for name in CLAMAV_DB_FILES:
+        p = CLAMAV_DB_DIR / name
+        if p.exists():
+            mtime = datetime.fromtimestamp(p.stat().st_mtime)
+            if newest_mtime is None or mtime > newest_mtime:
+                newest_mtime = mtime
+    version = None
+    try:
+        result = subprocess.run(["sigtool", "--version"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            version = result.stdout.strip()
+    except Exception as e:
+        log.warning("sigtool --version failed: %s", e)
+    stale = (
+        newest_mtime is not None
+        and (datetime.now() - newest_mtime).days >= CLAMAV_SIGNATURE_STALE_DAYS
+    )
+    return {
+        "version": version,
+        "updated_at": newest_mtime.strftime("%Y-%m-%d %H:%M:%S") if newest_mtime else None,
+        "stale": stale,
+        "missing": newest_mtime is None,
+    }
+
+
+def _clamav_service_status():
+    """clamd(スキャン本体)・freshclam(シグネチャ自動更新)の稼働状況を、書き込み系
+    権限が不要なsystemctl show/is-enabledだけで調べる(sudo不要・admin_smb.htmlと同じ
+    「閲覧専用」方針。有効化はサーバー上で直接操作してもらう)。"""
+    daemon = _systemctl_show("clamav-daemon.service", ["ActiveState", "SubState", "ActiveEnterTimestamp"])
+    freshclam = _systemctl_show(
+        "clamav-freshclam.service", ["ActiveState", "SubState", "UnitFileState", "ActiveEnterTimestamp"],
+    )
+    return {"daemon": daemon, "freshclam": freshclam}
+
+
+def _run_clamav_selftest():
+    """EICARテスト文字列を実際にclamdscanへ通し、検知できるかをその場で確認する。
+    戻り値のok=Trueはスキャン自体が正常に完了したこと(検知できたかどうかとは別)を示す。
+    ok=True・detected=Falseは、ClamAVは動いているのに既知のテスト検体すら検知できない
+    (シグネチャDB破損・設定不備等)という、フェイルオープンに気づきにくい深刻な状態を表す。
+    """
+    CLAMAV_SELFTEST_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = CLAMAV_SELFTEST_DIR / f"eicar_{uuid.uuid4().hex}.txt"
+    try:
+        tmp_path.write_bytes(EICAR_TEST_STRING)
+        try:
+            result = subprocess.run(
+                ["clamdscan", "--fdpass", "--no-summary", str(tmp_path)],
+                capture_output=True, text=True, timeout=30,
+            )
+        except Exception as e:
+            return {"ok": False, "detected": False, "error": str(e)}
+        if result.returncode == 1:
+            return {"ok": True, "detected": True, "error": None}
+        if result.returncode == 0:
+            return {"ok": True, "detected": False, "error": None}
+        return {"ok": False, "detected": False, "error": (result.stdout + result.stderr)[:300]}
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _run_clamav_rescan_async():
+    """既にアップロード済みのファイル(共有ファイル・DM添付・アバター)を、アップロード時点
+    より新しいシグネチャで再スキャンする(アップロード時はまだ未検知だった脅威が、その後の
+    シグネチャ更新で検知可能になるケースに備えた事後監査)。件数によっては時間がかかるため、
+    _run_script_asyncと同じ考え方でバックグラウンドプロセスとして切り離して実行する。"""
+    existing_dirs = [str(d) for d in CLAMAV_RESCAN_DIRS if d.exists()]
+    if not existing_dirs:
+        return
+    # このclamdscan(1.5.3)には-r/--recursiveオプション自体が無く(directoryを渡すと
+    # デフォルトで中身がスキャンされる)、付けると警告が出るだけなので付けない。
+    cmd = ["clamdscan", "--fdpass", "--no-summary", "--infected", *existing_dirs]
+    try:
+        with open(CLAMAV_RESCAN_LOG_PATH, "wb") as log_f:
+            proc = subprocess.Popen(
+                cmd, cwd=str(BASE_DIR), stdout=log_f, stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        _pid_file("clamav_rescan").write_text(str(proc.pid))
+        log.info("Launched clamav rescan as pid %d", proc.pid)
+    except Exception:
+        log.exception("Failed to launch clamav rescan")
+
+
+def _tailscale_status():
+    """`tailscale status --json`はデーモンが起動していれば一般ユーザーでもsudo無しで
+    実行できる(このサーバーでも確認済み)。取得できなければNoneを返す。"""
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            log.warning("tailscale status failed: %s", result.stderr)
+            return None
+        return json.loads(result.stdout)
+    except Exception as e:
+        log.warning("tailscale status could not run: %s", e)
+        return None
+
+
+def _tailscale_version():
+    try:
+        result = subprocess.run(["tailscale", "version"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip().splitlines()[0]
+    except Exception as e:
+        log.warning("tailscale version could not run: %s", e)
+    return None
+
+
+def _tailscale_autoupdate_prefs():
+    try:
+        result = subprocess.run(["tailscale", "debug", "prefs"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return json.loads(result.stdout).get("AutoUpdate")
+    except Exception as e:
+        log.warning("tailscale debug prefs could not run: %s", e)
+    return None
+
+
 # ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている
 # (river-fog-terminal.service)。Tailscale/LANどちらからアクセスしても繋がるよう、iframeのURLは
 # 固定せずリクエストのホスト名(request.host)に合わせて組み立てる（admin_terminal()参照）。
@@ -354,6 +491,31 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 設定すること。
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FORCE_HTTPS_COOKIES") == "1"
 
+# 外部から読み込んでいるのは地図ページのLeaflet(cdnjs.cloudflare.com)と
+# OpenStreetMapのタイル画像(*.tile.openstreetmap.org)のみ(把握済み・確認済み)。
+# 管理者ターミナル(admin_terminal.html)はhttp://<host>:TTYD_PORTを別オリジンの
+# iframeとして埋め込むため、frame-srcで明示的に許可する必要がある。
+_SECURITY_HEADERS_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data: https://*.tile.openstreetmap.org; "
+    "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+    "font-src 'self' https://cdnjs.cloudflare.com; "
+    f"frame-src 'self' http://*:{TTYD_PORT}; "
+    "frame-ancestors 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'"
+)
+
+
+@app.after_request
+def _apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Content-Security-Policy", _SECURITY_HEADERS_CSP)
+    return response
+
 try:
     STATION_NAMES = fog_data.load_station_names()
 except Exception:
@@ -376,6 +538,43 @@ def _inject_station_names_by_region():
     (個々のrender_templateで毎回渡さずに済むようにするため)。station_regionは
     逆引き(地点名→地域)、station_names_by_regionは正引き(地域→地点名リスト)。"""
     return {"station_names_by_region": _STATION_NAMES_BY_REGION, "station_region": STATION_REGION}
+
+
+# --- ロール: 一般(general)/管理者(admin)に加え、地域ごとの観測担当ロールを持つ ------
+# 会津観測者/只見観測者は、観測報告の確認待ちキュー(管理者と共有、担当地域分のみ)を
+# 見て訂正・却下でき、かつ地点別ページから承認待ちを介さずその場で観測結果を直接
+# 訂正できる(一般ユーザーは「報告」のみ)。それ以外の管理機能(アカウント管理・
+# DB操作等)には一切関与しない、observation_reports専用の限定ロール。
+OBSERVER_ROLE_REGIONS = {"aizu_observer": "会津", "tadami_observer": "只見川"}
+ROLE_LABELS = {
+    "admin": "管理者", "general": "一般",
+    "aizu_observer": "会津観測者", "tadami_observer": "只見観測者",
+}
+
+
+def _observer_region_for_role(role):
+    """管理者ならNone(地域を絞らない=全地域)、観測者ロールなら担当地域、
+    一般ロールなど観測権限が無ければNoneを返す(呼び出し側で
+    _can_manage_observation_reportsと組み合わせて使うこと)。"""
+    return OBSERVER_ROLE_REGIONS.get(role)
+
+
+def _can_manage_observation_reports(role):
+    return role == "admin" or role in OBSERVER_ROLE_REGIONS
+
+
+def _can_correct_station(role, station_name):
+    """その地点の観測結果をその場で直接訂正してよいか(管理者は常に可、観測者は
+    担当地域の地点のみ、一般は不可)。"""
+    if role == "admin":
+        return True
+    region = OBSERVER_ROLE_REGIONS.get(role)
+    return region is not None and STATION_REGION.get(station_name) == region
+
+
+@app.context_processor
+def _inject_role_label():
+    return {"role_label": lambda role: ROLE_LABELS.get(role, role)}
 
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
@@ -747,13 +946,20 @@ def _inject_pending_signup_count():
 
 @app.context_processor
 def _inject_pending_observation_report_count():
-    """管理者サイドバーの「観測報告」に未対応件数のバッジを出すため注入する。"""
+    """トップバーの「観測報告」に未対応件数のバッジを出すため注入する。管理者は全件、
+    会津観測者/只見観測者は担当地域分だけをカウントする(一般ロールには出さない)。"""
     def pending_observation_report_count():
-        if session.get("role") != "admin":
-            return 0
+        role = session.get("role")
         conn = _users_conn()
         try:
-            return users.pending_observation_report_count(conn)
+            if role == "admin":
+                return users.pending_observation_report_count(conn)
+            region = _observer_region_for_role(role)
+            if region is None:
+                return 0
+            return users.pending_observation_report_count_for_stations(
+                conn, _STATION_NAMES_BY_REGION.get(region, []),
+            )
         finally:
             conn.close()
     return {"pending_observation_report_count": pending_observation_report_count}
@@ -971,6 +1177,25 @@ def requires_admin(view):
             return redirect(url_for("dashboard"))
         if session.get("role") != "admin":
             flash("この操作には管理者権限が必要です。", "error")
+            return redirect(url_for("dashboard"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def requires_observer(view):
+    """観測報告の確認・訂正権限(管理者・会津観測者・只見観測者のいずれか)を必須にする。
+    requires_adminと同じセッションCookie方式・Funnel遮断。担当地域の絞り込みは
+    ここでは行わない(ログイン+権限の有無だけをチェックする)ので、各ルート側で
+    _observer_region_for_role/_can_correct_stationを使って地域チェックを行うこと。"""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login", next=request.path))
+        if _is_funnel_request():
+            flash("この機能は公開URLからは利用できません。Tailscale経由でアクセスしてください。", "error")
+            return redirect(url_for("dashboard"))
+        if not _can_manage_observation_reports(session.get("role")):
+            flash("この操作には観測者または管理者の権限が必要です。", "error")
             return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
     return wrapped
@@ -3266,14 +3491,54 @@ def station_report_observation(name):
     return _finish("station_detail", message, name=name)
 
 
+@app.route("/stations/<name>/correct", methods=["POST"])
+@requires_observer
+def station_correct_observation(name):
+    """会津観測者/只見観測者(担当地域のみ)・管理者が、承認待ちキューを介さず
+    その場で現在の観測結果を直接訂正する。一般ユーザーの「報告」と異なり即時反映する。"""
+    name = _validate_station(name)
+    role = session.get("role")
+    if not _can_correct_station(role, name):
+        abort(403)
+    my_id = session.get("user_id")
+    observations = _latest_observations()
+    if not observations:
+        return _finish("station_detail", "現在参照できる観測データがありません。", success=False, name=name)
+    current = {s["name"]: s for s in observations["stations"]}.get(name)
+    if current is None or current.get("code") is None:
+        return _finish("station_detail", "この地点の観測データがありません。", success=False, name=name)
+    corrected_code = request.form.get("corrected_code", type=int)
+    if corrected_code is None or not (0 <= corrected_code <= 10):
+        return _finish("station_detail", "訂正後の現象コードを選んでください。", success=False, name=name)
+    target_dt_str = observations["datetime"]
+    if hasattr(target_dt_str, "strftime"):
+        target_dt_str = target_dt_str.strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        users.add_phenomena_correction(
+            conn, name, target_dt_str, current["code"], corrected_code, my_id, now_str, source="human",
+        )
+        _record_audit(
+            "観測をその場で訂正", f"{name} {target_dt_str}: {current['code']} → {corrected_code}",
+        )
+    finally:
+        conn.close()
+    return _finish("station_detail", "観測結果を訂正しました。", name=name)
+
+
 @app.route("/admin/observation_reports")
-@requires_admin
+@requires_observer
 def admin_observation_reports():
+    role = session.get("role")
+    region = _observer_region_for_role(role)
     conn = _users_conn()
     try:
         reports = users.list_pending_observation_reports(conn)
     finally:
         conn.close()
+    if region is not None:
+        reports = [r for r in reports if STATION_REGION.get(r["station_name"]) == region]
     for r in reports:
         image_date = r["target_datetime"][:10]
         image_hhmm = r["target_datetime"][11:13] + r["target_datetime"][14:16]
@@ -3297,14 +3562,17 @@ def admin_observation_reports():
 
 
 @app.route("/admin/observation_reports/<int:report_id>/resolve", methods=["POST"])
-@requires_admin
+@requires_observer
 def admin_observation_report_resolve(report_id):
     my_id = session.get("user_id")
+    region = _observer_region_for_role(session.get("role"))
     conn = _users_conn()
     try:
         report = users.get_observation_report(conn, report_id)
         if report is None or report["status"] != "pending":
             abort(404)
+        if region is not None and STATION_REGION.get(report["station_name"]) != region:
+            abort(403)
         corrected_code = request.form.get("corrected_code", type=int)
         if corrected_code is None or not (0 <= corrected_code <= 10):
             return _finish("admin_observation_reports", "訂正後の現象コードを選んでください。", success=False)
@@ -3335,14 +3603,17 @@ def admin_observation_report_resolve(report_id):
 
 
 @app.route("/admin/observation_reports/<int:report_id>/dismiss", methods=["POST"])
-@requires_admin
+@requires_observer
 def admin_observation_report_dismiss(report_id):
     my_id = session.get("user_id")
+    region = _observer_region_for_role(session.get("role"))
     conn = _users_conn()
     try:
         report = users.get_observation_report(conn, report_id)
         if report is None or report["status"] != "pending":
             abort(404)
+        if region is not None and STATION_REGION.get(report["station_name"]) != region:
+            abort(403)
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         users.resolve_observation_report(conn, report_id, "dismissed", my_id, now_str, "問題なしと判断")
         _record_audit("観測報告を却下", f"{report['station_name']} {report['target_datetime']}")
@@ -3410,6 +3681,8 @@ def station_detail(name):
         ai_station_summary=ai_station_summary,
         ai_summary_generated_at=ai_summary.get("generated_at") if ai_summary else None,
         feature_snapshot=_load_station_feature_snapshot(name),
+        can_correct=_can_correct_station(session.get("role"), name),
+        phenom_labels=PHENOM_LABELS,
     )
 
 
@@ -4251,6 +4524,12 @@ LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
 # 的中すれば bet_amount * multiplier をgrant_pointsで払い戻す。外れれば戻ってこない
 # (名前どおりの「ギャンブル」として、当てずっぽうの丁半博打にならないよう
 # 難易度に応じた倍率を付ける)。
+class _ConsumableUnavailable(Exception):
+    """賭け金の残高チェックと同一トランザクション内でチケットを消費する際、
+    在庫チェック直後に別リクエストが先に使い切っていた場合に投げる(その場合
+    spend_points_if_available側でロールバックし、賭けは成立させない)。"""
+
+
 GAMBLE_MIN_BET = 10
 GAMBLE_MAX_LEAD_HOURS = 24 * 7  # 1週間先まで賭けられる
 GAMBLE_MULTIPLIER_CAP = 30.0
@@ -4769,6 +5048,64 @@ def admin_feedback_resolve(report_id):
     return _finish("admin_feedback", "対応済みにしました。")
 
 
+@app.route("/admin/clamav")
+@requires_admin
+def admin_clamav():
+    conn = _users_conn()
+    try:
+        recent_events = [
+            e for e in users.list_audit_log(conn, limit=500)
+            if "マルウェア" in e["action"] or "ウイルス" in e["action"]
+        ][:20]
+    finally:
+        conn.close()
+    rescan_running = _is_script_running("clamav_rescan")
+    rescan_log = None
+    rescan_log_at = None
+    if CLAMAV_RESCAN_LOG_PATH.exists():
+        rescan_log = CLAMAV_RESCAN_LOG_PATH.read_text(errors="replace")[-8000:]
+        rescan_log_at = datetime.fromtimestamp(CLAMAV_RESCAN_LOG_PATH.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    return render_template(
+        "admin_clamav.html",
+        db_info=_clamav_db_info(), service_status=_clamav_service_status(),
+        stale_days_threshold=CLAMAV_SIGNATURE_STALE_DAYS, recent_events=recent_events,
+        rescan_running=rescan_running, rescan_log=rescan_log, rescan_log_at=rescan_log_at,
+        rescan_dirs=[str(d) for d in CLAMAV_RESCAN_DIRS],
+    )
+
+
+@app.route("/admin/clamav/selftest", methods=["POST"])
+@requires_admin
+def admin_clamav_selftest():
+    result = _run_clamav_selftest()
+    _record_audit(
+        "ウイルス対策セルフテスト",
+        f"ok={result['ok']} detected={result['detected']} error={result['error']}",
+    )
+    if result["ok"] and result["detected"]:
+        return _finish("admin_clamav", "EICARテスト検体を正しく検知しました。ウイルス対策は正常に機能しています。")
+    if result["ok"] and not result["detected"]:
+        return _finish(
+            "admin_clamav",
+            "ClamAVは応答していますが、既知のテスト検体(EICAR)を検知できませんでした。"
+            "シグネチャDBや設定を確認してください。",
+            success=False,
+        )
+    return _finish(
+        "admin_clamav", f"スキャンを実行できませんでした: {result['error']}", success=False,
+    )
+
+
+@app.route("/admin/clamav/rescan", methods=["POST"])
+@requires_admin
+def admin_clamav_rescan():
+    if _is_script_running("clamav_rescan"):
+        return _finish("admin_clamav", "再スキャンは既に実行中です。", success=False)
+    _run_clamav_rescan_async()
+    _record_audit("ウイルス対策の一括再スキャンを開始", f"対象: {', '.join(str(d) for d in CLAMAV_RESCAN_DIRS)}")
+    return _finish("admin_clamav", "再スキャンを開始しました。件数によっては数分かかります。")
+
+
 @app.route("/members/<int:user_id>")
 def member_detail(user_id):
     conn = _users_conn()
@@ -4816,10 +5153,10 @@ def member_detail(user_id):
     except (ValueError, TypeError):
         account_age_days = 0
     has_avatar = _avatar_path(user_id).exists()
-    night_owl = any(len(h) >= 13 and int(h[11:13]) < 4 for h in history)
-    early_bird = any(len(h) >= 13 and 5 <= int(h[11:13]) < 7 for h in history)
-    newyear_login = any(len(h) >= 10 and h[5:10] == "01-01" for h in history)
-    newyearseve_login = any(len(h) >= 10 and h[5:10] == "12-31" for h in history)
+    night_owl = any(len(h["logged_in_at"]) >= 13 and int(h["logged_in_at"][11:13]) < 4 for h in history)
+    early_bird = any(len(h["logged_in_at"]) >= 13 and 5 <= int(h["logged_in_at"][11:13]) < 7 for h in history)
+    newyear_login = any(len(h["logged_in_at"]) >= 10 and h["logged_in_at"][5:10] == "01-01" for h in history)
+    newyearseve_login = any(len(h["logged_in_at"]) >= 10 and h["logged_in_at"][5:10] == "12-31" for h in history)
     weekend_days = sum(
         1 for d in counts_by_day if datetime.strptime(d, "%Y-%m-%d").weekday() >= 5
     )
@@ -5014,11 +5351,13 @@ def game_shop_buy():
     try:
         if frame["id"] in users.owned_frame_ids(conn, my_id):
             return _finish("game_shop", "そのフレームは既に持っています。", success=False)
-        if users.available_points(conn, my_id) < frame["cost"]:
-            return _finish("game_shop", "ポイントが足りません。", success=False)
-        users.purchase_frame(
-            conn, my_id, frame["id"], frame["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        ok = users.spend_points_if_available(
+            conn, my_id, frame["cost"],
+            lambda c: users.purchase_frame(c, my_id, frame["id"], frame["cost"], now_str),
         )
+        if not ok:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
     finally:
         conn.close()
     return _finish("game_shop", f"「{frame['label']}」と交換しました。")
@@ -5083,12 +5422,13 @@ def game_shop_buy_cosmetic(category):
     try:
         if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
             return _finish("game_shop", f"その{label}は既に持っています。", success=False)
-        if users.available_points(conn, my_id) < item["cost"]:
-            return _finish("game_shop", "ポイントが足りません。", success=False)
-        users.purchase_cosmetic(
-            conn, my_id, cosmetic_category, item["id"], item["cost"],
-            datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        ok = users.spend_points_if_available(
+            conn, my_id, item["cost"],
+            lambda c: users.purchase_cosmetic(c, my_id, cosmetic_category, item["id"], item["cost"], now_str),
         )
+        if not ok:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
         points = users.available_points(conn, my_id)
     finally:
         conn.close()
@@ -5179,8 +5519,6 @@ def game_shop_gacha():
         abort(403)
     conn = _users_conn()
     try:
-        if users.available_points(conn, my_id) < GACHA_COST:
-            return _finish("game_shop", "ポイントが足りません。", success=False)
         now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
         candidates = []
         for category, (catalog, cosmetic_category, label) in COSMETIC_CATALOGS.items():
@@ -5195,18 +5533,8 @@ def game_shop_gacha():
                     continue
                 candidates.append((category, cosmetic_category, label, item))
         weighted = [(c, cc, lb, it, 1.0 / max(it["cost"], 1)) for c, cc, lb, it in candidates]
-        if _gacha_is_jackpot(weighted):
-            # 参加費(GACHA_COST)はconsumable_purchases経由で記録し(total_spent_pointsの
-            # 集計対象)、当たり分だけを別途grant_pointsで加算する(二重計上にならない)。
-            users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
-            if weighted:
-                refund = int(round(GACHA_COST * GACHA_BIG_REFUND_MULTIPLIER))
-                users.grant_points(conn, my_id, f"gacha_refund:{uuid.uuid4()}", refund, now_str)
-                message = f"福袋の結果: {refund}pt の大当たり!"
-            else:
-                users.grant_points(conn, my_id, f"gacha_consolation:{uuid.uuid4()}", GACHA_CONSOLATION_POINTS, now_str)
-                message = f"すべて所持済みだったため、参加賞として{GACHA_CONSOLATION_POINTS}ptを獲得しました。"
-        else:
+        is_jackpot = _gacha_is_jackpot(weighted)
+        if not is_jackpot:
             roll = random.random() * sum(w for *_, w in weighted)
             chosen = weighted[-1]
             for entry in weighted:
@@ -5214,14 +5542,33 @@ def game_shop_gacha():
                 if roll <= 0:
                     chosen = entry
                     break
-            _, cosmetic_category, label, item, _ = chosen
-            users.buy_consumable(conn, my_id, "gacha_draw", GACHA_COST, now_str)
-            users.purchase_cosmetic(conn, my_id, cosmetic_category, item["id"], 0, now_str)
-            message = f"福袋の結果: 「{item['label']}」({label})を獲得しました!"
+
+        result = {}
+
+        def _spend(c):
+            # 参加費(GACHA_COST)はconsumable_purchases経由で記録し(total_spent_pointsの
+            # 集計対象)、当たり分だけを別途grant_pointsで加算する(二重計上にならない)。
+            users.buy_consumable(c, my_id, "gacha_draw", GACHA_COST, now_str)
+            if is_jackpot:
+                if weighted:
+                    refund = int(round(GACHA_COST * GACHA_BIG_REFUND_MULTIPLIER))
+                    users.grant_points(c, my_id, f"gacha_refund:{uuid.uuid4()}", refund, now_str)
+                    result["message"] = f"福袋の結果: {refund}pt の大当たり!"
+                else:
+                    users.grant_points(c, my_id, f"gacha_consolation:{uuid.uuid4()}", GACHA_CONSOLATION_POINTS, now_str)
+                    result["message"] = f"すべて所持済みだったため、参加賞として{GACHA_CONSOLATION_POINTS}ptを獲得しました。"
+            else:
+                _, cosmetic_category, label, item, _ = chosen
+                users.purchase_cosmetic(c, my_id, cosmetic_category, item["id"], 0, now_str)
+                result["message"] = f"福袋の結果: 「{item['label']}」({label})を獲得しました!"
+
+        ok = users.spend_points_if_available(conn, my_id, GACHA_COST, _spend)
+        if not ok:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
         points = users.available_points(conn, my_id)
     finally:
         conn.close()
-    return _finish("game_shop", message, extra={"available_points": points})
+    return _finish("game_shop", result["message"], extra={"available_points": points})
 
 
 @app.route("/game/shop/buy_consumable", methods=["POST"])
@@ -5234,11 +5581,13 @@ def game_shop_buy_consumable():
         abort(404)
     conn = _users_conn()
     try:
-        if users.available_points(conn, my_id) < item["cost"]:
-            return _finish("game_shop", "ポイントが足りません。", success=False)
-        users.buy_consumable(
-            conn, my_id, item["id"], item["cost"], datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        ok = users.spend_points_if_available(
+            conn, my_id, item["cost"],
+            lambda c: users.buy_consumable(c, my_id, item["id"], item["cost"], now_str),
         )
+        if not ok:
+            return _finish("game_shop", "ポイントが足りません。", success=False)
         points = users.available_points(conn, my_id)
         quantity = users.consumable_quantities(conn, my_id).get(item["id"], 0)
     finally:
@@ -5362,8 +5711,6 @@ def game_gamble_place():
 
     conn = _users_conn()
     try:
-        if users.available_points(conn, my_id) < bet_amount:
-            return _finish("game_gamble", "ポイントが足りません。", success=False)
         owned = users.consumable_quantities(conn, my_id)
         if use_insurance and owned.get("insurance_ticket", 0) < 1:
             return _finish("game_gamble", "保険チケットを持っていません。", success=False)
@@ -5372,21 +5719,42 @@ def game_gamble_place():
         if use_super_boost and owned.get("super_boost_ticket", 0) < 1:
             return _finish("game_gamble", "上級倍率ブーストチケットを持っていません。", success=False)
 
-        # 上級版と通常版が同時に指定された場合は上級版だけを使う(効果は重複させない)。
-        if use_super_boost:
-            users.use_consumable(conn, my_id, "super_boost_ticket")
-            multiplier = round(multiplier * CONSUMABLE_SUPER_BOOST_MULTIPLIER, 2)
-        elif use_boost:
-            users.use_consumable(conn, my_id, "boost_ticket")
-            multiplier = round(multiplier * CONSUMABLE_BOOST_MULTIPLIER, 2)
-        if use_insurance:
-            users.use_consumable(conn, my_id, "insurance_ticket")
-
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        users.place_fog_bet(
-            conn, my_id, station, precision_id, window_start, window_end, bet_amount, multiplier, now_str,
-            insurance=use_insurance,
-        )
+        applied_multiplier = {"value": multiplier}
+
+        def _spend(c):
+            # 上級版と通常版が同時に指定された場合は上級版だけを使う(効果は重複させない)。
+            # 在庫チェックは上で済ませているが、直後に別リクエストが使い切る競合が
+            # ありうるため、use_consumableの戻り値も必ず確認する(確認しないと、
+            # チケットを消費できなかったのに倍率だけ適用されてしまう)。
+            m = applied_multiplier["value"]
+            if use_super_boost:
+                if not users.use_consumable(c, my_id, "super_boost_ticket"):
+                    raise _ConsumableUnavailable()
+                m = round(m * CONSUMABLE_SUPER_BOOST_MULTIPLIER, 2)
+            elif use_boost:
+                if not users.use_consumable(c, my_id, "boost_ticket"):
+                    raise _ConsumableUnavailable()
+                m = round(m * CONSUMABLE_BOOST_MULTIPLIER, 2)
+            if use_insurance:
+                if not users.use_consumable(c, my_id, "insurance_ticket"):
+                    raise _ConsumableUnavailable()
+            applied_multiplier["value"] = m
+            users.place_fog_bet(
+                c, my_id, station, precision_id, window_start, window_end, bet_amount, m, now_str,
+                insurance=use_insurance,
+            )
+
+        try:
+            ok = users.spend_points_if_available(conn, my_id, bet_amount, _spend)
+        except _ConsumableUnavailable:
+            return _finish(
+                "game_gamble", "チケットの在庫が変わったため賭けられませんでした。もう一度お試しください。",
+                success=False,
+            )
+        if not ok:
+            return _finish("game_gamble", "ポイントが足りません。", success=False)
+        multiplier = applied_multiplier["value"]
     finally:
         conn.close()
     return _finish(
@@ -6376,6 +6744,15 @@ _PREVIEWABLE_XLSX_CONTENT_TYPES = {
 _PREVIEW_MAX_ROWS = 200
 _PREVIEW_MAX_COLS = 30
 
+# /files/<id>/raw はブラウザにその場で描画させる生配信のため、content_typeが
+# text/html等になりうる場合はここで弾かないと格納型XSSが成立してしまう。
+# アップロード自体には拡張子制限を設けていない(利用者の要望で撤廃済み)ため、
+# 「その場で描画してよい」ものだけをここで安全側に絞り、それ以外は
+# ダウンロード(添付ヘッダー付き)にフォールバックする。プレビュー画面が
+# <img>/<embed>で読み込むのは画像とPDFのみ(shared_file_preview.html参照)。
+def _is_safe_inline_content_type(content_type):
+    return content_type.startswith("image/") or content_type == "application/pdf"
+
 
 @app.route("/files")
 def shared_files_page():
@@ -6562,6 +6939,12 @@ def shared_file_raw(file_id):
         conn.close()
     if f is None:
         abort(404)
+    if not _is_safe_inline_content_type(f["content_type"]):
+        # 画像・PDF以外をその場描画させるとcontent_type偽装によるXSSが成立するため、
+        # 添付ダウンロードにフォールバックする(アップロード自体は拒否しない)。
+        return send_from_directory(
+            SHARED_FILES_DIR, f["stored_name"], as_attachment=True, download_name=f["filename"],
+        )
     return send_from_directory(SHARED_FILES_DIR, f["stored_name"], mimetype=f["content_type"])
 
 
@@ -6992,9 +7375,11 @@ def admin_accounts_unlock(user_id):
 def admin_accounts_role(user_id):
     """管理者への昇格(general→admin)は、権限昇格の悪用・誤操作を防ぐため即時反映せず、
     別の管理者による承認を必須にする(admin_accounts_role_approve参照)。降格
-    (admin→general)は安全側の変更なので従来どおり即時反映する。"""
+    (admin→general)は安全側の変更なので従来どおり即時反映する。会津観測者/只見観測者は
+    観測報告の確認・訂正権限に限られ、他の管理機能には一切関与しないため、
+    管理者昇格ほどの慎重さは不要と判断し、即時反映にしている。"""
     role = request.form.get("role")
-    if role not in ("general", "admin"):
+    if role not in ("general", "admin", *OBSERVER_ROLE_REGIONS):
         abort(400)
     conn = _users_conn()
     try:
@@ -7271,6 +7656,29 @@ def admin_smb():
         share=share, share_name=SMB_SHARE_NAME,
         smbd_state=smbd_state, nmbd_state=nmbd_state,
         smb_conf_path=str(SMB_CONF_PATH),
+    )
+
+
+@app.route("/admin/tailscale")
+@requires_admin
+def admin_tailscale():
+    """Tailscaleの接続状態を閲覧専用で表示する。状態を変更する操作(up/down/logout等)は
+    一切用意しない: このサーバーへのSSH・管理画面アクセスの経路そのものがTailscale
+    経由であり、誤操作で無効化すると物理アクセスかLAN側からの復旧作業が必要になる
+    (admin_smb.htmlと同じ「sudoersを増やすリスクとの見合い」の考え方だが、
+    ここは影響がリモートアクセス経路そのものに及ぶためより厳格に閲覧専用とした)。
+    """
+    status = _tailscale_status()
+    self_info = (status or {}).get("Self") or {}
+    peers = sorted(
+        (status or {}).get("Peer", {}).values(),
+        key=lambda p: (not p.get("Online"), (p.get("HostName") or "").lower()),
+    )
+    return render_template(
+        "admin_tailscale.html",
+        backend_state=(status or {}).get("BackendState"),
+        self_info=self_info, peers=peers,
+        version=_tailscale_version(), autoupdate=_tailscale_autoupdate_prefs(),
     )
 
 

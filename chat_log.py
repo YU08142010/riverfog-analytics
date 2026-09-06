@@ -40,7 +40,12 @@ CONVERSATION_INDEX_SQL = (
 
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    # webapp.pyの複数ワーカースレッドがAIチャット送信のたびに書き込むため、
+    # busy_timeoutで書き込み中の衝突を即座にエラーにせず待たせる
+    # (weather_store.pyと同じ対策)。
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     _migrate_legacy_messages(conn)
     with conn:

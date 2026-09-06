@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Tailscale{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+
+<div class="card">
+    <h2>このサーバーの状態</h2>
+    <p class="muted">閲覧専用です。接続を切る・再認証するといった操作はこの画面からは
+        できません(このサーバーへのSSH・管理画面アクセス自体がTailscale経由のため、
+        誤操作で無効化すると物理アクセスかLAN側からの復旧作業が必要になります)。</p>
+    <table class="obs-table" style="width:auto;">
+        <tbody>
+        <tr>
+            <td>接続状態</td>
+            <td style="color: {{ 'var(--color-success)' if backend_state == 'Running' else 'var(--color-danger)' }}; font-weight:600;">
+                {{ backend_state or "取得できませんでした" }}
+            </td>
+        </tr>
+        <tr><td>ホスト名</td><td>{{ self_info.get("HostName", "-") }}</td></tr>
+        <tr><td>Tailscale IP</td><td>{{ self_info.get("TailscaleIPs", [])|join(", ") or "-" }}</td></tr>
+        <tr><td>OS</td><td>{{ self_info.get("OS", "-") }}</td></tr>
+        <tr><td>バージョン</td><td>{{ version or "-" }}</td></tr>
+        <tr>
+            <td>自動更新</td>
+            <td>
+                {% if autoupdate %}
+                確認: {{ "有効" if autoupdate.get("Check") else "無効" }} /
+                適用: {{ "有効" if autoupdate.get("Apply") else "無効" }}
+                {% else %}
+                取得できませんでした
+                {% endif %}
+            </td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>同じTailnet上の端末({{ peers|length }}台)</h2>
+    {% if peers %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>名前</th><th>IP</th><th>OS</th><th>状態</th><th>最終確認</th></tr></thead>
+        <tbody>
+        {% for p in peers %}
+        <tr>
+            <td>{{ p.get("HostName", "-") }}</td>
+            <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">{{ p.get("TailscaleIPs", [])|first or "-" }}</td>
+            <td>{{ p.get("OS", "-") }}</td>
+            <td style="color: {{ 'var(--color-success)' if p.get('Online') else 'var(--color-text-muted)' }}; font-weight: {{ '600' if p.get('Online') else 'normal' }};">
+                {{ "オンライン" if p.get("Online") else "オフライン" }}
+            </td>
+            <td style="white-space:nowrap;">{{ p.get("LastSeen", "-") }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">取得できませんでした。</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -124,6 +124,8 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="role" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:0.3rem;">
                         <option value="general" {{ "selected" if a.role == "general" }}>一般</option>
+                        <option value="aizu_observer" {{ "selected" if a.role == "aizu_observer" }}>会津観測者</option>
+                        <option value="tadami_observer" {{ "selected" if a.role == "tadami_observer" }}>只見観測者</option>
                         <option value="admin" {{ "selected" if a.role == "admin" }}>管理者</option>
                     </select>
                 </form>

@@ -48,6 +48,8 @@
     "attach": '<path d="M21.4 11.05 12.7 19.75a4.5 4.5 0 0 1-6.36-6.36l8.49-8.49a3 3 0 0 1 4.24 4.24l-8.49 8.49a1.5 1.5 0 0 1-2.12-2.12l7.07-7.07"/>',
     "moon": '<path d="M20 12.5A8.5 8.5 0 1 1 11.5 4a7 7 0 0 0 8.5 8.5z"/>',
     "sunrise": '<circle cx="12" cy="17" r="4"/><line x1="12" y1="2" x2="12" y2="7"/><line x1="4.2" y1="9.2" x2="7.4" y2="12.4"/><line x1="19.8" y1="9.2" x2="16.6" y2="12.4"/><line x1="2" y1="21" x2="22" y2="21"/>',
+    "shield": '<path d="M12 2.5l7 2.8v6c0 5-3.4 8.6-7 10.2-3.6-1.6-7-5.2-7-10.2v-6z"/><polyline points="8.5,12 11,14.5 15.5,9.5"/>',
+    "network": '<circle cx="12" cy="5" r="2.3"/><circle cx="5" cy="19" r="2.3"/><circle cx="19" cy="19" r="2.3"/><line x1="12" y1="7.3" x2="6.4" y2="17.1"/><line x1="12" y1="7.3" x2="17.6" y2="17.1"/>',
 } %}
 <svg xmlns="http://www.w3.org/2000/svg" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="icon {{ cls }}" aria-hidden="true">{{ (paths.get(name) or "")|safe }}</svg>
 {%- endmacro %}

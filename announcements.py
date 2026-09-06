@@ -61,7 +61,11 @@ def _migrate_add_foreign_keys(conn):
 
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    # webapp.pyの複数ワーカースレッドから読み書きされるため、busy_timeoutで
+    # 書き込み中の衝突を即座にエラーにせず待たせる(weather_store.pyと同じ対策)。
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(SCHEMA)
     _migrate_add_foreign_keys(conn)

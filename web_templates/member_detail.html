@@ -34,7 +34,7 @@
             <h2 style="margin-bottom:0.3rem;">
                 <span class="{{ name_color_class }}">{{ member.name }}</span>
                 {% if marker_icon %}<span title="殿堂入り" style="margin-left:0.3rem;">{{ marker_icon }}</span>{% endif %}
-                <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ "管理者" if member.role == "admin" else "一般" }}</span>
+                <span class="role-tag {{ member.role }}" style="margin-left:0.5rem;">{{ role_label(member.role) }}</span>
             </h2>
             {% if title_label %}
             <p class="muted {{ title_color_class }}" style="margin:0 0 0.3rem; font-size:0.85rem;">
@@ -384,7 +384,13 @@
         <tr>
             <td class="muted">{{ loop.index }}</td>
             <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">{{ h.logged_in_at }}</td>
-            <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">{{ h.logged_out_at or "-" }}</td>
+            <td style="font-variant-numeric:tabular-nums; white-space:nowrap;">
+                {%- if not h.logged_out_at and loop.first and online -%}
+                <span style="color:var(--color-success);">ログイン中</span>
+                {%- else -%}
+                {{ h.logged_out_at or "-" }}
+                {%- endif -%}
+            </td>
         </tr>
         {% endfor %}
         </tbody>

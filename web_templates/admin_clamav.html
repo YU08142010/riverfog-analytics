@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}ウイルス対策{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+
+{% set daemon_active = service_status.daemon.get("ActiveState") == "active" %}
+{% set freshclam_active = service_status.freshclam.get("ActiveState") == "active" %}
+{% set freshclam_enabled = service_status.freshclam.get("UnitFileState") == "enabled" %}
+
+<div class="card">
+    <h2>稼働状況</h2>
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>項目</th><th>状態</th></tr></thead>
+        <tbody>
+        <tr>
+            <td>clamd(スキャン本体)</td>
+            <td style="color: {{ 'var(--color-success)' if daemon_active else 'var(--color-danger)' }}; font-weight:600;">
+                {{ service_status.daemon.get("ActiveState", "-") }} ({{ service_status.daemon.get("SubState", "-") }})
+            </td>
+        </tr>
+        <tr>
+            <td>シグネチャDBバージョン</td>
+            <td>{{ db_info.version or "取得できませんでした" }}</td>
+        </tr>
+        <tr>
+            <td>シグネチャDB最終更新</td>
+            <td style="color: {{ 'var(--color-danger)' if db_info.stale else 'inherit' }}; font-weight: {{ '600' if db_info.stale else 'normal' }};">
+                {% if db_info.missing %}
+                見つかりません
+                {% else %}
+                {{ db_info.updated_at }}
+                {% if db_info.stale %}({{ stale_days_threshold }}日以上更新されていません){% endif %}
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td>シグネチャ自動更新(freshclam)</td>
+            <td style="color: {{ 'var(--color-success)' if freshclam_active else 'var(--color-danger)' }}; font-weight:600;">
+                {{ "有効・稼働中" if freshclam_active else ("無効(自動更新されません)" if not freshclam_enabled else "有効だが停止中") }}
+            </td>
+        </tr>
+        </tbody>
+    </table>
+    {% if not freshclam_active %}
+    <p class="muted" style="font-size:0.82rem; margin-top:0.6rem;">
+        シグネチャの自動更新が動いていません。新しいウイルスに対応できなくなるため、
+        サーバー上で <code>sudo systemctl enable --now clamav-freshclam.service</code> を
+        実行して有効化することを推奨します(管理画面からの操作は、システムサービスの
+        起動・停止権限を管理画面に与えるリスクを避けるためあえて用意していません)。
+    </p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>手動実行</h2>
+    <p class="muted">シグネチャの更新自体はサーバー上のfreshclamが行うため、ここからは
+        「今のClamAVが正しく機能しているか」の確認と、「既にアップロード済みのファイルを
+        最新のシグネチャで再チェックする」の2つだけを行えます。</p>
+
+    <h3 style="margin-top:1.2rem;">セルフテスト(EICARテスト検体)</h3>
+    <p class="muted" style="font-size:0.85rem;">
+        本物のウイルスではなく、全アンチウイルス製品が検知するよう業界標準化された
+        テスト文字列を実際にスキャンさせ、検知できるかを確認します。
+    </p>
+    <form method="post" action="{{ url_for('admin_clamav_selftest') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button">セルフテストを実行</button>
+    </form>
+
+    <h3 style="margin-top:1.2rem;">既存ファイルの一括再スキャン</h3>
+    <p class="muted" style="font-size:0.85rem;">
+        アップロード時点では未検知だった脅威が、その後のシグネチャ更新で検知可能に
+        なっているケースに備えた事後チェックです。対象:
+    </p>
+    <ul class="muted" style="font-size:0.85rem;">
+        {% for d in rescan_dirs %}
+        <li><code>{{ d }}</code></li>
+        {% endfor %}
+    </ul>
+    {% if rescan_running %}
+    <p><strong>実行中です。</strong>しばらくしてからこのページを再読み込みしてください。</p>
+    {% else %}
+    <form method="post" action="{{ url_for('admin_clamav_rescan') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button">再スキャンを開始</button>
+    </form>
+    {% endif %}
+    {% if rescan_log %}
+    <p class="muted" style="font-size:0.82rem; margin-top:0.8rem;">
+        最終実行: {{ rescan_log_at }}(検知されたファイルのみ表示。空欄は「検知なし」)
+    </p>
+    <pre class="log-viewer scrollable">{{ rescan_log or "(検知なし)" }}</pre>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>最近の検知・スキャン異常</h2>
+    {% if recent_events %}
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>日時</th><th>内容</th><th>詳細</th></tr></thead>
+        <tbody>
+        {% for e in recent_events %}
+        <tr>
+            <td style="white-space:nowrap;">{{ e.created_at }}</td>
+            <td>{{ e.action }}</td>
+            <td>{{ e.detail }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">記録はありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -33,7 +33,12 @@ CREATE TABLE IF NOT EXISTS station_weather (
 
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    # collect.py(毎時)・backfill_weather.py・Webの複数プロセスが同じDBファイルに
+    # 書き込みうるため、busy_timeoutで他プロセスの書き込み中も即座にエラーにせず
+    # 待たせる(weather_store.pyと同じ対策)。
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     return conn
 

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}観測報告{% endblock %}
-{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block sidebar %}{% if session.get("role") == "admin" %}{% include "_admin_sidebar.html" %}{% endif %}{% endblock %}
 {% block content %}
 <div class="card">
     <h2>観測報告(未対応 {{ reports|length }}件)</h2>
@@ -8,72 +8,77 @@
         利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測と食い違う1時間だけの
         孤立したブレをシステムが自動検知した内容の確認待ちキューです。自動検知分は前後1時間ずつを
         含む3枚の画像を見比べたうえで、訂正するか却下するか判断してください(自動では訂正されません)。
+        {% if session.get("role") != "admin" %}
+        担当地域(会津/只見川のどちらか一方)の報告のみ表示しています。
+        {% endif %}
     </p>
-    {% if reports %}
-    <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
-        <thead><tr><th>写真</th><th>地点</th><th>日時</th><th>現在のコード</th><th>報告者</th><th>報告日時</th><th>対応</th></tr></thead>
-        <tbody>
-        {% for r in reports %}
-        <tr>
-            <td>
-                {% if r.source == 'auto_detected' %}
-                <div style="display:flex; gap:0.3rem;">
-                    {% for img in [
-                        {'label': '前', 'date': r.prev_image.date, 'hhmm': r.prev_image.hhmm, 'has_image': r.prev_image.has_image},
-                        {'label': '該当', 'date': r.image_date, 'hhmm': r.image_hhmm, 'has_image': r.has_image},
-                        {'label': '次', 'date': r.next_image.date, 'hhmm': r.next_image.hhmm, 'has_image': r.next_image.has_image},
-                    ] %}
-                    <div style="text-align:center;">
-                        {% if img.has_image %}
-                        {% set image_url = url_for('images_file', date=img.date, hhmm=img.hhmm, filename=r.station_name ~ '.jpg') %}
-                        <a href="{{ image_url }}" target="_blank" rel="noopener">
-                            <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}の{{ img.label }}の画像" style="width:80px; height:auto; border-radius:4px;">
-                        </a>
-                        {% else %}
-                        <span class="muted" style="font-size:0.7rem;">画像なし</span>
-                        {% endif %}
-                        <div class="muted" style="font-size:0.7rem;">{{ img.label }}</div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% elif r.has_image %}
-                {% set image_url = url_for('images_file', date=r.image_date, hhmm=r.image_hhmm, filename=r.station_name ~ '.jpg') %}
-                <a href="{{ image_url }}" target="_blank" rel="noopener">
-                    <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}のカメラ画像" style="width:100px; height:auto; border-radius:4px;">
-                </a>
-                {% else %}
-                <span class="muted">画像なし</span>
-                {% endif %}
-            </td>
-            <td>{{ r.station_name }}</td>
-            <td>{{ r.target_datetime }}</td>
-            <td>{{ phenom_labels.get(r.reported_code, "現象なし" if r.reported_code == 0 else "-") }}</td>
-            <td>{{ r.reporter_name }}</td>
-            <td>{{ r.reported_at }}</td>
-            <td style="white-space:nowrap;">
-                <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax style="display:inline-flex; gap:0.3rem; align-items:center;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <select name="corrected_code" style="padding:0.2rem;">
-                        <option value="0">現象なし</option>
-                        {% for code, label in phenom_labels.items() %}
-                        <option value="{{ code }}" {{ "selected" if code == r.reported_code }}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                    <button type="submit" class="button">訂正</button>
-                </form>
-                <form method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax style="display:inline-block;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="button button-danger">却下</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="muted">未対応の報告はありません。</p>
-    {% endif %}
 </div>
+
+{% if reports %}
+{% for r in reports %}
+<div class="card observation-report-card">
+    <div class="observation-report-head">
+        <div>
+            <h3 style="margin:0;">{{ r.station_name }}</h3>
+            <p class="muted" style="margin:0.2rem 0 0;">
+                対象日時: {{ r.target_datetime }} /
+                現在の判定: {{ phenom_labels.get(r.reported_code, "現象なし" if r.reported_code == 0 else "-") }} /
+                報告者: {{ r.reporter_name }} ({{ r.reported_at }})
+            </p>
+        </div>
+    </div>
+
+    <div class="observation-report-images">
+        {% if r.source == 'auto_detected' %}
+        {% for img in [
+            {'label': '1時間前', 'date': r.prev_image.date, 'hhmm': r.prev_image.hhmm, 'has_image': r.prev_image.has_image},
+            {'label': '該当時刻', 'date': r.image_date, 'hhmm': r.image_hhmm, 'has_image': r.has_image},
+            {'label': '1時間後', 'date': r.next_image.date, 'hhmm': r.next_image.hhmm, 'has_image': r.next_image.has_image},
+        ] %}
+        <div class="observation-report-image {{ 'is-target' if img.label == '該当時刻' }}">
+            {% if img.has_image %}
+            {% set image_url = url_for('images_file', date=img.date, hhmm=img.hhmm, filename=r.station_name ~ '.jpg') %}
+            <a href="{{ image_url }}" target="_blank" rel="noopener">
+                <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}の{{ img.label }}の画像">
+            </a>
+            {% else %}
+            <div class="observation-report-noimage">画像なし</div>
+            {% endif %}
+            <div class="observation-report-image-label">{{ img.label }}</div>
+        </div>
+        {% endfor %}
+        {% elif r.has_image %}
+        {% set image_url = url_for('images_file', date=r.image_date, hhmm=r.image_hhmm, filename=r.station_name ~ '.jpg') %}
+        <div class="observation-report-image is-target">
+            <a href="{{ image_url }}" target="_blank" rel="noopener">
+                <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}のカメラ画像">
+            </a>
+            <div class="observation-report-image-label">該当時刻</div>
+        </div>
+        {% else %}
+        <div class="observation-report-noimage">画像なし</div>
+        {% endif %}
+    </div>
+
+    <div class="observation-report-actions">
+        <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="corrected_code">
+                <option value="0">現象なし</option>
+                {% for code, label in phenom_labels.items() %}
+                <option value="{{ code }}" {{ "selected" if code == r.reported_code }}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="button">訂正</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button button-danger">却下</button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card"><p class="muted">未対応の報告はありません。</p></div>
+{% endif %}
 {% endblock %}

@@ -463,7 +463,13 @@ def _ensure_login_events_columns(conn):
 
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    # webapp.pyの複数ワーカースレッドが同時に読み書きするDBのため、busy_timeoutを
+    # 設定して他スレッドの書き込み中でも即座にエラーにせず一定時間待たせる
+    # (weather_store.py等の他DBモジュールと同じ対策。WALモードにすると読み取りが
+    # 書き込みをブロックしなくなり並行性がさらに上がる)。
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     # テーブル作り直し(移行)中はFK違反チェックを一時的に無効にする必要があるため、
     # スキーマ確定後にONへ切り替える。
     conn.execute("PRAGMA foreign_keys = OFF")
@@ -786,7 +792,22 @@ def reject_signup_request(conn, request_id):
 
 
 def record_login(conn, user_id, logged_in_at, ip=None):
+    """新しいログインを記録する前に、前回のログインがlogged_out_at未記録のまま
+    (タブを閉じた・セッションタイムアウトなどで/logoutを踏まずに終わった)残っていれば、
+    そのユーザーの最終アクセス時刻(user_presence.last_active_at、閲覧のたびに更新される)
+    を使って締める。この時点ではまだ今回のログイン分のpresenceは記録されていないため、
+    ここで読める値は前回セッション中に最後に観測された時刻そのものになる。"""
     with conn:
+        last_active_row = conn.execute(
+            "SELECT last_active_at FROM user_presence WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        last_active_at = last_active_row[0] if last_active_row else None
+        if last_active_at:
+            conn.execute(
+                "UPDATE login_events SET logged_out_at = ? WHERE user_id = ? "
+                "AND logged_out_at IS NULL AND logged_in_at < ?",
+                (last_active_at, user_id, logged_in_at),
+            )
         conn.execute(
             "INSERT INTO login_events (user_id, logged_in_at, ip) VALUES (?, ?, ?)",
             (user_id, logged_in_at, ip),
@@ -1337,6 +1358,31 @@ def available_points(conn, user_id):
     return total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
 
 
+def spend_points_if_available(conn, user_id, cost, do_spend):
+    """残高チェックと消費(do_spendが行うINSERT/UPDATE)をBEGIN IMMEDIATEで1つの
+    トランザクションに収めてアトミックに行う。残高は都度SUMで再計算する設計のため、
+    「チェック時点では足りていたが、ほぼ同時に来た別のリクエストが先に使ってしまい
+    実際は残高不足だった」という競合(ポイントのマイナス化・想定外の二重購入)を、
+    SQLiteの書き込みロックで直列化することで防ぐ。残高が足りなければdo_spendを
+    呼ばずにFalseを返す。do_spend内で使う個別の関数(purchase_frame等)が自前で
+    `with conn:`を使っていても、既にトランザクションが開始済みのためそのまま
+    正しく収まる(with conn:の終了時にこの外側のトランザクションがcommitされる)。"""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        balance = total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
+        if balance < cost:
+            conn.execute("ROLLBACK")
+            return False
+        do_spend(conn)
+        if conn.in_transaction:
+            conn.commit()
+        return True
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
 def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at, source="human"):
     """カメラ画像の現象判定(Gemini)を訂正した記録を残す。同じ(地点, 日時)を
     再度訂正した場合は上書きする(訂正の訂正はよくあることなので、履歴は持たず
@@ -1412,6 +1458,19 @@ def list_pending_observation_reports(conn):
 def pending_observation_report_count(conn):
     return conn.execute(
         "SELECT COUNT(*) FROM observation_reports WHERE status = 'pending'"
+    ).fetchone()[0]
+
+
+def pending_observation_report_count_for_stations(conn, station_names):
+    """会津観測者/只見観測者が担当地域分だけのバッジ件数を見られるようにするための、
+    地点名リストで絞り込んだ版。station_namesが空なら0を返す。"""
+    if not station_names:
+        return 0
+    placeholders = ",".join("?" for _ in station_names)
+    return conn.execute(
+        f"SELECT COUNT(*) FROM observation_reports WHERE status = 'pending' "
+        f"AND station_name IN ({placeholders})",
+        station_names,
     ).fetchone()[0]
 
 

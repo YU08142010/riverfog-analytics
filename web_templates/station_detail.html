@@ -19,10 +19,23 @@
         現在の現象: {{ current.label }}
     </div>
     {% if current.code is not none and session.get("user_id") %}
+    {% if can_correct %}
+    <form method="post" action="{{ url_for('station_correct_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="corrected_code" style="padding:0.35rem; font-size:0.85rem;">
+            <option value="0" {{ "selected" if current.code == 0 }}>現象なし</option>
+            {% for code, label in phenom_labels.items() %}
+            <option value="{{ code }}" {{ "selected" if code == current.code }}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測結果を訂正する</button>
+    </form>
+    {% else %}
     <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-block; margin-left:0.5rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測は間違っていると思う</button>
     </form>
+    {% endif %}
     {% endif %}
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>

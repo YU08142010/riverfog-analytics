@@ -1,6 +1,5 @@
 {% from "_icons.html" import icon %}
 {% set pending_count = pending_signup_count() %}
-{% set pending_report_count = pending_observation_report_count() %}
 {% set pending_feedback_count = pending_feedback_report_count() %}
 {% set admin_groups = [
     {"label": "モニタリング", "links": [
@@ -9,8 +8,8 @@
         {"name": "サービス状態", "endpoint": "admin_status", "icon": "status"},
         {"name": "Cockpit", "endpoint": "admin_cockpit", "icon": "cockpit"},
         {"name": "操作ログ", "endpoint": "admin_audit_log", "icon": "audit"},
-        {"name": "観測報告", "endpoint": "admin_observation_reports", "badge": pending_report_count, "icon": "error"},
         {"name": "意見箱", "endpoint": "admin_feedback", "badge": pending_feedback_count, "icon": "comment"},
+        {"name": "ウイルス対策", "endpoint": "admin_clamav", "icon": "shield"},
     ]},
     {"label": "モデル/精度", "links": [
         {"name": "モデル状況", "endpoint": "admin_models", "icon": "model"},
@@ -25,6 +24,7 @@
     {"label": "システム", "links": [
         {"name": "ディスク使用量", "endpoint": "admin_disk", "icon": "disk"},
         {"name": "SMB共有", "endpoint": "admin_smb", "icon": "share"},
+        {"name": "Tailscale", "endpoint": "admin_tailscale", "icon": "network"},
         {"name": "DB管理", "endpoint": "admin_db", "icon": "db"},
         {"name": "環境変数", "endpoint": "admin_env", "icon": "env"},
         {"name": "設定", "endpoint": "admin_settings", "icon": "settings"},

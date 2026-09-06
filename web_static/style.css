@@ -14,6 +14,7 @@
     --color-danger-bg: #fdecea;
     --color-danger-dark: #a3291b;
     --color-warning: #b9770e;
+    --color-warning-bg: #fdf2e3;
     --color-success: #1a7a3c;
     --color-success-bg: #eaf7ee;
     --radius-sm: 8px;
@@ -48,6 +49,7 @@
         --color-danger-bg: #3a2323;
         --color-danger-dark: #f0968b;
         --color-warning: #e0a751;
+        --color-warning-bg: #3a2f1c;
         --color-success: #4caf6f;
         --color-success-bg: #1f3327;
         --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
@@ -68,6 +70,7 @@
     --color-danger-bg: #3a2323;
     --color-danger-dark: #f0968b;
     --color-warning: #e0a751;
+    --color-warning-bg: #3a2f1c;
     --color-success: #4caf6f;
     --color-success-bg: #1f3327;
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
@@ -1406,6 +1409,8 @@ table.obs-table th.sticky-col { z-index: 3; }
 }
 .role-tag.admin { background: var(--color-danger-bg); color: var(--color-danger); }
 .role-tag.general { background: var(--color-primary-lighter); color: var(--color-primary-dark); }
+.role-tag.aizu_observer { background: var(--color-success-bg); color: var(--color-success); }
+.role-tag.tadami_observer { background: var(--color-warning-bg); color: var(--color-warning); }
 
 /* メンバーページのログイン回数ランキング。以前は装飾の無い番号付きリストだったため、
    順位バッジ・アバター・件数に応じた比較バーを加えて一目で分かるようにした。 */
@@ -2172,4 +2177,56 @@ table.obs-table th.sticky-col { z-index: 3; }
         font-size: 16px;
     }
 }
+
+/* 観測報告(admin_observation_reports.html)。以前は表の1セルに80px幅で3枚並べていて
+   見比べにくかったため、1件1カードのレイアウトに変え、画像を大きく表示する。 */
+.observation-report-card { padding-bottom: 1.1rem; }
+.observation-report-head { margin-bottom: 0.8rem; }
+.observation-report-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+.observation-report-image {
+    text-align: center;
+    width: 260px;
+    max-width: 100%;
+}
+.observation-report-image img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--color-border);
+    display: block;
+}
+.observation-report-image.is-target img { border-color: var(--color-primary); }
+.observation-report-image-label {
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+.observation-report-image.is-target .observation-report-image-label {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+.observation-report-noimage {
+    width: 260px;
+    max-width: 100%;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+}
+.observation-report-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+}
+.observation-report-actions select { padding: 0.4rem; }
 

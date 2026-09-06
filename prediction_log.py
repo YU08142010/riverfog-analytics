@@ -29,7 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_predictions_pending
 
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    # predict.py(日次)とWebの両方が書き込みうるため、busy_timeoutで書き込み中の
+    # 衝突を即座にエラーにせず待たせる(weather_store.pyと同じ対策)。
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     return conn
 

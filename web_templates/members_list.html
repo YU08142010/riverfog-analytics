@@ -148,7 +148,7 @@
                 {{ m.title_label }}{% if m.title_badge_icon %} <span>{{ m.title_badge_icon }}</span>{% endif %}
             </div>
             {% endif %}
-            <span class="role-tag {{ m.role }}">{{ "管理者" if m.role == "admin" else "一般" }}</span>
+            <span class="role-tag {{ m.role }}">{{ role_label(m.role) }}</span>
             <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">
                 ログイン{{ m.login_count }}回{% if m.streak > 1 %}・連続{{ m.streak }}日{% endif %}
             </div>
