@@ -601,7 +601,26 @@ LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
 # の有無で判定する。Funnelはnginxを経由せずtailscaledから直接127.0.0.1:8081へ転送される
 # ため、このヘッダーは絶対に付かない(公開のFunnel経由リクエストが自分でこのヘッダーを
 # 偽装しても、値が一致しなければfunnel扱いのままになる)。
-_NGINX_INTERNAL_HEADER_SECRET = "36ee8a9c0b6989fbe06f1c4e7202f694ab7750924462d7a0"
+def _load_or_create_nginx_internal_secret():
+    """nginx専用ヘッダーの合言葉を.envから読む。無ければ生成して.envに書き込み、以後は固定する。
+    リポジトリを公開GitHubにpushする際にコードへの直接埋め込みが発覚したため
+    (2026-09-11)、SECRET_KEYと同じ自己永続化パターンに切り替えた。nginx側の設定
+    (/etc/nginx/sites-available/river-fog、Gitでは管理していない)にも同じ値を
+    手動で設定する必要がある。"""
+    existing = os.environ.get("NGINX_INTERNAL_HEADER_SECRET")
+    if existing:
+        return existing
+    new_secret = secrets.token_hex(24)
+    try:
+        with open(ENV_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\nNGINX_INTERNAL_HEADER_SECRET={new_secret}\n")
+        os.environ["NGINX_INTERNAL_HEADER_SECRET"] = new_secret
+    except Exception:
+        log.exception("Failed to persist NGINX_INTERNAL_HEADER_SECRET to .env; using an in-memory value for this run")
+    return new_secret
+
+
+_NGINX_INTERNAL_HEADER_SECRET = _load_or_create_nginx_internal_secret()
 
 
 def _is_funnel_request():
