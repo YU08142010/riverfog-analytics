@@ -1418,6 +1418,28 @@ table.obs-table th.sticky-col { z-index: 3; }
    ラベル等)。他のカードコンポーネント([data-shop-panel][hidden]等)と同じく、
    明示的にdisplay:noneを上書きする。 */
 .role-tag[hidden] { display: none; }
+/* ジェムでしか買えない最高級アイテム(各ショップカテゴリに1点ずつ)用の共通の見た目。
+   プレビューが背景の四角(dashboard_theme/banner/effect等)のものはbox、文字色そのもの
+   (title_color/name_color等)のものはtextを使う。 */
+@keyframes shop-gem-shimmer {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+.shop-gem-premium-box {
+    background: linear-gradient(120deg, #f1c40f, #e67e22, #f39c12, #f1c40f);
+    background-size: 240% 240%;
+    animation: shop-gem-shimmer 4s ease infinite;
+}
+.shop-gem-premium-text {
+    background: linear-gradient(90deg, #f1c40f, #e67e22, #f1c40f);
+    background-size: 240% 240%;
+    animation: shop-gem-shimmer 4s ease infinite;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 700;
+}
 .role-tag.admin { background: var(--color-danger-bg); color: var(--color-danger); }
 .role-tag.general { background: var(--color-primary-lighter); color: var(--color-primary-dark); }
 .role-tag.aizu_observer { background: var(--color-success-bg); color: var(--color-success); }

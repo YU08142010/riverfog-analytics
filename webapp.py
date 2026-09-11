@@ -4452,6 +4452,9 @@ TITLE_DEFINITIONS.append(
     {"id": "kiri_no_kamigami", "label": "霧の神々に愛されし者", "cost": 1000000000,
      "monthly_fee": _monthly_fee(1000000000), "added": "2026-09-07"}
 )
+TITLE_DEFINITIONS.append(
+    {"id": "gem_title_legend", "label": "霧の伝承者", "currency": "gems", "cost_gems": 90000, "premium": True}
+)
 TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
 
 NAME_COLOR_DEFINITIONS = _reprice_for_inflation([
@@ -4461,6 +4464,10 @@ NAME_COLOR_DEFINITIONS = _reprice_for_inflation([
     {"id": "gold", "label": "金", "cost": 2000, "css_class": "name-color-gold"},
     {"id": "rainbow", "label": "虹色", "cost": 5000, "css_class": "name-color-rainbow"},
 ])
+NAME_COLOR_DEFINITIONS.append(
+    {"id": "gem_name_color_aurora", "label": "極光の名前", "css_class": "shop-gem-premium-text",
+     "currency": "gems", "cost_gems": 30000}
+)
 NAME_COLOR_BY_ID = {c["id"]: c for c in NAME_COLOR_DEFINITIONS}
 
 DASHBOARD_THEME_DEFINITIONS = _reprice_for_inflation([
@@ -4469,6 +4476,10 @@ DASHBOARD_THEME_DEFINITIONS = _reprice_for_inflation([
     {"id": "shinryoku", "label": "新緑", "cost": 1500, "css_class": "dash-theme-shinryoku"},
     {"id": "yukigesho", "label": "雪景色", "cost": 1500, "css_class": "dash-theme-yukigesho"},
 ])
+DASHBOARD_THEME_DEFINITIONS.append(
+    {"id": "gem_dashboard_aurora", "label": "黄金の川霧配色", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 25000}
+)
 DASHBOARD_THEME_BY_ID = {d["id"]: d for d in DASHBOARD_THEME_DEFINITIONS}
 
 EFFECT_DEFINITIONS = _reprice_for_inflation([
@@ -4476,6 +4487,10 @@ EFFECT_DEFINITIONS = _reprice_for_inflation([
     {"id": "sparkle", "label": "きらめき", "cost": 4000, "css_class": "fx-sparkle"},
     {"id": "aurora_glow", "label": "オーロラの光", "cost": 6000, "css_class": "fx-aurora-glow"},
 ])
+EFFECT_DEFINITIONS.append(
+    {"id": "gem_effect_aurora", "label": "黄金の煌めき", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 35000}
+)
 EFFECT_BY_ID = {e["id"]: e for e in EFFECT_DEFINITIONS}
 
 BANNER_DEFINITIONS = _reprice_for_inflation([
@@ -4484,6 +4499,10 @@ BANNER_DEFINITIONS = _reprice_for_inflation([
     {"id": "yukigesho", "label": "雪景色", "cost": 2000, "css_class": "banner-yukigesho"},
     {"id": "hoshizora", "label": "星空", "cost": 3000, "css_class": "banner-hoshizora"},
 ])
+BANNER_DEFINITIONS.append(
+    {"id": "gem_banner_aurora", "label": "黄金の川面", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 50000}
+)
 BANNER_BY_ID = {b["id"]: b for b in BANNER_DEFINITIONS}
 
 DM_THEME_DEFINITIONS = _reprice_for_inflation([
@@ -4491,6 +4510,10 @@ DM_THEME_DEFINITIONS = _reprice_for_inflation([
     {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dm-theme-yuuyake"},
     {"id": "mint", "label": "ミント", "cost": 1500, "css_class": "dm-theme-mint"},
 ])
+DM_THEME_DEFINITIONS.append(
+    {"id": "gem_dm_theme_aurora", "label": "黄金の便り", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 15000}
+)
 DM_THEME_BY_ID = {d["id"]: d for d in DM_THEME_DEFINITIONS}
 
 # 名前の色と同じCSSクラス(name-color-*)をそのまま流用する(色の見た目自体は
@@ -4502,6 +4525,10 @@ TITLE_COLOR_DEFINITIONS = _reprice_for_inflation([
     {"id": "gold", "label": "金", "cost": 1500, "css_class": "name-color-gold"},
     {"id": "rainbow", "label": "虹色", "cost": 4000, "css_class": "name-color-rainbow"},
 ])
+TITLE_COLOR_DEFINITIONS.append(
+    {"id": "gem_title_color_aurora", "label": "極上の称号色", "css_class": "shop-gem-premium-text",
+     "currency": "gems", "cost_gems": 20000}
+)
 TITLE_COLOR_BY_ID = {c["id"]: c for c in TITLE_COLOR_DEFINITIONS}
 
 MARKER_DEFINITIONS = _reprice_for_inflation([
@@ -4547,6 +4574,9 @@ TITLE_BADGE_DEFINITIONS = _reprice_for_inflation([
     {"id": "drop", "label": "しずく", "cost": 800, "icon": "💧", "added": NEW_ITEM_ADDED_AT},
     {"id": "gem", "label": "きらめく宝石", "cost": 2500, "icon": "💎", "added": NEW_ITEM_ADDED_AT},
 ])
+TITLE_BADGE_DEFINITIONS.append(
+    {"id": "gem_badge_star", "label": "極上の輝き", "icon": "🌟", "currency": "gems", "cost_gems": 15000}
+)
 TITLE_BADGE_BY_ID = {t["id"]: t for t in TITLE_BADGE_DEFINITIONS}
 
 BUBBLE_STYLE_DEFINITIONS = _reprice_for_inflation([
@@ -4554,6 +4584,10 @@ BUBBLE_STYLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "square", "label": "かく型", "cost": 1200, "css_class": "bubble-style-square", "added": NEW_ITEM_ADDED_AT},
     {"id": "handwritten", "label": "手書き風", "cost": 2500, "css_class": "bubble-style-handwritten", "added": NEW_ITEM_ADDED_AT},
 ])
+BUBBLE_STYLE_DEFINITIONS.append(
+    {"id": "gem_bubble_aurora", "label": "黄金の吹き出し", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 15000}
+)
 BUBBLE_STYLE_BY_ID = {b["id"]: b for b in BUBBLE_STYLE_DEFINITIONS}
 
 AVATAR_BG_DEFINITIONS = _reprice_for_inflation([
@@ -4561,6 +4595,10 @@ AVATAR_BG_DEFINITIONS = _reprice_for_inflation([
     {"id": "glow_gold", "label": "金の光暈", "cost": 3500, "css_class": "avatar-bg-glow-gold", "added": NEW_ITEM_ADDED_AT},
     {"id": "mist", "label": "霧の背景", "cost": 2200, "css_class": "avatar-bg-mist", "added": NEW_ITEM_ADDED_AT},
 ])
+AVATAR_BG_DEFINITIONS.append(
+    {"id": "gem_avatar_bg_aurora", "label": "後光の輝き", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 25000}
+)
 AVATAR_BG_BY_ID = {a["id"]: a for a in AVATAR_BG_DEFINITIONS}
 
 RANK_STYLE_DEFINITIONS = _reprice_for_inflation([
@@ -4568,6 +4606,10 @@ RANK_STYLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "neon_number", "label": "ネオンの数字", "cost": 1500, "css_class": "rank-style-neon", "added": NEW_ITEM_ADDED_AT},
     {"id": "serif_number", "label": "書道体の数字", "cost": 1500, "css_class": "rank-style-serif", "added": NEW_ITEM_ADDED_AT},
 ])
+RANK_STYLE_DEFINITIONS.append(
+    {"id": "gem_rank_aurora", "label": "至高の数字", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 20000}
+)
 RANK_STYLE_BY_ID = {r["id"]: r for r in RANK_STYLE_DEFINITIONS}
 
 # soundは効果音の種類ID。実際の音はWeb Audio APIでmember_detail.html側が合成するので、
@@ -4577,6 +4619,10 @@ PROFILE_SOUND_DEFINITIONS = _reprice_for_inflation([
     {"id": "bell", "label": "鈴の音", "cost": 1000, "sound": "bell", "added": NEW_ITEM_ADDED_AT},
     {"id": "kirakira", "label": "きらめき音", "cost": 1800, "sound": "kirakira", "added": NEW_ITEM_ADDED_AT},
 ])
+PROFILE_SOUND_DEFINITIONS.append(
+    # 音自体はkirakiraを流用(専用音を追加するとJS側の対応も必要になるため)。
+    {"id": "gem_sound_aurora", "label": "黄金の調べ", "sound": "kirakira", "currency": "gems", "cost_gems": 10000}
+)
 PROFILE_SOUND_BY_ID = {p["id"]: p for p in PROFILE_SOUND_DEFINITIONS}
 
 # 季節限定コレクション。available_from/available_untilの期間外は新規購入できないが、
@@ -4595,6 +4641,11 @@ SEASONAL_DEFINITIONS = _reprice_for_inflation([
         "available_from": "2026-12-15", "available_until": "2027-01-15", "added": NEW_ITEM_ADDED_AT,
     },
 ])
+SEASONAL_DEFINITIONS.append(
+    # 期間限定ではなく通年購入できる(available_from/untilを付けない)、ジェム限定の一点。
+    {"id": "gem_seasonal_aurora", "label": "永遠の黄金霧", "css_class": "shop-gem-premium-box",
+     "currency": "gems", "cost_gems": 45000}
+)
 SEASONAL_BY_ID = {s["id"]: s for s in SEASONAL_DEFINITIONS}
 
 GACHA_COST = 5000
@@ -5410,20 +5461,24 @@ def game_shop():
         gems = users.available_gems(conn, my_id)
         owned_gem_items = users.owned_gem_item_ids(conn, my_id)
         owned = users.owned_frame_ids(conn, my_id)
-        owned_titles = users.owned_cosmetic_ids(conn, my_id, "title")
-        owned_name_colors = users.owned_cosmetic_ids(conn, my_id, "name_color")
-        owned_dashboard_themes = users.owned_cosmetic_ids(conn, my_id, "dashboard_theme")
-        owned_effects = users.owned_cosmetic_ids(conn, my_id, "effect")
-        owned_banners = users.owned_cosmetic_ids(conn, my_id, "banner")
-        owned_dm_themes = users.owned_cosmetic_ids(conn, my_id, "dm_theme")
-        owned_title_colors = users.owned_cosmetic_ids(conn, my_id, "title_color")
+        # 各カテゴリのジェム限定アイテム(gem_shop_definitions等とは別に、各カテゴリの
+        # 定義リストへcurrency:"gems"付きで直接追加してある)はuser_cosmeticsではなく
+        # user_gem_itemsに所持記録があるため、owned_gem_items(IDはカタログ全体で一意)を
+        # そのまま和集合して渡す。これでcosmetic_itemマクロのowned判定がそのまま使える。
+        owned_titles = users.owned_cosmetic_ids(conn, my_id, "title") | owned_gem_items
+        owned_name_colors = users.owned_cosmetic_ids(conn, my_id, "name_color") | owned_gem_items
+        owned_dashboard_themes = users.owned_cosmetic_ids(conn, my_id, "dashboard_theme") | owned_gem_items
+        owned_effects = users.owned_cosmetic_ids(conn, my_id, "effect") | owned_gem_items
+        owned_banners = users.owned_cosmetic_ids(conn, my_id, "banner") | owned_gem_items
+        owned_dm_themes = users.owned_cosmetic_ids(conn, my_id, "dm_theme") | owned_gem_items
+        owned_title_colors = users.owned_cosmetic_ids(conn, my_id, "title_color") | owned_gem_items
         owned_markers = users.owned_cosmetic_ids(conn, my_id, "marker")
-        owned_title_badges = users.owned_cosmetic_ids(conn, my_id, "title_badge")
-        owned_bubble_styles = users.owned_cosmetic_ids(conn, my_id, "bubble_style")
-        owned_avatar_bgs = users.owned_cosmetic_ids(conn, my_id, "avatar_bg")
-        owned_rank_styles = users.owned_cosmetic_ids(conn, my_id, "rank_style")
-        owned_profile_sounds = users.owned_cosmetic_ids(conn, my_id, "profile_sound")
-        owned_seasonal = users.owned_cosmetic_ids(conn, my_id, "seasonal")
+        owned_title_badges = users.owned_cosmetic_ids(conn, my_id, "title_badge") | owned_gem_items
+        owned_bubble_styles = users.owned_cosmetic_ids(conn, my_id, "bubble_style") | owned_gem_items
+        owned_avatar_bgs = users.owned_cosmetic_ids(conn, my_id, "avatar_bg") | owned_gem_items
+        owned_rank_styles = users.owned_cosmetic_ids(conn, my_id, "rank_style") | owned_gem_items
+        owned_profile_sounds = users.owned_cosmetic_ids(conn, my_id, "profile_sound") | owned_gem_items
+        owned_seasonal = users.owned_cosmetic_ids(conn, my_id, "seasonal") | owned_gem_items
         consumables = users.consumable_quantities(conn, my_id)
 
         # 装着中のアイテム一覧と、今月の使用料合計(装着中のみ課金されるため)。
@@ -5442,8 +5497,8 @@ def game_shop():
             if not item_id:
                 continue
             item_def = catalog.get(item_id)
-            if not item_def:
-                continue
+            if not item_def or item_def.get("currency") == "gems":
+                continue  # ジェム品は買い切りで月額請求が無いため、この一覧には出さない
             info = users.cosmetic_billing_info(conn, my_id, cosmetic_category, item_id)
             equipped_items.append({
                 "category": category, "category_label": cat_label, "label": item_def["label"],
@@ -5649,24 +5704,43 @@ def game_shop_buy_cosmetic(category):
         return _finish("game_shop", "販売期間が終了しました。", success=False)
     if item.get("admin_only") and session.get("role") != "admin":
         return _finish("game_shop", "この称号は管理者のみ入手できます。", success=False)
+    is_gem = item.get("currency") == "gems"
     conn = _users_conn()
     try:
-        if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
+        already_owned = (
+            item["id"] in users.owned_gem_item_ids(conn, my_id) if is_gem
+            else item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
+        )
+        if already_owned:
             return _finish("game_shop", f"その{label}は既に持っています。", success=False)
         now = datetime.now(JST)
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
-        ok = users.spend_points_if_available(
-            conn, my_id, item["cost"],
-            lambda c: users.purchase_cosmetic(
-                c, my_id, cosmetic_category, item["id"], item["cost"], now_str, next_billing_str
-            ),
-        )
-        if not ok:
-            return _finish("game_shop", "ポイントが足りません。", success=False)
-        points = users.available_points(conn, my_id)
+        if is_gem:
+            ok = users.spend_gems_if_available(
+                conn, my_id, item["cost_gems"],
+                lambda c: users.purchase_gem_item(c, my_id, item["id"], item["cost_gems"], now_str),
+            )
+            if not ok:
+                return _finish("game_shop", "ジェムが足りません。", success=False)
+            gems = users.available_gems(conn, my_id)
+        else:
+            next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+            ok = users.spend_points_if_available(
+                conn, my_id, item["cost"],
+                lambda c: users.purchase_cosmetic(
+                    c, my_id, cosmetic_category, item["id"], item["cost"], now_str, next_billing_str
+                ),
+            )
+            if not ok:
+                return _finish("game_shop", "ポイントが足りません。", success=False)
+            points = users.available_points(conn, my_id)
     finally:
         conn.close()
+    if is_gem:
+        return _finish(
+            "game_shop", f"「{item['label']}」と交換しました。",
+            extra={"action": "buy", "category": category, "item_id": item["id"], "available_gems": gems},
+        )
     return _finish(
         "game_shop",
         f"「{item['label']}」と交換しました(初月分は購入価格に含まれています。"
@@ -5685,11 +5759,21 @@ def game_shop_equip_cosmetic(category):
         abort(404)
     catalog, cosmetic_category, label = entry
     item_id = request.form.get("item_id", "").strip()
+    target_def = catalog.get(item_id) if item_id else None
+    target_is_gem = bool(target_def) and target_def.get("currency") == "gems"
     conn = _users_conn()
     try:
-        if item_id and item_id not in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
-            abort(400)
+        if item_id:
+            owned = (
+                item_id in users.owned_gem_item_ids(conn, my_id) if target_is_gem
+                else item_id in users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
+            )
+            if not owned:
+                abort(400)
         current_item_id = users.get_user_by_id(conn, my_id).get(f"equipped_{category}")
+        # 現在装着中のものがジェム品(買い切り)の場合はcosmetic_billing_infoが必ずNoneを
+        # 返す(user_cosmeticsに存在しないため)ので、_check_slot_change_allowedは自動的に
+        # 「ロックなし」と判定する(ジェム品には月額サイクルという概念自体が無いため)。
         current_info = (
             users.cosmetic_billing_info(conn, my_id, cosmetic_category, current_item_id)
             if current_item_id else None
@@ -5697,13 +5781,12 @@ def game_shop_equip_cosmetic(category):
         lock_message = _check_slot_change_allowed(current_item_id, current_info, item_id)
         if lock_message:
             return _finish("game_shop", lock_message, success=False)
-        if item_id:
+        if item_id and not target_is_gem:
             billing_info = users.cosmetic_billing_info(conn, my_id, cosmetic_category, item_id)
-            item_def = catalog.get(item_id)
             billed_ok, fee_message = _charge_billing_if_due(
                 conn, my_id, "cosmetic", f"{cosmetic_category}:{item_id}",
                 billing_info["next_billing_at"] if billing_info else None,
-                item_def["monthly_fee"] if item_def else 0,
+                target_def["monthly_fee"] if target_def else 0,
                 lambda next_at: users.set_cosmetic_next_billing(conn, my_id, cosmetic_category, item_id, next_at),
             )
             if not billed_ok:
@@ -5892,6 +5975,8 @@ def game_shop_gacha():
             owned = users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
             today_str = now_str[:10]
             for item in catalog.values():
+                if item.get("currency") == "gems":
+                    continue  # ジェム限定品は福袋(ポイント抽選)の対象外
                 if item["id"] in owned:
                     continue
                 if item.get("available_from") and today_str < item["available_from"]:

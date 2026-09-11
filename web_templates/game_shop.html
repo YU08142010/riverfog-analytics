@@ -102,31 +102,43 @@
 
 {% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
 {% set owned = item.id in owned_ids %}
+{% set is_gem = item.currency == "gems" %}
 {% set admin_locked = item.admin_only and session.get('role') != 'admin' %}
 {% set unavailable = (item.available_from and today_str < item.available_from) or (item.available_until and today_str > item.available_until) or admin_locked %}
 <div class="member-tile" style="cursor:default;" data-shop-category="{{ category }}" data-item-id="{{ item.id }}" data-shop-owned="{{ '1' if owned else '0' }}" data-shop-name="{{ item.label|lower }}">
     {{ caller() }}
+    {% if is_gem %}<span class="shop-new-badge" style="background: linear-gradient(90deg, #f1c40f, #e67e22);">💎最高級</span>{% endif %}
     {% if is_new(item) %}<span class="shop-new-badge">NEW</span>{% endif %}
     {% if item.available_from or item.available_until %}
     <div class="shop-seasonal-window">{{ item.available_from }} 〜 {{ item.available_until }}</div>
     {% endif %}
     <div class="shop-owned-block" {{ "" if owned else "hidden" }}>
         <span class="role-tag admin equip-tag" {{ "" if equipped_id == item.id else "hidden" }}>装着中</span>
+        {% if not is_gem %}
         <div class="muted shop-monthly-fee" {{ "" if equipped_id == item.id else "hidden" }} style="font-size:0.75rem;">装着中は毎月{{ item.monthly_fee }}ptの使用料がかかります(残高不足の場合は自動で未装着になります)</div>
+        {% endif %}
         <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax data-ajax-reload class="equip-form" {{ "hidden" if equipped_id == item.id else "" }} style="margin-top:0.4rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="item_id" value="{{ item.id }}">
-            <button type="submit" class="button equip-btn">装着する(月額{{ item.monthly_fee }}pt)</button>
+            <button type="submit" class="button equip-btn">{{ "装着する" if is_gem else "装着する(月額" ~ item.monthly_fee ~ "pt)" }}</button>
         </form>
     </div>
     <div class="shop-buy-block" {{ "hidden" if owned else "" }}>
-        <form method="post" action="{{ url_for('game_shop_buy_cosmetic', category=category) }}" data-ajax class="buy-form" style="margin-top:0.4rem;">
+        <form method="post" action="{{ url_for('game_shop_buy_cosmetic', category=category) }}" data-ajax data-ajax-reload class="buy-form" style="margin-top:0.4rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="item_id" value="{{ item.id }}">
+            {% if is_gem %}
+            <button type="submit" class="button buy-btn" {{ "disabled" if gems < item.cost_gems }}>💎 {{ "{:,}".format(item.cost_gems) }}で交換</button>
+            {% else %}
             <button type="submit" class="button buy-btn" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost or unavailable }}>{{ "管理者専用" if admin_locked else (item.cost ~ " ptで交換") }}</button>
+            {% endif %}
         </form>
+        {% if is_gem %}
+        <div class="shop-shortfall" {{ "" if gems < item.cost_gems else "hidden" }}>あと 💎 {{ "{:,}".format(item.cost_gems - gems if item.cost_gems > gems else 0) }}</div>
+        {% else %}
         <div class="muted" style="font-size:0.75rem;">交換後は装着中のみ毎月{{ item.monthly_fee }}ptの使用料</div>
         <div class="shop-shortfall" {{ "" if (points < item.cost and not admin_locked) else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
+        {% endif %}
     </div>
 </div>
 {% endmacro %}
