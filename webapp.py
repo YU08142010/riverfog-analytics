@@ -4517,19 +4517,21 @@ MARKER_DEFINITIONS.append(
 )
 MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
 
-# --- ジェム専用ショップ(2026-09-11) -------------------------------------------------
-# 観測報告の報酬として貯まるジェムでしか買えない高級アイテム。ポイント経済とは
+# --- ジェム専用アイテム(2026-09-11、2026-09-11改訂) --------------------------------
+# 観測報告の報酬として貯まるジェムでしか買えない最高級アイテム。ポイント経済とは
 # 完全に別会計(user_gem_items)で、月額使用料も課さない買い切り品にしている
 # (ジェムは観測報告という単一の獲得経路しかなく、ポイントほど大量に稼げないため)。
+# 独立したショップタブは持たず、殿堂入り章タブに他の装飾品と並べて表示する
+# (ポイント品と別画面に分けない・ジェムは最高級品にしか使わない、という方針のため)。
 GEM_SHOP_DEFINITIONS = [
-    {"id": "observer_glasses", "label": "観測者の眼鏡", "cost_gems": 60, "icon": "🔍",
+    {"id": "observer_glasses", "label": "観測者の眼鏡", "cost_gems": 2000, "icon": "🔍",
      "desc": "遠くの霧もくっきり見通せるという、観測者の間で語られる縁起物。"},
-    {"id": "forecaster_compass", "label": "霧予報士の羅針盤", "cost_gems": 100, "icon": "🧭",
+    {"id": "forecaster_compass", "label": "霧予報士の羅針盤", "cost_gems": 10000, "icon": "🧭",
      "desc": "明日の川霧の気配を示すとされる、予報士憧れの逸品。"},
-    {"id": "river_fog_crystal", "label": "川霧の結晶", "cost_gems": 150, "icon": "💎",
+    {"id": "river_fog_crystal", "label": "川霧の結晶", "cost_gems": 40000, "icon": "💎", "premium": True,
      "desc": "濃い川霧の日にしか現れないという伝説の結晶。"},
-    {"id": "legendary_notebook", "label": "伝説の観測手帳", "cost_gems": 250, "icon": "📔",
-     "desc": "数々の重要報告を成し遂げた観測者だけが手にできる特別な手帳。"},
+    {"id": "legendary_notebook", "label": "伝説の観測手帳", "cost_gems": 120000, "icon": "📔", "premium": True,
+     "desc": "数々の重要報告を成し遂げた観測者だけが手にできる、史上最高級の手帳。"},
 ]
 GEM_SHOP_BY_ID = {g["id"]: g for g in GEM_SHOP_DEFINITIONS}
 
@@ -7704,9 +7706,12 @@ def admin_points():
     try:
         accounts = users.list_users(conn)
         balances = users.list_all_user_point_balances(conn)
+        gem_balances = users.list_all_user_gem_balances(conn)
     finally:
         conn.close()
-    return render_template("admin_points.html", accounts=accounts, balances=balances)
+    return render_template(
+        "admin_points.html", accounts=accounts, balances=balances, gem_balances=gem_balances,
+    )
 
 
 @app.route("/admin/points/<int:user_id>/adjust", methods=["POST"])
@@ -7737,6 +7742,37 @@ def admin_points_adjust(user_id):
     return _finish(
         "admin_points", f"{target['name']}さんに{amount:+d}ptを反映しました(残高: {balance}pt)。",
         extra={"user_id": user_id, "balance": balance},
+    )
+
+
+@app.route("/admin/points/<int:user_id>/adjust_gems", methods=["POST"])
+@requires_admin
+def admin_points_adjust_gems(user_id):
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        raw = (request.form.get("amount") or "").strip()
+        try:
+            amount = int(raw)
+        except ValueError:
+            return _finish("admin_points", "ジェム数は整数で入力してください。", success=False)
+        if amount == 0:
+            return _finish("admin_points", "0ジェムは指定できません。", success=False)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        source = f"admin_adjust_gems:{session.get('user_id')}:{now_str}:{secrets.token_hex(4)}"
+        users.grant_gems(conn, user_id, source, amount, now_str)
+        balance = users.available_gems(conn, user_id)
+    finally:
+        conn.close()
+    _record_audit(
+        "ジェム手動調整",
+        f"{target['name']}({target['email']})に{amount:+d}ジェム付与(調整後残高: {balance}ジェム)",
+    )
+    return _finish(
+        "admin_points", f"{target['name']}さんに{amount:+d}ジェムを反映しました(残高: {balance}ジェム)。",
+        extra={"user_id": user_id, "gem_balance": balance},
     )
 
 

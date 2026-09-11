@@ -80,7 +80,6 @@
 </div>
 
 <div class="shop-tab-bar" id="shop-tab-bar">
-    <button type="button" class="ranking-toggle-btn" data-shop-tab="gem_shop">💎 ジェムストア</button>
     <button type="button" class="ranking-toggle-btn active" data-shop-tab="frame">フレーム</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="title">称号</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="title_badge">称号バッジ</button>
@@ -142,8 +141,13 @@
 {% macro gem_item(item, owned_ids, equipped_id) %}
 {% set owned = item.id in owned_ids %}
 <div class="member-tile" style="cursor:default;" data-shop-category="gem_shop" data-item-id="{{ item.id }}" data-shop-owned="{{ '1' if owned else '0' }}" data-shop-name="{{ item.label|lower }}">
+    {% if item.premium %}
+    <div style="font-size:2.8rem; filter: drop-shadow(0 0 6px #f1c40f);">{{ item.icon }}</div>
+    <div style="font-weight:700; background: linear-gradient(90deg, #f1c40f, #e67e22, #f1c40f); -webkit-background-clip: text; background-clip: text; color: transparent;">{{ item.label }}</div>
+    {% else %}
     <div style="font-size:2.2rem;">{{ item.icon }}</div>
     <div style="font-weight:700;">{{ item.label }}</div>
+    {% endif %}
     <div class="muted" style="font-size:0.72rem; margin:0.3rem 0;">{{ item.desc }}</div>
     <div class="shop-owned-block" {{ "" if owned else "hidden" }}>
         {% if equipped_id == item.id %}
@@ -166,27 +170,6 @@
     </div>
 </div>
 {% endmacro %}
-
-<div data-shop-panel data-shop-tab-panel="gem_shop" hidden>
-    <div class="card">
-        <h2 style="margin-top:0;">💎 ジェムストア</h2>
-        <p class="muted" style="font-size:0.85rem;">
-            観測報告(「この観測は間違っていると思う」)を行うと貯まるジェム専用の高級アイテムです。
-            重要度「高」で報告すると承認を待たず即座にジェムが確定し、「低・中」は管理者が実際に
-            訂正した時点でまとめて確定します。ポイントとは別会計で、月額使用料もかかりません。
-        </p>
-        <div class="member-grid">
-            {% for item in gem_shop_definitions %}
-            {{ gem_item(item, owned_gem_items, member.equipped_gem_item) }}
-            {% endfor %}
-        </div>
-        <form method="post" action="{{ url_for('game_shop_equip_gem_item') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;" {{ "" if member.equipped_gem_item else "hidden" }}>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="item_id" value="">
-            <button type="submit" class="button cancel">外す</button>
-        </form>
-    </div>
-</div>
 
 <div data-shop-panel data-shop-tab-panel="frame">
     <div class="card">
@@ -448,6 +431,25 @@
             {% endfor %}
         </div>
         {{ unequip_form("marker", "殿堂入り章", member.equipped_marker) }}
+    </div>
+    <div class="card">
+        <h2 style="margin-top:0;">💎 最高級コレクション</h2>
+        <p class="muted" style="font-size:0.85rem;">
+            観測報告(「この観測は間違っていると思う」)を行うと貯まるジェムでしか交換できない
+            最高級のアイテムです。重要度「高」で報告すると承認を待たず即座にジェムが確定し、
+            「低・中」は管理者が実際に訂正した時点でまとめて確定します。ポイントとは別会計で、
+            賭け事には使えません。買い切りで月額使用料もかかりません。
+        </p>
+        <div class="member-grid">
+            {% for item in gem_shop_definitions %}
+            {{ gem_item(item, owned_gem_items, member.equipped_gem_item) }}
+            {% endfor %}
+        </div>
+        <form method="post" action="{{ url_for('game_shop_equip_gem_item') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;" {{ "" if member.equipped_gem_item else "hidden" }}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="">
+            <button type="submit" class="button cancel">外す</button>
+        </form>
     </div>
 </div>
 

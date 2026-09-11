@@ -3,12 +3,12 @@
 {% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>ポイント管理</h2>
-    <p class="muted">全ユーザーの所持ポイント残高を確認し、任意の増減を反映できます。マイナスの数値を入力するとその分だけ減らせます。</p>
+    <h2>ポイント・ジェム管理</h2>
+    <p class="muted">全ユーザーの所持ポイント・ジェム残高を確認し、任意の増減を反映できます。マイナスの数値を入力するとその分だけ減らせます。</p>
     <input type="text" id="points-search" class="search-box" style="max-width:320px; margin-bottom:0.7rem;" placeholder="お名前・メールアドレスで検索..." aria-label="ユーザー検索">
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;" id="points-table">
-        <thead><tr><th>お名前</th><th>メールアドレス</th><th>ロール</th><th>所持ポイント</th><th>増減させるポイント数</th><th></th></tr></thead>
+        <thead><tr><th>お名前</th><th>メールアドレス</th><th>ロール</th><th>所持ポイント</th><th>増減させるポイント数</th><th>所持ジェム</th><th>増減させるジェム数</th></tr></thead>
         <tbody>
         {% for a in accounts %}
         <tr data-search="{{ (a.name ~ ' ' ~ a.email)|lower }}">
@@ -24,12 +24,21 @@
                     <button type="submit" class="button">反映</button>
                 </form>
             </td>
-            <td class="muted" style="font-size:0.78rem;">(-で減算)</td>
+            <td class="gems-balance" data-user-id="{{ a.id }}" style="font-variant-numeric: tabular-nums; text-align:right;">💎 {{ "{:,}".format(gem_balances.get(a.id, 0)) }}</td>
+            <td>
+                <form method="post" action="{{ url_for('admin_points_adjust_gems', user_id=a.id) }}" style="display:flex; gap:0.3rem;" data-ajax>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="number" name="amount" step="1" placeholder="例: 500 / -500" required
+                           style="width:9em; padding:0.3rem;">
+                    <button type="submit" class="button">反映</button>
+                </form>
+            </td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
+    <p class="muted" style="font-size:0.78rem;">両方ともマイナスの数値で減算できます。</p>
 </div>
 <script>
 (function() {
@@ -45,9 +54,15 @@
 document.addEventListener("ajaxformsuccess", function(e) {
     var form = e.detail.form;
     var data = e.detail.data;
-    if (!data || typeof data.user_id === "undefined" || typeof data.balance === "undefined") { return; }
-    var cell = document.querySelector('.points-balance[data-user-id="' + data.user_id + '"]');
-    if (cell) { cell.textContent = data.balance.toLocaleString(); }
+    if (!data || typeof data.user_id === "undefined") { return; }
+    if (typeof data.balance !== "undefined") {
+        var cell = document.querySelector('.points-balance[data-user-id="' + data.user_id + '"]');
+        if (cell) { cell.textContent = data.balance.toLocaleString(); }
+    }
+    if (typeof data.gem_balance !== "undefined") {
+        var gemCell = document.querySelector('.gems-balance[data-user-id="' + data.user_id + '"]');
+        if (gemCell) { gemCell.textContent = "💎 " + data.gem_balance.toLocaleString(); }
+    }
     var input = form.querySelector('input[name="amount"]');
     if (input) { input.value = ""; }
 });

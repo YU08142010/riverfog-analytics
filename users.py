@@ -1439,6 +1439,21 @@ def list_all_user_point_balances(conn):
     return {row[0]: row[1] for row in rows}
 
 
+def list_all_user_gem_balances(conn):
+    """全ユーザーの所持ジェム残高({user_id: balance})を1クエリでまとめて返す。
+    ジェムはgem_events.amountの合計だけが残高になる(list_all_user_point_balances参照、
+    ポイントと違い別テーブル合算が不要なぶんシンプル)。"""
+    rows = conn.execute(
+        """
+        SELECT u.id, COALESCE(ge.total, 0) AS balance
+        FROM users u
+        LEFT JOIN (SELECT user_id, SUM(amount) AS total FROM gem_events GROUP BY user_id) ge
+            ON ge.user_id = u.id
+        """
+    ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
 def spend_points_if_available(conn, user_id, cost, do_spend):
     """残高チェックと消費(do_spendが行うINSERT/UPDATE)をBEGIN IMMEDIATEで1つの
     トランザクションに収めてアトミックに行う。残高は都度SUMで再計算する設計のため、
@@ -2724,7 +2739,7 @@ __all__ = [
     "add_station_comment", "list_station_comments", "get_station_comment",
     "delete_station_comment", "comment_count",
     "award_badge", "grant_points", "total_earned_points", "total_spent_points", "available_points",
-    "list_all_user_point_balances",
+    "list_all_user_point_balances", "list_all_user_gem_balances",
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
     "frame_billing_info", "set_frame_next_billing", "list_equipped_frames_due",
     "owned_cosmetic_ids", "purchase_cosmetic", "set_equipped_cosmetic",
