@@ -31,8 +31,13 @@
         <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測結果を訂正する</button>
     </form>
     {% else %}
-    <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-block; margin-left:0.5rem;">
+    <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="importance" style="padding:0.35rem; font-size:0.85rem;" title="重要度(高は承認なしで即ジェムが確定します)">
+            <option value="low">重要度: 低</option>
+            <option value="medium" selected>重要度: 中</option>
+            <option value="high">重要度: 高</option>
+        </select>
         <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測は間違っていると思う</button>
     </form>
     {% endif %}

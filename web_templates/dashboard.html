@@ -269,9 +269,15 @@ document.addEventListener("ajaxformsuccess", function(e) {
 
 <div class="card">
     <h2>本日の予測サマリー</h2>
-    {% if summary_file %}
+    {% if summary_files_by_region %}
     <p class="muted">{{ latest_pred_date }}</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=summary_file) }}" alt="全地点の予測サマリーグラフ"></div>
+    {% for region_label in ["只見川", "会津"] %}
+    {% set region_summary_file = summary_files_by_region.get(region_label) %}
+    {% if region_summary_file %}
+    <h3 style="margin-bottom:0.5rem;">{{ region_label }}</h3>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=region_summary_file) }}" alt="{{ region_label }}の予測サマリーグラフ"></div>
+    {% endif %}
+    {% endfor %}
     <p><a class="button" href="{{ url_for('predictions_date', date=latest_pred_date) }}">地点ごとのグラフを見る</a></p>
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>予測結果がまだありません。</span></div>

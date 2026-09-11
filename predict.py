@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 from common import (
     BASE_DIR, DATA_XLSX, STATION_WEATHER_DB_PATH,
-    load_camera_coords, now_jst_naive, representative_coords,
+    load_camera_coords, load_camera_regions, now_jst_naive, representative_coords,
 )
 import fog_data
 import fog_graphs
@@ -267,6 +267,13 @@ def main():
             )
         fog_graphs.plot_all_location_summary(pred_df, models, str(out_dir), prob_df=prob_df,
                                              run_date_str=run_date_str)
+        regions = load_camera_regions()
+        for region_label, file_suffix in (("只見川", "_只見"), ("会津", "_会津")):
+            region_stations = {name for name, r in regions.items() if r == region_label}
+            fog_graphs.plot_all_location_summary(
+                pred_df, models, str(out_dir), prob_df=prob_df, run_date_str=run_date_str,
+                station_names=region_stations, file_suffix=file_suffix, label_suffix=f"（{region_label}）",
+            )
         fog_graphs.export_prediction_csv(pred_df, prob_df, models, str(out_dir), run_date_str=run_date_str)
         log.info("Saved graphs/CSV to %s", out_dir)
 

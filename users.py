@@ -5,7 +5,7 @@
 パスワードは常にハッシュ化して保存し、平文は一切保持しない。
 """
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -122,6 +122,24 @@ CREATE TABLE IF NOT EXISTS point_events (
     UNIQUE(user_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_point_events_user_id ON point_events(user_id);
+CREATE TABLE IF NOT EXISTS gem_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, source)
+);
+CREATE INDEX IF NOT EXISTS idx_gem_events_user_id ON gem_events(user_id);
+CREATE TABLE IF NOT EXISTS user_gem_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    cost_gems INTEGER NOT NULL,
+    acquired_at TEXT NOT NULL,
+    UNIQUE(user_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_gem_items_user_id ON user_gem_items(user_id);
 CREATE TABLE IF NOT EXISTS fog_bets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -186,7 +204,8 @@ CREATE TABLE IF NOT EXISTS observation_reports (
     status TEXT NOT NULL DEFAULT 'pending',
     resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     resolved_at TEXT,
-    resolution_note TEXT
+    resolution_note TEXT,
+    importance TEXT NOT NULL DEFAULT 'medium'
 );
 CREATE INDEX IF NOT EXISTS idx_observation_reports_status ON observation_reports(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_reports_pending_unique
@@ -386,7 +405,7 @@ def _ensure_profile_columns(conn):
         "equipped_title", "equipped_name_color", "equipped_dashboard_theme", "equipped_effect",
         "equipped_banner", "equipped_dm_theme", "equipped_title_color", "equipped_marker",
         "equipped_title_badge", "equipped_bubble_style", "equipped_avatar_bg",
-        "equipped_rank_style", "equipped_profile_sound", "equipped_seasonal",
+        "equipped_rank_style", "equipped_profile_sound", "equipped_seasonal", "equipped_gem_item",
     ):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
@@ -449,6 +468,37 @@ def _migrate_phenomena_corrections_nullable_source(conn):
         conn.execute("DROP TABLE phenomena_corrections_old_mig")
 
 
+def _ensure_subscription_billing_columns(conn):
+    """フレーム・その他装備品を買い切りから月額使用料制に変えた際に追加した列。
+    next_billing_atがNULLでない かつ 現在時刻以下になった装備中のアイテムから
+    毎月使用料を引き落とす(未装着のものは請求しない)。既存の所持者がいきなり
+    請求されて驚かないよう、列を新規追加した直後だけ「今から30日後」を初期値として
+    バックフィルする(1回きりの移行猶予期間)。"""
+    frame_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_frames)").fetchall()}
+    frame_is_new = "next_billing_at" not in frame_cols
+    if frame_is_new:
+        conn.execute("ALTER TABLE user_frames ADD COLUMN next_billing_at TEXT")
+    cosmetic_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_cosmetics)").fetchall()}
+    cosmetic_is_new = "next_billing_at" not in cosmetic_cols
+    if cosmetic_is_new:
+        conn.execute("ALTER TABLE user_cosmetics ADD COLUMN next_billing_at TEXT")
+    if frame_is_new or cosmetic_is_new:
+        grace = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        with conn:
+            if frame_is_new:
+                conn.execute("UPDATE user_frames SET next_billing_at = ? WHERE next_billing_at IS NULL", (grace,))
+            if cosmetic_is_new:
+                conn.execute("UPDATE user_cosmetics SET next_billing_at = ? WHERE next_billing_at IS NULL", (grace,))
+
+
+def _ensure_observation_report_importance_column(conn):
+    """observation_reportsに後から追加したimportance列(low/medium/high)。ジェム報酬の
+    金額とキューの並び順に使う。既存行はデフォルトの'medium'扱いにする。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(observation_reports)").fetchall()}
+    if "importance" not in cols:
+        conn.execute("ALTER TABLE observation_reports ADD COLUMN importance TEXT NOT NULL DEFAULT 'medium'")
+
+
 def _ensure_login_events_columns(conn):
     """ipは異常ログイン検知(未知IPからの管理者ログイン等)のために後から追加した列。
     logged_out_atはログイン履歴に終了時刻も表示するために後から追加した列
@@ -477,10 +527,12 @@ def connect(db_path):
     _ensure_profile_columns(conn)
     _ensure_shared_files_columns(conn)
     _ensure_fog_bets_columns(conn)
+    _ensure_subscription_billing_columns(conn)
     _ensure_dm_messages_columns(conn)
     _migrate_add_foreign_keys(conn)
     _migrate_phenomena_corrections_nullable_source(conn)
     _ensure_login_events_columns(conn)
+    _ensure_observation_report_importance_column(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -494,7 +546,7 @@ _USER_COLUMNS = (
     "equipped_title, equipped_name_color, equipped_dashboard_theme, equipped_effect, "
     "equipped_banner, equipped_dm_theme, equipped_title_color, equipped_marker, "
     "equipped_title_badge, equipped_bubble_style, equipped_avatar_bg, equipped_rank_style, "
-    "equipped_profile_sound, equipped_seasonal"
+    "equipped_profile_sound, equipped_seasonal, equipped_gem_item"
 )
 
 
@@ -510,6 +562,7 @@ def _user_row_to_dict(row):
         "equipped_title_badge": row[18], "equipped_bubble_style": row[19],
         "equipped_avatar_bg": row[20], "equipped_rank_style": row[21],
         "equipped_profile_sound": row[22], "equipped_seasonal": row[23],
+        "equipped_gem_item": row[24],
     }
 
 
@@ -1358,6 +1411,34 @@ def available_points(conn, user_id):
     return total_earned_points(conn, user_id) - total_spent_points(conn, user_id)
 
 
+def list_all_user_point_balances(conn):
+    """全ユーザーの所持ポイント残高({user_id: balance})を1クエリでまとめて返す。
+    available_points()を全ユーザー分N回呼ぶと管理者ポイント一覧ページが重くなるため、
+    total_earned_points/total_spent_pointsと同じ集計をSQL側で一括して行う。"""
+    rows = conn.execute(
+        """
+        SELECT u.id,
+               COALESCE(ba.total, 0) + COALESCE(pe.total, 0)
+               - COALESCE(uf.total, 0) - COALESCE(fb.total, 0)
+               - COALESCE(uc.total, 0) - COALESCE(cp.total, 0) AS balance
+        FROM users u
+        LEFT JOIN (SELECT user_id, SUM(points) AS total FROM badge_awards GROUP BY user_id) ba
+            ON ba.user_id = u.id
+        LEFT JOIN (SELECT user_id, SUM(amount) AS total FROM point_events GROUP BY user_id) pe
+            ON pe.user_id = u.id
+        LEFT JOIN (SELECT user_id, SUM(cost) AS total FROM user_frames GROUP BY user_id) uf
+            ON uf.user_id = u.id
+        LEFT JOIN (SELECT user_id, SUM(bet_amount) AS total FROM fog_bets GROUP BY user_id) fb
+            ON fb.user_id = u.id
+        LEFT JOIN (SELECT user_id, SUM(cost) AS total FROM user_cosmetics GROUP BY user_id) uc
+            ON uc.user_id = u.id
+        LEFT JOIN (SELECT user_id, SUM(cost) AS total FROM consumable_purchases GROUP BY user_id) cp
+            ON cp.user_id = u.id
+        """
+    ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
 def spend_points_if_available(conn, user_id, cost, do_spend):
     """残高チェックと消費(do_spendが行うINSERT/UPDATE)をBEGIN IMMEDIATEで1つの
     トランザクションに収めてアトミックに行う。残高は都度SUMで再計算する設計のため、
@@ -1381,6 +1462,80 @@ def spend_points_if_available(conn, user_id, cost, do_spend):
         if conn.in_transaction:
             conn.rollback()
         raise
+
+
+# --- ジェム(観測報告専用の第二通貨) ------------------------------------------------
+# ポイントと完全に別会計にする(交換不可)。ポイントのuser_frames/user_cosmetics.costの
+# ような別テーブル合算方式は使わず、gem_events.amountの符号(付与は正・消費は負)だけで
+# 残高を表す、よりシンプルな1テーブル方式にしている(ジェムは観測報告の報酬という
+# 単一の獲得経路しか持たないため、ポイントほど複雑な集計は不要)。
+def grant_gems(conn, user_id, source, amount, created_at):
+    """UNIQUE(user_id, source)制約により、同じsource文字列への二重付与(・二重消費)を
+    防ぐ。新規付与/消費ならTrue、既に同じsourceで記録済みならFalseを返す。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO gem_events (user_id, source, amount, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, source, amount, created_at),
+        )
+        return cur.rowcount > 0
+
+
+def available_gems(conn, user_id):
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM gem_events WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    return row[0]
+
+
+def spend_gems_if_available(conn, user_id, cost, do_spend):
+    """spend_points_if_availableのジェム版。BEGIN IMMEDIATEで残高チェックと消費を
+    アトミックに行う。"""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if available_gems(conn, user_id) < cost:
+            conn.execute("ROLLBACK")
+            return False
+        do_spend(conn)
+        if conn.in_transaction:
+            conn.commit()
+        return True
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
+def owned_gem_item_ids(conn, user_id):
+    rows = conn.execute(
+        "SELECT item_id FROM user_gem_items WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def purchase_gem_item(conn, user_id, item_id, cost_gems, acquired_at):
+    """ジェム残高が足りているかは呼び出し側(spend_gems_if_available)で確認済みの
+    前提。既に所持しているアイテムの場合はUNIQUE制約により何もしない。available_gems()
+    はgem_events.amountの合計だけを見るため、所持記録(user_gem_items)を作るだけでは
+    残高が減らない。gem_events側にも同額のマイナスを記録して初めて消費が反映される。"""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO user_gem_items (user_id, item_id, cost_gems, acquired_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, item_id, cost_gems, acquired_at),
+        )
+        if cur.rowcount > 0:
+            conn.execute(
+                "INSERT OR IGNORE INTO gem_events (user_id, source, amount, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, f"gem_item_purchase:{item_id}", -cost_gems, acquired_at),
+            )
+
+
+def set_equipped_gem_item(conn, user_id, item_id):
+    """item_idに空文字を渡すと「未装備」の状態に戻せる。"""
+    with conn:
+        conn.execute("UPDATE users SET equipped_gem_item = ? WHERE id = ?", (item_id or "", user_id))
 
 
 def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at, source="human"):
@@ -1417,30 +1572,33 @@ def phenomena_correction_counts_by_station(conn):
     return [{"station": s, "count": c} for s, c in rows]
 
 
-def create_observation_report(conn, station_name, target_datetime, reported_code, reported_by, reported_at, source="user"):
+def create_observation_report(conn, station_name, target_datetime, reported_code, reported_by, reported_at,
+                               source="user", importance="medium"):
     """観測が間違っていると思う場合の報告を1件記録する。同じ(地点, 日時)への保留中の
     報告が既にあれば新規作成しない(idx_observation_reports_pending_uniqueにより
-    INSERT OR IGNOREが安全に効く)。挿入できたらTrue、既に保留中の報告があればFalseを返す。"""
+    INSERT OR IGNOREが安全に効く)。挿入できたら新しいreport_idを、既に保留中の報告が
+    あればNoneを返す(呼び出し側はNoneかどうかで成否を判定する)。"""
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO observation_reports "
-            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-            (station_name, target_datetime, reported_code, reported_by, reported_at, source),
+            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status, importance) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+            (station_name, target_datetime, reported_code, reported_by, reported_at, source, importance),
         )
-        return cur.rowcount > 0
+        return cur.lastrowid if cur.rowcount > 0 else None
 
 
 def list_pending_observation_reports(conn):
-    """保留中の観測報告を、報告者名を添えて新しい順で返す(管理者の確認キュー用)。"""
+    """保留中の観測報告を、報告者名を添えて重要度が高い順(同じ重要度なら新しい順)で返す
+    (管理者の確認キュー用)。"""
     rows = conn.execute(
         """
         SELECT r.id, r.station_name, r.target_datetime, r.reported_code, r.reported_by, r.reported_at,
-               r.source, u.name AS reporter_name
+               r.source, u.name AS reporter_name, r.importance
         FROM observation_reports r
         LEFT JOIN users u ON u.id = r.reported_by
         WHERE r.status = 'pending'
-        ORDER BY r.reported_at DESC
+        ORDER BY CASE r.importance WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, r.reported_at DESC
         """
     ).fetchall()
     return [
@@ -1450,6 +1608,7 @@ def list_pending_observation_reports(conn):
             "reporter_name": (
                 "(自動検知)" if r[6] == "auto_detected" else (r[7] or "(退会済みユーザー)")
             ),
+            "importance": r[8],
         }
         for r in rows
     ]
@@ -1476,7 +1635,7 @@ def pending_observation_report_count_for_stations(conn, station_names):
 
 def get_observation_report(conn, report_id):
     row = conn.execute(
-        "SELECT id, station_name, target_datetime, reported_code, status, reported_by, source "
+        "SELECT id, station_name, target_datetime, reported_code, status, reported_by, source, importance "
         "FROM observation_reports WHERE id = ?",
         (report_id,),
     ).fetchone()
@@ -1485,6 +1644,7 @@ def get_observation_report(conn, report_id):
     return {
         "id": row[0], "station_name": row[1], "target_datetime": row[2],
         "reported_code": row[3], "status": row[4], "reported_by": row[5], "source": row[6],
+        "importance": row[7],
     }
 
 
@@ -1572,14 +1732,15 @@ def owned_frame_ids(conn, user_id):
     return {r[0] for r in rows}
 
 
-def purchase_frame(conn, user_id, frame_id, cost, acquired_at):
+def purchase_frame(conn, user_id, frame_id, cost, acquired_at, next_billing_at):
     """ポイント残高が足りているかは呼び出し側で確認してから使うこと。既に所持している
-    フレームの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。"""
+    フレームの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。next_billing_at
+    は購入時点で最初の1ヶ月分を含めた上での次回請求日(購入日+1ヶ月)を呼び出し側で計算して渡す。"""
     with conn:
         conn.execute(
-            "INSERT OR IGNORE INTO user_frames (user_id, frame_id, cost, acquired_at) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, frame_id, cost, acquired_at),
+            "INSERT OR IGNORE INTO user_frames (user_id, frame_id, cost, acquired_at, next_billing_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, frame_id, cost, acquired_at, next_billing_at),
         )
 
 
@@ -1587,6 +1748,33 @@ def set_equipped_frame(conn, user_id, frame_id):
     """frame_idに空文字を渡すと「フレームなし」の状態に戻せる。"""
     with conn:
         conn.execute("UPDATE users SET equipped_frame = ? WHERE id = ?", (frame_id or "", user_id))
+
+
+def frame_billing_info(conn, user_id, frame_id):
+    row = conn.execute(
+        "SELECT cost, next_billing_at FROM user_frames WHERE user_id = ? AND frame_id = ?",
+        (user_id, frame_id),
+    ).fetchone()
+    return {"cost": row[0], "next_billing_at": row[1]} if row else None
+
+
+def set_frame_next_billing(conn, user_id, frame_id, next_billing_at):
+    with conn:
+        conn.execute(
+            "UPDATE user_frames SET next_billing_at = ? WHERE user_id = ? AND frame_id = ?",
+            (next_billing_at, user_id, frame_id),
+        )
+
+
+def list_equipped_frames_due(conn, as_of):
+    """装備中(users.equipped_frame一致)かつ次回請求日を過ぎているフレームを全ユーザー分返す。
+    月額使用料の定期徴収バッチ(未装着のものは請求しない)で使う。"""
+    return conn.execute(
+        "SELECT uf.user_id, uf.frame_id, uf.cost, uf.next_billing_at "
+        "FROM user_frames uf JOIN users u ON u.id = uf.user_id AND u.equipped_frame = uf.frame_id "
+        "WHERE uf.next_billing_at IS NOT NULL AND uf.next_billing_at <= ?",
+        (as_of,),
+    ).fetchall()
 
 
 # --- 称号・名前の色・ダッシュボード配色・演出(まとめてuser_cosmeticsで管理) ------------
@@ -1618,14 +1806,15 @@ def owned_cosmetic_ids(conn, user_id, category):
     return {r[0] for r in rows}
 
 
-def purchase_cosmetic(conn, user_id, category, item_id, cost, acquired_at):
+def purchase_cosmetic(conn, user_id, category, item_id, cost, acquired_at, next_billing_at):
     """ポイント残高が足りているかは呼び出し側で確認してから使うこと。既に所持している
-    アイテムの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。"""
+    アイテムの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。next_billing_at
+    は購入時点で最初の1ヶ月分を含めた上での次回請求日(購入日+1ヶ月)を呼び出し側で計算して渡す。"""
     with conn:
         conn.execute(
-            "INSERT OR IGNORE INTO user_cosmetics (user_id, category, item_id, cost, acquired_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (user_id, category, item_id, cost, acquired_at),
+            "INSERT OR IGNORE INTO user_cosmetics (user_id, category, item_id, cost, acquired_at, next_billing_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, category, item_id, cost, acquired_at, next_billing_at),
         )
 
 
@@ -1637,6 +1826,38 @@ def set_equipped_cosmetic(conn, user_id, category, item_id):
         raise ValueError(f"unknown cosmetic category: {category}")
     with conn:
         conn.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (item_id or "", user_id))
+
+
+def cosmetic_billing_info(conn, user_id, category, item_id):
+    row = conn.execute(
+        "SELECT cost, next_billing_at FROM user_cosmetics WHERE user_id = ? AND category = ? AND item_id = ?",
+        (user_id, category, item_id),
+    ).fetchone()
+    return {"cost": row[0], "next_billing_at": row[1]} if row else None
+
+
+def set_cosmetic_next_billing(conn, user_id, category, item_id, next_billing_at):
+    with conn:
+        conn.execute(
+            "UPDATE user_cosmetics SET next_billing_at = ? WHERE user_id = ? AND category = ? AND item_id = ?",
+            (next_billing_at, user_id, category, item_id),
+        )
+
+
+def list_equipped_cosmetics_due(conn, as_of):
+    """装備中(users.equipped_*一致)かつ次回請求日を過ぎているコスメを、全カテゴリ・
+    全ユーザー分まとめて返す。各要素は(user_id, category, item_id, cost, next_billing_at)。"""
+    due = []
+    for category, column in _COSMETIC_EQUIP_COLUMNS.items():
+        rows = conn.execute(
+            f"SELECT uc.user_id, uc.item_id, uc.cost, uc.next_billing_at "
+            f"FROM user_cosmetics uc JOIN users u ON u.id = uc.user_id AND u.{column} = uc.item_id "
+            f"WHERE uc.category = ? AND uc.next_billing_at IS NOT NULL AND uc.next_billing_at <= ?",
+            (category, as_of),
+        ).fetchall()
+        due.extend((user_id, category, item_id, cost, next_billing_at)
+                   for user_id, item_id, cost, next_billing_at in rows)
+    return due
 
 
 # --- 川霧ギャンブルの消費アイテム(保険チケット・倍率ブーストチケット) ------------------
@@ -2503,8 +2724,13 @@ __all__ = [
     "add_station_comment", "list_station_comments", "get_station_comment",
     "delete_station_comment", "comment_count",
     "award_badge", "grant_points", "total_earned_points", "total_spent_points", "available_points",
+    "list_all_user_point_balances",
     "owned_frame_ids", "purchase_frame", "set_equipped_frame",
+    "frame_billing_info", "set_frame_next_billing", "list_equipped_frames_due",
     "owned_cosmetic_ids", "purchase_cosmetic", "set_equipped_cosmetic",
+    "cosmetic_billing_info", "set_cosmetic_next_billing", "list_equipped_cosmetics_due",
+    "grant_gems", "available_gems", "spend_gems_if_available",
+    "owned_gem_item_ids", "purchase_gem_item", "set_equipped_gem_item",
     "buy_consumable", "consumable_quantities", "use_consumable",
     "login_counts_between",
     "get_fog_bet", "cancel_fog_bet", "won_fog_bet_count",

@@ -13,14 +13,14 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 
 <div class="card">
     <h2 style="margin-top:0;">現在のポイント</h2>
     <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
     <p class="muted" style="font-size:0.82rem;">
-        以下はすべて無料で遊べます(ポイントは賭けません)。川霧ギャンブルとは別に、1日1回ずつ挑戦できます。
+        以下はすべて無料で遊べます(ポイントは賭けません)。霧予測ゲームとは別に、1日1回ずつ挑戦できます。
     </p>
 </div>
 

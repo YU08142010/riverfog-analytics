@@ -12,7 +12,7 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 <div class="card">
     <h2 style="margin-top:0;">現在のポイント</h2>
@@ -35,7 +35,7 @@
         <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">ポイントでアバターフレームや称号と交換できます。</p>
     </a>
     <a class="member-tile" href="{{ url_for('game_gamble') }}" style="text-decoration:none;">
-        <div style="font-size:1.1rem; font-weight:600;">川霧ギャンブル</div>
+        <div style="font-size:1.1rem; font-weight:600;">霧予測ゲーム</div>
         <p class="muted" style="font-size:0.82rem; margin-top:0.4rem;">
             未来のある地点・時刻に川霧が出るかポイントを賭けます。難しい予想ほど倍率が上がります。
         </p>

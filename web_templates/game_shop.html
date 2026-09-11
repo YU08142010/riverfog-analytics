@@ -14,7 +14,7 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "川霧ギャンブル", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 
 <div class="card shop-points-header">
@@ -31,6 +31,10 @@
             <div class="muted" style="font-size:0.8rem;">現在のポイント</div>
             <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);" id="shop-points-value">{{ points }} pt</div>
         </div>
+        <div>
+            <div class="muted" style="font-size:0.8rem;">現在のジェム</div>
+            <div style="font-size:1.6rem; font-weight:700; color: #16a3a3;" id="shop-gems-value">💎 {{ gems }}</div>
+        </div>
         <input type="text" class="shop-search-input" id="shop-search-input" placeholder="アイテム名で検索...">
         <label class="muted" style="font-size:0.82rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer;">
             <input type="checkbox" id="shop-hide-owned-toggle"> 所持済みを隠す
@@ -38,7 +42,45 @@
     </div>
 </div>
 
+<div class="card">
+    <h2 style="margin-top:0;">装着中のアイテム</h2>
+    {% if equipped_items %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>種類</th><th>アイテム名</th><th>月額</th><th>次回請求日</th><th></th></tr></thead>
+        <tbody>
+        {% for eq in equipped_items %}
+        <tr>
+            <td>{{ eq.category_label }}</td>
+            <td>{{ eq.label }}</td>
+            <td style="text-align:right;">{{ "{:,}".format(eq.monthly_fee) }} pt</td>
+            <td class="muted">{{ eq.next_billing_at or "-" }}</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('game_shop_equip') if eq.category == 'frame' else url_for('game_shop_equip_cosmetic', category=eq.category) }}"
+                      data-ajax data-ajax-reload style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="{{ 'frame_id' if eq.category == 'frame' else 'item_id' }}" value="">
+                    <button type="submit" class="button cancel">外す</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p style="margin-top:0.6rem; font-weight:600;">今月のお支払い合計: {{ "{:,}".format(total_monthly_fee) }} pt / 月</p>
+    <p class="muted" style="font-size:0.78rem; margin:0;">
+        請求日までに残高が足りないと、そのアイテムは所持したまま自動で未装着になります。
+        アイテムの変更・解除は次回請求日(更新タイミング)にしかできません。
+    </p>
+    {% else %}
+    <p class="muted">現在装着中のアイテムはありません。</p>
+    {% endif %}
+</div>
+
 <div class="shop-tab-bar" id="shop-tab-bar">
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="gem_shop">💎 ジェムストア</button>
     <button type="button" class="ranking-toggle-btn active" data-shop-tab="frame">フレーム</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="title">称号</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="title_badge">称号バッジ</button>
@@ -55,7 +97,7 @@
     <button type="button" class="ranking-toggle-btn" data-shop-tab="marker">殿堂入り章</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="seasonal">季節限定</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="gacha">福袋</button>
-    <button type="button" class="ranking-toggle-btn" data-shop-tab="consumable">ギャンブル用アイテム</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="consumable">霧予測ゲーム用アイテム</button>
 </div>
 
 {% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
@@ -70,10 +112,11 @@
     {% endif %}
     <div class="shop-owned-block" {{ "" if owned else "hidden" }}>
         <span class="role-tag admin equip-tag" {{ "" if equipped_id == item.id else "hidden" }}>装着中</span>
-        <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax class="equip-form" {{ "hidden" if equipped_id == item.id else "" }} style="margin-top:0.4rem;">
+        <div class="muted shop-monthly-fee" {{ "" if equipped_id == item.id else "hidden" }} style="font-size:0.75rem;">装着中は毎月{{ item.monthly_fee }}ptの使用料がかかります(残高不足の場合は自動で未装着になります)</div>
+        <form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax data-ajax-reload class="equip-form" {{ "hidden" if equipped_id == item.id else "" }} style="margin-top:0.4rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="item_id" value="{{ item.id }}">
-            <button type="submit" class="button equip-btn">装着する</button>
+            <button type="submit" class="button equip-btn">装着する(月額{{ item.monthly_fee }}pt)</button>
         </form>
     </div>
     <div class="shop-buy-block" {{ "hidden" if owned else "" }}>
@@ -82,18 +125,68 @@
             <input type="hidden" name="item_id" value="{{ item.id }}">
             <button type="submit" class="button buy-btn" data-cost="{{ item.cost }}" {{ "disabled" if points < item.cost or unavailable }}>{{ "管理者専用" if admin_locked else (item.cost ~ " ptで交換") }}</button>
         </form>
+        <div class="muted" style="font-size:0.75rem;">交換後は装着中のみ毎月{{ item.monthly_fee }}ptの使用料</div>
         <div class="shop-shortfall" {{ "" if (points < item.cost and not admin_locked) else "hidden" }}>あと {{ item.cost - points if item.cost > points else 0 }} pt</div>
     </div>
 </div>
 {% endmacro %}
 
 {% macro unequip_form(category, label, equipped_id) %}
-<form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax class="unequip-form" data-shop-category="{{ category }}" style="margin-top:0.6rem;" {{ "" if equipped_id else "hidden" }}>
+<form method="post" action="{{ url_for('game_shop_equip_cosmetic', category=category) }}" data-ajax data-ajax-reload class="unequip-form" data-shop-category="{{ category }}" style="margin-top:0.6rem;" {{ "" if equipped_id else "hidden" }}>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="item_id" value="">
     <button type="submit" class="button cancel">{{ label }}を外す</button>
 </form>
 {% endmacro %}
+
+{% macro gem_item(item, owned_ids, equipped_id) %}
+{% set owned = item.id in owned_ids %}
+<div class="member-tile" style="cursor:default;" data-shop-category="gem_shop" data-item-id="{{ item.id }}" data-shop-owned="{{ '1' if owned else '0' }}" data-shop-name="{{ item.label|lower }}">
+    <div style="font-size:2.2rem;">{{ item.icon }}</div>
+    <div style="font-weight:700;">{{ item.label }}</div>
+    <div class="muted" style="font-size:0.72rem; margin:0.3rem 0;">{{ item.desc }}</div>
+    <div class="shop-owned-block" {{ "" if owned else "hidden" }}>
+        {% if equipped_id == item.id %}
+        <span class="role-tag admin">装着中</span>
+        {% else %}
+        <form method="post" action="{{ url_for('game_shop_equip_gem_item') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <button type="submit" class="button">装着する</button>
+        </form>
+        {% endif %}
+    </div>
+    <div class="shop-buy-block" {{ "hidden" if owned else "" }}>
+        <form method="post" action="{{ url_for('game_shop_buy_gem_item') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <button type="submit" class="button" {{ "disabled" if gems < item.cost_gems }}>💎 {{ item.cost_gems }}で交換</button>
+        </form>
+        <div class="shop-shortfall" {{ "" if gems < item.cost_gems else "hidden" }}>あと 💎 {{ item.cost_gems - gems if item.cost_gems > gems else 0 }}</div>
+    </div>
+</div>
+{% endmacro %}
+
+<div data-shop-panel data-shop-tab-panel="gem_shop" hidden>
+    <div class="card">
+        <h2 style="margin-top:0;">💎 ジェムストア</h2>
+        <p class="muted" style="font-size:0.85rem;">
+            観測報告(「この観測は間違っていると思う」)を行うと貯まるジェム専用の高級アイテムです。
+            重要度「高」で報告すると承認を待たず即座にジェムが確定し、「低・中」は管理者が実際に
+            訂正した時点でまとめて確定します。ポイントとは別会計で、月額使用料もかかりません。
+        </p>
+        <div class="member-grid">
+            {% for item in gem_shop_definitions %}
+            {{ gem_item(item, owned_gem_items, member.equipped_gem_item) }}
+            {% endfor %}
+        </div>
+        <form method="post" action="{{ url_for('game_shop_equip_gem_item') }}" data-ajax data-ajax-reload style="margin-top:0.6rem;" {{ "" if member.equipped_gem_item else "hidden" }}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="item_id" value="">
+            <button type="submit" class="button cancel">外す</button>
+        </form>
+    </div>
+</div>
 
 <div data-shop-panel data-shop-tab-panel="frame">
     <div class="card">
@@ -123,11 +216,12 @@
                 {% if f.id in owned %}
                     {% if member.equipped_frame == f.id %}
                     <span class="role-tag admin" style="margin-top:0.4rem;">装着中</span>
+                    <div class="muted" style="font-size:0.75rem;">毎月{{ f.monthly_fee }}ptの使用料(残高不足で自動未装着)</div>
                     {% else %}
                     <form method="post" action="{{ url_for('game_shop_equip') }}" data-ajax data-ajax-reload style="margin-top:0.4rem;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="frame_id" value="{{ f.id }}">
-                        <button type="submit" class="button">装着する</button>
+                        <button type="submit" class="button">装着する(月額{{ f.monthly_fee }}pt)</button>
                     </form>
                     {% endif %}
                 {% else %}
@@ -136,6 +230,7 @@
                         <input type="hidden" name="frame_id" value="{{ f.id }}">
                         <button type="submit" class="button" {{ "disabled" if points < f.cost }}>{{ f.cost }} ptで交換</button>
                     </form>
+                    <div class="muted" style="font-size:0.75rem;">交換後は装着中のみ毎月{{ f.monthly_fee }}ptの使用料</div>
                     <div class="shop-shortfall" {{ "" if points < f.cost else "hidden" }}>あと {{ f.cost - points if f.cost > points else 0 }} pt</div>
                 {% endif %}
             </div>
@@ -342,8 +437,13 @@
         <div class="member-grid">
             {% for item in marker_definitions %}
             {% call cosmetic_item("marker", item, owned_markers, member.equipped_marker) %}
+            {% if item.premium %}
+            <div style="font-size:2.4rem; filter: drop-shadow(0 0 6px #f1c40f);">{{ item.icon }}</div>
+            <div style="font-weight:700; background: linear-gradient(90deg, #f1c40f, #e67e22, #f1c40f); -webkit-background-clip: text; background-clip: text; color: transparent;">{{ item.label }}</div>
+            {% else %}
             <div style="font-size:1.5rem;">{{ item.icon }}</div>
             <div style="font-weight:600;">{{ item.label }}</div>
+            {% endif %}
             {% endcall %}
             {% endfor %}
         </div>
@@ -384,8 +484,8 @@
 
 <div data-shop-panel data-shop-tab-panel="consumable" hidden>
     <div class="card">
-        <h2 style="margin-top:0;">川霧ギャンブル用アイテム</h2>
-        <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、ギャンブルで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
+        <h2 style="margin-top:0;">霧予測ゲーム用アイテム</h2>
+        <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、霧予測ゲームで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
         <div class="member-grid">
             {% for item in consumable_definitions %}
             <div class="member-tile" style="cursor:default;" data-item-id="{{ item.id }}">

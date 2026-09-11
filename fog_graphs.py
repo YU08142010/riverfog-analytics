@@ -245,12 +245,21 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
     return out_path
 
 
-def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_str=""):
-    """全地点サマリー。上段=日ごとの霧予測地点数、下段=地点×日の霧確率ヒートマップ。"""
+def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_str="",
+                               station_names=None, file_suffix="", label_suffix=""):
+    """全地点サマリー。上段=日ごとの霧予測地点数、下段=地点×日の霧確率ヒートマップ。
+    station_namesを指定すると、その地点だけに絞ったサマリーを生成する（2026-09に会津
+    地方を追加した際、只見川・会津で別々のダッシュボードカードに分けられるようにするため）。
+    対象地点にモデルが1つも無い場合は描画せずNoneを返す。
+    """
     df = pred_df.copy()
     df["date"] = df["datetime"].dt.date
     fog_cols = [c for c in models.keys() if c in df.columns]
+    if station_names is not None:
+        fog_cols = [c for c in fog_cols if c in station_names]
     n_total = len(fog_cols)
+    if n_total == 0:
+        return None
 
     dates = sorted(df["date"].unique())
     n_days = len(dates)
@@ -288,7 +297,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
     ax_bar.set_ylim(0, n_total + 1)
     ax_bar.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     ax_bar.set_ylabel(f"霧が予測された\n地点数（全{n_total}中）", fontsize=9)
-    ax_bar.set_title(f"日ごとの霧予測サマリー（今後{n_days}日間）", fontsize=13)
+    ax_bar.set_title(f"日ごとの霧予測サマリー{label_suffix}（今後{n_days}日間）", fontsize=13)
     ax_bar.grid(True, axis="y", alpha=0.3)
 
     handles, labels = ax_bar.get_legend_handles_labels()
@@ -320,7 +329,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
                         shrink=heat_ratio / (bar_ratio + heat_ratio), anchor=(0.0, 0.0))
     cbar.set_label("霧確率の最大（％）", fontsize=8)
 
-    out_path = os.path.join(out_dir, f"全地点サマリー_{run_date_str}.png")
+    out_path = os.path.join(out_dir, f"全地点サマリー{file_suffix}_{run_date_str}.png")
     fig.savefig(out_path, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close(fig)
     return out_path

@@ -27,6 +27,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
+from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from PIL import Image
 from flask import (
@@ -512,6 +513,12 @@ def _apply_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Content-Security-Policy", _SECURITY_HEADERS_CSP)
+    if request.path == "/game/shop":
+        # ショップ画面は所持ポイント・装着中アイテムをJSでその場更新するため、ブラウザの
+        # bfcache(戻る/進むでの復元)やHTTPキャッシュに古いDOM/HTMLのまま残ると、
+        # 別タブや別セッションで装備を切り替えた後も「装着中」表示が古いままになりうる。
+        # 必ず毎回サーバーから取り直させることでこのズレを防ぐ。
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 try:
@@ -584,15 +591,21 @@ MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
-# 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる
-# (実機のHostヘッダーで検証済み: funnel経由はHostが必ずこの値になり、nginx経由では
-# ならない)。管理者機能は、たとえ管理者ロールでログインしていてもこの経路では常に
-# 使わせない(公開範囲を広げすぎないための多層防御)。
-FUNNEL_PUBLIC_HOSTNAME = "sshserver.taile43041.ts.net"
+# 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
+# 以前はHostヘッダーの値(funnel経由は必ずこのホスト名になる)でfunnel判定していたが、
+# MagicDNSのホスト名(この値と同じ)を使ってTailscale内から直接ブラウザでアクセスした
+# 場合もHostが同じ値になってしまい、正規のTailscale内アクセスなのにfunnel扱いされて
+# 管理者機能が消える誤判定があった(2026-09-11に発覚)。Hostヘッダーはリクエストする側が
+# 自由に指定できる値なので、そもそも判定に使うべきではなかった。
+# 代わりに、nginx側だけが付与できる秘密のヘッダー(X-Rf-Internal、nginx設定ファイル参照)
+# の有無で判定する。Funnelはnginxを経由せずtailscaledから直接127.0.0.1:8081へ転送される
+# ため、このヘッダーは絶対に付かない(公開のFunnel経由リクエストが自分でこのヘッダーを
+# 偽装しても、値が一致しなければfunnel扱いのままになる)。
+_NGINX_INTERNAL_HEADER_SECRET = "36ee8a9c0b6989fbe06f1c4e7202f694ab7750924462d7a0"
 
 
 def _is_funnel_request():
-    return request.host.split(":")[0] == FUNNEL_PUBLIC_HOSTNAME
+    return request.headers.get("X-Rf-Internal") != _NGINX_INTERNAL_HEADER_SECRET
 
 
 @app.context_processor
@@ -718,6 +731,10 @@ HHMM_RE = re.compile(r"^\d{4}$")
 
 STATION_FORECAST_RE = re.compile(r"^(.+)_予測_\d{8}\.png$")
 SUMMARY_RE = re.compile(r"^全地点サマリー_\d{8}\.png$")
+SUMMARY_REGION_RE = {
+    "只見川": re.compile(r"^全地点サマリー_只見_\d{8}\.png$"),
+    "会津": re.compile(r"^全地点サマリー_会津_\d{8}\.png$"),
+}
 CSV_RE = re.compile(r"^予測結果_\d{8}\.csv$")
 
 
@@ -2900,6 +2917,10 @@ def dashboard():
         _check_economy_anomalies()
     except Exception as e:
         log.warning("Economy anomaly check failed: %s", e)
+    try:
+        _charge_due_subscriptions()
+    except Exception as e:
+        log.warning("Subscription billing check failed: %s", e)
     latest_image_date = next(iter(_sorted_subdirs(IMAGE_DIR)), None)
     latest_image_hour = None
     latest_images = []
@@ -2911,9 +2932,15 @@ def dashboard():
 
     latest_pred_date = next(iter(_sorted_subdirs(PRED_DIR)), None)
     summary_file = None
+    summary_files_by_region = {}
     if latest_pred_date:
         pred_dir = PRED_DIR / latest_pred_date
-        summary_file = next((p.name for p in pred_dir.iterdir() if SUMMARY_RE.match(p.name)), None)
+        pred_files = list(pred_dir.iterdir())
+        summary_file = next((p.name for p in pred_files if SUMMARY_RE.match(p.name)), None)
+        for region_label, region_re in SUMMARY_REGION_RE.items():
+            match = next((p.name for p in pred_files if region_re.match(p.name)), None)
+            if match:
+                summary_files_by_region[region_label] = match
 
     active_announcements = _active_announcements_safe()
     if active_announcements:
@@ -2954,6 +2981,7 @@ def dashboard():
         latest_images=latest_images,
         latest_pred_date=latest_pred_date,
         summary_file=summary_file,
+        summary_files_by_region=summary_files_by_region,
         station_names=STATION_NAMES,
         announcements_list=active_announcements,
         ai_overall_summary=ai_summary.get("overall") if ai_summary else None,
@@ -3470,17 +3498,31 @@ def station_report_observation(name):
     target_dt_str = observations["datetime"]
     if hasattr(target_dt_str, "strftime"):
         target_dt_str = target_dt_str.strftime("%Y-%m-%d %H:%M:%S")
+    importance = request.form.get("importance", "medium")
+    if importance not in IMPORTANCE_LEVELS:
+        importance = "medium"
     conn = _users_conn()
     try:
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-        created = users.create_observation_report(
-            conn, name, target_dt_str, current["code"], my_id, now_str, source="user",
+        report_id = users.create_observation_report(
+            conn, name, target_dt_str, current["code"], my_id, now_str, source="user", importance=importance,
         )
+        created = report_id is not None
+        gem_note = ""
         if created:
-            _record_audit("観測報告を受信", f"{name} {target_dt_str}: コード{current['code']}")
+            submit_gems = GEM_REWARD_ON_SUBMIT[importance]
+            if users.grant_gems(conn, my_id, f"observation_report_submit:{report_id}", submit_gems, now_str):
+                gem_note = f"(+{submit_gems}ジェム)"
+            _record_audit(
+                "観測報告を受信",
+                f"{name} {target_dt_str}: コード{current['code']} (重要度: {IMPORTANCE_LABELS[importance]})",
+            )
     finally:
         conn.close()
-    message = "報告を受け付けました。管理者が確認します。" if created else "この観測は既に報告済みです。"
+    if created:
+        message = f"報告を受け付けました{gem_note}。管理者が確認します。"
+    else:
+        message = "この観測は既に報告済みです。"
     return _finish("station_detail", message, name=name)
 
 
@@ -3551,6 +3593,7 @@ def admin_observation_reports():
                 r[key] = {"date": n_date, "hhmm": n_hhmm, "has_image": n_path.is_file()}
     return render_template(
         "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
+        importance_labels=IMPORTANCE_LABELS,
     )
 
 
@@ -3585,6 +3628,23 @@ def admin_observation_report_resolve(report_id):
             )
             if granted:
                 reward_note = f"(報告者に{OBSERVATION_REPORT_REWARD_POINTS}pt付与)"
+            approve_gems = GEM_REWARD_ON_APPROVE.get(report["importance"], 0)
+            if approve_gems > 0:
+                gem_granted = users.grant_gems(
+                    conn, report["reported_by"], f"observation_report_approve:{report_id}",
+                    approve_gems, now_str,
+                )
+                if gem_granted:
+                    reward_note = f"{reward_note}(+{approve_gems}ジェム)"
+        elif report["source"] == "auto_detected" and corrected_code != report["reported_code"]:
+            # 自動検知分には報告者がいないため、代わりに実際に確認・訂正した管理者へ
+            # ジェムを付与する(報告者選択の重要度が無いため「中」相当の固定額)。
+            gem_granted = users.grant_gems(
+                conn, my_id, f"observation_report_auto_approve:{report_id}",
+                GEM_REWARD_TOTAL["medium"], now_str,
+            )
+            if gem_granted:
+                reward_note = f"(確認した管理者に+{GEM_REWARD_TOTAL['medium']}ジェム)"
         _record_audit(
             "観測報告を確認・訂正",
             f"{report['station_name']} {report['target_datetime']}: "
@@ -4225,16 +4285,16 @@ BADGE_DEFINITIONS = [
      # FRAME_DEFINITIONSはこの後で定義されるが、lambda本体はaward/表示のたびに評価される
      # ため問題ない(定義時ではなく呼び出し時にグローバル名を解決するPythonの通常の挙動)。
      "check": lambda s: s["owned_frame_count"] >= len(FRAME_DEFINITIONS)},
-    # 川霧ギャンブルの的中実績
-    {"id": "gamble_first_win", "label": "初勝利", "desc": "川霧ギャンブルで初めて賭けを的中させた", "icon": "star", "points": 200,
+    # 霧予測ゲームの的中実績
+    {"id": "gamble_first_win", "label": "初勝利", "desc": "霧予測ゲームで初めて賭けを的中させた", "icon": "star", "points": 200,
      "check": lambda s: s["gamble_won_count"] >= 1},
-    {"id": "gamble_won_20", "label": "ギャンブラー", "desc": "川霧ギャンブルで20回的中させた", "icon": "star", "points": 600,
+    {"id": "gamble_won_20", "label": "ギャンブラー", "desc": "霧予測ゲームで20回的中させた", "icon": "star", "points": 600,
      "check": lambda s: s["gamble_won_count"] >= 20},
-    {"id": "gamble_won_50", "label": "目利き", "desc": "川霧ギャンブルで50回的中させた", "icon": "star", "points": 1500,
+    {"id": "gamble_won_50", "label": "目利き", "desc": "霧予測ゲームで50回的中させた", "icon": "star", "points": 1500,
      "check": lambda s: s["gamble_won_count"] >= 50},
-    {"id": "gamble_won_100", "label": "霧予知能力者", "desc": "川霧ギャンブルで100回的中させた", "icon": "crown", "points": 3000,
+    {"id": "gamble_won_100", "label": "霧予知能力者", "desc": "霧予測ゲームで100回的中させた", "icon": "crown", "points": 3000,
      "check": lambda s: s["gamble_won_count"] >= 100},
-    {"id": "gamble_won_500", "label": "川霧の神様", "desc": "川霧ギャンブルで500回的中させた", "icon": "crown", "points": 10000,
+    {"id": "gamble_won_500", "label": "川霧の神様", "desc": "霧予測ゲームで500回的中させた", "icon": "crown", "points": 10000,
      "check": lambda s: s["gamble_won_count"] >= 500},
     # メッセージ機能の利用(DM・グループチャット合算)
     {"id": "msg_10", "label": "おしゃべりデビュー", "desc": "DM・グループチャットで合計10件送信した", "icon": "chat", "points": 200,
@@ -4302,18 +4362,54 @@ DAILY_LOGIN_BONUS_POINTS = 20
 COMMENT_POST_POINTS = 15
 CHAT_MESSAGE_POINTS = 10
 
+# --- ショップ経済インフレ対策(2026-09-07) -----------------------------------------
+# 霧予測ゲームで数千万〜億単位のポイントを稼ぐユーザーが出てきた結果、既存のショップ価格
+# (数百〜数万pt)がほぼ無価値になったため、高額品ほど強く底上げする形で全カタログの
+# costを一括値上げする。安価な品(BASE以下)はそのまま据え置き、高額品ほど指数的に
+# 値上がりする(単純な定数倍だと安い品まで一律で上がってしまうため)。
+_SHOP_INFLATION_BASE = 1500
+_SHOP_INFLATION_EXPONENT = 0.85
+
+
+def _inflated_cost(cost):
+    if cost <= _SHOP_INFLATION_BASE:
+        return cost
+    multiplier = (cost / _SHOP_INFLATION_BASE) ** _SHOP_INFLATION_EXPONENT
+    return int(round(cost * multiplier / 10.0)) * 10
+
+
+# 買い切りをやめ、毎月この割合分を使用料として引き落とす(装備中のアイテムのみ課金、
+# 未装備なら請求しない)。costに対する割合なので安い品は安く・高い品は高くなり、
+# 月額が元の購入価格を超えることは割合が1未満である限り起こらない。
+MONTHLY_FEE_RATIO = 0.12
+
+
+def _monthly_fee(cost):
+    return max(1, round(cost * MONTHLY_FEE_RATIO))
+
+
+def _reprice_for_inflation(definitions):
+    """定義リストの各itemのcostを_inflated_costで置き換え、月額使用料(monthly_fee)も
+    合わせて計算してitemに埋め込む(破壊的変更)。ショップ画面はitem.monthly_feeを
+    そのまま表示するだけでよい。"""
+    for item in definitions:
+        item["cost"] = _inflated_cost(item["cost"])
+        item["monthly_fee"] = _monthly_fee(item["cost"])
+    return definitions
+
+
 # --- ポイント交換アバターフレーム -------------------------------------------------
 # 実績ポイントで交換できるアバター装飾枠。「段階(グレード)」×「テーマ」の組み合わせで
 # 4x5=20種類になる。CSS側は段階クラス(リング太さ・発光・アニメーション)とテーマクラス
 # (配色)を掛け合わせて表現するため、フレーム自体を20個ハードコードする必要はない
 # (style.cssの.avatar-frame関連ルール参照)。
-FRAME_GRADES = [
+FRAME_GRADES = _reprice_for_inflation([
     {"id": "bronze", "label": "銅", "cost": 1000},
     {"id": "silver", "label": "銀", "cost": 2500},
     {"id": "gold", "label": "金", "cost": 5000},
     {"id": "platinum", "label": "虹", "cost": 10000},
     {"id": "legend", "label": "伝説", "cost": 20000},
-]
+])
 FRAME_THEMES = [
     {"id": "kiri", "label": "霧"},
     {"id": "hare", "label": "晴天"},
@@ -4331,6 +4427,7 @@ FRAME_DEFINITIONS = [
         "id": f"{grade['id']}_{theme['id']}",
         "label": f"{grade['label']}の{theme['label']}",
         "grade": grade["id"], "grade_label": grade["label"], "cost": grade["cost"],
+        "monthly_fee": grade["monthly_fee"],
         "theme": theme["id"], "theme_label": theme["label"],
     }
     for grade in FRAME_GRADES for theme in FRAME_THEMES
@@ -4340,7 +4437,7 @@ FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
 # --- 称号・名前の色・ダッシュボード配色・演出 ---------------------------------------
 # フレーム以外のショップ品。装備の仕組みはusers.py側で共通化しているが(user_cosmetics、
 # category列で区別)、カタログ(何が買えるか)はここに種類ごとに定義する。
-TITLE_DEFINITIONS = [
+TITLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "regular", "label": "常連さん", "cost": 500},
     {"id": "early_riser", "label": "早起き名人", "cost": 1200},
     {"id": "fog_walker", "label": "霧使い", "cost": 3000},
@@ -4348,63 +4445,93 @@ TITLE_DEFINITIONS = [
     {"id": "legendary_observer", "label": "伝説の観測者", "cost": 15000},
     {"id": "dopagaki", "label": "ドパガキ", "cost": 50000},
     {"id": "legendary_gambler", "label": "伝説のギャンブラー", "cost": 1000000},
-]
+])
+# 経済インフレ対策と同時に追加した最高レア度の称号(2026-09-07)。値上げ後の最高額品
+# よりさらに一段上に置くため、_reprice_for_inflationは通さず直接「狂った」価格を付ける。
+TITLE_DEFINITIONS.append(
+    {"id": "kiri_no_kamigami", "label": "霧の神々に愛されし者", "cost": 1000000000,
+     "monthly_fee": _monthly_fee(1000000000), "added": "2026-09-07"}
+)
 TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
 
-NAME_COLOR_DEFINITIONS = [
+NAME_COLOR_DEFINITIONS = _reprice_for_inflation([
     {"id": "red", "label": "赤", "cost": 800, "css_class": "name-color-red"},
     {"id": "blue", "label": "青", "cost": 800, "css_class": "name-color-blue"},
     {"id": "green", "label": "緑", "cost": 800, "css_class": "name-color-green"},
     {"id": "gold", "label": "金", "cost": 2000, "css_class": "name-color-gold"},
     {"id": "rainbow", "label": "虹色", "cost": 5000, "css_class": "name-color-rainbow"},
-]
+])
 NAME_COLOR_BY_ID = {c["id"]: c for c in NAME_COLOR_DEFINITIONS}
 
-DASHBOARD_THEME_DEFINITIONS = [
+DASHBOARD_THEME_DEFINITIONS = _reprice_for_inflation([
     {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dash-theme-yuuyake"},
     {"id": "hoshizora", "label": "星空", "cost": 2500, "css_class": "dash-theme-hoshizora"},
     {"id": "shinryoku", "label": "新緑", "cost": 1500, "css_class": "dash-theme-shinryoku"},
     {"id": "yukigesho", "label": "雪景色", "cost": 1500, "css_class": "dash-theme-yukigesho"},
-]
+])
 DASHBOARD_THEME_BY_ID = {d["id"]: d for d in DASHBOARD_THEME_DEFINITIONS}
 
-EFFECT_DEFINITIONS = [
+EFFECT_DEFINITIONS = _reprice_for_inflation([
     {"id": "fog_drift", "label": "霧の揺らめき", "cost": 4000, "css_class": "fx-fog-drift"},
     {"id": "sparkle", "label": "きらめき", "cost": 4000, "css_class": "fx-sparkle"},
     {"id": "aurora_glow", "label": "オーロラの光", "cost": 6000, "css_class": "fx-aurora-glow"},
-]
+])
 EFFECT_BY_ID = {e["id"]: e for e in EFFECT_DEFINITIONS}
 
-BANNER_DEFINITIONS = [
+BANNER_DEFINITIONS = _reprice_for_inflation([
     {"id": "kiri", "label": "霧景色", "cost": 2000, "css_class": "banner-kiri"},
     {"id": "yuuyake", "label": "夕焼け", "cost": 2000, "css_class": "banner-yuuyake"},
     {"id": "yukigesho", "label": "雪景色", "cost": 2000, "css_class": "banner-yukigesho"},
     {"id": "hoshizora", "label": "星空", "cost": 3000, "css_class": "banner-hoshizora"},
-]
+])
 BANNER_BY_ID = {b["id"]: b for b in BANNER_DEFINITIONS}
 
-DM_THEME_DEFINITIONS = [
+DM_THEME_DEFINITIONS = _reprice_for_inflation([
     {"id": "kiri", "label": "霧", "cost": 1500, "css_class": "dm-theme-kiri"},
     {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dm-theme-yuuyake"},
     {"id": "mint", "label": "ミント", "cost": 1500, "css_class": "dm-theme-mint"},
-]
+])
 DM_THEME_BY_ID = {d["id"]: d for d in DM_THEME_DEFINITIONS}
 
 # 名前の色と同じCSSクラス(name-color-*)をそのまま流用する(色の見た目自体は
 # 用途によらず共通なので、称号用に別のクラスを増やす必要が無い)。
-TITLE_COLOR_DEFINITIONS = [
+TITLE_COLOR_DEFINITIONS = _reprice_for_inflation([
     {"id": "red", "label": "赤", "cost": 600, "css_class": "name-color-red"},
     {"id": "blue", "label": "青", "cost": 600, "css_class": "name-color-blue"},
     {"id": "green", "label": "緑", "cost": 600, "css_class": "name-color-green"},
     {"id": "gold", "label": "金", "cost": 1500, "css_class": "name-color-gold"},
     {"id": "rainbow", "label": "虹色", "cost": 4000, "css_class": "name-color-rainbow"},
-]
+])
 TITLE_COLOR_BY_ID = {c["id"]: c for c in TITLE_COLOR_DEFINITIONS}
 
-MARKER_DEFINITIONS = [
+MARKER_DEFINITIONS = _reprice_for_inflation([
     {"id": "hall_of_fame", "label": "殿堂入り章", "cost": 25000, "icon": "★"},
-]
+])
+# 経済インフレ対策と同時に追加した最高レア度のマーカー(2026-09-07)。
+MARKER_DEFINITIONS.append(
+    # 殿堂入り章(★)と見た目が被らないよう冠アイコンにし、買い切りではなく毎月
+    # 使用料がかかる(=払い続けられなくなれば自動で外れる)仕様に合わせて「永久」を
+    # 含まない名前にしている。
+    {"id": "aurora_crown", "label": "暁光の冠", "cost": 500000000, "icon": "👑", "premium": True,
+     "monthly_fee": _monthly_fee(500000000), "added": "2026-09-07"}
+)
 MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
+
+# --- ジェム専用ショップ(2026-09-11) -------------------------------------------------
+# 観測報告の報酬として貯まるジェムでしか買えない高級アイテム。ポイント経済とは
+# 完全に別会計(user_gem_items)で、月額使用料も課さない買い切り品にしている
+# (ジェムは観測報告という単一の獲得経路しかなく、ポイントほど大量に稼げないため)。
+GEM_SHOP_DEFINITIONS = [
+    {"id": "observer_glasses", "label": "観測者の眼鏡", "cost_gems": 60, "icon": "🔍",
+     "desc": "遠くの霧もくっきり見通せるという、観測者の間で語られる縁起物。"},
+    {"id": "forecaster_compass", "label": "霧予報士の羅針盤", "cost_gems": 100, "icon": "🧭",
+     "desc": "明日の川霧の気配を示すとされる、予報士憧れの逸品。"},
+    {"id": "river_fog_crystal", "label": "川霧の結晶", "cost_gems": 150, "icon": "💎",
+     "desc": "濃い川霧の日にしか現れないという伝説の結晶。"},
+    {"id": "legendary_notebook", "label": "伝説の観測手帳", "cost_gems": 250, "icon": "📔",
+     "desc": "数々の重要報告を成し遂げた観測者だけが手にできる特別な手帳。"},
+]
+GEM_SHOP_BY_ID = {g["id"]: g for g in GEM_SHOP_DEFINITIONS}
 
 # --- 2026-09-03追加のショップ拡張分 ------------------------------------------------
 # NEW_ITEM_ADDED_ATはこのバッチで追加したカタログ品に付けた"added"日付。ショップ側で
@@ -4412,47 +4539,47 @@ MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
 NEW_ITEM_ADDED_AT = "2026-09-03"
 SHOP_NEW_BADGE_DAYS = 21
 
-TITLE_BADGE_DEFINITIONS = [
+TITLE_BADGE_DEFINITIONS = _reprice_for_inflation([
     {"id": "sparkle", "label": "きらきら", "cost": 600, "icon": "✨", "added": NEW_ITEM_ADDED_AT},
     {"id": "fire", "label": "めらめら", "cost": 600, "icon": "🔥", "added": NEW_ITEM_ADDED_AT},
     {"id": "drop", "label": "しずく", "cost": 800, "icon": "💧", "added": NEW_ITEM_ADDED_AT},
     {"id": "gem", "label": "きらめく宝石", "cost": 2500, "icon": "💎", "added": NEW_ITEM_ADDED_AT},
-]
+])
 TITLE_BADGE_BY_ID = {t["id"]: t for t in TITLE_BADGE_DEFINITIONS}
 
-BUBBLE_STYLE_DEFINITIONS = [
+BUBBLE_STYLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "round", "label": "まる型", "cost": 1200, "css_class": "bubble-style-round", "added": NEW_ITEM_ADDED_AT},
     {"id": "square", "label": "かく型", "cost": 1200, "css_class": "bubble-style-square", "added": NEW_ITEM_ADDED_AT},
     {"id": "handwritten", "label": "手書き風", "cost": 2500, "css_class": "bubble-style-handwritten", "added": NEW_ITEM_ADDED_AT},
-]
+])
 BUBBLE_STYLE_BY_ID = {b["id"]: b for b in BUBBLE_STYLE_DEFINITIONS}
 
-AVATAR_BG_DEFINITIONS = [
+AVATAR_BG_DEFINITIONS = _reprice_for_inflation([
     {"id": "glow_blue", "label": "青の光暈", "cost": 1800, "css_class": "avatar-bg-glow-blue", "added": NEW_ITEM_ADDED_AT},
     {"id": "glow_gold", "label": "金の光暈", "cost": 3500, "css_class": "avatar-bg-glow-gold", "added": NEW_ITEM_ADDED_AT},
     {"id": "mist", "label": "霧の背景", "cost": 2200, "css_class": "avatar-bg-mist", "added": NEW_ITEM_ADDED_AT},
-]
+])
 AVATAR_BG_BY_ID = {a["id"]: a for a in AVATAR_BG_DEFINITIONS}
 
-RANK_STYLE_DEFINITIONS = [
+RANK_STYLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "gold_number", "label": "金の数字", "cost": 1500, "css_class": "rank-style-gold", "added": NEW_ITEM_ADDED_AT},
     {"id": "neon_number", "label": "ネオンの数字", "cost": 1500, "css_class": "rank-style-neon", "added": NEW_ITEM_ADDED_AT},
     {"id": "serif_number", "label": "書道体の数字", "cost": 1500, "css_class": "rank-style-serif", "added": NEW_ITEM_ADDED_AT},
-]
+])
 RANK_STYLE_BY_ID = {r["id"]: r for r in RANK_STYLE_DEFINITIONS}
 
 # soundは効果音の種類ID。実際の音はWeb Audio APIでmember_detail.html側が合成するので、
 # 音声ファイルは持たない(依存を増やさないため)。
-PROFILE_SOUND_DEFINITIONS = [
+PROFILE_SOUND_DEFINITIONS = _reprice_for_inflation([
     {"id": "chime", "label": "チャイム", "cost": 1000, "sound": "chime", "added": NEW_ITEM_ADDED_AT},
     {"id": "bell", "label": "鈴の音", "cost": 1000, "sound": "bell", "added": NEW_ITEM_ADDED_AT},
     {"id": "kirakira", "label": "きらめき音", "cost": 1800, "sound": "kirakira", "added": NEW_ITEM_ADDED_AT},
-]
+])
 PROFILE_SOUND_BY_ID = {p["id"]: p for p in PROFILE_SOUND_DEFINITIONS}
 
 # 季節限定コレクション。available_from/available_untilの期間外は新規購入できないが、
 # 既に持っている分はそのまま装備・表示し続けられる(買い方だけを期間で絞る)。
-SEASONAL_DEFINITIONS = [
+SEASONAL_DEFINITIONS = _reprice_for_inflation([
     {
         "id": "summer_2026", "label": "夏祭りの提灯", "cost": 1800, "css_class": "seasonal-summer",
         "available_from": "2026-07-01", "available_until": "2026-08-31", "added": NEW_ITEM_ADDED_AT,
@@ -4465,7 +4592,7 @@ SEASONAL_DEFINITIONS = [
         "id": "newyear_2027", "label": "迎春の霧", "cost": 2200, "css_class": "seasonal-newyear",
         "available_from": "2026-12-15", "available_until": "2027-01-15", "added": NEW_ITEM_ADDED_AT,
     },
-]
+])
 SEASONAL_BY_ID = {s["id"]: s for s in SEASONAL_DEFINITIONS}
 
 GACHA_COST = 5000
@@ -4473,15 +4600,15 @@ GACHA_BIG_REFUND_MULTIPLIER = 2.5
 GACHA_BIG_REFUND_WEIGHT = 5
 GACHA_CONSOLATION_POINTS = 300
 
-# --- 川霧ギャンブル・デイリーゲーム共通の消費アイテム ---------------------------------
+# --- 霧予測ゲーム・デイリーゲーム共通の消費アイテム ---------------------------------
 CONSUMABLE_DEFINITIONS = [
     {
         "id": "insurance_ticket", "label": "保険チケット", "cost": 300,
-        "desc": "川霧ギャンブルの賭けがハズレても、賭けたポイントの半額が払い戻されます。",
+        "desc": "霧予測ゲームの賭けがハズレても、賭けたポイントの半額が払い戻されます。",
     },
     {
         "id": "boost_ticket", "label": "倍率ブーストチケット", "cost": 250,
-        "desc": "川霧ギャンブルの賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
+        "desc": "霧予測ゲームの賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
     },
     {
         "id": "lottery_luck_ticket", "label": "ラッキーチケット", "cost": 200,
@@ -4493,7 +4620,7 @@ CONSUMABLE_DEFINITIONS = [
     },
     {
         "id": "super_boost_ticket", "label": "上級倍率ブーストチケット", "cost": 600,
-        "desc": "川霧ギャンブルの賭けの倍率が25%上がります(倍率ブーストチケットの上位版。同時使用時はこちらが優先されます)。",
+        "desc": "霧予測ゲームの賭けの倍率が25%上がります(倍率ブーストチケットの上位版。同時使用時はこちらが優先されます)。",
         "added": NEW_ITEM_ADDED_AT,
     },
     {
@@ -4509,13 +4636,13 @@ CONSUMABLE_INSURANCE_REFUND_RATIO = 0.5
 # ラッキーチケット使用時、100pt以上の枠の重みをこの倍率で底上げする(重みの再配分)。
 LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
 
-# --- 川霧ギャンブル ---------------------------------------------------------------
+# --- 霧予測ゲーム ---------------------------------------------------------------
 # 「この地点でこの時刻に川霧が出るか」にポイントを賭けるゲーム。
 # 倍率 = 地点の難易度(過去の川霧発生率が低いほど高倍率) × 先の長さ(遠い予測ほど高倍率)
 #      × 時間精度(ざっくり日付だけ<時間帯<正確な1時間、細かく当てるほど高倍率)
 # 賭けた時点でポイントは引かれ(fog_bets.bet_amountがtotal_spent_pointsに含まれる)、
 # 的中すれば bet_amount * multiplier をgrant_pointsで払い戻す。外れれば戻ってこない
-# (名前どおりの「ギャンブル」として、当てずっぽうの丁半博打にならないよう
+# (名前どおりの「霧予測ゲーム」として、当てずっぽうの丁半博打にならないよう
 # 難易度に応じた倍率を付ける)。
 class _ConsumableUnavailable(Exception):
     """賭け金の残高チェックと同一トランザクション内でチケットを消費する際、
@@ -4537,7 +4664,7 @@ GAMBLE_PRECISIONS = [
 ]
 GAMBLE_PRECISION_BY_ID = {p["id"]: p for p in GAMBLE_PRECISIONS}
 
-# --- デイリー霧予報クイズ(無料・スキル型、川霧ギャンブルと違いポイントを賭けない) -------
+# --- デイリー霧予報クイズ(無料・スキル型、霧予測ゲームと違いポイントを賭けない) -------
 # 毎日同じ地点を全員に出題する(日付から決定論的に選ぶ)ことで、その日1回だけの
 # 気軽な予想ゲームにする。的中報酬に連続的中日数のボーナスを付け、継続を後押しする。
 FOG_QUIZ_BASE_POINTS = 500
@@ -4562,6 +4689,20 @@ PHENOM_QUIZ_CATEGORIES = [
 ]
 PHENOM_QUIZ_POINTS = 500
 OBSERVATION_REPORT_REWARD_POINTS = 2000
+
+# --- ジェム(観測報告専用の第二通貨) ------------------------------------------------
+# 重要度は報告者が選ぶ(低・中・高)。「高」だけは緊急性を考慮し、管理者の承認を待たず
+# 報告した時点で満額を即時付与する。低・中は誤報乱発によるファーミングを防ぐため、
+# 報告時点では少額の参加ボーナスだけを出し、管理者が実際に訂正コードを変えて承認した
+# 時にまとめて満額になるよう差額を追加付与する(既存のポイント報酬と同じ承認条件、
+# corrected_code != reported_codeを使う)。
+IMPORTANCE_LEVELS = ("low", "medium", "high")
+IMPORTANCE_LABELS = {"low": "低", "medium": "中", "high": "高"}
+GEM_REWARD_TOTAL = {"low": 10, "medium": 20, "high": 40}
+GEM_REWARD_ON_SUBMIT = {"low": 1, "medium": 1, "high": GEM_REWARD_TOTAL["high"]}
+GEM_REWARD_ON_APPROVE = {
+    level: GEM_REWARD_TOTAL[level] - GEM_REWARD_ON_SUBMIT[level] for level in IMPORTANCE_LEVELS
+}
 PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
 
 
@@ -4938,7 +5079,7 @@ def members_list():
             )[:5],
         },
         {
-            "id": "gamble_win", "label": "ギャンブル勝利数", "unit": "回",
+            "id": "gamble_win", "label": "霧予測ゲーム勝利数", "unit": "回",
             "count_key": "month_gamble_win_count",
             "entries": sorted(
                 [m for m in members if m["month_gamble_win_count"] > 0],
@@ -5239,7 +5380,7 @@ def member_profile_update(user_id):
 
 @app.route("/game")
 def game_home():
-    """ポイント・ショップ・川霧ギャンブルをまとめたゲームのトップページ。"""
+    """ポイント・ショップ・霧予測ゲームをまとめたゲームのトップページ。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -5256,7 +5397,7 @@ def game_home():
 @app.route("/game/shop")
 def game_shop():
     """ポイントでアバターフレーム・称号・名前の色・ダッシュボード配色・演出・
-    ギャンブル用消費アイテムと交換する画面。"""
+    霧予測ゲーム用消費アイテムと交換する画面。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -5264,6 +5405,8 @@ def game_shop():
     try:
         member = users.get_user_by_id(conn, my_id)
         points = users.available_points(conn, my_id)
+        gems = users.available_gems(conn, my_id)
+        owned_gem_items = users.owned_gem_item_ids(conn, my_id)
         owned = users.owned_frame_ids(conn, my_id)
         owned_titles = users.owned_cosmetic_ids(conn, my_id, "title")
         owned_name_colors = users.owned_cosmetic_ids(conn, my_id, "name_color")
@@ -5280,6 +5423,32 @@ def game_shop():
         owned_profile_sounds = users.owned_cosmetic_ids(conn, my_id, "profile_sound")
         owned_seasonal = users.owned_cosmetic_ids(conn, my_id, "seasonal")
         consumables = users.consumable_quantities(conn, my_id)
+
+        # 装着中のアイテム一覧と、今月の使用料合計(装着中のみ課金されるため)。
+        equipped_items = []
+        if member["equipped_frame"]:
+            frame_def = FRAME_BY_ID.get(member["equipped_frame"])
+            if frame_def:
+                info = users.frame_billing_info(conn, my_id, member["equipped_frame"])
+                equipped_items.append({
+                    "category": "frame", "category_label": "フレーム", "label": frame_def["label"],
+                    "monthly_fee": frame_def["monthly_fee"],
+                    "next_billing_at": info["next_billing_at"] if info else None,
+                })
+        for category, (catalog, cosmetic_category, cat_label) in COSMETIC_CATALOGS.items():
+            item_id = member.get(f"equipped_{category}")
+            if not item_id:
+                continue
+            item_def = catalog.get(item_id)
+            if not item_def:
+                continue
+            info = users.cosmetic_billing_info(conn, my_id, cosmetic_category, item_id)
+            equipped_items.append({
+                "category": category, "category_label": cat_label, "label": item_def["label"],
+                "monthly_fee": item_def["monthly_fee"],
+                "next_billing_at": info["next_billing_at"] if info else None,
+            })
+        total_monthly_fee = sum(i["monthly_fee"] for i in equipped_items)
     finally:
         conn.close()
     today_str = now_jst_naive().strftime("%Y-%m-%d")
@@ -5292,6 +5461,11 @@ def game_shop():
         "game_shop.html",
         member=member,
         points=points,
+        gems=gems,
+        gem_shop_definitions=GEM_SHOP_DEFINITIONS,
+        owned_gem_items=owned_gem_items,
+        equipped_items=equipped_items,
+        total_monthly_fee=total_monthly_fee,
         owned=owned,
         frame_grades=FRAME_GRADES,
         frame_themes=FRAME_THEMES,
@@ -5332,6 +5506,50 @@ def game_shop():
     )
 
 
+def _check_slot_change_allowed(current_item_id, current_billing_info, target_item_id):
+    """月額使用料アイテムは「装着中のものの次回請求日が来た(=月初の更新タイミング)時だけ
+    選び直せて、それ以外は固定」という仕様にするための事前チェック。次回請求日より前に
+    外してしまうと請求されずに済んでしまう抜け道を塞ぐため、変更(別アイテムへの
+    切り替え・解除の両方を含む)は次回請求日到達後にしか許可しない。target_item_idが
+    現在と同じ(実質変更なし)場合は常に許可する。
+    戻り値: 変更してよければNone、拒否するなら理由メッセージ。"""
+    if not current_item_id or current_item_id == target_item_id:
+        return None
+    next_billing_at = current_billing_info.get("next_billing_at") if current_billing_info else None
+    if not next_billing_at:
+        return None
+    now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    if next_billing_at > now_str:
+        return f"次回の更新日({next_billing_at[:10]})まで、装着中のアイテムは変更(解除も含む)できません。"
+    return None
+
+
+def _charge_billing_if_due(conn, user_id, kind, item_id, next_billing_at, fee, advance_billing_fn):
+    """装備しようとしているアイテムの月額使用料の次回請求日が過ぎていれば、装着を許可する
+    前にその場で1ヶ月分を請求する(装備中のものだけを課金する使用料モデルのため、装着操作
+    そのものが「今月分を払って使い始める」タイミングになる)。feeは呼び出し側がカタログ
+    (FRAME_BY_ID/COSMETIC_CATALOGS)から引いた現在のmonthly_feeを渡す(user_frames/
+    user_cosmetics.costは取得時点の記録用でしかなく、福袋等でcost=0のまま所持している
+    場合もあるため、使用料は必ずカタログの現在価格から計算する)。advance_billing_fnは
+    請求成功時に次回請求日を1ヶ月先へ更新する関数(新しいnext_billing_at文字列を1つ受け取る)。
+    戻り値: (装着してよいか, 失敗時にユーザーへ見せるメッセージ)。"""
+    if not next_billing_at:
+        return True, ""
+    now = datetime.now(JST)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    if next_billing_at > now_str:
+        return True, ""
+    balance = users.available_points(conn, user_id)
+    if balance < fee:
+        return False, f"月額使用料{fee}ptが不足しているため装着できません(現在の残高: {balance}pt)。"
+    source = f"subscription_fee:{kind}:{item_id}:{next_billing_at}"
+    charged = users.grant_points(conn, user_id, source, -fee, now_str)
+    if charged:
+        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+        advance_billing_fn(next_billing_str)
+    return True, ""
+
+
 @app.route("/game/shop/buy", methods=["POST"])
 def game_shop_buy():
     my_id = session.get("user_id")
@@ -5344,16 +5562,18 @@ def game_shop_buy():
     try:
         if frame["id"] in users.owned_frame_ids(conn, my_id):
             return _finish("game_shop", "そのフレームは既に持っています。", success=False)
-        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(JST)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
         ok = users.spend_points_if_available(
             conn, my_id, frame["cost"],
-            lambda c: users.purchase_frame(c, my_id, frame["id"], frame["cost"], now_str),
+            lambda c: users.purchase_frame(c, my_id, frame["id"], frame["cost"], now_str, next_billing_str),
         )
         if not ok:
             return _finish("game_shop", "ポイントが足りません。", success=False)
     finally:
         conn.close()
-    return _finish("game_shop", f"「{frame['label']}」と交換しました。")
+    return _finish("game_shop", f"「{frame['label']}」と交換しました(初月分は購入価格に含まれています。翌月以降は毎月{_monthly_fee(frame['cost'])}ptの使用料がかかります)。")
 
 
 @app.route("/game/shop/equip", methods=["POST"])
@@ -5366,6 +5586,22 @@ def game_shop_equip():
     try:
         if frame_id and frame_id not in users.owned_frame_ids(conn, my_id):
             abort(400)
+        current_frame_id = users.get_user_by_id(conn, my_id)["equipped_frame"]
+        current_info = users.frame_billing_info(conn, my_id, current_frame_id) if current_frame_id else None
+        lock_message = _check_slot_change_allowed(current_frame_id, current_info, frame_id)
+        if lock_message:
+            return _finish("game_shop", lock_message, success=False)
+        if frame_id:
+            billing_info = users.frame_billing_info(conn, my_id, frame_id)
+            frame_def = FRAME_BY_ID.get(frame_id)
+            billed_ok, fee_message = _charge_billing_if_due(
+                conn, my_id, "frame", frame_id,
+                billing_info["next_billing_at"] if billing_info else None,
+                frame_def["monthly_fee"] if frame_def else 0,
+                lambda next_at: users.set_frame_next_billing(conn, my_id, frame_id, next_at),
+            )
+            if not billed_ok:
+                return _finish("game_shop", fee_message, success=False)
         users.set_equipped_frame(conn, my_id, frame_id)
     finally:
         conn.close()
@@ -5415,10 +5651,14 @@ def game_shop_buy_cosmetic(category):
     try:
         if item["id"] in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
             return _finish("game_shop", f"その{label}は既に持っています。", success=False)
-        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(JST)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
         ok = users.spend_points_if_available(
             conn, my_id, item["cost"],
-            lambda c: users.purchase_cosmetic(c, my_id, cosmetic_category, item["id"], item["cost"], now_str),
+            lambda c: users.purchase_cosmetic(
+                c, my_id, cosmetic_category, item["id"], item["cost"], now_str, next_billing_str
+            ),
         )
         if not ok:
             return _finish("game_shop", "ポイントが足りません。", success=False)
@@ -5426,7 +5666,9 @@ def game_shop_buy_cosmetic(category):
     finally:
         conn.close()
     return _finish(
-        "game_shop", f"「{item['label']}」と交換しました。",
+        "game_shop",
+        f"「{item['label']}」と交換しました(初月分は購入価格に含まれています。"
+        f"翌月以降は毎月{_monthly_fee(item['cost'])}ptの使用料がかかります)。",
         extra={"action": "buy", "category": category, "item_id": item["id"], "available_points": points},
     )
 
@@ -5445,6 +5687,25 @@ def game_shop_equip_cosmetic(category):
     try:
         if item_id and item_id not in users.owned_cosmetic_ids(conn, my_id, cosmetic_category):
             abort(400)
+        current_item_id = users.get_user_by_id(conn, my_id).get(f"equipped_{category}")
+        current_info = (
+            users.cosmetic_billing_info(conn, my_id, cosmetic_category, current_item_id)
+            if current_item_id else None
+        )
+        lock_message = _check_slot_change_allowed(current_item_id, current_info, item_id)
+        if lock_message:
+            return _finish("game_shop", lock_message, success=False)
+        if item_id:
+            billing_info = users.cosmetic_billing_info(conn, my_id, cosmetic_category, item_id)
+            item_def = catalog.get(item_id)
+            billed_ok, fee_message = _charge_billing_if_due(
+                conn, my_id, "cosmetic", f"{cosmetic_category}:{item_id}",
+                billing_info["next_billing_at"] if billing_info else None,
+                item_def["monthly_fee"] if item_def else 0,
+                lambda next_at: users.set_cosmetic_next_billing(conn, my_id, cosmetic_category, item_id, next_at),
+            )
+            if not billed_ok:
+                return _finish("game_shop", fee_message, success=False)
         users.set_equipped_cosmetic(conn, my_id, cosmetic_category, item_id)
     finally:
         conn.close()
@@ -5453,6 +5714,51 @@ def game_shop_equip_cosmetic(category):
         "game_shop", message,
         extra={"action": "equip" if item_id else "unequip", "category": category, "item_id": item_id},
     )
+
+
+@app.route("/game/shop/gems/buy", methods=["POST"])
+def game_shop_buy_gem_item():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    item = GEM_SHOP_BY_ID.get(request.form.get("item_id", ""))
+    if item is None:
+        abort(404)
+    conn = _users_conn()
+    try:
+        if item["id"] in users.owned_gem_item_ids(conn, my_id):
+            return _finish("game_shop", f"「{item['label']}」は既に持っています。", success=False)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        ok = users.spend_gems_if_available(
+            conn, my_id, item["cost_gems"],
+            lambda c: users.purchase_gem_item(c, my_id, item["id"], item["cost_gems"], now_str),
+        )
+        if not ok:
+            return _finish("game_shop", "ジェムが足りません。", success=False)
+        gems = users.available_gems(conn, my_id)
+    finally:
+        conn.close()
+    return _finish(
+        "game_shop", f"「{item['label']}」と交換しました。",
+        extra={"action": "buy_gem_item", "item_id": item["id"], "available_gems": gems},
+    )
+
+
+@app.route("/game/shop/gems/equip", methods=["POST"])
+def game_shop_equip_gem_item():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    item_id = request.form.get("item_id", "").strip()
+    conn = _users_conn()
+    try:
+        if item_id and item_id not in users.owned_gem_item_ids(conn, my_id):
+            abort(400)
+        users.set_equipped_gem_item(conn, my_id, item_id)
+    finally:
+        conn.close()
+    message = "装着しました。" if item_id else "外しました。"
+    return _finish("game_shop", message)
 
 
 def _gacha_is_jackpot(weighted):
@@ -5464,9 +5770,60 @@ def _gacha_is_jackpot(weighted):
     return not weighted or random.random() < (1.0 / GACHA_BIG_REFUND_WEIGHT)
 
 
+SUBSCRIPTION_BILLING_CHECK_INTERVAL_SECONDS = 1800
+_subscription_billing_check_state = {"at": 0.0}
+_subscription_billing_check_lock = threading.Lock()
+
+
+def _charge_due_subscriptions():
+    """装備したまま放置されているフレーム・コスメについて、月額使用料の支払期限
+    (next_billing_at)が来ているものを一括で請求する。_charge_billing_if_dueが装着操作
+    そのもののタイミングで課金するのに対し、こちらは既に装着済みのまま何もしなくても
+    毎月ちゃんと引き落とされるようにするための見回り役(fog_bets清算・経済異常検知と同じく
+    専用cronは持たず、よく踏まれるページから間引いて呼ぶ)。残高が足りなければ所持は
+    残したまま自動で未装着に戻す(装備解除のみ。再装着時に_charge_billing_if_dueが
+    改めて請求を試みる)。"""
+    now = time.monotonic()
+    with _subscription_billing_check_lock:
+        if now - _subscription_billing_check_state["at"] < SUBSCRIPTION_BILLING_CHECK_INTERVAL_SECONDS:
+            return
+        _subscription_billing_check_state["at"] = now
+    conn = _users_conn()
+    try:
+        wall_now = datetime.now(JST)
+        now_str = wall_now.strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = (wall_now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+        for user_id, frame_id, _cost, next_billing_at in users.list_equipped_frames_due(conn, now_str):
+            frame_def = FRAME_BY_ID.get(frame_id)
+            fee = frame_def["monthly_fee"] if frame_def else 0
+            if users.available_points(conn, user_id) >= fee:
+                source = f"subscription_fee:frame:{frame_id}:{next_billing_at}"
+                if users.grant_points(conn, user_id, source, -fee, now_str):
+                    users.set_frame_next_billing(conn, user_id, frame_id, next_billing_str)
+            else:
+                users.set_equipped_frame(conn, user_id, "")
+
+        for user_id, category, item_id, _cost, next_billing_at in users.list_equipped_cosmetics_due(conn, now_str):
+            entry = COSMETIC_CATALOGS.get(category)
+            item_def = entry[0].get(item_id) if entry else None
+            fee = item_def["monthly_fee"] if item_def else 0
+            if users.available_points(conn, user_id) >= fee:
+                source = f"subscription_fee:cosmetic:{category}:{item_id}:{next_billing_at}"
+                if users.grant_points(conn, user_id, source, -fee, now_str):
+                    users.set_cosmetic_next_billing(conn, user_id, category, item_id, next_billing_str)
+            else:
+                users.set_equipped_cosmetic(conn, user_id, category, "")
+    finally:
+        conn.close()
+
+
 ECONOMY_ANOMALY_CHECK_INTERVAL_SECONDS = 1800
 ECONOMY_ANOMALY_WINDOW_MINUTES = 60
 ECONOMY_ANOMALY_POINT_THRESHOLD = 50000
+# 重要度「高」の観測報告は承認なしで即座に40ジェムが確定するため、短時間に大量の
+# 「高」報告を連発するファーミングを検知する(1時間に10件超のペース)。
+ECONOMY_ANOMALY_GEM_THRESHOLD = 400
 _economy_anomaly_check_state = {"at": 0.0}
 _economy_anomaly_check_lock = threading.Lock()
 
@@ -5490,6 +5847,11 @@ def _check_economy_anomalies():
             "GROUP BY user_id HAVING SUM(amount) >= ?",
             (cutoff, ECONOMY_ANOMALY_POINT_THRESHOLD),
         ).fetchall()
+        gem_rows = conn.execute(
+            "SELECT user_id, SUM(amount) FROM gem_events WHERE created_at >= ? AND amount > 0 "
+            "GROUP BY user_id HAVING SUM(amount) >= ?",
+            (cutoff, ECONOMY_ANOMALY_GEM_THRESHOLD),
+        ).fetchall()
     finally:
         conn.close()
     for user_id, total in rows:
@@ -5499,6 +5861,14 @@ def _check_economy_anomalies():
         )
         _record_audit("経済異常検知", message)
         _send_alert_throttled(f"economy_anomaly_user_{user_id}", message)
+    for user_id, total in gem_rows:
+        message = (
+            f"user_id={user_id}が直近{ECONOMY_ANOMALY_WINDOW_MINUTES}分で{total}ジェム獲得しています"
+            f"(閾値{ECONOMY_ANOMALY_GEM_THRESHOLD}ジェム)。重要度「高」の観測報告乱発による"
+            f"ファーミングの疑いがあるため確認してください。"
+        )
+        _record_audit("経済異常検知(ジェム)", message)
+        _send_alert_throttled(f"economy_anomaly_gem_user_{user_id}", message)
 
 
 @app.route("/game/shop/gacha", methods=["POST"])
@@ -5512,7 +5882,9 @@ def game_shop_gacha():
         abort(403)
     conn = _users_conn()
     try:
-        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        now_dt = datetime.now(JST)
+        now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = (now_dt + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
         candidates = []
         for category, (catalog, cosmetic_category, label) in COSMETIC_CATALOGS.items():
             owned = users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
@@ -5552,7 +5924,7 @@ def game_shop_gacha():
                     result["message"] = f"すべて所持済みだったため、参加賞として{GACHA_CONSOLATION_POINTS}ptを獲得しました。"
             else:
                 _, cosmetic_category, label, item, _ = chosen
-                users.purchase_cosmetic(c, my_id, cosmetic_category, item["id"], 0, now_str)
+                users.purchase_cosmetic(c, my_id, cosmetic_category, item["id"], 0, now_str, next_billing_str)
                 result["message"] = f"福袋の結果: 「{item['label']}」({label})を獲得しました!"
 
         ok = users.spend_points_if_available(conn, my_id, GACHA_COST, _spend)
@@ -5593,7 +5965,7 @@ def game_shop_buy_consumable():
 
 @app.route("/game/gamble")
 def game_gamble():
-    """川霧ギャンブル: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
+    """霧予測ゲーム: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -5785,7 +6157,7 @@ def game_gamble_cancel(bet_id):
 @app.route("/game/daily")
 def game_daily():
     """無料のデイリーゲーム(霧予報クイズ・現象当てクイズ・くじ)をまとめたページ。
-    川霧ギャンブルと違いポイントを賭けないため、ポイントが無い新規ユーザーでも遊べる。"""
+    霧予測ゲームと違いポイントを賭けないため、ポイントが無い新規ユーザーでも遊べる。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -7323,6 +7695,49 @@ def admin_audit_log():
     finally:
         conn.close()
     return render_template("admin_audit_log.html", entries=entries)
+
+
+@app.route("/admin/points")
+@requires_admin
+def admin_points():
+    conn = _users_conn()
+    try:
+        accounts = users.list_users(conn)
+        balances = users.list_all_user_point_balances(conn)
+    finally:
+        conn.close()
+    return render_template("admin_points.html", accounts=accounts, balances=balances)
+
+
+@app.route("/admin/points/<int:user_id>/adjust", methods=["POST"])
+@requires_admin
+def admin_points_adjust(user_id):
+    conn = _users_conn()
+    try:
+        target = users.get_user_by_id(conn, user_id)
+        if target is None:
+            abort(404)
+        raw = (request.form.get("amount") or "").strip()
+        try:
+            amount = int(raw)
+        except ValueError:
+            return _finish("admin_points", "ポイント数は整数で入力してください。", success=False)
+        if amount == 0:
+            return _finish("admin_points", "0ポイントは指定できません。", success=False)
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        source = f"admin_adjust:{session.get('user_id')}:{now_str}:{secrets.token_hex(4)}"
+        users.grant_points(conn, user_id, source, amount, now_str)
+        balance = users.available_points(conn, user_id)
+    finally:
+        conn.close()
+    _record_audit(
+        "ポイント手動調整",
+        f"{target['name']}({target['email']})に{amount:+d}pt付与(調整後残高: {balance}pt)",
+    )
+    return _finish(
+        "admin_points", f"{target['name']}さんに{amount:+d}ptを反映しました(残高: {balance}pt)。",
+        extra={"user_id": user_id, "balance": balance},
+    )
 
 
 @app.route("/admin/accounts")

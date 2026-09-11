@@ -1413,6 +1413,11 @@ table.obs-table th.sticky-col { z-index: 3; }
     border-radius: 999px;
     margin-top: 0.3rem;
 }
+/* .role-tagのdisplay:inline-blockがhidden属性のデフォルト表示(display:none)より
+   優先されてしまい、hidden指定してもタグが消えないバグがあった(ショップの装着中
+   ラベル等)。他のカードコンポーネント([data-shop-panel][hidden]等)と同じく、
+   明示的にdisplay:noneを上書きする。 */
+.role-tag[hidden] { display: none; }
 .role-tag.admin { background: var(--color-danger-bg); color: var(--color-danger); }
 .role-tag.general { background: var(--color-primary-lighter); color: var(--color-primary-dark); }
 .role-tag.aizu_observer { background: var(--color-success-bg); color: var(--color-success); }
