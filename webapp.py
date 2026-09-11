@@ -605,7 +605,19 @@ _NGINX_INTERNAL_HEADER_SECRET = "36ee8a9c0b6989fbe06f1c4e7202f694ab7750924462d7a
 
 
 def _is_funnel_request():
-    return request.headers.get("X-Rf-Internal") != _NGINX_INTERNAL_HEADER_SECRET
+    if request.headers.get("X-Rf-Internal") == _NGINX_INTERNAL_HEADER_SECRET:
+        return False
+    # tailscale funnelは同じホスト名(sshserver.taile43041.ts.net)のポート443を
+    # 使い回すため、nginxを経由しない(MagicDNS等で直接443番にアクセスした)リクエストは
+    # 上のX-Rf-Internalだけでは「正規のtailnet内アクセス」と「公開funnel経由」を区別
+    # できない(2026-09-11、MagicDNS経由だと観測報告タブが消えるという形で発覚)。
+    # tailscaledは認証済みのtailnetメンバーからのリクエストにのみTailscale-User-Login等の
+    # 身元ヘッダーを付与し(クライアントが自分で付けても必ず上書き・削除されるため偽装
+    # 不可能。仕様: https://tailscale.com/s/serve-headers)、身元を特定できない公開funnel
+    # 経由の匿名リクエストにはこのヘッダーが付かない。これを内部アクセス判定に使う。
+    if request.headers.get("Tailscale-User-Login"):
+        return False
+    return True
 
 
 @app.context_processor
