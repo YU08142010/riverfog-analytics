@@ -6,8 +6,9 @@
     <h2>観測報告(未対応 {{ reports|length }}件)</h2>
     <p class="muted">
         利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測と食い違う1時間だけの
-        孤立したブレをシステムが自動検知した内容の確認待ちキューです。自動検知分は前後1時間ずつを
-        含む3枚の画像を見比べたうえで、訂正するか却下するか判断してください(自動では訂正されません)。
+        孤立したブレをシステムが自動検知した内容の確認待ちキューです。どちらも対象時刻の前後1時間ずつを
+        含む3枚の画像と現象判定を見比べたうえで、訂正するか却下するか判断してください(自動では訂正されません)。
+        前後が同じ判定で対象時刻だけ違う場合は、孤立したブレの可能性として赤字で注意表示します。
         自動検知分を実際に訂正すると、報告者の代わりに確認した本人にジェムが付与されます。
         {% if session.get("role") != "admin" %}
         担当地域(会津/只見川のどちらか一方)の報告のみ表示しています。
@@ -35,11 +36,10 @@
     </div>
 
     <div class="observation-report-images">
-        {% if r.source == 'auto_detected' %}
         {% for img in [
-            {'label': '1時間前', 'date': r.prev_image.date, 'hhmm': r.prev_image.hhmm, 'has_image': r.prev_image.has_image},
-            {'label': '該当時刻', 'date': r.image_date, 'hhmm': r.image_hhmm, 'has_image': r.has_image},
-            {'label': '1時間後', 'date': r.next_image.date, 'hhmm': r.next_image.hhmm, 'has_image': r.next_image.has_image},
+            {'label': '1時間前', 'date': r.prev_image.date, 'hhmm': r.prev_image.hhmm, 'has_image': r.prev_image.has_image, 'phenom_label': r.prev_image.label},
+            {'label': '該当時刻', 'date': r.image_date, 'hhmm': r.image_hhmm, 'has_image': r.has_image, 'phenom_label': r.current_label},
+            {'label': '1時間後', 'date': r.next_image.date, 'hhmm': r.next_image.hhmm, 'has_image': r.next_image.has_image, 'phenom_label': r.next_image.label},
         ] %}
         <div class="observation-report-image {{ 'is-target' if img.label == '該当時刻' }}">
             {% if img.has_image %}
@@ -51,20 +51,15 @@
             <div class="observation-report-noimage">画像なし</div>
             {% endif %}
             <div class="observation-report-image-label">{{ img.label }}</div>
+            <div class="muted" style="font-size:0.78rem; font-weight:600;">現象: {{ img.phenom_label }}</div>
         </div>
         {% endfor %}
-        {% elif r.has_image %}
-        {% set image_url = url_for('images_file', date=r.image_date, hhmm=r.image_hhmm, filename=r.station_name ~ '.jpg') %}
-        <div class="observation-report-image is-target">
-            <a href="{{ image_url }}" target="_blank" rel="noopener">
-                <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}のカメラ画像">
-            </a>
-            <div class="observation-report-image-label">該当時刻</div>
-        </div>
-        {% else %}
-        <div class="observation-report-noimage">画像なし</div>
-        {% endif %}
     </div>
+    {% if r.looks_isolated %}
+    <p style="color: var(--color-danger); font-size:0.82rem; font-weight:600; margin:0.5rem 0 0;">
+        ⚠ 前後は同じ判定なのに、この時刻だけ異なります(孤立したブレの可能性があります)。
+    </p>
+    {% endif %}
 
     <div class="observation-report-actions">
         <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload>

@@ -3574,6 +3574,27 @@ def admin_observation_reports():
         conn.close()
     if region is not None:
         reports = [r for r in reports if STATION_REGION.get(r["station_name"]) == region]
+
+    # 前後1時間の現象コードを引けるよう、現象データを1回だけ読み込んで日時をインデックスに
+    # する(報告のたびに全件読み直すと件数が多い時に重くなるため)。読み込みに失敗しても
+    # 画像の前後比較自体は(コード無しで)続けられるようにNoneのまま進める。
+    phenom_by_dt = None
+    if reports:
+        try:
+            _, phenom_df, _ = fog_data.load_river_fog_data()
+            phenom_by_dt = phenom_df.set_index("datetime")
+        except Exception as e:
+            log.warning("Failed to load phenomena data for observation report review: %s", e)
+
+    def _phenom_code_at(station, dt):
+        if phenom_by_dt is None or station not in phenom_by_dt.columns:
+            return None
+        try:
+            code = encode_phenomena_cell(phenom_by_dt.at[dt, station])
+        except KeyError:
+            return None
+        return None if code != code else int(code)  # NaNはcode != codeがTrueになる
+
     for r in reports:
         image_date = r["target_datetime"][:10]
         image_hhmm = r["target_datetime"][11:13] + r["target_datetime"][14:16]
@@ -3581,16 +3602,30 @@ def admin_observation_reports():
         r["image_date"] = image_date
         r["image_hhmm"] = image_hhmm
         r["has_image"] = image_path.is_file()
-        if r["source"] == "auto_detected":
-            # 自動検知分は「前後の観測と食い違う1時間だけの孤立したブレか」を管理者が
-            # 目視で判断できるよう、対象時刻の前後1時間分の画像も並べて見せる。
-            target_dt = datetime.strptime(r["target_datetime"], "%Y-%m-%d %H:%M:%S")
-            for offset, key in ((-1, "prev_image"), (1, "next_image")):
-                neighbor_dt = target_dt + timedelta(hours=offset)
-                n_date = neighbor_dt.strftime("%Y-%m-%d")
-                n_hhmm = neighbor_dt.strftime("%H%M")
-                n_path = IMAGE_DIR / n_date / n_hhmm / f"{r['station_name']}.jpg"
-                r[key] = {"date": n_date, "hhmm": n_hhmm, "has_image": n_path.is_file()}
+        # 「孤立した1時間だけのブレか」を管理者が前後と見比べて判断できるよう、対象時刻の
+        # 前後1時間分の画像と現象コードを、報告の種類(利用者報告/自動検知)を問わず表示する。
+        target_dt = datetime.strptime(r["target_datetime"], "%Y-%m-%d %H:%M:%S")
+        for offset, key in ((-1, "prev_image"), (1, "next_image")):
+            neighbor_dt = target_dt + timedelta(hours=offset)
+            n_date = neighbor_dt.strftime("%Y-%m-%d")
+            n_hhmm = neighbor_dt.strftime("%H%M")
+            n_path = IMAGE_DIR / n_date / n_hhmm / f"{r['station_name']}.jpg"
+            code = _phenom_code_at(r["station_name"], neighbor_dt)
+            r[key] = {
+                "date": n_date, "hhmm": n_hhmm, "has_image": n_path.is_file(),
+                "code": code,
+                "label": PHENOM_LABELS.get(code, "現象なし" if code == 0 else "-"),
+            }
+        # 該当時刻自体の判定は前後と同じ形式で並べて見比べやすくする(値自体は報告時点の
+        # reported_codeそのまま。訂正前の判断材料なので現時点の現象データを再取得する
+        # 意味は無い)。
+        r["current_label"] = PHENOM_LABELS.get(r["reported_code"], "現象なし" if r["reported_code"] == 0 else "-")
+        differs_from_both = (
+            r["prev_image"]["code"] is not None and r["next_image"]["code"] is not None
+            and r["prev_image"]["code"] == r["next_image"]["code"]
+            and r["prev_image"]["code"] != r["reported_code"]
+        )
+        r["looks_isolated"] = differs_from_both
     return render_template(
         "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
         importance_labels=IMPORTANCE_LABELS,
