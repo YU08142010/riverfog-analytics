@@ -11,17 +11,56 @@
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('accuracy_chart') }}" alt="全地点の的中率推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_chart') }}" alt="全地点の的中率推移グラフ"></div>
     <p class="muted">累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
-        （{{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
+        （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
+    {% if overall_fog_stats and overall_fog_stats.precision is not none %}
+    <p class="muted">
+        霧クラス（防災上重要な「霧かどうか」だけを陽性として見た場合）:
+        precision(空振りの少なさ) {{ "%.1f"|format(overall_fog_stats.precision * 100) }}% /
+        recall(見逃しの少なさ) {{ "%.1f"|format(overall_fog_stats.recall * 100) }}%
+        {% if overall_fog_stats.f1 is not none %} / F1 {{ "%.1f"|format(overall_fog_stats.f1 * 100) }}%{% endif %}
+        <br>見逃し(霧なのに霧じゃないと予測): {{ overall_fog_stats.fn }}件 / 空振り(霧じゃないのに霧と予測): {{ overall_fog_stats.fp }}件
+    </p>
+    <p class="muted" style="font-size:0.8rem;">
+        「的中率」は霧が珍しい現象であるほど、常に「霧じゃない」と予測するだけでも高く出てしまいます。
+        実際に霧を捉えられているかはrecall(見逃しの少なさ)の方が参考になります。
+    </p>
+    {% endif %}
     {% else %}
     <p class="muted">答え合わせ済みの予測がまだありません。</p>
     {% endif %}
 </div>
 
+{% if region_summary %}
+<div class="card">
+    <h2>地域別の的中率・霧F1</h2>
+    <p class="muted">会津地方は観測を始めてからまだ日が浅く学習データが少ないため、只見川地域との差を確認できます。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_region_chart') }}" alt="地域別の的中率・霧F1グラフ"></div>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:auto;">
+        <thead><tr><th>地域</th><th>件数</th><th>的中率</th><th>霧recall</th><th>霧precision</th><th>霧F1</th></tr></thead>
+        <tbody>
+        {% for row in region_summary %}
+        <tr>
+            <td>{{ row.region }}</td>
+            <td>{{ row.n }}</td>
+            <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.recall * 100) if row.recall is not none else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.precision * 100) if row.precision is not none else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
 {% if summary and summary.by_lead_day %}
 <div class="card">
     <h2>リードタイム別の的中率</h2>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_lead_time_chart') }}" alt="リードタイム別の的中率グラフ"></div>
     <div class="table-scroll">
 <table class="obs-table" style="width:auto;">
         <thead><tr><th>予測から何日後</th><th>件数</th><th>正解数</th><th>的中率</th></tr></thead>
@@ -40,20 +79,40 @@
 </div>
 {% endif %}
 
-{% if summary and summary.by_station %}
+<div class="card">
+    <h2>混同行列(全地点合算・本番予測)</h2>
+    <p class="muted">縦軸が実際の現象、横軸が予測した現象。対角線上が的中、それ以外は誤判定(どの現象をどの現象と間違えやすいか)を示す。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="chart-themed" src="{{ url_for('accuracy_confusion_matrix') }}" alt="混同行列" style="max-width:520px;"></div>
+</div>
+
+<div class="card">
+    <h2>しきい値ごとのprecision/recall/F1(全地点合算)</h2>
+    <p class="muted">
+        霧と判定するしきい値(予測確率がこの値以上なら「霧」とする)を変えた場合に、
+        precision(空振りの少なさ)・recall(見逃しの少なさ)・F1がどう変わるかを示す。
+        点線は現在各地点で自動選択されているしきい値の分布ではなく、全地点合算データでの
+        参考値であることに注意。地点ごとの正確な採用しきい値は各地点の観測ページで確認できる。
+    </p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_threshold_chart') }}" alt="しきい値ごとのprecision/recall/F1グラフ"></div>
+</div>
+
+{% if summary and by_station %}
 <div class="card">
     <h2>地点別の的中率</h2>
     <div class="table-scroll">
 <table class="obs-table" style="width:auto;">
-        <thead><tr><th>地点</th><th>地域</th><th>件数</th><th>正解数</th><th>的中率</th></tr></thead>
+        <thead><tr><th>地点</th><th>地域</th><th>件数</th><th>正解数</th><th>的中率</th><th>霧recall</th><th>霧precision</th><th>霧F1</th></tr></thead>
         <tbody>
-        {% for row in summary.by_station %}
+        {% for row in by_station %}
         <tr>
             <td><a href="{{ url_for('station_detail', name=row.station) }}">{{ row.station }}</a></td>
             <td>{{ station_region.get(row.station) or "-" }}</td>
             <td>{{ row.n }}</td>
             <td>{{ row.correct }}</td>
             <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.recall * 100) if row.recall is not none else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.precision * 100) if row.precision is not none else "-" }}%</td>
+            <td>{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -99,6 +158,81 @@
     </table>
     </div>
     {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<h2 style="margin:2rem 0 0.5rem;">学習時のモデル精度(検証データ)</h2>
+<p class="muted">
+    ここから下は、本番の予測ログではなく、モデルを学習した際に取り分けた検証データでの評価値です。
+    再学習のたびにfog_model.pyが計算し直すもので、地点ごとに実際に採用されているモデル方式の比較や、
+    どの気象要素が効いているかを確認できます。
+</p>
+
+<div class="card">
+    <h2>学習精度の推移(全地点平均)</h2>
+    <p class="muted">毎日の再学習ごとに記録したaccuracy・霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_training_metrics_chart') }}" alt="学習精度の推移グラフ(全地点平均)"></div>
+</div>
+
+<div class="card">
+    <h2>モデル方式ごとの性能比較</h2>
+    <p class="muted">
+        RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・RF+LightGBM・RF+XGBoost+LightGBMの
+        霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
+        正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります)。
+    </p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_model_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
+</div>
+
+<div class="card">
+    <h2>混同行列(全地点合算・学習時検証データ)</h2>
+    <p class="muted">実際の現象(縦軸)と予測(横軸)を突き合わせた集計です。対角線上が多いほど的中していることを意味します。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="chart-themed" src="{{ url_for('accuracy_training_confusion_matrix') }}" alt="混同行列(全地点合算・学習時検証データ)" style="max-width:520px;"></div>
+</div>
+
+<div class="card">
+    <h2>特徴量の重要度(全地点)</h2>
+    <p class="muted">どの気象要素が霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_feature_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
+</div>
+
+<div class="card">
+    <h2>特徴量の重要度(精度が低い地点のみ)</h2>
+    <p class="muted">
+        accuracyが低い地点{% if low_accuracy_stations %}({{ low_accuracy_stations|join('、') }}){% endif %}
+        に限定した特徴量重要度です。全地点の傾向と比較すると、精度が伸び悩む要因が見えることがあります。
+    </p>
+    {% if low_accuracy_stations %}
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_feature_importance_low_accuracy_chart') }}" alt="特徴量の重要度グラフ(精度が低い地点のみ)"></div>
+    {% else %}
+    <p class="muted">accuracyを算出できた地点がまだありません。</p>
+    {% endif %}
+</div>
+
+{% if model_rows %}
+<div class="card">
+    <h2>地点ごとのモデル状況(最新)</h2>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr>
+            <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
+            <th>accuracy</th><th>霧F1(採用中)</th><th>学習日時</th>
+        </tr></thead>
+        <tbody>
+        {% for r in model_rows %}
+        <tr>
+            <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
+            <td>{{ r.model_type or "-" }}</td>
+            <td>{{ "はい" if r.pooled else "いいえ" }}</td>
+            <td>{{ r.n if r.n is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(r.accuracy) if r.accuracy is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none and r.fog_f1 == r.fog_f1 else "n/a" }}</td>
+            <td>{{ r.trained_at or "-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
     </div>
 </div>
 {% endif %}

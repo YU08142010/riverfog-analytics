@@ -3,78 +3,11 @@
 {% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>学習精度の推移(全地点平均)</h2>
-    <p class="muted">毎日の再学習ごとに記録したaccuracy・霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_chart') }}" alt="学習精度の推移グラフ(全地点平均)"></div>
-</div>
-
-<div class="card">
-    <h2>モデル方式ごとの性能比較</h2>
     <p class="muted">
-        RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・RF+LightGBM・RF+XGBoost+LightGBMの
-        霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
-        正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります。
-        地点ごとの内訳は下の「地点ごとのモデル状況」表を参照してください)。
+        モデルの精度・F1・モデル方式の比較・混同行列・特徴量重要度・地点別のモデル状況は、
+        管理者専用にする理由が無いため<a href="{{ url_for('accuracy_page') }}">分析ページ</a>に統合しました。
+        ここには運用ログ(モデルの自動ロールバック履歴)だけを残しています。
     </p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
-</div>
-
-<div class="card">
-    <h2>混同行列(全地点合算)</h2>
-    <p class="muted">実際の現象(縦軸)と予測(横軸)を突き合わせた集計です。対角線上が多いほど的中していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_confusion_matrix') }}" alt="混同行列(全地点合算)"></div>
-</div>
-
-<div class="card">
-    <h2>特徴量の重要度(全地点)</h2>
-    <p class="muted">どの気象要素が霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
-</div>
-
-<div class="card">
-    <h2>特徴量の重要度(精度が低い地点のみ)</h2>
-    <p class="muted">
-        accuracyが低い地点{% if low_accuracy_stations %}({{ low_accuracy_stations|join('、') }}){% endif %}
-        に限定した特徴量重要度です。全地点の傾向と比較すると、精度が伸び悩む要因が見えることがあります。
-    </p>
-    {% if low_accuracy_stations %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('admin_models_importance_low_accuracy_chart') }}" alt="特徴量の重要度グラフ(精度が低い地点のみ)"></div>
-    {% else %}
-    <p class="muted">accuracyを算出できた地点がまだありません。</p>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2>地点ごとのモデル状況(最新)</h2>
-    {% if rows %}
-    <div class="table-scroll">
-    <table class="obs-table" style="width:100%;">
-        <thead><tr>
-            <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
-            <th>accuracy</th><th>霧F1(採用中)</th>
-            <th>霧F1(RF単体)</th><th>霧F1(XGB単体)</th>
-            <th>学習日時</th>
-        </tr></thead>
-        <tbody>
-        {% for r in rows %}
-        <tr>
-            <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
-            <td>{{ r.model_type or "-" }}</td>
-            <td>{{ "はい" if r.pooled else "いいえ" }}</td>
-            <td>{{ r.n if r.n is not none else "-" }}</td>
-            <td>{{ "%.3f"|format(r.accuracy) if r.accuracy is not none else "-" }}</td>
-            <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none and r.fog_f1 == r.fog_f1 else "n/a" }}</td>
-            <td>{{ "%.3f"|format(r.rf_only.fog_f1) if r.rf_only and r.rf_only.fog_f1 is not none else "n/a" }}</td>
-            <td>{{ "%.3f"|format(r.xgb_only.fog_f1) if r.xgb_only and r.xgb_only.fog_f1 is not none else "n/a" }}</td>
-            <td>{{ r.trained_at or "-" }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="muted">まだモデルが保存されていません(初回の学習を待っています)。</p>
-    {% endif %}
 </div>
 
 <div class="card">

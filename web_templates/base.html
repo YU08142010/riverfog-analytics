@@ -15,6 +15,11 @@
         var saved = localStorage.getItem("theme");
         if (saved === "light" || saved === "dark") {
             document.documentElement.setAttribute("data-theme", saved);
+            // サーバー側でグラフ(分析ページのPNG画像等)をテーマに合わせて描画するために
+            // localStorageと同じ値をクッキーにも書いておく(localStorageはJSでしか
+            // 読めずサーバーには送られないため)。既にthemeクッキーがある場合も
+            // 常に上書きして同期を保つ。
+            document.cookie = "theme=" + saved + "; path=/; max-age=31536000; samesite=lax";
         }
     } catch (e) {}
 })();
@@ -30,7 +35,7 @@
     <nav id="main-nav">
         <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
-        {% if session.get('role') in ('admin', 'observer', 'aizu_observer', 'tadami_observer') and not is_funnel_request() %}
+        {% if session.get('role') in ('admin', 'observer', 'aizu_observer', 'tadami_observer') %}
         {% set obs_pending = pending_observation_report_count() %}
         <a href="{{ url_for('admin_observation_reports') }}" class="{{ 'active' if request.path.startswith('/admin/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
         {% endif %}
@@ -165,6 +170,9 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
     var next = current === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     try { localStorage.setItem("theme", next); } catch (e) {}
+    // サーバー側で描画する分析ページ等のグラフPNGもテーマに合わせられるように、
+    // クッキーにも書いておく(反映されるのは次にそのページを開いた時から)。
+    document.cookie = "theme=" + next + "; path=/; max-age=31536000; samesite=lax";
 });
 
 // ハンバーガーメニュー(狭い画面でナビを折りたたむ)。

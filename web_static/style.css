@@ -97,6 +97,20 @@
     border-radius: var(--radius-sm);
     padding: 0.4rem;
 }
+/* サーバー側でrequest.cookies["theme"]を見て文字色・グリッド色を切り替え、背景を
+   透過で描画しているグラフ(分析ページのF1/precision/recall系など、2026-09-12追加)
+   には、上の「ダークモードは常に白背景」ルールを適用しない(適用すると明るい文字色が
+   白背景に埋もれて読めなくなる)。img.chart-themedクラスを付けたものだけ除外する。 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) img.chart-themed {
+        background: transparent;
+        padding: 0;
+    }
+}
+:root[data-theme="dark"] img.chart-themed {
+    background: transparent;
+    padding: 0;
+}
 
 * { box-sizing: border-box; }
 

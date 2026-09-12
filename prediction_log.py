@@ -126,6 +126,53 @@ def accuracy_trend(conn, station=None):
     return [{"date": d, "n": n, "correct": c} for d, n, c in rows]
 
 
+def fog_pair_counts(conn, since=None, station=None):
+    """答え合わせ済みの(station, 予測コード, 実際のコード)の組み合わせごとの件数を返す。
+    混同行列・地点/地域別のprecision/recall/F1・霧クラスの見逃し/空振り集計など、
+    分析ページの各種指標をこの1つの集計結果から使い回す（個別に似たクエリを何度も
+    発行しないため）。戻り値: [{"station":, "predicted_code":, "actual_code":, "n":}, ...]
+    """
+    where = ["actual_code IS NOT NULL"]
+    params = []
+    if since:
+        where.append("verified_at >= ?")
+        params.append(since)
+    if station:
+        where.append("station = ?")
+        params.append(station)
+    where_sql = " AND ".join(where)
+    rows = conn.execute(
+        f"""SELECT station, predicted_code, actual_code, COUNT(*)
+            FROM predictions WHERE {where_sql}
+            GROUP BY station, predicted_code, actual_code""", params,
+    ).fetchall()
+    return [{"station": s, "predicted_code": p, "actual_code": a, "n": n} for s, p, a, n in rows]
+
+
+def fog_prob_bucket_counts(conn, since=None, station=None):
+    """答え合わせ済みかつpredicted_fog_probが記録されている予測を、確率を0.05刻みに
+    丸めた上で件数を集計する。しきい値を変えた場合のprecision/recall/F1を後から
+    計算するための元データ（生の行を全部返すとレコード数が多い場合に重いため、
+    しきい値の刻み幅と同じ粒度に丸めて集計してから返す）。
+    戻り値: [{"prob": 0.05刻みの確率, "actual_code":, "n":}, ...]
+    """
+    where = ["actual_code IS NOT NULL", "predicted_fog_prob IS NOT NULL"]
+    params = []
+    if since:
+        where.append("verified_at >= ?")
+        params.append(since)
+    if station:
+        where.append("station = ?")
+        params.append(station)
+    where_sql = " AND ".join(where)
+    rows = conn.execute(
+        f"""SELECT ROUND(predicted_fog_prob, 2) AS bucket, actual_code, COUNT(*)
+            FROM predictions WHERE {where_sql}
+            GROUP BY bucket, actual_code""", params,
+    ).fetchall()
+    return [{"prob": b, "actual_code": a, "n": n} for b, a, n in rows]
+
+
 def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
     """from_dt_str〜to_dt_strの間で「霧」と予測されている地点・時刻を返す。
     同じ(station, target_datetime)に複数回の予測記録がある場合、最新のrun_atのものを使う

@@ -141,7 +141,21 @@
 
 <div class="card">
     <h2>的中率の推移</h2>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('station_chart', name=name) }}" alt="{{ name }}の的中率推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_chart', name=name) }}" alt="{{ name }}の的中率推移グラフ"></div>
+</div>
+</div>
+
+<div class="content-grid-2">
+<div class="card">
+    <h2>学習時のモデル精度推移</h2>
+    <p class="muted">再学習のたびの、この地点のaccuracy・霧F1(検証データでの評価値)の推移。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_model_metrics_chart', name=name) }}" alt="{{ name }}の学習時モデル精度推移グラフ"></div>
+</div>
+
+<div class="card">
+    <h2>しきい値ごとのprecision/recall/F1</h2>
+    <p class="muted">霧と判定するしきい値を変えた場合のトレードオフ。点線が現在この地点で自動選択されているしきい値。</p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_threshold_chart', name=name) }}" alt="{{ name }}のしきい値ごとのprecision/recall/F1グラフ"></div>
 </div>
 </div>
 

@@ -43,6 +43,7 @@
                     <br>→ 訂正済み: {{ phenom_labels.get(corrected, "現象なし" if corrected == 0 else "-") }}
                     {% endif %}
                 </span>
+                {% if can_correct_station(station_name) %}
                 <details style="margin-top:0.3rem; font-size:0.78rem;">
                     <summary style="cursor:pointer;">この判定を訂正する</summary>
                     <form method="post" action="{{ url_for('images_hour_correct', date=date, hhmm=hhmm) }}" style="margin-top:0.3rem; display:flex; gap:0.3rem; align-items:center;">
@@ -57,6 +58,7 @@
                         <button type="submit" class="button" style="padding:0.2rem 0.5rem; font-size:0.78rem;">保存</button>
                     </form>
                 </details>
+                {% endif %}
                 {% endif %}
             </figcaption>
         </figure>

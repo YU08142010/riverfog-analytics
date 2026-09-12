@@ -35,6 +35,7 @@ from flask import (
     request, send_file, send_from_directory, session, url_for,
 )
 
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -583,6 +584,11 @@ def _can_correct_station(role, station_name):
 @app.context_processor
 def _inject_role_label():
     return {"role_label": lambda role: ROLE_LABELS.get(role, role)}
+
+
+@app.context_processor
+def _inject_can_correct_station():
+    return {"can_correct_station": lambda station_name: _can_correct_station(session.get("role"), station_name)}
 
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
 # （でないと自分でオンにしたら誰もオフに戻せなくなる）。
@@ -1234,16 +1240,16 @@ def requires_admin(view):
 
 def requires_observer(view):
     """観測報告の確認・訂正権限(管理者・会津観測者・只見観測者のいずれか)を必須にする。
-    requires_adminと同じセッションCookie方式・Funnel遮断。担当地域の絞り込みは
+    requires_adminと違い、Funnelでは遮断しない(2026-09-12、別tailnetのTailscale
+    アカウントを使うスマホから使えなくなるという形で発覚)。観測報告はユーザー管理や
+    ポイント操作のような本来の管理者専用機能(/admin配下、requires_admin)とは異なり、
+    ログイン+役割さえ確認できればよい観測業務の一部として扱う。担当地域の絞り込みは
     ここでは行わない(ログイン+権限の有無だけをチェックする)ので、各ルート側で
     _observer_region_for_role/_can_correct_stationを使って地域チェックを行うこと。"""
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login", next=request.path))
-        if _is_funnel_request():
-            flash("この機能は公開URLからは利用できません。Tailscale経由でアクセスしてください。", "error")
-            return redirect(url_for("dashboard"))
         if not _can_manage_observation_reports(session.get("role")):
             flash("この操作には観測者または管理者の権限が必要です。", "error")
             return redirect(url_for("dashboard"))
@@ -1277,6 +1283,32 @@ def _cached_png(cache_key, watch_paths, render_fn):
     with _png_cache_lock:
         _png_cache[cache_key] = (mtimes, data)
     return data
+
+
+def _chart_theme():
+    """グラフ描画時に使う配色テーマ('light'/'dark')。ダーク/ライト切替ボタン(base.html)が
+    localStorageと一緒にthemeクッキーにも同じ値を書き込むので、それをサーバー側の
+    matplotlib描画にも反映する(2026-09-12、分析ページのグラフがダークモードでも
+    白背景のまま浮いて見えるという指摘を受けて追加)。"""
+    return "dark" if request.cookies.get("theme") == "dark" else "light"
+
+
+def _chart_rc_context():
+    """グラフの文字色・グリッド色をテーマに合わせ、背景を透過にするrcParamsのコンテキスト。
+    _cached_pngでキャッシュする場合は、cache_keyにテーマも含めること(サーバー全体で
+    共有するキャッシュのため、含めないと片方のテーマで生成された画像がもう片方の
+    利用者にも出てしまう)。"""
+    if _chart_theme() == "dark":
+        fg, grid = "#e6edf3", "#3a4552"
+    else:
+        fg, grid = "#1c2733", "#c7d0da"
+    return matplotlib.rc_context({
+        "text.color": fg, "axes.labelcolor": fg, "axes.edgecolor": fg,
+        "xtick.color": fg, "ytick.color": fg, "grid.color": grid,
+        "legend.labelcolor": fg, "figure.facecolor": "none",
+        "axes.facecolor": "none", "savefig.facecolor": "none",
+        "savefig.transparent": True,
+    })
 
 
 def _render_line_chart_png(dates, rates, title):
@@ -1537,9 +1569,11 @@ def _accuracy_trend_safe(station=None):
         return []
 
 
-def _load_metrics_history_trend():
+def _load_metrics_history_trend(station=None):
     """fog_model.append_metrics_historyが書く履歴CSVから、学習日ごとの
     平均accuracy・平均霧F1(%)を計算する（『精度が向上しているか』を見るための集計）。
+    station指定時はその地点の行だけに絞る(CSVは元々station列を持つ、地点ごとの
+    モデル精度推移を見せるための拡張。2026-09-12追加)。
     """
     if not fog_model.METRICS_HISTORY_PATH.exists():
         return []
@@ -1547,6 +1581,8 @@ def _load_metrics_history_trend():
     try:
         with open(fog_model.METRICS_HISTORY_PATH, encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                if station is not None and row.get("station") != station:
+                    continue
                 date = (row.get("trained_at") or "")[:10]
                 if not date:
                     continue
@@ -1574,8 +1610,9 @@ def _load_metrics_history_trend():
     return trend
 
 
-def _render_metrics_trend_png(trend):
-    """学習時のaccuracy・霧F1（全地点平均、%）の推移を折れ線グラフのPNGにして返す。"""
+def _render_metrics_trend_png(trend, title="学習時のモデル精度推移(全地点平均)"):
+    """学習時のaccuracy・霧F1の推移を折れ線グラフのPNGにして返す。station指定で絞り込んだ
+    trend(_load_metrics_history_trend参照)を渡せば地点別の推移にもなる。"""
     fig, ax = plt.subplots(figsize=(9, 3.2))
     all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
     acc_pts = [(d, t["accuracy"]) for d, t in zip(all_dates, trend) if t["accuracy"] is not None]
@@ -1600,7 +1637,7 @@ def _render_metrics_trend_png(trend):
 
     ax.set_ylim(0, 100)
     ax.set_ylabel("スコア(%)")
-    ax.set_title("学習時のモデル精度推移(全地点平均)", fontsize=11)
+    ax.set_title(title, fontsize=11)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     buf = io.BytesIO()
@@ -1611,7 +1648,7 @@ def _render_metrics_trend_png(trend):
 
 
 def _is_valid_number(v):
-    """NoneでもNaNでもない数値かを判定する（NaN != NaNを利用、numpyを追加importしない）。"""
+    """NoneでもNaNでもない数値かを判定する（NaN != NaNを利用）。"""
     return v is not None and v == v
 
 
@@ -1688,8 +1725,10 @@ def _render_feature_importance_png(importance, top_n=15):
     return buf.getvalue()
 
 
-def _render_confusion_matrix_png(labels, matrix):
-    """全地点のテストデータを合算した混同行列をヒートマップで表示する。"""
+def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算)"):
+    """全地点分を合算した混同行列をヒートマップで表示する。管理者向け「モデル管理」
+    ページ(学習時の検証データが元)と、/accuracyページ(本番の予測ログが元、
+    _confusion_matrix_from_pairs参照)の両方でこの関数を共用する。"""
     fig, ax = plt.subplots(figsize=(4.6, 4.0))
     if matrix is None or len(labels) == 0:
         ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
@@ -1710,7 +1749,104 @@ def _render_confusion_matrix_png(labels, matrix):
                 color = "white" if vmax and v > vmax * 0.6 else "#1c2733"
                 ax.text(j, i, str(int(v)), ha="center", va="center", color=color, fontsize=10)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    ax.set_title("混同行列(全地点合算)", fontsize=11)
+    ax.set_title(title, fontsize=11)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_lead_time_chart_png(by_lead_day):
+    """リードタイム(予測から何日後か)別の的中率を棒グラフにする。表だけだと
+    『日数が経つほど精度が落ちる』傾向が伝わりにくいための補足グラフ。"""
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    rows = [r for r in by_lead_day if r["n"] > 0]
+    if rows:
+        labels = [f"{r['lead_day']}日後" for r in rows]
+        rates = [100.0 * r["correct"] / r["n"] for r in rows]
+        x = list(range(len(rows)))
+        ax.bar(x, rates, color="#1a5276", width=0.6)
+        for i, (rate, r) in enumerate(zip(rates, rows)):
+            ax.text(i, rate + 2, f"{rate:.1f}%\n(n={r['n']})", ha="center", fontsize=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=9)
+    else:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("的中率(%)")
+    ax.set_title("リードタイム別の的中率", fontsize=11)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_region_compare_chart_png(region_summary):
+    """地域(会津/只見川)ごとに的中率と霧F1を並べた棒グラフ。会津は観測開始が新しく
+    学習データが少ないため、只見川との差が一目でわかるようにする。"""
+    fig, ax = plt.subplots(figsize=(7, 3.4))
+    rows = [r for r in region_summary if r["n"] > 0]
+    if rows:
+        labels = [r["region"] for r in rows]
+        acc = [100.0 * r["correct"] / r["n"] for r in rows]
+        f1 = [100.0 * r["f1"] if r["f1"] is not None else 0 for r in rows]
+        x = np.arange(len(rows))
+        width = 0.32
+        ax.bar(x - width / 2, acc, width, color="#1a5276", label="的中率(%)")
+        ax.bar(x + width / 2, f1, width, color="#c0392b", label="霧F1(%)")
+        for i, r in enumerate(rows):
+            ax.text(i - width / 2, acc[i] + 2, f"{acc[i]:.1f}", ha="center", fontsize=8)
+            label = f"{f1[i]:.1f}" if r["f1"] is not None else "データなし"
+            ax.text(i + width / 2, f1[i] + 2, label, ha="center", fontsize=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.legend(loc="upper right", fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("スコア(%)")
+    ax.set_title("地域別の的中率・霧F1", fontsize=11)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
+    """霧と判定するしきい値(fog_probがこの値以上なら「霧」)を変えた場合の
+    precision(空振りの少なさ)・recall(見逃しの少なさ)・F1の変化を折れ線で示す。
+    現在採用中のしきい値(fog_model._choose_fog_thresholdが選んだ値)を縦線で示し、
+    他のしきい値を選んだ場合とのトレードオフを比較できるようにする。"""
+    fig, ax = plt.subplots(figsize=(8, 3.4))
+    if sweep:
+        ts = [s["threshold"] for s in sweep]
+        precisions = [s["precision"] if s["precision"] is not None else float("nan") for s in sweep]
+        recalls = [s["recall"] if s["recall"] is not None else float("nan") for s in sweep]
+        f1s = [s["f1"] if s["f1"] is not None else float("nan") for s in sweep]
+        ax.plot(ts, precisions, marker="o", markersize=3, color="#2a78d6", linewidth=1.4, label="precision(空振りの少なさ)")
+        ax.plot(ts, recalls, marker="s", markersize=3, color="#eb6834", linewidth=1.4, label="recall(見逃しの少なさ)")
+        ax.plot(ts, f1s, marker="^", markersize=3, color="#16a085", linewidth=1.6, label="F1")
+        if current_threshold is not None:
+            ax.axvline(current_threshold, color="#7f2020", linestyle="--", linewidth=1.2)
+            ax.text(current_threshold, 1.02, f"採用中({current_threshold:.2f})",
+                    ha="center", fontsize=8, color="#7f2020", transform=ax.get_xaxis_transform())
+        ax.legend(loc="lower center", fontsize=8, ncol=3)
+        ax.set_xlim(0, 1)
+    else:
+        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("しきい値(この確率以上を「霧」と判定)")
+    ax.set_ylabel("スコア")
+    ax.set_title(title, fontsize=11)
+    ax.grid(True, alpha=0.3)
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
@@ -2817,6 +2953,160 @@ def _accuracy_by_weather_safe():
     return result
 
 
+# 霧クラスのprecision/recall/F1・混同行列・地域比較は、いずれも答え合わせ済みの
+# (地点, 予測コード, 実際のコード)の組み合わせ件数(prediction_log.fog_pair_counts)
+# という1つの集計結果から計算できるため、accuracy_summaryと同じTTLキャッシュで共有する。
+_fog_pair_counts_cache = {"data": None, "at": 0.0}
+_fog_pair_counts_cache_lock = threading.Lock()
+
+
+def _fog_pair_counts_safe():
+    now = time.monotonic()
+    with _fog_pair_counts_cache_lock:
+        cached = _fog_pair_counts_cache["data"]
+        if cached is not None and now - _fog_pair_counts_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+            return cached
+    if not DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            result = prediction_log.fog_pair_counts(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to read fog pair counts: %s", e)
+        return []
+    with _fog_pair_counts_cache_lock:
+        _fog_pair_counts_cache["data"] = result
+        _fog_pair_counts_cache["at"] = now
+    return result
+
+
+def _fog_confusion_stats(pairs, fog_codes=None):
+    """(station, predicted_code, actual_code, n)のリストから、「霧」を陽性クラスとみなした
+    TP(的中)/FP(空振り: 霧じゃないのに霧と予測)/FN(見逃し: 霧なのに霧じゃないと予測)/TNと、
+    precision/recall/F1を計算する。fog_model._choose_fog_thresholdと同じくSUMMARY_FOG_CODES
+    を陽性クラスの定義に使うので、学習時のしきい値選択と同じ基準で比較できる。"""
+    fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
+    tp = fp = fn = tn = 0
+    for row in pairs:
+        n = row["n"]
+        pred_fog = row["predicted_code"] in fog_codes
+        actual_fog = row["actual_code"] in fog_codes
+        if pred_fog and actual_fog:
+            tp += n
+        elif pred_fog and not actual_fog:
+            fp += n
+        elif actual_fog:
+            fn += n
+        else:
+            tn += n
+    precision = tp / (tp + fp) if (tp + fp) else None
+    recall = tp / (tp + fn) if (tp + fn) else None
+    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+    return {"tp": tp, "fp": fp, "fn": fn, "tn": tn, "precision": precision, "recall": recall, "f1": f1}
+
+
+def _accuracy_station_metrics_safe():
+    """地点ごとに霧クラスのprecision/recall/F1をまとめる(地点別的中率テーブルに
+    列を足すためのもの)。戻り値: {地点名: _fog_confusion_statsの戻り値}"""
+    by_station = {}
+    for row in _fog_pair_counts_safe():
+        by_station.setdefault(row["station"], []).append(row)
+    return {station: _fog_confusion_stats(rows) for station, rows in by_station.items()}
+
+
+def _accuracy_region_summary_safe():
+    """地域(会津/只見川)ごとに、的中率と霧クラスのprecision/recall/F1をまとめる
+    (会津は観測を始めてまだ日が浅く学習データが少ないため、只見川との差を
+    一目で見せられるようにする)。"""
+    by_region = {}
+    for row in _fog_pair_counts_safe():
+        region = STATION_REGION.get(row["station"], "不明")
+        by_region.setdefault(region, []).append(row)
+    result = []
+    for region, rows in sorted(by_region.items()):
+        n = sum(r["n"] for r in rows)
+        correct = sum(r["n"] for r in rows if r["predicted_code"] == r["actual_code"])
+        result.append({"region": region, "n": n, "correct": correct, **_fog_confusion_stats(rows)})
+    return result
+
+
+def _confusion_matrix_from_pairs(pairs):
+    """prediction_log.fog_pair_countsの集計結果から(labels, matrix)を組み立てる。
+    fog_model.compute_confusion_matrixと同じ形式だが、学習時の検証データではなく
+    実際の本番予測ログ(prediction_log)を元にする点が異なる。"""
+    labels = sorted({row["predicted_code"] for row in pairs} | {row["actual_code"] for row in pairs})
+    index = {c: i for i, c in enumerate(labels)}
+    matrix = np.zeros((len(labels), len(labels)), dtype=int)
+    for row in pairs:
+        matrix[index[row["actual_code"]], index[row["predicted_code"]]] += row["n"]
+    return labels, matrix
+
+
+_fog_prob_buckets_cache = {"data": None, "at": 0.0}
+_fog_prob_buckets_cache_lock = threading.Lock()
+
+
+def _fog_prob_buckets_safe(station=None):
+    """predicted_fog_prob(0.05刻み)ごとに、実際に霧だったか否かの件数を集計する。
+    しきい値を変えた場合のprecision/recall/F1を後から計算するための元データ。
+    station未指定(全地点合算、/accuracyページ用)の場合のみ短時間キャッシュする
+    (地点別は station_detail 表示のたびに変わるstation引数が多様で、キャッシュの
+    ヒット率が低いため素通しにする)。"""
+    if station is None:
+        now = time.monotonic()
+        with _fog_prob_buckets_cache_lock:
+            cached = _fog_prob_buckets_cache["data"]
+            if cached is not None and now - _fog_prob_buckets_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+                return cached
+    if not DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            result = prediction_log.fog_prob_bucket_counts(conn, station=station)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to read fog probability buckets: %s", e)
+        return []
+    if station is None:
+        with _fog_prob_buckets_cache_lock:
+            _fog_prob_buckets_cache["data"] = result
+            _fog_prob_buckets_cache["at"] = now
+    return result
+
+
+def _threshold_sweep_stats(buckets, fog_codes=None):
+    """しきい値ごとのprecision/recall/F1を計算する。fog_model.FOG_THRESHOLD_GRIDと
+    同じ刻みを使うので、学習時にfog_model._choose_fog_thresholdが選んだしきい値と
+    同じ基準で比較できる。戻り値: [{"threshold":, "precision":, "recall":, "f1":}, ...]
+    """
+    fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
+    if not buckets:
+        return []
+    total_fog = sum(b["n"] for b in buckets if b["actual_code"] in fog_codes)
+    if total_fog == 0:
+        return []
+    results = []
+    for t in fog_model.FOG_THRESHOLD_GRID:
+        tp = fp = 0
+        for b in buckets:
+            if b["prob"] < t:
+                continue
+            if b["actual_code"] in fog_codes:
+                tp += b["n"]
+            else:
+                fp += b["n"]
+        precision = tp / (tp + fp) if (tp + fp) else None
+        recall = tp / total_fog
+        f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+        results.append({"threshold": float(t), "precision": precision, "recall": recall, "f1": f1})
+    return results
+
+
 def _latest_observations():
     """最新時刻の観測(気象値+地点ごとの現象コード)を返す。データが無ければNoneを返す。"""
     if not WEATHER_DB_PATH.exists():
@@ -3183,9 +3473,16 @@ def _phenom_codes_for_datetime(target_dt_str):
 
 @app.route("/images/<date>/<hhmm>/correct", methods=["POST"])
 def images_hour_correct(date, hhmm):
-    """人間がGeminiの現象判定を訂正する。訂正内容はphenomena_correctionsに記録するのみで、
-    xlsx上の値そのものは書き換えない(次回の再学習でfog_model.py側がこの記録を使って
-    除外・重み付けする設計にしやすいよう、生データと訂正履歴を分けて持つ)。"""
+    """観測者・管理者(担当地域のみ)が、過去のアーカイブ画像に対するGeminiの現象判定を
+    その場で直接訂正する。station_correct_observationと同じ承認不要の即時訂正だが、
+    こちらは「今」ではなく任意の過去の日時を対象にできる点が異なる。訂正内容は
+    phenomena_correctionsに記録するのみで、xlsx上の値そのものは書き換えない
+    (次回の再学習でfog_model.py側がこの記録を使って除外・重み付けする設計にしやすいよう、
+    生データと訂正履歴を分けて持つ)。
+    2026-09-12: 元々役割チェックが無く、ログインしていれば誰でも(一般ユーザーでも)
+    任意の地点の判定を書き換えられてしまっていた(station_correct_observationは
+    _can_correct_stationで守られているのに、こちらは抜けていた)ため、同じチェックを
+    追加した。"""
     my_id = session.get("user_id")
     if not my_id:
         abort(403)
@@ -3194,6 +3491,8 @@ def images_hour_correct(date, hhmm):
     station = request.form.get("station", "")
     if station not in STATION_NAMES:
         abort(404)
+    if not _can_correct_station(session.get("role"), station):
+        abort(403)
     corrected_code = request.form.get("corrected_code", type=int)
     if corrected_code is None or not (0 <= corrected_code <= 10):
         return _finish(
@@ -3208,13 +3507,20 @@ def images_hour_correct(date, hhmm):
     try:
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         users.add_phenomena_correction(conn, station, target_dt_str, original_code, corrected_code, my_id, now_str)
+        gem_note = ""
+        if corrected_code != original_code:
+            if users.grant_gems(
+                conn, my_id, f"direct_correction:{station}:{target_dt_str}",
+                GEM_REWARD_DIRECT_CORRECTION, now_str,
+            ):
+                gem_note = f"(+{GEM_REWARD_DIRECT_CORRECTION}ジェム)"
         _record_audit(
             "画像判定を訂正",
             f"{station} {target_dt_str}: {original_code} → {corrected_code}",
         )
     finally:
         conn.close()
-    return _finish("images_hour", "訂正を記録しました。", date=date, hhmm=hhmm)
+    return _finish("images_hour", f"訂正を記録しました{gem_note}。", date=date, hhmm=hhmm)
 
 
 @app.route("/images/<date>/<hhmm>/file/<path:filename>")
@@ -3585,12 +3891,19 @@ def station_correct_observation(name):
         users.add_phenomena_correction(
             conn, name, target_dt_str, current["code"], corrected_code, my_id, now_str, source="human",
         )
+        gem_note = ""
+        if corrected_code != current["code"]:
+            if users.grant_gems(
+                conn, my_id, f"direct_correction:{name}:{target_dt_str}",
+                GEM_REWARD_DIRECT_CORRECTION, now_str,
+            ):
+                gem_note = f"(+{GEM_REWARD_DIRECT_CORRECTION}ジェム)"
         _record_audit(
             "観測をその場で訂正", f"{name} {target_dt_str}: {current['code']} → {corrected_code}",
         )
     finally:
         conn.close()
-    return _finish("station_detail", "観測結果を訂正しました。", name=name)
+    return _finish("station_detail", f"観測結果を訂正しました{gem_note}。", name=name)
 
 
 @app.route("/admin/observation_reports")
@@ -4005,9 +4318,46 @@ def station_chart(name):
         trend = _accuracy_trend_safe(station=name)
         dates = [r["date"] for r in trend if r["n"] > 0]
         rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-        return _render_line_chart_png(dates, rates, f"{name} の的中率推移")
+        with _chart_rc_context():
+            return _render_line_chart_png(dates, rates, f"{name} の的中率推移")
 
-    png = _cached_png(f"station_chart:{name}", [DB_PATH], render)
+    png = _cached_png(f"station_chart:{name}:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/stations/<name>/model_metrics_chart.png")
+def station_model_metrics_chart(name):
+    """地点別のモデル学習時精度推移(item 7)。全地点平均のみだった従来の
+    admin_models_chartと違い、この地点固有の学習履歴だけに絞る。"""
+    name = _validate_station(name)
+
+    def render():
+        trend = _load_metrics_history_trend(station=name)
+        with _chart_rc_context():
+            return _render_metrics_trend_png(trend, title=f"{name} の学習時モデル精度推移")
+
+    png = _cached_png(f"station_model_metrics_chart:{name}:{_chart_theme()}",
+                       [fog_model.METRICS_HISTORY_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/stations/<name>/threshold_chart.png")
+def station_threshold_chart(name):
+    """地点別のしきい値ごとのprecision/recall/F1(item 8)。実際の本番予測ログ
+    (predicted_fog_prob)から算出するので、学習時の検証データに依存しない。"""
+    name = _validate_station(name)
+
+    def render():
+        sweep = _threshold_sweep_stats(_fog_prob_buckets_safe(station=name))
+        state = fog_model.load_model_state()
+        current = (state.get(name) or {}).get("fog_threshold")
+        with _chart_rc_context():
+            return _render_threshold_sweep_png(
+                sweep, current_threshold=current,
+                title=f"{name} のしきい値ごとのprecision/recall/F1",
+            )
+
+    png = _cached_png(f"station_threshold_chart:{name}:{_chart_theme()}", [DB_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -4015,7 +4365,42 @@ def station_chart(name):
 def accuracy_page():
     summary = _accuracy_summary_safe()
     by_weather = _accuracy_by_weather_safe()
-    return render_template("accuracy.html", summary=summary, by_weather=by_weather)
+    if summary:
+        # _accuracy_summary_safeはサーバー全体で共有するキャッシュを返すため、
+        # そのdictを直接書き換えず、霧クラス指標を足した新しい行リストを別途作る。
+        station_metrics = _accuracy_station_metrics_safe()
+        by_station = [
+            {**row, **station_metrics.get(row["station"], {})}
+            for row in summary["by_station"]
+        ]
+    else:
+        by_station = []
+    region_summary = _accuracy_region_summary_safe()
+    overall_fog_stats = _fog_confusion_stats(_fog_pair_counts_safe())
+
+    # 以前は管理者専用の「モデル管理」ページにしかなかった学習時(検証データ)の指標。
+    # 2026-09-12、正答率・F1のような分析情報は管理者専用でなくてよいとの判断で
+    # 分析ページに統合した(admin_models_*のチャート・地点別モデル状況の表を参照)。
+    model_state = fog_model.load_model_state()
+    model_rows = []
+    for col in sorted(model_state.keys()):
+        info = model_state[col]
+        model_rows.append({
+            "station": col,
+            "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
+            "n": info.get("n"),
+            "accuracy": info.get("accuracy"),
+            "fog_f1": info.get("fog_f1"),
+            "pooled": info.get("pooled"),
+            "trained_at": info.get("trained_at"),
+        })
+    low_accuracy_stations = _low_accuracy_stations(model_state)
+
+    return render_template(
+        "accuracy.html", summary=summary, by_weather=by_weather, by_station=by_station,
+        region_summary=region_summary, overall_fog_stats=overall_fog_stats,
+        model_rows=model_rows, low_accuracy_stations=low_accuracy_stations,
+    )
 
 
 @app.route("/accuracy/chart.png")
@@ -4024,9 +4409,119 @@ def accuracy_chart():
         trend = _accuracy_trend_safe()
         dates = [r["date"] for r in trend if r["n"] > 0]
         rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-        return _render_line_chart_png(dates, rates, "全地点の的中率推移")
+        with _chart_rc_context():
+            return _render_line_chart_png(dates, rates, "全地点の的中率推移")
 
-    png = _cached_png("accuracy_chart", [DB_PATH], render)
+    png = _cached_png(f"accuracy_chart:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/lead_time_chart.png")
+def accuracy_lead_time_chart():
+    def render():
+        summary = _accuracy_summary_safe()
+        by_lead_day = summary["by_lead_day"] if summary else []
+        with _chart_rc_context():
+            return _render_lead_time_chart_png(by_lead_day)
+
+    png = _cached_png(f"accuracy_lead_time_chart:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/region_chart.png")
+def accuracy_region_chart():
+    def render():
+        with _chart_rc_context():
+            return _render_region_compare_chart_png(_accuracy_region_summary_safe())
+
+    png = _cached_png(f"accuracy_region_chart:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/confusion_matrix.png")
+def accuracy_confusion_matrix():
+    def render():
+        labels, matrix = _confusion_matrix_from_pairs(_fog_pair_counts_safe())
+        with _chart_rc_context():
+            return _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算・本番予測)")
+
+    png = _cached_png(f"accuracy_confusion_matrix:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/threshold_chart.png")
+def accuracy_threshold_chart():
+    def render():
+        sweep = _threshold_sweep_stats(_fog_prob_buckets_safe())
+        with _chart_rc_context():
+            return _render_threshold_sweep_png(sweep, title="しきい値ごとのprecision/recall/F1(全地点合算)")
+
+    png = _cached_png(f"accuracy_threshold_chart:{_chart_theme()}", [DB_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+# 以下5つは元々/admin/models配下(管理者専用)にあった学習時(検証データ)のチャート。
+# 本番予測ログ(prediction_log)ベースの上記チャートと違い、fog_model.load_model_state()
+# が持つ最新の学習結果(検証データでの評価)が元になっている。
+
+
+@app.route("/accuracy/training_metrics_chart.png")
+def accuracy_training_metrics_chart():
+    def render():
+        with _chart_rc_context():
+            return _render_metrics_trend_png(_load_metrics_history_trend())
+
+    png = _cached_png(f"accuracy_training_metrics_chart:{_chart_theme()}",
+                       [fog_model.METRICS_HISTORY_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/model_compare_chart.png")
+def accuracy_model_compare_chart():
+    def render():
+        state = fog_model.load_model_state()
+        with _chart_rc_context():
+            return _render_model_compare_png(state)
+
+    png = _cached_png(f"accuracy_model_compare_chart:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/training_confusion_matrix.png")
+def accuracy_training_confusion_matrix():
+    def render():
+        state = fog_model.load_model_state()
+        labels, matrix = fog_model.compute_confusion_matrix(state)
+        with _chart_rc_context():
+            return _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算・学習時検証データ)")
+
+    png = _cached_png(f"accuracy_training_confusion_matrix:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/feature_importance_chart.png")
+def accuracy_feature_importance_chart():
+    def render():
+        state = fog_model.load_model_state()
+        importance = fog_model.compute_feature_importance(state)
+        with _chart_rc_context():
+            return _render_feature_importance_png(importance)
+
+    png = _cached_png(f"accuracy_feature_importance_chart:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
+    return Response(png, mimetype="image/png")
+
+
+@app.route("/accuracy/feature_importance_low_accuracy_chart.png")
+def accuracy_feature_importance_low_accuracy_chart():
+    def render():
+        state = fog_model.load_model_state()
+        only_stations = set(_low_accuracy_stations(state))
+        importance = fog_model.compute_feature_importance(state, only_stations=only_stations)
+        with _chart_rc_context():
+            return _render_feature_importance_png(importance)
+
+    png = _cached_png(f"accuracy_feature_importance_low_accuracy_chart:{_chart_theme()}",
+                       [fog_model.MODEL_STATE_PATH], render)
     return Response(png, mimetype="image/png")
 
 
@@ -4822,6 +5317,11 @@ GEM_REWARD_ON_SUBMIT = {"low": 1, "medium": 1, "high": GEM_REWARD_TOTAL["high"]}
 GEM_REWARD_ON_APPROVE = {
     level: GEM_REWARD_TOTAL[level] - GEM_REWARD_ON_SUBMIT[level] for level in IMPORTANCE_LEVELS
 }
+# 観測者・管理者がstation_correct_observation(承認待ちを介さずその場で直接訂正する方)を
+# 使った時の即時ジェム報酬。一般ユーザーの「報告」と違い、担当権限を持つ本人の判断で
+# 確定させる操作のため承認は挟まず、最高重要度の報告(GEM_REWARD_TOTAL["high"]=40)より
+# 高い50ジェムを即時付与する(2026-09-12追加)。
+GEM_REWARD_DIRECT_CORRECTION = 50
 PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
 
 
@@ -8309,22 +8809,9 @@ def admin_restart():
 @app.route("/admin/models")
 @requires_admin
 def admin_models():
-    state = fog_model.load_model_state()
-    rows = []
-    for col in sorted(state.keys()):
-        info = state[col]
-        rows.append({
-            "station": col,
-            "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
-            "n": info.get("n"),
-            "accuracy": info.get("accuracy"),
-            "fog_f1": info.get("fog_f1"),
-            "rf_only": info.get("rf_only"),
-            "xgb_only": info.get("xgb_only"),
-            "pooled": info.get("pooled"),
-            "trained_at": info.get("trained_at"),
-        })
-
+    """モデルの精度・F1・混同行列・特徴量重要度・地点別状況は、2026-09-12に
+    /accuracy(分析ページ、管理者専用ではない)へ統合した。ここにはpredict.logの
+    ロールバック履歴(モデルの自動ロールバックという運用上の出来事のログ)のみ残す。"""
     rollback_lines = []
     predict_log_path = ALLOWED_LOGS.get("predict")
     if predict_log_path and predict_log_path.exists():
@@ -8334,54 +8821,7 @@ def admin_models():
         except Exception as e:
             log.warning("Failed to scan predict.log for rollbacks: %s", e)
 
-    low_accuracy_stations = _low_accuracy_stations(state)
-    return render_template(
-        "admin_models.html", rows=rows, rollback_lines=rollback_lines[-50:],
-        low_accuracy_stations=low_accuracy_stations,
-    )
-
-
-@app.route("/admin/models/chart.png")
-@requires_admin
-def admin_models_chart():
-    png = _render_metrics_trend_png(_load_metrics_history_trend())
-    return Response(png, mimetype="image/png")
-
-
-@app.route("/admin/models/compare_chart.png")
-@requires_admin
-def admin_models_compare_chart():
-    state = fog_model.load_model_state()
-    png = _render_model_compare_png(state)
-    return Response(png, mimetype="image/png")
-
-
-@app.route("/admin/models/importance_chart.png")
-@requires_admin
-def admin_models_importance_chart():
-    state = fog_model.load_model_state()
-    importance = fog_model.compute_feature_importance(state)
-    png = _render_feature_importance_png(importance)
-    return Response(png, mimetype="image/png")
-
-
-@app.route("/admin/models/confusion_matrix.png")
-@requires_admin
-def admin_models_confusion_matrix():
-    state = fog_model.load_model_state()
-    labels, matrix = fog_model.compute_confusion_matrix(state)
-    png = _render_confusion_matrix_png(labels, matrix)
-    return Response(png, mimetype="image/png")
-
-
-@app.route("/admin/models/importance_low_accuracy_chart.png")
-@requires_admin
-def admin_models_importance_low_accuracy_chart():
-    state = fog_model.load_model_state()
-    only_stations = set(_low_accuracy_stations(state))
-    importance = fog_model.compute_feature_importance(state, only_stations=only_stations)
-    png = _render_feature_importance_png(importance)
-    return Response(png, mimetype="image/png")
+    return render_template("admin_models.html", rollback_lines=rollback_lines[-50:])
 
 
 def _image_archive_day_dirs():
