@@ -4,10 +4,15 @@
 まず申請(signup_requests)として保存され、管理者が承認して初めてusersに実体ができる。
 パスワードは常にハッシュ化して保存し、平文は一切保持しない。
 """
+import logging
+import re
 import sqlite3
 from datetime import date, datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
+
+log = logging.getLogger("users")
+_foreign_keys_verified = False
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -205,7 +210,8 @@ CREATE TABLE IF NOT EXISTS observation_reports (
     resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     resolved_at TEXT,
     resolution_note TEXT,
-    importance TEXT NOT NULL DEFAULT 'medium'
+    importance TEXT NOT NULL DEFAULT 'medium',
+    reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_observation_reports_status ON observation_reports(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_reports_pending_unique
@@ -499,6 +505,15 @@ def _ensure_observation_report_importance_column(conn):
         conn.execute("ALTER TABLE observation_reports ADD COLUMN importance TEXT NOT NULL DEFAULT 'medium'")
 
 
+def _ensure_observation_report_reason_column(conn):
+    """observation_reportsに後から追加したreason列。報告者が「なぜこの現象だと思ったか」を
+    自由記述で残せるようにするための列(管理者が承認キューで画像と一緒に確認する)。
+    自動検知(source="auto_detected")分には人の理由が無いためNULLのままになる。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(observation_reports)").fetchall()}
+    if "reason" not in cols:
+        conn.execute("ALTER TABLE observation_reports ADD COLUMN reason TEXT")
+
+
 def _ensure_login_events_columns(conn):
     """ipは異常ログイン検知(未知IPからの管理者ログイン等)のために後から追加した列。
     logged_out_atはログイン履歴に終了時刻も表示するために後から追加した列
@@ -510,6 +525,32 @@ def _ensure_login_events_columns(conn):
         conn.execute("ALTER TABLE login_events ADD COLUMN ip TEXT")
     if "logged_out_at" not in cols:
         conn.execute("ALTER TABLE login_events ADD COLUMN logged_out_at TEXT")
+
+
+def _verify_foreign_keys(conn):
+    """SCHEMA文字列でREFERENCESを書いているテーブルが、実際にこのDBファイル上でも
+    外部キーとして有効になっているかを確認し、ずれていればログに警告する。
+
+    CREATE TABLE IF NOT EXISTSは既存テーブルに対して無視されるため、あるテーブルが
+    「REFERENCESが書き足される前」に一度作られたまま残っていると、SCHEMA文字列の
+    見た目上はFKがあるように見えても実際には効いていない、という状態になりうる
+    (login_events/audit_log/station_commentsで過去に実際に発生し、_migrate_add_foreign_keys
+    で個別に直した)。他のテーブルで同じ問題が今後(または他の環境で)静かに発生しても
+    気づけるよう、起動のたびに全テーブルを機械的に突き合わせる(2026-09-13の監査で
+    「3テーブルしか個別対応していない」点を指摘された)。"""
+    tables = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", SCHEMA, re.S)
+    for table, body in tables:
+        if "REFERENCES" not in body:
+            continue
+        actual_fks = conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+        if not actual_fks:
+            log.warning(
+                "Table %s declares REFERENCES in SCHEMA but has no foreign key enforced on this "
+                "database file (likely created before the REFERENCES clause was added); "
+                "ON DELETE CASCADE will not apply to it. Consider adding a migration like "
+                "_migrate_add_foreign_keys for this table.",
+                table,
+            )
 
 
 def connect(db_path):
@@ -533,8 +574,24 @@ def connect(db_path):
     _migrate_phenomena_corrections_nullable_source(conn)
     _ensure_login_events_columns(conn)
     _ensure_observation_report_importance_column(conn)
+    _ensure_observation_report_reason_column(conn)
     conn.execute("PRAGMA foreign_keys = ON")
+    global _foreign_keys_verified
+    if not _foreign_keys_verified:
+        # connect()はリクエストのたびに呼ばれるため、この検証はプロセスごとに1回だけ
+        # 行う(毎回全34テーブル分PRAGMAを打つのは無駄なオーバーヘッドになるため)。
+        _verify_foreign_keys(conn)
+        _foreign_keys_verified = True
     return conn
+
+
+def _escape_like(keyword):
+    """SQLのLIKE検索でキーワード中の%・_をワイルドカードではなく文字そのものとして
+    扱わせるためにエスケープする(呼び出し側でLIKE ? ESCAPE '\\'と組み合わせて使う)。
+    パラメータ化されているためSQLインジェクションのリスクは無いが、例えば"50%"で検索
+    すると"%"がワイルドカード扱いされ「50に続く任意の文字列」にマッチしてしまい、
+    利用者の意図と異なる検索結果になっていた(2026-09-13の監査で指摘)。"""
+    return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _norm_email(email):
@@ -1191,7 +1248,13 @@ def grant_points(conn, user_id, source, amount, created_at):
     """実績以外のポイント源(ログインボーナス・コメント投稿・AIチャット利用等)用の汎用付与。
     UNIQUE(user_id, source)制約により、同じsource文字列への二重付与を防ぐ。sourceは
     呼び出し元で一意になるよう組み立てる(例: "daily_login:2026-08-31", "comment:123")。
-    新規付与ならTrue、既に付与済みならFalseを返す。"""
+    新規付与ならTrue、既に付与済みならFalseを返す。
+
+    注意: 同じ(user_id, source)には生涯で1回しか付与できない(スキーマレベルでの保証)。
+    呼び出し元がsourceに日付やレコードidのような一意な値を含めずに固定文字列を使うと、
+    本来は繰り返し発生してよいはずのイベントでも2回目以降は静かに付与されなくなる
+    (エラーにはならず、cur.rowcount == 0でFalseが返るだけ)。新しい付与経路を追加する際は
+    sourceの一意性を必ず確認すること(2026-09-13の監査で指摘)。"""
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO point_events (user_id, source, amount, created_at) "
@@ -1486,7 +1549,13 @@ def spend_points_if_available(conn, user_id, cost, do_spend):
 # 単一の獲得経路しか持たないため、ポイントほど複雑な集計は不要)。
 def grant_gems(conn, user_id, source, amount, created_at):
     """UNIQUE(user_id, source)制約により、同じsource文字列への二重付与(・二重消費)を
-    防ぐ。新規付与/消費ならTrue、既に同じsourceで記録済みならFalseを返す。"""
+    防ぐ。新規付与/消費ならTrue、既に同じsourceで記録済みならFalseを返す。
+
+    注意: grant_pointsと同じ契約。同じ(user_id, source)には生涯で1回しか付与できない。
+    呼び出し元がsourceに日付やレコードidのような一意な値を含めずに固定文字列を使うと、
+    本来は繰り返し発生してよいはずのイベントでも2回目以降は静かに付与されなくなる
+    (エラーにはならず、cur.rowcount == 0でFalseが返るだけ)。新しい付与経路を追加する際は
+    sourceの一意性を必ず確認すること(2026-09-13の監査で指摘)。"""
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO gem_events (user_id, source, amount, created_at) "
@@ -1588,17 +1657,18 @@ def phenomena_correction_counts_by_station(conn):
 
 
 def create_observation_report(conn, station_name, target_datetime, reported_code, reported_by, reported_at,
-                               source="user", importance="medium"):
+                               source="user", importance="medium", reason=None):
     """観測が間違っていると思う場合の報告を1件記録する。同じ(地点, 日時)への保留中の
     報告が既にあれば新規作成しない(idx_observation_reports_pending_uniqueにより
     INSERT OR IGNOREが安全に効く)。挿入できたら新しいreport_idを、既に保留中の報告が
-    あればNoneを返す(呼び出し側はNoneかどうかで成否を判定する)。"""
+    あればNoneを返す(呼び出し側はNoneかどうかで成否を判定する)。
+    reason: 報告者が「なぜこの現象だと思ったか」を書いた自由記述(自動検知分はNone)。"""
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO observation_reports "
-            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
-            (station_name, target_datetime, reported_code, reported_by, reported_at, source, importance),
+            "(station_name, target_datetime, reported_code, reported_by, reported_at, source, status, importance, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (station_name, target_datetime, reported_code, reported_by, reported_at, source, importance, reason),
         )
         return cur.lastrowid if cur.rowcount > 0 else None
 
@@ -1609,7 +1679,7 @@ def list_pending_observation_reports(conn):
     rows = conn.execute(
         """
         SELECT r.id, r.station_name, r.target_datetime, r.reported_code, r.reported_by, r.reported_at,
-               r.source, u.name AS reporter_name, r.importance
+               r.source, u.name AS reporter_name, r.importance, r.reason
         FROM observation_reports r
         LEFT JOIN users u ON u.id = r.reported_by
         WHERE r.status = 'pending'
@@ -1624,6 +1694,7 @@ def list_pending_observation_reports(conn):
                 "(自動検知)" if r[6] == "auto_detected" else (r[7] or "(退会済みユーザー)")
             ),
             "importance": r[8],
+            "reason": r[9],
         }
         for r in rows
     ]
@@ -1908,7 +1979,7 @@ def use_consumable(conn, user_id, item_id):
         return cur.rowcount > 0
 
 
-# --- デイリー霧予報クイズ(無料・スキル型) -----------------------------------------
+# --- デイリー川霧予報クイズ(無料・スキル型) -----------------------------------------
 def place_daily_fog_quiz_guess(conn, user_id, quiz_date, station_name, guess, created_at):
     """同じ(user_id, quiz_date)への2回目以降の投稿はPRIMARY KEY制約により無視される
     (1日1回のみ)。新規に記録できればTrue、既に今日の分を出していればFalseを返す。"""
@@ -2100,8 +2171,8 @@ def list_pinned_dm_messages(conn, conversation_id):
 def search_dm_messages(conn, conversation_id, keyword, limit=50):
     rows = conn.execute(
         "SELECT id, sender_id, body, created_at FROM dm_messages "
-        "WHERE conversation_id = ? AND body LIKE ? ORDER BY id DESC LIMIT ?",
-        (conversation_id, f"%{keyword}%", limit),
+        "WHERE conversation_id = ? AND body LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
+        (conversation_id, f"%{_escape_like(keyword)}%", limit),
     ).fetchall()
     return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
 
@@ -2407,8 +2478,9 @@ def list_pinned_group_messages(conn):
 
 def search_group_messages(conn, keyword, limit=50):
     rows = conn.execute(
-        "SELECT id, sender_id, body, created_at FROM group_messages WHERE body LIKE ? ORDER BY id DESC LIMIT ?",
-        (f"%{keyword}%", limit),
+        "SELECT id, sender_id, body, created_at FROM group_messages "
+        "WHERE body LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
+        (f"%{_escape_like(keyword)}%", limit),
     ).fetchall()
     return [{"id": r[0], "sender_id": r[1], "body": r[2], "created_at": r[3]} for r in rows]
 
@@ -2596,11 +2668,12 @@ def list_shared_files(conn, folder_id=None):
 def search_shared_files(conn, keyword):
     """filename・description・tags・content_text(全文検索対象、_save_uploaded_file時に
     テキスト系ファイルのみ格納済み)を横断検索する。フォルダをまたいで全件を対象にする。"""
-    like = f"%{keyword}%"
+    like = f"%{_escape_like(keyword)}%"
     rows = conn.execute(
         "SELECT id, filename, content_type, size_bytes, uploaded_by, uploaded_at, description, "
         "folder_id, tags FROM shared_files "
-        "WHERE filename LIKE ? OR description LIKE ? OR tags LIKE ? OR content_text LIKE ? "
+        "WHERE filename LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' "
+        "OR tags LIKE ? ESCAPE '\\' OR content_text LIKE ? ESCAPE '\\' "
         "ORDER BY uploaded_at DESC",
         (like, like, like, like),
     ).fetchall()
@@ -2722,8 +2795,18 @@ def shared_folder_is_empty(conn, folder_id):
 
 
 def delete_shared_folder(conn, folder_id):
+    """空のフォルダだけを削除する。空チェックと削除を同じトランザクション内で行うことで、
+    「空チェック」と「削除」の間に別リクエストがファイルを追加するレース(TOCTOU)を防ぐ
+    (以前はwebapp.py側でshared_folder_is_empty()を先に呼び、その結果を見てから
+    delete_shared_folder()を呼ぶ2ステップだったため、間隔中に追加されたファイルが
+    親フォルダ削除のON DELETE CASCADEで一緒に消えてしまう、あるいはIntegrityErrorに
+    なる可能性があった、2026-09-13の監査で指摘)。戻り値: 実際に削除できたらTrue、
+    空でなかった(削除しなかった)場合はFalse。"""
     with conn:
+        if not shared_folder_is_empty(conn, folder_id):
+            return False
         conn.execute("DELETE FROM shared_folders WHERE id = ?", (folder_id,))
+        return True
 
 
 __all__ = [

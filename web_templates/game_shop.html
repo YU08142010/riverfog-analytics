@@ -14,7 +14,7 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "川霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 
 <div class="card shop-points-header">
@@ -97,7 +97,7 @@
     <button type="button" class="ranking-toggle-btn" data-shop-tab="marker">殿堂入り章 / 💎最高級</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="seasonal">季節限定</button>
     <button type="button" class="ranking-toggle-btn" data-shop-tab="gacha">福袋</button>
-    <button type="button" class="ranking-toggle-btn" data-shop-tab="consumable">霧予測ゲーム用アイテム</button>
+    <button type="button" class="ranking-toggle-btn" data-shop-tab="consumable">川霧予測ゲーム用アイテム</button>
 </div>
 
 {% macro cosmetic_item(category, item, owned_ids, equipped_id) %}
@@ -499,8 +499,8 @@
 
 <div data-shop-panel data-shop-tab-panel="consumable" hidden>
     <div class="card">
-        <h2 style="margin-top:0;">霧予測ゲーム用アイテム</h2>
-        <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、霧予測ゲームで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
+        <h2 style="margin-top:0;">川霧予測ゲーム用アイテム</h2>
+        <p class="muted" style="font-size:0.85rem;">買った分だけ在庫が増え、川霧予測ゲームで賭ける時に使えます(装備品と違い、使うと1個減ります)。</p>
         <div class="member-grid">
             {% for item in consumable_definitions %}
             <div class="member-tile" style="cursor:default;" data-item-id="{{ item.id }}">

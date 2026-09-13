@@ -1,4 +1,4 @@
-"""地点ごとの霧予測モデルの学習・予測。
+"""地点ごとの川霧予測モデルの学習・予測。
 
 RandomForest・XGBoost・LightGBM単体、およびRF+XGBoost・RF+LightGBM・
 RF+XGBoost+LightGBMのブレンドを候補として地点ごとに学習し、検証データでの正答率(accuracy)が最も高い方式を
@@ -9,6 +9,7 @@ RF+XGBoost+LightGBMのブレンドを候補として地点ごとに学習し、�
 （アルゴリズム自体はそちらで検証済みのものを流用し、Colab専用の周辺機能だけを外した）。
 """
 import csv
+import json
 import logging
 import shutil
 import time
@@ -20,6 +21,7 @@ import pandas as pd
 import requests
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, make_scorer
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
@@ -28,6 +30,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 from common import BASE_DIR, JST, request_with_dns_fallback
 import station_weather
 from fog_advection import ADVECTION_FOG_FEATURE, compute_advection_fog_index
+import fog_tree_viz
 
 try:
     from xgboost import XGBClassifier
@@ -90,15 +93,22 @@ MIN_CLASSES_PER_LOCATION = 2
 MIN_TOTAL_ROWS_FOR_POOLING = 500
 MIN_ROWS_FOR_POOLED_RESCUE = 30
 # 追加されたばかりの地点(会津地方など)は、まだMIN_ROWS_FOR_POOLED_RESCUEに満たない・
-# 霧の実例が1件も無い(1クラスのみ)ことがほとんどで、従来のゲートのままだとプーリング
+# 川霧の実例が1件も無い(1クラスのみ)ことがほとんどで、従来のゲートのままだとプーリング
 # モデルにすら乗せられず「その地点だけモデルが存在しない」状態になってしまう。
-# 地点別霧発生率(STATION_FOG_RATE_FEATURE)は少数サンプルでも全体平均に平滑化される設計
+# 地点別川霧発生率(STATION_FOG_RATE_FEATURE)は少数サンプルでも全体平均に平滑化される設計
 # のため、ごく少数の実測さえあればプーリングモデルへの「配置」自体は問題ない。以下の値を
 # 満たせば、ホールドアウト評価(精度算出)はできなくても実際の予測には使えるようにする。
 MIN_ROWS_FOR_POOLED_DEPLOY = 3
 
 FOG_THRESHOLD_GRID = tuple(round(t, 2) for t in np.arange(0.05, 1.0, 0.05))
 DEFAULT_FOG_THRESHOLD = 0.5
+
+# 川霧確率の較正(isotonic regression)に使う、個別学習した地点のホールドアウトを
+# プールしたサンプル数の下限。RF/XGBoost/LightGBMのブレンド確率はSVMのような
+# sigmoid型ではなく非単調に歪みやすく、しきい値ごとのprecision/recallのブレの
+# 一因になっているため事後補正するが、isotonicはノンパラメトリックな分サンプルが
+# 少ないと過学習しやすい。足りない場合は較正せず生の確率をそのまま使う。
+MIN_SAMPLES_FOR_FOG_CALIBRATION = 300
 
 PARAM_DIST = {
     "model__n_estimators": [200, 300, 500],
@@ -127,25 +137,25 @@ XGB_FALLBACK_PARAMS = dict(model__n_estimators=300, model__max_depth=4, model__l
 LGBM_FALLBACK_PARAMS = dict(model__n_estimators=300, model__max_depth=-1, model__learning_rate=0.1)
 BLEND_WEIGHTS = [0.0, 0.25, 0.5, 0.75, 1.0]
 
-# プーリングモデル専用の追加特徴量：地点ごとの過去の霧発生率（他の特徴量は全地点で同一の
+# プーリングモデル専用の追加特徴量：地点ごとの過去の川霧発生率（他の特徴量は全地点で同一の
 # 気象データのため、これが無いと同時刻の予測が全地点で完全に一致してしまう）。
 # サンプル数が少ない地点で経験値がそのまま乗ると不安定なので、全地点平均へ向けてベイズ平滑化する。
-STATION_FOG_RATE_FEATURE = "地点別霧発生率"
+STATION_FOG_RATE_FEATURE = "地点別川霧発生率"
 STATION_RATE_SMOOTHING = 20
 
 # 地点間の空間相関を表す特徴量：自地点を除く他地点の(CROSS_STATION_FOG_LAG_HOURS)時間前の
-# 霧発生率。川霧は隣接区間で連動しやすいという想定に基づく。1時間前の値を使うのは、
-# 同時刻の値をそのまま使うと「今まさに霧かどうか」という答えの情報が特徴量に漏れてしまう
+# 川霧発生率。川霧は隣接区間で連動しやすいという想定に基づく。1時間前の値を使うのは、
+# 同時刻の値をそのまま使うと「今まさに川霧かどうか」という答えの情報が特徴量に漏れてしまう
 # ため（他地点の現在値は、自地点の現在の判定と強く相関するが、それは推論時には使えない
 # 未来情報に等しい）。
 # 予報（未来）には他地点の実測が存在しないため、学習時のみ時間変化する値を使い、予報時は
 # 直近の実測時点での値を一定値として引き継ぐ近似とする（視程等と同様、予報期間が長くなる
 # ほど厳密ではなくなるが、無いよりは直近の広域的な傾向を反映できる）。
 CROSS_STATION_FOG_LAG_HOURS = 1
-CROSS_STATION_FOG_FEATURE = "広域霧指数"
+CROSS_STATION_FOG_FEATURE = "広域川霧指数"
 
 # 上のCROSS_STATION_FOG_FEATUREは地理・風向を一切見ない単純平均のため、「どちらから
-# どちらへ流れているか」を表せない。fog_advection.pyの移流霧指数(ADVECTION_FOG_FEATURE)は
+# どちらへ流れているか」を表せない。fog_advection.pyの移流川霧指数(ADVECTION_FOG_FEATURE)は
 # 実測座標(cameras.csv)と実測風向風速から風上側の地点を推定し、その延長として追加した
 # 特徴量。互いに排他ではなく両方を特徴量として与え、どちらがどれだけ効くかはモデルの
 # 学習(および回帰検知の自動ロールバック)に委ねる。
@@ -162,13 +172,16 @@ CONFIDENCE_LOG_PATH = BASE_DIR / "data" / "models" / "confidence_log.csv"
 # その日時の気象特徴量を学習から除外するために読む(confidence_log.csvと同じ考え方)。
 BACKFILL_LOG_PATH = BASE_DIR / "data" / "models" / "backfill_log.csv"
 
-# モデル退行防止：前回学習時点よりスコア（霧F1、無ければ全体F1）が悪化した地点を自動検出する。
+# モデル退行防止：前回学習時点よりスコア（川霧F1、無ければ全体F1）が悪化した地点を自動検出する。
 # 固定の許容誤差ではなく、各回のテストデータをブートストラップ再抽出して「今回のスコアが
 # 前回以上になる確率」を推定し、それがREGRESSION_CONFIDENCE分の1未満（＝ノイズでは説明が
 # つかないほど明確に悪化）と判断できた地点だけ、自動的に前回のモデルへロールバックする。
 # サンプル数が少なすぎる、または前回の生データ(y_test/y_pred)が保存されていない（形式が古い等）
 # 場合は、判定できないため比較自体を行わない。
 MODEL_STATE_PATH = BASE_DIR / "data" / "models" / "model_state.joblib"
+# 川霧確率の較正モデル(IsotonicRegression)。modelsと形が異なる(地点ごとの辞書ではなく
+# 単一のオブジェクト)ため、model_state.joblibとは別ファイルに保存する。
+FOG_CALIBRATOR_PATH = BASE_DIR / "data" / "models" / "fog_calibrator.joblib"
 # model_state.joblibは常に最新状態で上書きされ過去の履歴が残らないため、精度が実際に
 # 改善しているかを後で振り返れるよう、学習のたびに地点ごとのaccuracy/F1をここに追記する。
 METRICS_HISTORY_PATH = BASE_DIR / "data" / "models" / "model_metrics_history.csv"
@@ -176,6 +189,12 @@ METRICS_HISTORY_FIELDS = ["trained_at", "station", "model_type", "pooled", "n", 
 REGRESSION_CONFIDENCE = 0.95
 REGRESSION_N_BOOTSTRAP = 500
 MIN_N_FOR_REGRESSION_CHECK = 30
+# ブートストラップによる統計的判定に足るサンプルが無い(新規地点・プーリング救済で
+# 評価split自体が組めない場合を含む)地点は完全に回帰保護の対象外になっていた
+# (2026-09-13の監査で指摘)。統計的な有意差検定はできなくても、スコアがこれだけ
+# 絶対値で落ちていれば「明らかに壊れている」とみなしてロールバックする簡易ガードを
+# フォールバックとして使う。
+SPARSE_REGRESSION_ABS_DROP = 0.3
 
 
 class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
@@ -309,7 +328,7 @@ TRIPLE_BLEND_STEPS = 4  # 0, 0.25, 0.5, 0.75, 1.0刻みの重心座標グリッ�
 
 def _choose_triple_blend_weights(rf, xgb, lgbm, X_val, y_val):
     """RF・XGBoost・LightGBMの3方式ブレンドの重み(w_rf, w_xgb, w_lgbm)を、検証データでの
-    _blend_score(霧F1優先)が最も高くなる組み合わせから選ぶ。"""
+    _blend_score(川霧F1優先)が最も高くなる組み合わせから選ぶ。"""
     n = TRIPLE_BLEND_STEPS
     best_w, best_score = (1.0 / 3, 1.0 / 3, 1.0 / 3), -1.0
     for i in range(n + 1):
@@ -322,13 +341,127 @@ def _choose_triple_blend_weights(rf, xgb, lgbm, X_val, y_val):
     return best_w
 
 
-def compute_fog_probability(pipe, X):
-    """川霧（SUMMARY_FOG_CODES、コード1〜3）である確率（predict_probaの該当クラス列の合計）。"""
+def compute_fog_probability(pipe, X, calibrator=None):
+    """川霧（SUMMARY_FOG_CODES、コード1〜3）である確率（predict_probaの該当クラス列の合計）。
+    calibratorに_fit_fog_calibratorで学習したIsotonicRegressionを渡すと、その較正を
+    通した確率を返す(木ベースアンサンブルの生の確率は非単調に歪みやすいため)。
+    Noneの場合(較正モデルが無い/学習を打ち切った場合)は生の確率をそのまま返す。"""
     proba = pipe.predict_proba(X)
     fog_idx = [i for i, c in enumerate(pipe.classes_) if c in SUMMARY_FOG_CODES]
-    if not fog_idx:
-        return np.zeros(len(X))
-    return proba[:, fog_idx].sum(axis=1)
+    raw = np.zeros(len(X)) if not fog_idx else proba[:, fog_idx].sum(axis=1)
+    return apply_fog_calibration(calibrator, raw)
+
+
+def apply_fog_calibration(calibrator, probs):
+    """calibratorがあれば較正後の確率を、無ければそのまま返す。"""
+    probs = np.asarray(probs, dtype="float64")
+    if calibrator is None:
+        return probs
+    return np.clip(calibrator.predict(probs), 0.0, 1.0)
+
+
+def extract_representative_tree(pipe, feature_names):
+    """採用中のモデル(HybridFogClassifier/TripleBlendFogClassifier、または単一方式)が
+    実際に使っている決定木の構造を、可視化用の共通ノード形式(fog_tree_viz参照)で取り出す。
+    ブレンドモデルは複数方式を組み合わせているため、実際に使われている(Noneでない)
+    コンポーネントそれぞれについて、その中の代表として1本目の木を取り出す(RF/XGBoost/
+    LightGBMいずれも多数の木の平均・合計で最終予測を出す方式のため、1本だけでは全体の
+    性格を表しきれない点に注意。木の深さ・複雑さの雰囲気をつかむための図であり、
+    予測ロジックそのものの正確な再現ではない)。
+
+    戻り値: {"RF": {...}, "XGBoost": {...}, "LightGBM": {...}}(実際に使われている方式のみ)。
+    各値は {"root": ノード, "actual_max_depth": int, "configured_max_depth": int/None,
+    "n_estimators": int}。
+    """
+    result = {}
+    rf_pipe = getattr(pipe, "rf", None)
+    xgb_pipe = getattr(pipe, "xgb", None)
+    lgbm_pipe = getattr(pipe, "lgbm", None)
+
+    if rf_pipe is not None:
+        rf_model = rf_pipe.named_steps["model"]
+        tree0 = rf_model.estimators_[0].tree_
+        root = fog_tree_viz.sklearn_tree_to_nodes(tree0, feature_names)
+        result["RF"] = {
+            "root": root,
+            "actual_max_depth": fog_tree_viz.tree_actual_max_depth(root),
+            "configured_max_depth": rf_model.max_depth,
+            "n_estimators": rf_model.n_estimators,
+        }
+    if xgb_pipe is not None:
+        try:
+            xgb_model = xgb_pipe.named_steps["model"].model_
+            booster = xgb_model.get_booster()
+            dump = booster.get_dump(dump_format="json")
+            tree0 = json.loads(dump[0])
+            root = fog_tree_viz.xgb_tree_to_nodes(tree0, feature_names)
+            result["XGBoost"] = {
+                "root": root,
+                "actual_max_depth": fog_tree_viz.tree_actual_max_depth(root),
+                "configured_max_depth": xgb_model.max_depth,
+                "n_estimators": len(dump),
+            }
+        except Exception as e:
+            log.warning("Failed to extract XGBoost tree for visualization: %s", e)
+    if lgbm_pipe is not None:
+        try:
+            lgbm_model = lgbm_pipe.named_steps["model"]
+            model_dump = lgbm_model.booster_.dump_model()
+            tree_structure = model_dump["tree_info"][0]["tree_structure"]
+            root = fog_tree_viz.lgbm_tree_to_nodes(tree_structure, feature_names)
+            result["LightGBM"] = {
+                "root": root,
+                "actual_max_depth": fog_tree_viz.tree_actual_max_depth(root),
+                "configured_max_depth": lgbm_model.max_depth if lgbm_model.max_depth != -1 else None,
+                "n_estimators": len(model_dump["tree_info"]),
+            }
+        except Exception as e:
+            log.warning("Failed to extract LightGBM tree for visualization: %s", e)
+    return result
+
+
+def _fit_fog_calibrator(probs, labels):
+    """個々の地点モデルのホールドアウト(検証用テストデータ)をプールし、川霧確率の較正モデル
+    (isotonic regression)を学習する。プーリング救済した地点は評価split自体が信頼できない
+    ことがある(can_evaluate=False)ため含めず、個別学習できた地点の分だけを使う。
+    プールしたサンプル数がMIN_SAMPLES_FOR_FOG_CALIBRATION未満、またはラベルが1種類しか
+    無い場合は較正を行わずNoneを返す(呼び出し側は生の確率をそのまま使う)。"""
+    probs = np.asarray(probs, dtype="float64")
+    labels = np.asarray(labels, dtype="int64")
+    if len(probs) < MIN_SAMPLES_FOR_FOG_CALIBRATION or len(np.unique(labels)) < 2:
+        log.info("Not enough pooled holdout data (%d rows) to fit a fog probability calibrator", len(probs))
+        return None
+    calibrator = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    calibrator.fit(probs, labels)
+    log.info("Fitted fog probability calibrator on %d pooled holdout row(s)", len(probs))
+    return calibrator
+
+
+def save_fog_calibrator(calibrator, path=FOG_CALIBRATOR_PATH):
+    """較正モデルを保存する。Noneの場合(サンプル不足等で較正を行わない場合)は既存の
+    ファイルを削除し、次回load_fog_calibrator()がNoneを返す(=生の確率にフォールバック)
+    ようにする。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if calibrator is None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    joblib.dump(calibrator, tmp_path)
+    tmp_path.replace(path)
+
+
+def load_fog_calibrator(path=FOG_CALIBRATOR_PATH):
+    """保存済みの較正モデルを読み込む。無い/壊れている場合はNone(生の確率にフォールバック)。"""
+    if not path.exists():
+        return None
+    try:
+        return joblib.load(path)
+    except Exception as e:
+        log.warning("Failed to load fog probability calibrator (%s), using raw probabilities: %s", path, e)
+        return None
 
 
 def _estimator_feature_importances(estimator):
@@ -449,7 +582,7 @@ def _blend_score(y_true, y_pred):
 
 
 def _single_component_metrics(component_pipe, is_rf, X_test, y_test):
-    """RandomForest単体・XGBoost単体それぞれで予測した場合のaccuracy・霧F1を返す
+    """RandomForest単体・XGBoost単体それぞれで予測した場合のaccuracy・川霧F1を返す
     （採用しているhybridとの性能比較を管理画面で見せるための診断用。モデル選択自体には
     使わない）。コンポーネントが学習されていない場合はNoneを返す。
     """
@@ -466,7 +599,7 @@ def _single_component_metrics(component_pipe, is_rf, X_test, y_test):
 
 
 def _evaluate_solo_pipe(pipe, X_test, y_test):
-    """任意の学習済みモデル単体(ここではLightGBM)で予測した場合のaccuracy・霧F1を返す。
+    """任意の学習済みモデル単体(ここではLightGBM)で予測した場合のaccuracy・川霧F1を返す。
     RF/XGBの_single_component_metrics()はHybridFogClassifier経由で評価するが、
     LightGBMは採用中のhybridブレンド(RF+XGB)には含めていない独立した比較用モデルのため、
     直接.predict()を呼ぶだけで同じ指標を計算できる（単に横並び比較を管理画面で見せるための
@@ -515,12 +648,17 @@ def _fit_component(kind, X_train, y_train):
             search = RandomizedSearchCV(
                 _make_base_pipe(kind), param_dist, n_iter=n_iter,
                 cv=TimeSeriesSplit(n_splits=cv_splits),
-                # n_jobs=-1（loky/マルチプロセス）はこのサーバー環境でBroken pipeを起こすことを
-                # 確認したため、単一プロセスで確実性を優先する（日次バッチなので数秒〜数十秒の
-                # 差は問題にならない）。
-                scoring=FOG_F1_SCORER, random_state=42, n_jobs=1, error_score="raise",
+                # n_jobs=-1をjoblibの既定のloky(マルチプロセス)バックエンドと組み合わせると
+                # このサーバー環境でBroken pipeを起こすことを確認したため、単一プロセスに
+                # していた。ただし日次バッチが実測1.5時間以上かかるようになっており
+                # (2026-09-13の監査で「数秒〜数十秒の差」という前提が既に古いと指摘された)、
+                # 並列化自体は諦めずthreadingバックエンドに切り替える。RF/XGBoost/LightGBMは
+                # 学習の大部分がC/C++実装でGILを解放するため、プロセス間通信(壊れうるpipe)を
+                # 使わないthreadingでも実効的に並列化でき、Broken pipeの再発リスクを避けられる。
+                scoring=FOG_F1_SCORER, random_state=42, n_jobs=-1, error_score="raise",
             )
-            search.fit(X_train, y_train)
+            with joblib.parallel_backend("threading"):
+                search.fit(X_train, y_train)
             return search.best_estimator_, search.best_params_, True
         except Exception as e:
             log.warning("Hyperparameter search failed (%s), using fallback params: %s", kind, e)
@@ -568,7 +706,7 @@ def _fit_best_model(X_train, y_train):
     戻り値: dict
       pipe: 採用したモデル（HybridFogClassifierまたはTripleBlendFogClassifier。本番予測用）
       tuned: ハイパーパラメータ探索が実行できたか
-      threshold: 霧判定しきい値
+      threshold: 川霧判定しきい値
       rf_pipe, xgb_pipe, lgbm_pipe: X_train全体で再学習した各コンポーネント単体
           （利用不可なライブラリの分はNone。診断用の性能比較に使う）
       hybrid_weight: RF+XGBoostの比較用ブレンド重み（xgboost無ければNone）
@@ -792,8 +930,33 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
     merged = pd.merge(main_df, targets, on="datetime", how="inner")
     merged = merged.sort_values("datetime").reset_index(drop=True)
     cross_rates = _compute_cross_station_fog_rates(merged, phenom_cols)
+
+    # 移流川霧指数(風向・風速が本質の特徴量)は、地点固有の実測気象(station_weather.db)が
+    # あればそれを使う。無ければcompute_advection_fog_index側で共通の代表地点の風に
+    # フォールバックする(2026-09-13の監査で、この特徴量こそ地点固有の精度の恩恵が
+    # 大きいはずだと指摘された)。プーリング救済モデルは全地点で共通の気象値を前提に
+    # 設計されているため、あえてここでは対象にしない(下のstation_framesループと同じ考え方)。
+    station_wind = {}
+    if weather_conn is not None and camera_coords:
+        for col in phenom_cols:
+            if col not in camera_coords:
+                continue
+            station_main_df = _apply_station_weather(main_df, col, weather_conn)
+            if station_main_df is None:
+                continue
+            aligned = pd.merge(
+                merged[["datetime"]],
+                station_main_df[["datetime", COL_WIND_DIR_DEG, COL_WIND_SPEED]],
+                on="datetime", how="left",
+            )
+            station_wind[col] = (
+                pd.to_numeric(aligned[COL_WIND_DIR_DEG], errors="coerce").to_numpy(dtype="float64"),
+                pd.to_numeric(aligned[COL_WIND_SPEED], errors="coerce").to_numpy(dtype="float64"),
+            )
+
     advection_idx = compute_advection_fog_index(
         merged, phenom_cols, camera_coords or {}, COL_WIND_DIR_DEG, COL_WIND_SPEED,
+        station_wind=station_wind,
     )
 
     merged, feature_names, shared_medians = prepare_features(merged, lat, lon)
@@ -834,6 +997,16 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             log.info("Using per-station weather for %d/%d station(s)", len(station_frames), len(phenom_cols))
 
     models = {}
+    # 川霧確率較正(isotonic)を学習するための材料。個別学習できた地点のホールドアウト
+    # (X_test/y_test)だけをプールする(プーリング救済した地点は評価split自体が
+    # 信頼できないことがあるため対象外)。地点ごとに分けて保持するのは、この後
+    # apply_regression_guardでロールバックされた地点(今回の候補パイプが破棄され、
+    # 前回のパイプがそのまま配信される)を較正モデルの学習データから除外できるように
+    # するため(2026-09-13の監査で、ロールバックされる可能性のある「まだ採用が確定して
+    # いない」候補の確率を較正学習に混ぜてしまうバグとして指摘された)。実際の較正モデル
+    # 学習・しきい値の較正後空間への変換は、この関数の中ではなくfinalize_fog_calibration()
+    # で、apply_regression_guardの後にpredict.py側から呼ぶ。
+    calib_data_by_station = {}
     for col in phenom_cols:
         col_merged, col_features, col_medians = station_frames.get(col, (merged, feature_names, shared_medians))
         col_merged[CROSS_STATION_FOG_FEATURE] = cross_rates[col].reindex(col_merged.index).to_numpy()
@@ -855,6 +1028,10 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
         pipe, tuned, threshold = result["pipe"], result["tuned"], result["threshold"]
         rf_pipe, xgb_pipe, lgbm_pipe = result["rf_pipe"], result["xgb_pipe"], result["lgbm_pipe"]
         y_pred = pipe.predict(X_test)
+        calib_data_by_station[col] = (
+            compute_fog_probability(pipe, X_test),
+            pd.Series(y_test).isin(SUMMARY_FOG_CODES).astype(int).to_numpy(),
+        )
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
         fog_f1 = _fog_class_f1(y_test, y_pred)
@@ -908,11 +1085,48 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
         "Training summary: %d/%d individual, %d/%d pooled, %d/%d could not be modeled at all",
         n_individual, len(phenom_cols), n_pooled, len(phenom_cols), n_unmodeled, len(phenom_cols),
     )
-    return models
+
+    # 川霧確率較正モデルの学習・しきい値の較正後空間への変換は、ここでは行わない
+    # (calib_data_by_stationをそのまま返す)。apply_regression_guardによる
+    # ロールバック判定がこの後(predict.py側)で行われるため、まだ採用が確定していない
+    # 今回の候補パイプの確率を較正学習に混ぜないよう、finalize_fog_calibration()を
+    # ロールバック判定の後に呼ぶ設計にしている(2026-09-13の監査で指摘された、
+    # 較正とロールバックの順序バグの修正)。
+    return models, calib_data_by_station
+
+
+def finalize_fog_calibration(models, calib_data_by_station, rolled_back=()):
+    """train_location_modelsが集めたホールドアウト確率から川霧確率較正モデルを学習し、
+    全地点(ロールバックされた地点も含む)のfog_thresholdを較正後の確率空間に変換する。
+    apply_regression_guardの後に呼ぶこと。
+
+    rolled_backに含まれる地点は、今回学習した候補パイプが不採用になり前回のパイプが
+    そのまま配信される。前回のパイプの生確率はここでは再計算できない(前回のホールド
+    アウトのX_testを保持していないため)ので、較正モデルの学習データからは単純に除外する
+    (今回不採用になった候補の確率を混ぜるのは、実際に配信されないものを学習材料に
+    使うことになり不適切なため)。しきい値の較正後空間への変換自体は、ロールバックされた
+    地点も含め全地点に対して行う(配信時にはロールバック後のパイプも含め全地点の生確率に
+    この較正モデルを適用するため、しきい値の表示・保存も同じ較正後空間に揃える必要がある)。
+    """
+    rolled_back = set(rolled_back)
+    usable = {col: v for col, v in calib_data_by_station.items() if col not in rolled_back}
+    probs = [p for p, _ in usable.values()]
+    labels = [l for _, l in usable.values()]
+    fog_calibrator = _fit_fog_calibrator(
+        np.concatenate(probs) if probs else np.array([]),
+        np.concatenate(labels) if labels else np.array([]),
+    )
+    if fog_calibrator is not None:
+        # 較正はisotonic(単調非減少)なので、既に選んだしきい値(生の確率空間でF1最大の
+        # 点)を較正後の値に写像するだけで、分類結果を変えずにしきい値の表示・保存だけを
+        # 較正後の確率空間に合わせられる(グリッドを較正後の確率で再探索する必要はない)。
+        for info in models.values():
+            info["fog_threshold"] = float(apply_fog_calibration(fog_calibrator, [info["fog_threshold"]])[0])
+    return fog_calibrator
 
 
 def _station_fog_rate(y, global_rate):
-    """地点ごとの霧発生率を、サンプル数が少ないほど全地点平均に寄せて平滑化する。"""
+    """地点ごとの川霧発生率を、サンプル数が少ないほど全地点平均に寄せて平滑化する。"""
     n = len(y)
     if n == 0:
         return global_rate
@@ -922,7 +1136,7 @@ def _station_fog_rate(y, global_rate):
 
 
 def _compute_cross_station_fog_rates(merged, phenom_cols):
-    """各地点について、自分を除く他地点のCROSS_STATION_FOG_LAG_HOURS時間前の霧発生率を
+    """各地点について、自分を除く他地点のCROSS_STATION_FOG_LAG_HOURS時間前の川霧発生率を
     計算する。戻り値: {地点名: pd.Series}（mergedと同じindexのSeries）。
     他地点の実測が無い（欠測ばかり）時刻はNaNになる。
     """
@@ -954,7 +1168,7 @@ def _last_valid_value(series, default=0.0):
 def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_rates, shared_medians, advection_idx):
     """個別条件を満たさなかった地点を、全地点共通データで学習した「プーリングモデル」で補う。
 
-    気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の霧発生率
+    気象特徴量は全地点で同一の値（代表地点1つの実況/予報）のため、地点ごとの過去の川霧発生率
     (STATION_FOG_RATE_FEATURE)を追加特徴量として与える。これが無いと、同時刻の予測が
     全地点で完全に同一になってしまう（実際に2026-08-26の初回本番実行で発生した）。
     """
@@ -1026,7 +1240,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
         X2[STATION_FOG_RATE_FEATURE] = station_rates[col]
 
         # 十分な行数・2クラス以上が揃っていればホールドアウト評価付きで救済する。
-        # 揃っていない(追加されたばかりで霧の実例がまだ無い等)場合でも、プーリング
+        # 揃っていない(追加されたばかりで川霧の実例がまだ無い等)場合でも、プーリング
         # モデル自体は他地点のデータで既に学習済みのため、精度算出は諦めて予測にだけ使う
         # (accuracy/f1等はNoneのままにする。webapp.py側は既にNoneを「精度不明」として
         # 扱う設計になっている: 例えば_is_valid_number()での判定やis not Noneでのフィルタ)。
@@ -1179,6 +1393,20 @@ def fetch_forecast_range_multi(camera_coords, forecast_days):
     for name, item in zip(names, payload):
         if not item or "hourly" not in item:
             continue
+        # Open-Meteoの複数地点バッチ応答は位置(names[i] <-> payload[i])で対応付けている。
+        # 応答がエコーバックするlatitude/longitudeと要求した座標を突き合わせ、万一順序が
+        # ずれていたら(APIの仕様変更等)黙って誤った地点同士を対応付けるのではなく検知して
+        # スキップする(2026-09-13の監査で指摘)。
+        expected_lat, expected_lon = camera_coords[name]
+        echoed_lat, echoed_lon = item.get("latitude"), item.get("longitude")
+        if echoed_lat is not None and echoed_lon is not None:
+            if abs(echoed_lat - expected_lat) > 0.05 or abs(echoed_lon - expected_lon) > 0.05:
+                log.error(
+                    "Open-Meteo multi-location response order mismatch for %s: "
+                    "expected (%.4f, %.4f), got (%.4f, %.4f); skipping to avoid misaligned data",
+                    name, expected_lat, expected_lon, echoed_lat, echoed_lon,
+                )
+                continue
         try:
             result[name] = _forecast_payload_to_df(item["hourly"])
         except ValueError:
@@ -1186,10 +1414,12 @@ def fetch_forecast_range_multi(camera_coords, forecast_days):
     return result
 
 
-def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_station=None, camera_coords=None):
-    """予報データに対して地点ごとの現象コードと霧確率を予測する。
+def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_station=None,
+                                   camera_coords=None, calibrator=None):
+    """予報データに対して地点ごとの現象コードと川霧確率を予測する。
     forecast_by_station/camera_coordsが与えられ、かつその地点の予報が取得できていれば、
     共通の代表地点予報(forecast_raw/lat/lon)の代わりにその地点自身の予報を使う。
+    calibratorを渡すとpredicted_fog_prob(prob_df/feature_snapshots両方)に較正を適用する。
     戻り値: (pred_df, prob_df, feature_snapshots)。pred_df/prob_dfはdatetime列 + 地点ごとの列。
     feature_snapshotsは {地点名: DataFrame(datetime, 各特徴量, predicted_code, predicted_fog_prob)}で、
     「この予測にどの特徴量の値が使われたか」を後から参照する(station_detail.htmlの表示用)ために
@@ -1201,12 +1431,21 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
     for col, info in models.items():
         feature_names = info["features"]
         station_forecast = (forecast_by_station or {}).get(col)
-        if station_forecast is not None and len(station_forecast) == len(forecast_raw):
-            f_raw = station_forecast
+        if station_forecast is not None and len(station_forecast) > 0:
+            # 以前は1時間でも代表地点予報と行数が食い違う(取得の一部失敗・欠測補間の
+            # dropna等)と地点別予報を丸ごと捨てて代表地点予報にフォールバックしていた。
+            # 代表地点の日時にreindexしたうえでcombine_firstを使い、地点別予報がある
+            # 時間はそれを、欠けている時間だけ代表地点予報の値で埋める形に改めた
+            # (2026-09-13の監査で「全か無か」の設計を指摘された)。
+            f_raw = (
+                station_forecast.set_index("datetime")
+                .reindex(forecast_raw["datetime"])
+                .combine_first(forecast_raw.set_index("datetime"))
+                .reset_index()
+            )
             f_lat, f_lon = (camera_coords or {}).get(col, (lat, lon))
         else:
-            # 地点別の予報が無い/行数が代表地点と食い違う(取得の一部失敗等)場合は
-            # 共通の代表地点予報にフォールバックする。
+            # 地点別の予報が全く取得できなかった場合は共通の代表地点予報にフォールバックする。
             f_raw, f_lat, f_lon = forecast_raw, lat, lon
         # 任意項目(視程・日照・日射)の中央値埋めは、学習時にfit済みの中央値(measure_medians)
         # をそのまま使う。以前は予報データ(16日分だけ)から都度中央値を計算し直しており、
@@ -1222,7 +1461,7 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
         if ADVECTION_FOG_FEATURE in feature_names:
             X[ADVECTION_FOG_FEATURE] = info.get("advection_index_last", 0.0)
         pred_df[col] = info["pipe"].predict(X).astype(int)
-        prob_df[col] = compute_fog_probability(info["pipe"], X)
+        prob_df[col] = compute_fog_probability(info["pipe"], X, calibrator=calibrator)
         snapshot = X.copy()
         snapshot.insert(0, "datetime", df["datetime"].values)
         snapshot["predicted_code"] = pred_df[col].values
@@ -1231,16 +1470,18 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
     return pred_df, prob_df, feature_snapshots
 
 
-def simulate_station(info, lat, lon, weather, dt):
-    """手動入力した1時点分の気象条件から、その地点が採用中のモデルで霧予測をシミュレートする
+def simulate_station(info, lat, lon, weather, dt, calibrator=None):
+    """手動入力した1時点分の気象条件から、その地点が採用中のモデルで川霧予測をシミュレートする
     (Whatーifシミュレーター用)。build_location_forecast_codesと同じ特徴量の組み立て方
-    (学習時にfitした中央値・地点別霧発生率・広域霧指数の最終値を使う近似)を、1行分の
+    (学習時にfitした中央値・地点別川霧発生率・広域川霧指数の最終値を使う近似)を、1行分の
     データに対して行う。
 
     info: load_model_state()で読んだ、1地点分の辞書(models[地点名])。
     weather: fog_features.COL_*を主なキーとする値のdict(欠けている項目はNaNのまま扱われ、
     視程・日照・日射は学習時の中央値(measure_medians)で自動的に埋まる)。
     dt: この予測を行う日時(時刻依存の特徴量に使う)。
+    calibrator: load_fog_calibrator()で読んだ較正モデル。渡すとfog_probが較正後の値になり、
+    しきい値グラフ等(本番のpredicted_fog_prob)と同じ確率空間で比較できる。
 
     戻り値: (predicted_code, fog_prob, class_proba)。class_probaは{現象コード: 確率}を
     確率降順に並べたdict。
@@ -1261,7 +1502,7 @@ def simulate_station(info, lat, lon, weather, dt):
     pipe = info["pipe"]
     proba = np.asarray(pipe.predict_proba(X))[0]
     predicted_code = int(pipe.classes_[np.argmax(proba)])
-    fog_prob = float(compute_fog_probability(pipe, X)[0])
+    fog_prob = float(compute_fog_probability(pipe, X, calibrator=calibrator)[0])
     class_proba = dict(sorted(
         ((int(c), float(p)) for c, p in zip(pipe.classes_, proba)),
         key=lambda item: -item[1],
@@ -1270,12 +1511,24 @@ def simulate_station(info, lat, lon, weather, dt):
 
 
 def _effective_score(info):
-    """モデル比較用のスコア。霧クラスのF1を優先し、無ければ全体F1を使う
+    """モデル比較用のスコア。川霧クラスのF1を優先し、無ければ全体F1を使う
     （ハイパーパラメータ選択時の_blend_scoreと同じ考え方）。"""
     fog_f1 = info.get("fog_f1")
     if fog_f1 is not None and not (isinstance(fog_f1, float) and np.isnan(fog_f1)):
         return float(fog_f1)
     return float(info.get("f1", 0.0))
+
+
+def _effective_score_or_none(info):
+    """_effective_scoreと同じだが、fog_f1もf1も無い(プーリング救済でホールドアウト
+    評価split自体が組めなかった地点、"deployed without eval")場合はNoneを返す
+    (_effective_scoreのfloat(info.get("f1", 0.0))は、"f1"キー自体はあるが値がNoneの
+    ときfloat(None)で例外になるため、そのまま流用できない)。"""
+    fog_f1 = info.get("fog_f1")
+    if fog_f1 is not None and not (isinstance(fog_f1, float) and np.isnan(fog_f1)):
+        return float(fog_f1)
+    f1 = info.get("f1")
+    return float(f1) if f1 is not None else None
 
 
 _MODEL_STATE_CACHE = {"path": None, "mtime": None, "data": None}
@@ -1355,9 +1608,14 @@ def save_model_state(models, path=MODEL_STATE_PATH):
     append_metrics_history(models, trained_at)
 
 
-def _score_from_predictions(y_true, y_pred):
-    """_effective_scoreと同じ考え方（霧クラスF1優先、無ければ全体F1）を、任意の
-    (y_true, y_pred)配列に対して計算する（ブートストラップ再抽出のたびに呼び出す）。"""
+def _score_from_predictions(y_true, y_pred, fog_labels=None):
+    """_effective_scoreと同じ考え方（川霧クラスF1優先、無ければ全体F1）を、任意の
+    (y_true, y_pred)配列に対して計算する（ブートストラップ再抽出のたびに呼び出す）。
+    fog_labelsを渡すと、このリサンプルにたまたま川霧の実例が1件も無くても(全体F1に
+    フォールバックせず)強制的にそのラベル集合でF1を計算する(下の_bootstrap_scores参照)。
+    """
+    if fog_labels is not None:
+        return float(f1_score(y_true, y_pred, labels=fog_labels, average="macro", zero_division=0))
     fog_f1 = _fog_class_f1(y_true, y_pred)
     if not (isinstance(fog_f1, float) and np.isnan(fog_f1)):
         return float(fog_f1)
@@ -1365,13 +1623,22 @@ def _score_from_predictions(y_true, y_pred):
 
 
 def _bootstrap_scores(y_true, y_pred, n_boot, seed):
-    """テストデータをn_boot回、復元抽出でリサンプリングし、そのたびのスコアを配列で返す。"""
+    """テストデータをn_boot回、復元抽出でリサンプリングし、そのたびのスコアを配列で返す。
+    川霧F1を使うかどうか(元のテストデータ全体に川霧の実例があるか)は最初に1回だけ判定し、
+    以後の全リサンプルで同じ評価基準を使う。判定をリサンプルごとに繰り返すと、川霧の実例が
+    少ない地点では特定のリサンプルだけ偶然川霧が0件になってNaN扱い(→全体F1にフォールバック)
+    となり、同じブートストラップ分布の中で川霧F1と全体F1が混在してしまう
+    (2026-09-13の監査で、稀にしか川霧が起きない地点ほど回帰判定がぶれる原因として指摘された)。
+    """
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     n = len(y_true)
+    original_fog_f1 = _fog_class_f1(y_true, y_pred)
+    use_fog_f1 = not (isinstance(original_fog_f1, float) and np.isnan(original_fog_f1))
+    fog_labels = sorted(SUMMARY_FOG_CODES) if use_fog_f1 else None
     rng = np.random.default_rng(seed)
     return np.array([
-        _score_from_predictions(y_true[idx], y_pred[idx])
+        _score_from_predictions(y_true[idx], y_pred[idx], fog_labels=fog_labels)
         for idx in rng.integers(0, n, size=(n_boot, n))
     ])
 
@@ -1405,6 +1672,20 @@ def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
         if prev is None:
             continue
         if info.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK or prev.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK:
+            new_score = _effective_score_or_none(info)
+            prev_score = _effective_score_or_none(prev)
+            if (
+                new_score is not None and prev_score is not None
+                and new_score < prev_score - SPARSE_REGRESSION_ABS_DROP
+            ):
+                log.warning(
+                    "Sparse-sample regression detected for %s (n=%s/%s, new score=%.3f, "
+                    "previous score=%.3f); rolling back to previous model "
+                    "(too few samples for the bootstrap check, used the absolute-drop guard instead)",
+                    col, info.get("n", 0), prev.get("n", 0), new_score, prev_score,
+                )
+                models[col] = {**prev, "model_type": normalize_model_type_label(prev.get("model_type"))}
+                rolled_back.append(col)
             continue
         prob_not_worse = _bootstrap_prob_not_worse(prev, info)
         if prob_not_worse is None:

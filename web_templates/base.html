@@ -514,7 +514,7 @@ document.addEventListener("submit", function(e) {
 {% endif %}
 
 // 通知ベル。既読管理はサーバーに状態を持たず、ブラウザのlocalStorageで通知idごとに行う
-// (通知の内容自体は霧アラート・システム状態から毎回計算しているだけで、DBに保存された
+// (通知の内容自体は川霧アラート・システム状態から毎回計算しているだけで、DBに保存された
 // 通知レコードではないため)。
 (function() {
     var notifications = {{ notifications_data()|tojson }};

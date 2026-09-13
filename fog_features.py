@@ -1,4 +1,4 @@
-"""霧予測モデル用の特徴量エンジニアリング。
+"""川霧予測モデル用の特徴量エンジニアリング。
 
 ~/Desktop/fog-prediction/weather_visualizer.py（Colab向け・単発実行ツール）の
 特徴量設計をそのまま踏襲しつつ、river-fogサーバー用に以下を簡略化している。
@@ -22,8 +22,8 @@ PHENOM_COLORS = {
     6: "#2c3e50", 7: "#f8c471", 8: "#d35400", 9: "#a9dfbf", 10: "#196f3d",
 }
 SLASH_COLOR = "#f9e79f"
-SUMMARY_FOG_CODES = {1, 2, 3}  # 「川霧」とみなすコード（霧F1・霧確率・サマリー集計・アラートで使用）
-# 以前は全体霧(4〜6)も含めていたが、「霧である確率」等の表示が川霧限定に見えて実態と
+SUMMARY_FOG_CODES = {1, 2, 3}  # 「川霧」とみなすコード（川霧F1・川霧確率・サマリー集計・アラートで使用）
+# 以前は全体霧(4〜6)も含めていたが、「川霧である確率」等の表示が川霧限定に見えて実態と
 # ズレる問題があり、川霧(1〜3)のみに統一した。これによりアラート・ダッシュボード集計・
 # モデル評価指標もすべて川霧基準になる(全体霧単独の日はアラート対象外になる)。
 
@@ -152,11 +152,14 @@ def _add_time_features(df, lat, lon):
     return df
 
 
-def select_feature_names(df):
+def select_feature_names(df, exclude_optional=None):
+    exclude_optional = exclude_optional or ()
     features = list(BASE_FEATURES)
     if all(f in df.columns for f in WIND_DIR_FEATURES):
         features += WIND_DIR_FEATURES
     for label in OPTIONAL_MEASURE_KEYWORDS:
+        if label in exclude_optional:
+            continue
         if label in df.columns and df[label].notna().any():
             features.append(label)
     features += [f for f in LAG_FEATURE_NAMES if f in df.columns]
@@ -167,18 +170,24 @@ def select_feature_names(df):
 
 def _fill_optional_measures(df, medians=None):
     """任意項目（視程・日照時間・日射量）の欠測を中央値で埋める。
-    割合が低ければNaNのままにし、select_feature_names()に特徴量から外させる。
+    割合が低ければ特徴量から外す対象としてラベルを返す(下記参照)。
 
     medians（{列名: 中央値}）を渡すと、その値で埋める（学習時に確定した中央値を
     予報時にも一貫して使うため）。渡さなければこのdf自身から中央値を計算する
-    （従来通りの学習時の挙動）。戻り値は(df, 実際に使った{列名: 中央値})。
+    （従来通りの学習時の挙動）。戻り値は(df, 実際に使った{列名: 中央値}, カバレッジ不足で
+    特徴量から除外すべき列名の集合)。
     以前は予報時にもdf自身（16日分の予報データだけ）から中央値を計算していたため、
     学習時とは全く異なる母集団の中央値で欠測を埋めることになり、同じ特徴量が
     train/inference間で意味的にズレる問題があった。
+    以前はカバレッジ不足の列を丸ごとNaNで上書きしてselect_feature_names()に「使うな」と
+    伝えていたが、これは実測の疎らな値まで一緒に消してしまい、表示用途等で生の実測値を
+    再利用したい将来の呼び出し元にとって破壊的だった(2026-09-13の監査で指摘)。列自体は
+    書き換えず、除外すべき列名を別途返す方式に改めた。
     """
     df = df.copy()
     medians = dict(medians) if medians else {}
     used = {}
+    excluded = set()
     for label in OPTIONAL_MEASURE_KEYWORDS:
         if label not in df.columns:
             continue
@@ -193,8 +202,8 @@ def _fill_optional_measures(df, medians=None):
             df[label] = col.fillna(m)
             used[label] = m
         else:
-            df[label] = np.nan
-    return df, used
+            excluded.add(label)
+    return df, used, excluded
 
 
 def prepare_features(df, lat, lon, feature_names=None, medians=None):
@@ -203,7 +212,7 @@ def prepare_features(df, lat, lon, feature_names=None, medians=None):
     medians引数の意味は_fill_optional_measures参照（予報時に学習時の中央値を渡すために使う）。
     """
     out = _add_time_features(df, lat, lon)
-    out, medians_used = _fill_optional_measures(out, medians=medians)
+    out, medians_used, excluded_optional = _fill_optional_measures(out, medians=medians)
     out[COL_PRECIP] = pd.to_numeric(out[COL_PRECIP], errors="coerce").fillna(0.0)
 
     for name in ("気温変化_1h", "気温変化_3h"):
@@ -212,7 +221,7 @@ def prepare_features(df, lat, lon, feature_names=None, medians=None):
     out["降水量_24h合計"] = out["降水量_24h合計"].fillna(0.0)
 
     if feature_names is None:
-        feature_names = select_feature_names(out)
+        feature_names = select_feature_names(out, exclude_optional=excluded_optional)
     for name in feature_names:
         if name not in out.columns:
             out[name] = np.nan
@@ -227,8 +236,8 @@ def build_location_class_targets(phenom_df, phenom_cols):
     結果につながっていた: predicted_code(常に0〜8のいずれか)がactual_code(実況では
     9・10も記録される)と完全一致するかで的中率を測っているため、雨天時は原理的に
     的中しようがなかった。9・10も他のクラスと同様にそのまま学習ターゲットに残すことで、
-    モデルが「雨・霧雨っぽい気象条件」と「本当に何も無い(0)」・「霧(1〜3)」を区別する
-    手がかりを学習データから奪わないようにする。霧である確率(_fog_probability)は
+    モデルが「雨・霧雨っぽい気象条件」と「本当に何も無い(0)」・「川霧(1〜3)」を区別する
+    手がかりを学習データから奪わないようにする。川霧である確率(_fog_probability)は
     SUMMARY_FOG_CODESの列だけを合算するため、この変更の影響を受けない。
     """
     codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))

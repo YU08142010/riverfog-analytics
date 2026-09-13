@@ -24,7 +24,7 @@
     <form id="chat-form" class="chat-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="conversation_id" id="chat-conversation-id" value="{{ conversation.id if conversation else '' }}">
-        <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は霧が出そうですか？" required></textarea>
+        <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は川霧が出そうですか？" required></textarea>
         <button type="submit" class="button" id="chat-send-btn">送信</button>
     </form>
     <p class="muted chat-footnote">無料枠のクォータ保護のため、1日あたりの質問回数に上限があります。回答はAIによる自動生成のため誤りを含むことがあります。</p>

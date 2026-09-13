@@ -131,6 +131,17 @@ def delete_conversation(conn, conversation_id, user_id):
     return cur.rowcount > 0
 
 
+def delete_user_data(conn, user_id):
+    """指定ユーザーの会話・メッセージを全て削除する。chat.dbはusers.dbとは別ファイルの
+    SQLiteのため外部キーによるON DELETE CASCADEが効かず、以前はユーザー削除時に
+    呼ばれることが無かった(admin_accounts_deleteはusers.delete_user()しか呼んでおらず、
+    退会後もAIチャット履歴が孤立したまま残り続けていた、2026-09-13の監査で指摘)。
+    admin_accounts_deleteからusers.delete_user()と一緒に呼ぶこと。"""
+    with conn:
+        conn.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM chat_conversations WHERE user_id = ?", (user_id,))
+
+
 def set_conversation_title(conn, conversation_id, title):
     with conn:
         conn.execute("UPDATE chat_conversations SET title = ? WHERE id = ?", (title, conversation_id))

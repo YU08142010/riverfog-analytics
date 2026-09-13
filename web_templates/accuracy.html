@@ -16,15 +16,15 @@
         （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
     {% if overall_fog_stats and overall_fog_stats.precision is not none %}
     <p class="muted">
-        霧クラス（防災上重要な「霧かどうか」だけを陽性として見た場合）:
+        川霧クラス（防災上重要な「川霧かどうか」だけを陽性として見た場合）:
         precision(空振りの少なさ) {{ "%.1f"|format(overall_fog_stats.precision * 100) }}% /
         recall(見逃しの少なさ) {{ "%.1f"|format(overall_fog_stats.recall * 100) }}%
         {% if overall_fog_stats.f1 is not none %} / F1 {{ "%.1f"|format(overall_fog_stats.f1 * 100) }}%{% endif %}
-        <br>見逃し(霧なのに霧じゃないと予測): {{ overall_fog_stats.fn }}件 / 空振り(霧じゃないのに霧と予測): {{ overall_fog_stats.fp }}件
+        <br>見逃し(川霧なのに川霧じゃないと予測): {{ overall_fog_stats.fn }}件 / 空振り(川霧じゃないのに川霧と予測): {{ overall_fog_stats.fp }}件
     </p>
     <p class="muted" style="font-size:0.8rem;">
-        「的中率」は霧が珍しい現象であるほど、常に「霧じゃない」と予測するだけでも高く出てしまいます。
-        実際に霧を捉えられているかはrecall(見逃しの少なさ)の方が参考になります。
+        「的中率」は川霧が珍しい現象であるほど、常に「川霧じゃない」と予測するだけでも高く出てしまいます。
+        実際に川霧を捉えられているかはrecall(見逃しの少なさ)の方が参考になります。
     </p>
     {% endif %}
     {% else %}
@@ -34,12 +34,12 @@
 
 {% if region_summary %}
 <div class="card">
-    <h2>地域別の的中率・霧F1</h2>
+    <h2>地域別の的中率・川霧F1</h2>
     <p class="muted">会津地方は観測を始めてからまだ日が浅く学習データが少ないため、只見川地域との差を確認できます。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_region_chart') }}" alt="地域別の的中率・霧F1グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_region_chart') }}" alt="地域別の的中率・川霧F1グラフ"></div>
     <div class="table-scroll">
     <table class="obs-table" style="width:auto;">
-        <thead><tr><th>地域</th><th>件数</th><th>的中率</th><th>霧recall</th><th>霧precision</th><th>霧F1</th></tr></thead>
+        <thead><tr><th>地域</th><th>件数</th><th>的中率</th><th>川霧recall</th><th>川霧precision</th><th>川霧F1</th></tr></thead>
         <tbody>
         {% for row in region_summary %}
         <tr>
@@ -88,7 +88,7 @@
 <div class="card">
     <h2>しきい値ごとのprecision/recall/F1(全地点合算)</h2>
     <p class="muted">
-        霧と判定するしきい値(予測確率がこの値以上なら「霧」とする)を変えた場合に、
+        川霧と判定するしきい値(予測確率がこの値以上なら「川霧」とする)を変えた場合に、
         precision(空振りの少なさ)・recall(見逃しの少なさ)・F1がどう変わるかを示す。
         点線は現在各地点で自動選択されているしきい値の分布ではなく、全地点合算データでの
         参考値であることに注意。地点ごとの正確な採用しきい値は各地点の観測ページで確認できる。
@@ -101,7 +101,7 @@
     <h2>地点別の的中率</h2>
     <div class="table-scroll">
 <table class="obs-table" style="width:auto;">
-        <thead><tr><th>地点</th><th>地域</th><th>件数</th><th>正解数</th><th>的中率</th><th>霧recall</th><th>霧precision</th><th>霧F1</th></tr></thead>
+        <thead><tr><th>地点</th><th>地域</th><th>件数</th><th>正解数</th><th>的中率</th><th>川霧recall</th><th>川霧precision</th><th>川霧F1</th></tr></thead>
         <tbody>
         {% for row in by_station %}
         <tr>
@@ -171,7 +171,7 @@
 
 <div class="card">
     <h2>学習精度の推移(全地点平均)</h2>
-    <p class="muted">毎日の再学習ごとに記録したaccuracy・霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
+    <p class="muted">毎日の再学習ごとに記録したaccuracy・川霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_training_metrics_chart') }}" alt="学習精度の推移グラフ(全地点平均)"></div>
 </div>
 
@@ -179,7 +179,7 @@
     <h2>モデル方式ごとの性能比較</h2>
     <p class="muted">
         RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・RF+LightGBM・RF+XGBoost+LightGBMの
-        霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
+        川霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
         正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります)。
     </p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_model_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
@@ -193,7 +193,7 @@
 
 <div class="card">
     <h2>特徴量の重要度(全地点)</h2>
-    <p class="muted">どの気象要素が霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
+    <p class="muted">どの気象要素が川霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_feature_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
 </div>
 
@@ -217,7 +217,7 @@
     <table class="obs-table" style="width:100%;">
         <thead><tr>
             <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
-            <th>accuracy</th><th>霧F1(採用中)</th><th>学習日時</th>
+            <th>accuracy</th><th>川霧F1(採用中)</th><th>学習日時</th>
         </tr></thead>
         <tbody>
         {% for r in model_rows %}

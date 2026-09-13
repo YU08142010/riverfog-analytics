@@ -32,6 +32,11 @@
                 現在の判定: {{ phenom_labels.get(r.reported_code, "現象なし" if r.reported_code == 0 else "-") }} /
                 報告者: {{ r.reporter_name }} ({{ r.reported_at }})
             </p>
+            {% if r.reason %}
+            <p style="margin:0.4rem 0 0; font-size:0.85rem;">
+                <strong>報告者の理由:</strong> {{ r.reason }}
+            </p>
+            {% endif %}
         </div>
     </div>
 

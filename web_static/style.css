@@ -1272,7 +1272,7 @@ table.obs-table th.sticky-col { z-index: 3; }
     .content-grid-2 { grid-template-columns: 1fr; }
 }
 
-/* 地点マップ(map.html)の霧アラート地点マーカー点滅。 */
+/* 地点マップ(map.html)の川霧アラート地点マーカー点滅。 */
 .map-marker-alert {
     animation: mapMarkerPulse 1.2s ease-in-out infinite;
 }
@@ -1679,7 +1679,7 @@ table.obs-table th.sticky-col { z-index: 3; }
     overflow: hidden;
     background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-bg) 65%);
 }
-/* 背景の霧演出。帯状の要素をぼかして左右にゆっくり漂わせる(CSSのみ、画像・JS不要)。 */
+/* 背景の川霧演出。帯状の要素をぼかして左右にゆっくり漂わせる(CSSのみ、画像・JS不要)。 */
 .fog-layer {
     position: absolute;
     inset: 0;

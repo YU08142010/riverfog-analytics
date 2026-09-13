@@ -40,6 +40,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.patches as mpatches
 from matplotlib import font_manager
 
 from common import (
@@ -52,6 +53,7 @@ import announcements
 import users
 import fog_data
 import fog_model
+import fog_tree_viz
 import weather_store
 import prediction_log
 import station_weather
@@ -94,15 +96,61 @@ LOGIN_ATTEMPT_MAX = 10
 ACCOUNT_LOCKOUT_THRESHOLD = 5
 _login_attempts_lock = threading.Lock()
 _login_attempts_by_ip = {}
+# _login_attempts_by_ipは以前、呼び出しのたびに「そのIPの分だけ」しか期限切れ分を
+# 整理していなかったため、一度アクセスして二度と来ないIP(攻撃者・organic トラフィック
+# 問わず)のエントリが無期限に溜まり続けてメモリが緩やかに増え続けていた
+# (2026-09-13の監査で指摘)。この間隔でIP全体を対象にした掃除を行う。
+LOGIN_ATTEMPT_SWEEP_INTERVAL = timedelta(hours=1)
+_login_attempts_last_sweep = datetime.now(JST)
 
 
 def _client_ip():
     return request.remote_addr or "unknown"
 
 
+def _sweep_login_attempts(now):
+    """呼び出し頻度が高すぎない程度に間引きながら、_login_attempts_by_ip全体から
+    期限切れ・空になったIPのエントリを削除する(呼び出し元で_login_attempts_lock保持中に呼ぶこと)。"""
+    global _login_attempts_last_sweep
+    if now - _login_attempts_last_sweep < LOGIN_ATTEMPT_SWEEP_INTERVAL:
+        return
+    _login_attempts_last_sweep = now
+    for ip in list(_login_attempts_by_ip.keys()):
+        attempts = [t for t in _login_attempts_by_ip[ip] if now - t < LOGIN_ATTEMPT_WINDOW]
+        if attempts:
+            _login_attempts_by_ip[ip] = attempts
+        else:
+            del _login_attempts_by_ip[ip]
+
+
+REPORT_RATE_LIMIT_WINDOW = timedelta(minutes=10)
+REPORT_RATE_LIMIT_MAX = 3
+_report_generation_attempts = {}
+_report_generation_lock = threading.Lock()
+
+
+def _report_rate_limited(user_id):
+    """PDFレポート生成(_generate_report_pdf)は一般ユーザーでも呼べる公開機能(/report)
+    だが軽い処理ではないため、連打による負荷を防ぐレート制限を設ける(2026-09-13の
+    監査で無制限だった点を指摘された)。ユーザーID単位のキーで、実在する登録ユーザー数
+    しか増えないため_login_attempts_by_ipのような無期限増加の心配はない。"""
+    now = datetime.now(JST)
+    with _report_generation_lock:
+        attempts = [
+            t for t in _report_generation_attempts.get(user_id, []) if now - t < REPORT_RATE_LIMIT_WINDOW
+        ]
+        if len(attempts) >= REPORT_RATE_LIMIT_MAX:
+            _report_generation_attempts[user_id] = attempts
+            return True
+        attempts.append(now)
+        _report_generation_attempts[user_id] = attempts
+        return False
+
+
 def _login_rate_limited(ip):
     now = datetime.now(JST)
     with _login_attempts_lock:
+        _sweep_login_attempts(now)
         attempts = [t for t in _login_attempts_by_ip.get(ip, []) if now - t < LOGIN_ATTEMPT_WINDOW]
         _login_attempts_by_ip[ip] = attempts
         return len(attempts) >= LOGIN_ATTEMPT_MAX
@@ -119,6 +167,7 @@ DB_PATH = BASE_DIR / "data" / "predictions.db"
 AVATAR_DIR = BASE_DIR / "data" / "avatars"
 AVATAR_SIZE = 256
 AVATAR_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+IMAGES_HOUR_ZIP_MAX_BYTES = 300 * 1024 * 1024
 # デコンプレッションボム対策: 高圧縮率の画像(小さいファイルサイズで巨大な解像度)による
 # メモリ枯渇を防ぐため、Pillowの展開後ピクセル数の上限を明示的に指定する
 # (アバターとして必要なサイズよりかなり余裕を持たせた値)。
@@ -127,7 +176,7 @@ LOGIN_HEATMAP_DAYS = 371  # GitHubの草(コントリビューショングラフ
 
 # --- ファイル共有(DM添付・班の共有ファイル置き場) -------------------------------------
 # 拡張子による制限は設けていない(利用者からの要望で撤廃)。1ファイルあたりのサイズ上限も
-# あえて設けていないが、ディスクを使い切ってサーバー全体(霧の収集・予測パイプライン含む)を
+# あえて設けていないが、ディスクを使い切ってサーバー全体(川霧の収集・予測パイプライン含む)を
 # 巻き添えにしないよう、書き込み前に空き容量だけ確認する。
 DM_ATTACHMENT_DIR = BASE_DIR / "data" / "dm_attachments"
 SHARED_FILES_DIR = BASE_DIR / "data" / "shared_files"
@@ -353,10 +402,17 @@ def _tailscale_autoupdate_prefs():
     return None
 
 
-# ttydは全インターフェースにバインドし、Basic認証をかけた別プロセスとしてsystemdで動かしている
-# (river-fog-terminal.service)。Tailscale/LANどちらからアクセスしても繋がるよう、iframeのURLは
-# 固定せずリクエストのホスト名(request.host)に合わせて組み立てる（admin_terminal()参照）。
-TTYD_PORT = 7681
+# ttydはBasic認証をかけた別プロセスとしてsystemdで動かしている(river-fog-terminal.service)。
+# 以前は全インターフェースにバインドしており、requires_admin・CSRF・Funnel判定を一切
+# 経由せずBasic認証(以前はsshuser:sshuserという弱い組み合わせ)だけを突破すれば誰でも
+# フルシェルを取れてしまっていた(2026-09-13の監査で最重要指摘事項)。ループバック
+# (127.0.0.1)限定にバインドしなおし、nginxが/admin/terminal-ws/として同一オリジンで
+# プロキシする(river-fog-nginx設定参照)ことで、このアプリの他の管理機能と同じ
+# allow/deny・X-Rf-Internalヘッダーの保護下に置いた。admin_terminal()はrequires_admin
+# 配下のページなので、そこに到達できる(=既に管理者と確認済みの)閲覧者だけがiframeの
+# URLを受け取れる。ttyd自身のBasic認証(ランダム生成したパスワードに変更済み)は
+# 最後の防御層として残す。
+TTYD_BASE_PATH = "/admin/terminal-ws/"
 
 # CockpitはOS標準でインストール済み(HTTPSのみ、自己署名証明書)。9090番は別オリジンかつ
 # X-Frame-Options: sameoriginを送るため、他オリジンからのiframe埋め込みができない
@@ -490,18 +546,27 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 送らなくなりログインできなくなる。HTTPS化した場合はFORCE_HTTPS_COOKIES=1を.envに
 # 設定すること。
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FORCE_HTTPS_COOKIES") == "1"
+# MAX_CONTENT_LENGTHが未設定だと、Werkzeugはリクエストボディ全体をアプリコード実行前に
+# メモリへ読み込んでしまう(アップロード先のルート自身のサイズチェックはfile.save()の
+# "後"にしか効かない)。全アップロード系エンドポイント(添付ファイル・アバター・
+# バックアップ復元等)に共通の上限を設け、巨大POST 1本によるメモリ/ディスク枯渇DoSを
+# 防ぐ。最大の正規アップロードは管理者のバックアップ復元(RESTORE_MAX_UPLOAD_BYTES=2GB)
+# なので、それに余裕を持たせた値にする(2026-09-13の監査で指摘)。
+app.config["MAX_CONTENT_LENGTH"] = 2560 * 1024 * 1024  # 2.5GB
 
 # 外部から読み込んでいるのは地図ページのLeaflet(cdnjs.cloudflare.com)と
 # OpenStreetMapのタイル画像(*.tile.openstreetmap.org)のみ(把握済み・確認済み)。
-# 管理者ターミナル(admin_terminal.html)はhttp://<host>:TTYD_PORTを別オリジンの
-# iframeとして埋め込むため、frame-srcで明示的に許可する必要がある。
+# 管理者ターミナル(admin_terminal.html)は以前http://<host>:TTYD_PORTを別オリジンの
+# iframeとして埋め込んでいたが、ttydをループバック限定にしnginx配下の同一オリジン
+# (/admin/terminal-ws/)でプロキシする方式に変更したため、frame-srcを別途許可する
+# 必要が無くなった(2026-09-13の監査で指摘、admin_terminal()参照)。
 _SECURITY_HEADERS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data: https://*.tile.openstreetmap.org; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "font-src 'self' https://cdnjs.cloudflare.com; "
-    f"frame-src 'self' http://*:{TTYD_PORT}; "
+    "frame-src 'self'; "
     "frame-ancestors 'self'; "
     "object-src 'none'; "
     "base-uri 'self'"
@@ -572,6 +637,18 @@ def _can_manage_observation_reports(role):
     return role in OBSERVATION_ROLES
 
 
+def _enforce_observer_region(station_name):
+    """requires_observerと組み合わせて使う: 会津観測者/只見観測者は担当地域外の地点への
+    操作を403で拒否する(管理者・観測者は地域を問わず常に許可)。地域チェックをここに
+    集約することで、新しいrequires_observerルートを追加する際にチェックを書き忘れる、
+    あるいは微妙に間違った条件を書いてしまうリスクを減らす(2026-09-13の監査で、
+    requires_observer自体は地域を絞らない設計のため各ルートでの手動チェックに依存して
+    いる点が将来的な権限昇格リスクとして指摘された)。"""
+    region = _observer_region_for_role(session.get("role"))
+    if region is not None and STATION_REGION.get(station_name) != region:
+        abort(403)
+
+
 def _can_correct_station(role, station_name):
     """その地点の観測結果をその場で直接訂正してよいか(管理者・観測者は常に可、
     会津観測者/只見観測者は担当地域の地点のみ、一般は不可)。"""
@@ -591,7 +668,11 @@ def _inject_can_correct_station():
     return {"can_correct_station": lambda station_name: _can_correct_station(session.get("role"), station_name)}
 
 # メンテナンスモード中でも管理者(/admin配下)だけは常にアクセスできるようにする
-# （でないと自分でオンにしたら誰もオフに戻せなくなる）。
+# （でないと自分でオンにしたら誰もオフに戻せなくなる）。/loginを例外にしているのは、
+# セッションが無い状態では「管理者かどうか」を判定できず、管理者自身がログインする
+# 手段が無くなってしまうため。/signupはLOGIN_EXEMPT_PREFIXESと違いここには意図的に
+# 含めていない: メンテナンス中の新規登録申請は、管理者が行っている作業(DBの移行等)と
+# 競合しうるため止めておきたい(この非対称はバグではなく意図した挙動)。
 MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
 LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
@@ -1097,12 +1178,12 @@ def _stations_with_recent_camera_failures_cached():
 
 
 def _current_notifications():
-    """通知ベル(base.html)の一覧。一般利用者には霧アラート+カメラ故障の兆候、管理者には
+    """通知ベル(base.html)の一覧。一般利用者には川霧アラート+カメラ故障の兆候、管理者には
     それに加えてシステム状態の通知を加える。通知はDBに記録された履歴ではなく、その時点の
-    状態から毎回計算するだけ（霧アラートは_upcoming_fog_alerts_safe()、システム状態は
+    状態から毎回計算するだけ（川霧アラートは_upcoming_fog_alerts_safe()、システム状態は
     _admin_overview()を再利用）。既読管理はサーバー側に持たず、base.htmlのJSがlocalStorageで行う。
 
-    お気に入り地点を設定しているユーザーには、霧アラート・カメラ故障通知の両方をお気に入り
+    お気に入り地点を設定しているユーザーには、川霧アラート・カメラ故障通知の両方をお気に入り
     地点だけに絞る(1件も設定していない場合は絞り込まず全地点分を出す)。
     """
     favorites = _current_user_favorite_stations()
@@ -1571,7 +1652,7 @@ def _accuracy_trend_safe(station=None):
 
 def _load_metrics_history_trend(station=None):
     """fog_model.append_metrics_historyが書く履歴CSVから、学習日ごとの
-    平均accuracy・平均霧F1(%)を計算する（『精度が向上しているか』を見るための集計）。
+    平均accuracy・平均川霧F1(%)を計算する（『精度が向上しているか』を見るための集計）。
     station指定時はその地点の行だけに絞る(CSVは元々station列を持つ、地点ごとの
     モデル精度推移を見せるための拡張。2026-09-12追加)。
     """
@@ -1611,7 +1692,7 @@ def _load_metrics_history_trend(station=None):
 
 
 def _render_metrics_trend_png(trend, title="学習時のモデル精度推移(全地点平均)"):
-    """学習時のaccuracy・霧F1の推移を折れ線グラフのPNGにして返す。station指定で絞り込んだ
+    """学習時のaccuracy・川霧F1の推移を折れ線グラフのPNGにして返す。station指定で絞り込んだ
     trend(_load_metrics_history_trend参照)を渡せば地点別の推移にもなる。"""
     fig, ax = plt.subplots(figsize=(9, 3.2))
     all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
@@ -1624,7 +1705,7 @@ def _render_metrics_trend_png(trend, title="学習時のモデル精度推移(�
             ax.plot(xs, ys, marker="o", markersize=3, color="#1a5276", linewidth=1.4, label="accuracy(平均,%)")
         if fog_pts:
             xs, ys = zip(*fog_pts)
-            ax.plot(xs, ys, marker="s", markersize=3, color="#c0392b", linewidth=1.4, label="霧F1(平均,%)")
+            ax.plot(xs, ys, marker="s", markersize=3, color="#c0392b", linewidth=1.4, label="川霧F1(平均,%)")
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=10))
         span = max(all_dates) - min(all_dates)
@@ -1654,7 +1735,7 @@ def _is_valid_number(v):
 
 def _render_model_compare_png(state):
     """RandomForest単体・XGBoost単体・LightGBM単体・RF+XGBoost・RF+LightGBM・
-    RF+XGBoost+LightGBMの霧F1平均を棒グラフで比較する。地点ごとに実際に採用される
+    RF+XGBoost+LightGBMの川霧F1平均を棒グラフで比較する。地点ごとに実際に採用される
     モデル方式はこのうち検証データでの正答率が最も高かったものが自動選択されるため
     (fog_model._fit_best_model参照)、「採用中」バーは方式が地点によって異なる
     ものの平均を示す。
@@ -1691,7 +1772,7 @@ def _render_model_compare_png(state):
     # 斜めにして間隔を確保する。
     ax.set_xticklabels(labels, fontsize=8.5, rotation=20, ha="right")
     ax.set_ylim(0, 100)
-    ax.set_ylabel("霧F1(平均, %)")
+    ax.set_ylabel("川霧F1(平均, %)")
     ax.set_title("モデル方式ごとの性能比較(全地点平均)", fontsize=11)
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
@@ -1787,7 +1868,7 @@ def _render_lead_time_chart_png(by_lead_day):
 
 
 def _render_region_compare_chart_png(region_summary):
-    """地域(会津/只見川)ごとに的中率と霧F1を並べた棒グラフ。会津は観測開始が新しく
+    """地域(会津/只見川)ごとに的中率と川霧F1を並べた棒グラフ。会津は観測開始が新しく
     学習データが少ないため、只見川との差が一目でわかるようにする。"""
     fig, ax = plt.subplots(figsize=(7, 3.4))
     rows = [r for r in region_summary if r["n"] > 0]
@@ -1798,7 +1879,7 @@ def _render_region_compare_chart_png(region_summary):
         x = np.arange(len(rows))
         width = 0.32
         ax.bar(x - width / 2, acc, width, color="#1a5276", label="的中率(%)")
-        ax.bar(x + width / 2, f1, width, color="#c0392b", label="霧F1(%)")
+        ax.bar(x + width / 2, f1, width, color="#c0392b", label="川霧F1(%)")
         for i, r in enumerate(rows):
             ax.text(i - width / 2, acc[i] + 2, f"{acc[i]:.1f}", ha="center", fontsize=8)
             label = f"{f1[i]:.1f}" if r["f1"] is not None else "データなし"
@@ -1810,7 +1891,7 @@ def _render_region_compare_chart_png(region_summary):
         ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
     ax.set_ylim(0, 100)
     ax.set_ylabel("スコア(%)")
-    ax.set_title("地域別の的中率・霧F1", fontsize=11)
+    ax.set_title("地域別の的中率・川霧F1", fontsize=11)
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     buf = io.BytesIO()
@@ -1821,7 +1902,7 @@ def _render_region_compare_chart_png(region_summary):
 
 
 def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
-    """霧と判定するしきい値(fog_probがこの値以上なら「霧」)を変えた場合の
+    """川霧と判定するしきい値(fog_probがこの値以上なら「川霧」)を変えた場合の
     precision(空振りの少なさ)・recall(見逃しの少なさ)・F1の変化を折れ線で示す。
     現在採用中のしきい値(fog_model._choose_fog_thresholdが選んだ値)を縦線で示し、
     他のしきい値を選んだ場合とのトレードオフを比較できるようにする。"""
@@ -1835,18 +1916,115 @@ def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい�
         ax.plot(ts, recalls, marker="s", markersize=3, color="#eb6834", linewidth=1.4, label="recall(見逃しの少なさ)")
         ax.plot(ts, f1s, marker="^", markersize=3, color="#16a085", linewidth=1.6, label="F1")
         if current_threshold is not None:
-            ax.axvline(current_threshold, color="#7f2020", linestyle="--", linewidth=1.2)
-            ax.text(current_threshold, 1.02, f"採用中({current_threshold:.2f})",
-                    ha="center", fontsize=8, color="#7f2020", transform=ax.get_xaxis_transform())
-        ax.legend(loc="lower center", fontsize=8, ncol=3)
+            # 以前はax.text(y=1.02)で縦線の上にラベルを浮かせていたが、タイトルと重なって
+            # 読みにくかったため、凡例の1エントリとして表示する方式に変更した。
+            ax.axvline(current_threshold, color="#7f2020", linestyle="--", linewidth=1.2,
+                       label=f"採用中({current_threshold:.2f})")
+        ax.legend(loc="upper right", fontsize=7.5, ncol=1, framealpha=0.9)
         ax.set_xlim(0, 1)
     else:
         ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
     ax.set_ylim(0, 1.05)
-    ax.set_xlabel("しきい値(この確率以上を「霧」と判定)")
+    ax.set_xlabel("しきい値(この確率以上を「川霧」と判定)")
     ax.set_ylabel("スコア")
     ax.set_title(title, fontsize=11)
     ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _draw_tree_on_axis(ax, root, max_display_depth, is_rf):
+    """fog_tree_viz.assign_layoutで計算した位置に沿って、木構造を箱と線で描画する。
+    分岐ノードは水色、葉ノードはRFなら緑(判定コードを表示)・XGBoost/LightGBMなら
+    黄土色(その木単体の葉の値を表示、複数の木を合計/平均して初めて最終予測になるため
+    単体では「予測クラス」を意味しない)、省略ノード(「…」)はグレーで描く。
+    戻り値: 描画したxの範囲に使った葉の本数(呼び出し側でxlim計算に使う)。
+    """
+    positions = fog_tree_viz.assign_layout(root, max_display_depth)
+
+    def draw(node):
+        if node is None:
+            return
+        x, y, truncated = positions[id(node)]
+        if node["is_leaf"] or truncated:
+            if truncated:
+                label, color = "…", "#9aa5b1"
+            elif is_rf:
+                label = PHENOM_LABELS.get(node["value"], "現象なし" if node["value"] == 0 else str(node["value"]))
+                color = "#7fb8a4"
+            else:
+                label = f"{node['value']:+.2f}"
+                color = "#e6c789"
+            ax.add_patch(mpatches.FancyBboxPatch(
+                (x - 0.40, y - 0.34), 0.80, 0.68, boxstyle="round,pad=0.02",
+                linewidth=0.8, edgecolor="#5a6570", facecolor=color, alpha=0.9, zorder=2,
+            ))
+            # ノードの箱の色は固定(ダーク/ライトどちらのテーマでも同じ淡い色)のため、
+            # 文字色もテーマのtext.color(ダークモードでは白系)に任せず、常に読める
+            # 濃い色で固定する。
+            ax.text(x, y, label, ha="center", va="center", fontsize=6.3, zorder=3, color="#1c2733")
+            return
+        feat = node["feature"]
+        if len(feat) > 9:
+            feat = feat[:8] + "…"
+        label = f"{feat}\n≤{node['threshold']:.2f}"
+        ax.add_patch(mpatches.FancyBboxPatch(
+            (x - 0.44, y - 0.34), 0.88, 0.68, boxstyle="round,pad=0.02",
+            linewidth=0.8, edgecolor="#5a6570", facecolor="#a9c6de", alpha=0.9, zorder=2,
+        ))
+        ax.text(x, y, label, ha="center", va="center", fontsize=6.0, zorder=3, color="#1c2733")
+        for child in (node.get("left"), node.get("right")):
+            if child is None:
+                continue
+            cx, cy, _ = positions[id(child)]
+            ax.plot([x, cx], [y + 0.34, cy - 0.34], color="#8a97a3", linewidth=0.7, zorder=1)
+        draw(node["left"])
+        draw(node["right"])
+
+    draw(root)
+    xs = [p[0] for p in positions.values()]
+    return (min(xs), max(xs)) if xs else (0, 0)
+
+
+def _render_tree_depth_diagram_png(extracted, station_name):
+    """extract_representative_treeが返した木構造(方式ごと)を、横に並べて描画する。
+    採用中のモデルが実際にどれくらいの深さ・複雑さの木を使っているかを直感的に示す図。
+    深さ14等のRFをノード単位でそのまま描くと指数的にノード数が増えて読めなくなるため、
+    表示は上位数階層までに絞り(fog_tree_viz.DEFAULT_MAX_DISPLAY_DEPTH)、実際の最大深さは
+    各サブプロットのタイトルに明記する(表示を打ち切っているだけで、実際のモデルの判定は
+    その先も続いている点に注意)。"""
+    kinds = list(extracted.keys())
+    max_display = fog_tree_viz.DEFAULT_MAX_DISPLAY_DEPTH
+    if not kinds:
+        fig, ax = plt.subplots(figsize=(6, 2.2))
+        ax.text(0.5, 0.5, "この地点はまだモデルがありません", ha="center", va="center",
+                transform=ax.transAxes, color=plt.rcParams["text.color"])
+        ax.axis("off")
+    else:
+        fig, axes = plt.subplots(1, len(kinds), figsize=(6.4 * len(kinds), 6.8))
+        axes = [axes] if len(kinds) == 1 else list(axes)
+        for ax, kind in zip(axes, kinds):
+            info = extracted[kind]
+            x_min, x_max = _draw_tree_on_axis(ax, info["root"], max_display, kind == "RF")
+            ax.set_xlim(x_min - 0.6, x_max + 0.6)
+            ax.set_ylim(max_display + 0.6, -0.6)
+            ax.axis("off")
+            configured = info["configured_max_depth"]
+            configured_label = "無制限" if configured is None else str(configured)
+            # ax.axis("off")で軸を消すと、なぜかax.set_titleの文字色がrcParamsの
+            # text.colorを正しく引き継がず、ダークモードで背景とほぼ同化して読めなくなる
+            # 現象を確認したため(2026-09-13)、明示的にcolorを指定する。
+            ax.set_title(
+                f"{kind}\n採用木の実際の深さ: {info['actual_max_depth']} / "
+                f"設定上限: {configured_label} / 本数: {info['n_estimators']}\n"
+                f"(表示は上位{max_display}階層まで、それ以降は「…」に省略)",
+                fontsize=8.3, color=plt.rcParams["text.color"],
+            )
+    fig.suptitle(f"{station_name}: 採用モデルの決定木(代表1本)", fontsize=11, color=plt.rcParams["text.color"])
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
@@ -2028,17 +2206,17 @@ CHAT_SYSTEM_INSTRUCTION = (
     "利用者からの質問に日本語で簡潔に答えてください。\n"
     "\n"
     "【このシステムの仕組み(常に正しい前提知識として使ってよい)】\n"
-    "- 霧の発生予測には、RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・"
+    "- 川霧の発生予測には、RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・"
     "RF+LightGBM・RF+XGBoost+LightGBMのブレンドという複数のモデル方式を候補として地点ごとに"
     "学習し、検証データでの正答率が最も高かった方式を地点ごとに自動選択して使っている"
     "(地点によって採用される方式は異なる)。ブレンド方式が採用された場合の混合比"
     "(ブレンド重み)も地点ごとに検証データから自動選択される。\n"
     "- 観測データが少ない地点は、単独では十分な精度のモデルを学習できないため、複数地点をまとめた"
-    "「pooled」モデル(地点別霧発生率などの特徴量を加えた共通モデル)で代替している。\n"
-    "- 霧と判定するしきい値(fog_threshold)は0.5固定ではなく、地点ごとに検証データでF1が"
+    "「pooled」モデル(地点別川霧発生率などの特徴量を加えた共通モデル)で代替している。\n"
+    "- 川霧と判定するしきい値(fog_threshold)は0.5固定ではなく、地点ごとに検証データでF1が"
     "最良になる値を自動選択している。\n"
-    "- 特徴量には気温・湿度・降水量・視程などの気象観測値に加え、その地点の過去の霧発生率や、"
-    "他地点も含めた広域の霧の出やすさを示す指数なども使っている。\n"
+    "- 特徴量には気温・湿度・降水量・視程などの気象観測値に加え、その地点の過去の川霧発生率や、"
+    "他地点も含めた広域の川霧の出やすさを示す指数なども使っている。\n"
     "- 定期的な再学習のたびに、新モデルが統計的に有意に前のモデルより良いと確認できない場合は、"
     "自動的に前のモデルへロールバックする安全機構がある(精度低下を防ぐため)。\n"
     "- 予測精度がなぜ変動するか(季節性、学習データの偏り、直近の異常な気象、モデルの再学習・"
@@ -2087,7 +2265,7 @@ def _build_chat_context():
                 f"{s['name']}({s['label']})" for s in notable
             ))
         else:
-            lines.append("現在、霧・層雲等の現象が出ている地点はありません。")
+            lines.append("現在、川霧・層雲等の現象が出ている地点はありません。")
     else:
         lines.append("現在の観測データは取得できていません。")
 
@@ -2953,7 +3131,7 @@ def _accuracy_by_weather_safe():
     return result
 
 
-# 霧クラスのprecision/recall/F1・混同行列・地域比較は、いずれも答え合わせ済みの
+# 川霧クラスのprecision/recall/F1・混同行列・地域比較は、いずれも答え合わせ済みの
 # (地点, 予測コード, 実際のコード)の組み合わせ件数(prediction_log.fog_pair_counts)
 # という1つの集計結果から計算できるため、accuracy_summaryと同じTTLキャッシュで共有する。
 _fog_pair_counts_cache = {"data": None, "at": 0.0}
@@ -2984,8 +3162,8 @@ def _fog_pair_counts_safe():
 
 
 def _fog_confusion_stats(pairs, fog_codes=None):
-    """(station, predicted_code, actual_code, n)のリストから、「霧」を陽性クラスとみなした
-    TP(的中)/FP(空振り: 霧じゃないのに霧と予測)/FN(見逃し: 霧なのに霧じゃないと予測)/TNと、
+    """(station, predicted_code, actual_code, n)のリストから、「川霧」を陽性クラスとみなした
+    TP(的中)/FP(空振り: 川霧じゃないのに川霧と予測)/FN(見逃し: 川霧なのに川霧じゃないと予測)/TNと、
     precision/recall/F1を計算する。fog_model._choose_fog_thresholdと同じくSUMMARY_FOG_CODES
     を陽性クラスの定義に使うので、学習時のしきい値選択と同じ基準で比較できる。"""
     fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
@@ -3009,7 +3187,7 @@ def _fog_confusion_stats(pairs, fog_codes=None):
 
 
 def _accuracy_station_metrics_safe():
-    """地点ごとに霧クラスのprecision/recall/F1をまとめる(地点別的中率テーブルに
+    """地点ごとに川霧クラスのprecision/recall/F1をまとめる(地点別的中率テーブルに
     列を足すためのもの)。戻り値: {地点名: _fog_confusion_statsの戻り値}"""
     by_station = {}
     for row in _fog_pair_counts_safe():
@@ -3018,7 +3196,7 @@ def _accuracy_station_metrics_safe():
 
 
 def _accuracy_region_summary_safe():
-    """地域(会津/只見川)ごとに、的中率と霧クラスのprecision/recall/F1をまとめる
+    """地域(会津/只見川)ごとに、的中率と川霧クラスのprecision/recall/F1をまとめる
     (会津は観測を始めてまだ日が浅く学習データが少ないため、只見川との差を
     一目で見せられるようにする)。"""
     by_region = {}
@@ -3050,7 +3228,7 @@ _fog_prob_buckets_cache_lock = threading.Lock()
 
 
 def _fog_prob_buckets_safe(station=None):
-    """predicted_fog_prob(0.05刻み)ごとに、実際に霧だったか否かの件数を集計する。
+    """predicted_fog_prob(0.05刻み)ごとに、実際に川霧だったか否かの件数を集計する。
     しきい値を変えた場合のprecision/recall/F1を後から計算するための元データ。
     station未指定(全地点合算、/accuracyページ用)の場合のみ短時間キャッシュする
     (地点別は station_detail 表示のたびに変わるstation引数が多様で、キャッシュの
@@ -3079,6 +3257,13 @@ def _fog_prob_buckets_safe(station=None):
     return result
 
 
+# しきい値ごとの集計で、そのしきい値以上と判定された件数がこれ未満の場合はprecision/F1を
+# 計算しない(Noneのままにする)。特に地点別のグラフはしきい値を上げるほど対象件数が
+# 数件まで減り、precisionが0%/100%の間で激しくジグザグしてグラフが見苦しくなるため
+# (2026-09-12、station_threshold_chartのグラフが「気持ち悪い」との指摘を受けて追加)。
+MIN_SAMPLES_FOR_THRESHOLD_PRECISION = 10
+
+
 def _threshold_sweep_stats(buckets, fog_codes=None):
     """しきい値ごとのprecision/recall/F1を計算する。fog_model.FOG_THRESHOLD_GRIDと
     同じ刻みを使うので、学習時にfog_model._choose_fog_thresholdが選んだしきい値と
@@ -3100,9 +3285,18 @@ def _threshold_sweep_stats(buckets, fog_codes=None):
                 tp += b["n"]
             else:
                 fp += b["n"]
-        precision = tp / (tp + fp) if (tp + fp) else None
+        n_predicted_positive = tp + fp
+        if n_predicted_positive >= MIN_SAMPLES_FOR_THRESHOLD_PRECISION:
+            precision = tp / n_predicted_positive
+        else:
+            precision = None
         recall = tp / total_fog
-        f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+        # 「if precision and recall」だとprecision/recallが正当な0.0の時も偽扱いになり
+        # F1が本来計算できるのに欠落してしまうバグがあったため、is not Noneで判定する。
+        if precision is not None and recall is not None and (precision + recall) > 0:
+            f1 = 2 * precision * recall / (precision + recall)
+        else:
+            f1 = None
         results.append({"threshold": float(t), "precision": precision, "recall": recall, "f1": f1})
     return results
 
@@ -3540,6 +3734,11 @@ def images_hour_zip(date, hhmm):
     files = sorted(p for p in hour_dir.iterdir() if p.suffix.lower() == ".jpg")
     if not files:
         abort(404)
+    # 地点数が増えていくとメモリ上に丸ごと構築するZIPも際限なく大きくなるため、
+    # 合計サイズに上限を設ける(2026-09-13の監査で指摘)。
+    total_bytes = sum(f.stat().st_size for f in files)
+    if total_bytes > IMAGES_HOUR_ZIP_MAX_BYTES:
+        abort(413)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -3682,7 +3881,7 @@ def map_page():
 @app.route("/simulator")
 def simulator_page():
     """What-ifシミュレーター: 地点を選び、気象条件・時刻を手動で入力すると、その地点が
-    現在採用しているモデル(fog_model.simulate_station)でその場で霧予測を試算する。
+    現在採用しているモデル(fog_model.simulate_station)でその場で川霧予測を試算する。
     学習・本番の予測パイプラインには一切書き込まない、閲覧専用の推論だけの機能。
     """
     station = request.args.get("station") or (STATION_NAMES[0] if STATION_NAMES else None)
@@ -3736,7 +3935,10 @@ def simulator_page():
             lat, lon = representative_coords()
         dt = datetime.strptime(f"{date_str} {hour:02d}:00", "%Y-%m-%d %H:%M")
         weather = {field["col"]: values[field["key"]] for field in SIM_WEATHER_FIELDS}
-        predicted_code, fog_prob, class_proba = fog_model.simulate_station(info, lat, lon, weather, dt)
+        calibrator = fog_model.load_fog_calibrator()
+        predicted_code, fog_prob, class_proba = fog_model.simulate_station(
+            info, lat, lon, weather, dt, calibrator=calibrator,
+        )
         label, color, text_color = _phenom_label_color(predicted_code)
         threshold = info.get("fog_threshold") or fog_model.DEFAULT_FOG_THRESHOLD
         result = {
@@ -3838,11 +4040,17 @@ def station_report_observation(name):
     importance = request.form.get("importance", "medium")
     if importance not in IMPORTANCE_LEVELS:
         importance = "medium"
+    reason = request.form.get("reason", "").strip()[:OBSERVATION_REPORT_REASON_MAX_LENGTH]
+    if not reason:
+        return _finish(
+            "station_detail", "なぜこの現象だと思うか、理由を入力してください。", success=False, name=name,
+        )
     conn = _users_conn()
     try:
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         report_id = users.create_observation_report(
-            conn, name, target_dt_str, current["code"], my_id, now_str, source="user", importance=importance,
+            conn, name, target_dt_str, current["code"], my_id, now_str,
+            source="user", importance=importance, reason=reason,
         )
         created = report_id is not None
         gem_note = ""
@@ -3980,21 +4188,29 @@ def admin_observation_reports():
 @requires_observer
 def admin_observation_report_resolve(report_id):
     my_id = session.get("user_id")
-    region = _observer_region_for_role(session.get("role"))
     conn = _users_conn()
     try:
         report = users.get_observation_report(conn, report_id)
         if report is None or report["status"] != "pending":
             abort(404)
-        if region is not None and STATION_REGION.get(report["station_name"]) != region:
-            abort(403)
+        _enforce_observer_region(report["station_name"])
         corrected_code = request.form.get("corrected_code", type=int)
         if corrected_code is None or not (0 <= corrected_code <= 10):
             return _finish("admin_observation_reports", "訂正後の現象コードを選んでください。", success=False)
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+        # original_codeは報告作成時点のreported_codeではなく、今この瞬間の実際の判定
+        # (既に別経路で訂正済みならその訂正後コード、無ければ生のAI判定)を使う。報告から
+        # 承認までの間に別経路(その場での直接訂正・再収集等)でコードが変わっていた場合、
+        # 古いreported_codeをそのままoriginal_codeに残すとfog_model.pyの学習除外/
+        # 再重み付けロジックが事実と食い違うレコードを参照してしまうため(2026-09-13の
+        # 監査で指摘)。
+        codes_by_station, corrections_by_station = _phenom_codes_for_datetime(report["target_datetime"])
+        current_code = corrections_by_station.get(
+            report["station_name"], codes_by_station.get(report["station_name"], report["reported_code"]),
+        )
         users.add_phenomena_correction(
             conn, report["station_name"], report["target_datetime"],
-            report["reported_code"], corrected_code, my_id, now_str, source="human",
+            current_code, corrected_code, my_id, now_str, source="human",
         )
         users.resolve_observation_report(
             conn, report_id, "resolved", my_id, now_str, f"{corrected_code}に訂正",
@@ -4038,14 +4254,12 @@ def admin_observation_report_resolve(report_id):
 @requires_observer
 def admin_observation_report_dismiss(report_id):
     my_id = session.get("user_id")
-    region = _observer_region_for_role(session.get("role"))
     conn = _users_conn()
     try:
         report = users.get_observation_report(conn, report_id)
         if report is None or report["status"] != "pending":
             abort(404)
-        if region is not None and STATION_REGION.get(report["station_name"]) != region:
-            abort(403)
+        _enforce_observer_region(report["station_name"])
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         users.resolve_observation_report(conn, report_id, "dismissed", my_id, now_str, "問題なしと判断")
         _record_audit("観測報告を却下", f"{report['station_name']} {report['target_datetime']}")
@@ -4177,6 +4391,9 @@ def weather_fog_histogram_png():
 
 @app.route("/stations/<name>/comments", methods=["POST"])
 def station_comment_add(name):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
     name = _validate_station(name)
     body = request.form.get("body", "").strip()[:STATION_COMMENT_MAX_LENGTH]
     if not body:
@@ -4184,9 +4401,9 @@ def station_comment_add(name):
     created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
     conn = _users_conn()
     try:
-        comment_id = users.add_station_comment(conn, name, session["user_id"], body, created_at)
+        comment_id = users.add_station_comment(conn, name, my_id, body, created_at)
         users.grant_points(
-            conn, session["user_id"], f"comment:{comment_id}", COMMENT_POST_POINTS, created_at,
+            conn, my_id, f"comment:{comment_id}", COMMENT_POST_POINTS, created_at,
         )
     finally:
         conn.close()
@@ -4361,13 +4578,50 @@ def station_threshold_chart(name):
     return Response(png, mimetype="image/png")
 
 
+@app.route("/stations/<name>/tree_diagram.png")
+def station_tree_diagram(name):
+    """採用中のモデル(RF/XGBoost/LightGBMのうち実際にブレンドに使われている方式)が
+    実際にどれくらいの深さの木を使っているかを示す図。木の深さは分岐条件を重ねるほど
+    複雑な判定ができる一方、過学習のリスクとの兼ね合いでもあるため、モデルの複雑さを
+    直感的に把握できるよう追加した(2026-09-13、利用者からの要望)。"""
+    name = _validate_station(name)
+
+    def render():
+        state = fog_model.load_model_state()
+        info = state.get(name)
+        extracted = {}
+        if info is not None and info.get("pipe") is not None:
+            feature_names = list(info.get("features", []))
+            if (
+                info.get("pooled") and "station_fog_rate" in info
+                and fog_model.STATION_FOG_RATE_FEATURE not in feature_names
+            ):
+                # プーリング救済モデルは実際には地点別川霧発生率も特徴量として使っているが、
+                # info["features"]には含まれていない(build_location_forecast_codes等は
+                # Xの末尾に追加する形で辻褄を合わせているため予測自体は問題ないが、
+                # 特徴量名の一覧としては不完全だった)。木の特徴量ラベルが正しく出るよう
+                # ここで補う(2026-09-13、この可視化機能を作った際に発覚)。
+                feature_names.append(fog_model.STATION_FOG_RATE_FEATURE)
+            try:
+                extracted = fog_model.extract_representative_tree(info["pipe"], feature_names)
+            except Exception as e:
+                log.warning("Failed to extract tree diagram for %s: %s", name, e)
+        with _chart_rc_context():
+            return _render_tree_depth_diagram_png(extracted, name)
+
+    png = _cached_png(
+        f"station_tree_diagram:{name}:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render,
+    )
+    return Response(png, mimetype="image/png")
+
+
 @app.route("/accuracy")
 def accuracy_page():
     summary = _accuracy_summary_safe()
     by_weather = _accuracy_by_weather_safe()
     if summary:
         # _accuracy_summary_safeはサーバー全体で共有するキャッシュを返すため、
-        # そのdictを直接書き換えず、霧クラス指標を足した新しい行リストを別途作る。
+        # そのdictを直接書き換えず、川霧クラス指標を足した新しい行リストを別途作る。
         station_metrics = _accuracy_station_metrics_safe()
         by_station = [
             {**row, **station_metrics.get(row["station"], {})}
@@ -4680,7 +4934,13 @@ def richbody(text, mentioned_names=None):
         escaped = str(escape(p))
         for name in mentioned_names:
             token = f"@{escape(name)}"
-            escaped = escaped.replace(str(token), f'<span class="mention-tag">{token}</span>')
+            # 単純な部分文字列置換だと、対象ユーザー名が別の(メンション対象ではない)
+            # 名前の接頭辞になっている場合(例: 対象が"Yu"で本文中に無関係な"@Yuki"がある)、
+            # 誤って"@Yu"だけをハイライトし"ki"が分離されてしまっていた。直後が単語構成
+            # 文字(\w、日本語含む)で続いていないマッチだけを対象にする
+            # (2026-09-13の監査で指摘)。
+            pattern = re.compile(re.escape(str(token)) + r"(?!\w)")
+            escaped = pattern.sub(f'<span class="mention-tag">{token}</span>', escaped)
         out.append(escaped)
     return Markup("".join(out))
 
@@ -4846,16 +5106,16 @@ BADGE_DEFINITIONS = [
      # FRAME_DEFINITIONSはこの後で定義されるが、lambda本体はaward/表示のたびに評価される
      # ため問題ない(定義時ではなく呼び出し時にグローバル名を解決するPythonの通常の挙動)。
      "check": lambda s: s["owned_frame_count"] >= len(FRAME_DEFINITIONS)},
-    # 霧予測ゲームの的中実績
-    {"id": "gamble_first_win", "label": "初勝利", "desc": "霧予測ゲームで初めて賭けを的中させた", "icon": "star", "points": 200,
+    # 川霧予測ゲームの的中実績
+    {"id": "gamble_first_win", "label": "初勝利", "desc": "川霧予測ゲームで初めて賭けを的中させた", "icon": "star", "points": 200,
      "check": lambda s: s["gamble_won_count"] >= 1},
-    {"id": "gamble_won_20", "label": "ギャンブラー", "desc": "霧予測ゲームで20回的中させた", "icon": "star", "points": 600,
+    {"id": "gamble_won_20", "label": "ギャンブラー", "desc": "川霧予測ゲームで20回的中させた", "icon": "star", "points": 600,
      "check": lambda s: s["gamble_won_count"] >= 20},
-    {"id": "gamble_won_50", "label": "目利き", "desc": "霧予測ゲームで50回的中させた", "icon": "star", "points": 1500,
+    {"id": "gamble_won_50", "label": "目利き", "desc": "川霧予測ゲームで50回的中させた", "icon": "star", "points": 1500,
      "check": lambda s: s["gamble_won_count"] >= 50},
-    {"id": "gamble_won_100", "label": "霧予知能力者", "desc": "霧予測ゲームで100回的中させた", "icon": "crown", "points": 3000,
+    {"id": "gamble_won_100", "label": "川霧予知能力者", "desc": "川霧予測ゲームで100回的中させた", "icon": "crown", "points": 3000,
      "check": lambda s: s["gamble_won_count"] >= 100},
-    {"id": "gamble_won_500", "label": "川霧の神様", "desc": "霧予測ゲームで500回的中させた", "icon": "crown", "points": 10000,
+    {"id": "gamble_won_500", "label": "川霧の神様", "desc": "川霧予測ゲームで500回的中させた", "icon": "crown", "points": 10000,
      "check": lambda s: s["gamble_won_count"] >= 500},
     # メッセージ機能の利用(DM・グループチャット合算)
     {"id": "msg_10", "label": "おしゃべりデビュー", "desc": "DM・グループチャットで合計10件送信した", "icon": "chat", "points": 200,
@@ -4871,11 +5131,11 @@ BADGE_DEFINITIONS = [
     {"id": "mention_received_20", "label": "頼られる存在", "desc": "@メンションを20回もらった", "icon": "comment", "points": 400,
      "check": lambda s: s["mention_received_count"] >= 20},
     # 無料デイリーゲーム
-    {"id": "fog_quiz_correct_10", "label": "予報士見習い", "desc": "霧予報クイズに10回正解した", "icon": "forecast", "points": 300,
+    {"id": "fog_quiz_correct_10", "label": "予報士見習い", "desc": "川霧予報クイズに10回正解した", "icon": "forecast", "points": 300,
      "check": lambda s: s["fog_quiz_correct"] >= 10},
-    {"id": "fog_quiz_correct_50", "label": "予報士", "desc": "霧予報クイズに50回正解した", "icon": "forecast", "points": 1200,
+    {"id": "fog_quiz_correct_50", "label": "予報士", "desc": "川霧予報クイズに50回正解した", "icon": "forecast", "points": 1200,
      "check": lambda s: s["fog_quiz_correct"] >= 50},
-    {"id": "fog_quiz_correct_200", "label": "名予報士", "desc": "霧予報クイズに200回正解した", "icon": "crown", "points": 4000,
+    {"id": "fog_quiz_correct_200", "label": "名予報士", "desc": "川霧予報クイズに200回正解した", "icon": "crown", "points": 4000,
      "check": lambda s: s["fog_quiz_correct"] >= 200},
     {"id": "phenom_quiz_correct_20", "label": "現象マニア", "desc": "現象当てクイズに20回正解した", "icon": "accuracy", "points": 400,
      "check": lambda s: s["phenom_quiz_correct"] >= 20},
@@ -4924,7 +5184,7 @@ COMMENT_POST_POINTS = 15
 CHAT_MESSAGE_POINTS = 10
 
 # --- ショップ経済インフレ対策(2026-09-07) -----------------------------------------
-# 霧予測ゲームで数千万〜億単位のポイントを稼ぐユーザーが出てきた結果、既存のショップ価格
+# 川霧予測ゲームで数千万〜億単位のポイントを稼ぐユーザーが出てきた結果、既存のショップ価格
 # (数百〜数万pt)がほぼ無価値になったため、高額品ほど強く底上げする形で全カタログの
 # costを一括値上げする。安価な品(BASE以下)はそのまま据え置き、高額品ほど指数的に
 # 値上がりする(単純な定数倍だと安い品まで一律で上がってしまうため)。
@@ -4972,7 +5232,7 @@ FRAME_GRADES = _reprice_for_inflation([
     {"id": "legend", "label": "伝説", "cost": 20000},
 ])
 FRAME_THEMES = [
-    {"id": "kiri", "label": "霧"},
+    {"id": "kiri", "label": "川霧"},
     {"id": "hare", "label": "晴天"},
     {"id": "yuuyake", "label": "夕焼け"},
     {"id": "yuki", "label": "雪"},
@@ -5001,7 +5261,7 @@ FRAME_BY_ID = {f["id"]: f for f in FRAME_DEFINITIONS}
 TITLE_DEFINITIONS = _reprice_for_inflation([
     {"id": "regular", "label": "常連さん", "cost": 500},
     {"id": "early_riser", "label": "早起き名人", "cost": 1200},
-    {"id": "fog_walker", "label": "霧使い", "cost": 3000},
+    {"id": "fog_walker", "label": "川霧使い", "cost": 3000},
     {"id": "tadami_master", "label": "只見川マスター", "cost": 8000},
     {"id": "legendary_observer", "label": "伝説の観測者", "cost": 15000},
     {"id": "dopagaki", "label": "ドパガキ", "cost": 50000},
@@ -5010,11 +5270,11 @@ TITLE_DEFINITIONS = _reprice_for_inflation([
 # 経済インフレ対策と同時に追加した最高レア度の称号(2026-09-07)。値上げ後の最高額品
 # よりさらに一段上に置くため、_reprice_for_inflationは通さず直接「狂った」価格を付ける。
 TITLE_DEFINITIONS.append(
-    {"id": "kiri_no_kamigami", "label": "霧の神々に愛されし者", "cost": 1000000000,
+    {"id": "kiri_no_kamigami", "label": "川霧の神々に愛されし者", "cost": 1000000000,
      "monthly_fee": _monthly_fee(1000000000), "added": "2026-09-07"}
 )
 TITLE_DEFINITIONS.append(
-    {"id": "gem_title_legend", "label": "霧の伝承者", "currency": "gems", "cost_gems": 90000, "premium": True}
+    {"id": "gem_title_legend", "label": "川霧の伝承者", "currency": "gems", "cost_gems": 90000, "premium": True}
 )
 TITLE_BY_ID = {t["id"]: t for t in TITLE_DEFINITIONS}
 
@@ -5044,7 +5304,7 @@ DASHBOARD_THEME_DEFINITIONS.append(
 DASHBOARD_THEME_BY_ID = {d["id"]: d for d in DASHBOARD_THEME_DEFINITIONS}
 
 EFFECT_DEFINITIONS = _reprice_for_inflation([
-    {"id": "fog_drift", "label": "霧の揺らめき", "cost": 4000, "css_class": "fx-fog-drift"},
+    {"id": "fog_drift", "label": "川霧の揺らめき", "cost": 4000, "css_class": "fx-fog-drift"},
     {"id": "sparkle", "label": "きらめき", "cost": 4000, "css_class": "fx-sparkle"},
     {"id": "aurora_glow", "label": "オーロラの光", "cost": 6000, "css_class": "fx-aurora-glow"},
 ])
@@ -5055,7 +5315,7 @@ EFFECT_DEFINITIONS.append(
 EFFECT_BY_ID = {e["id"]: e for e in EFFECT_DEFINITIONS}
 
 BANNER_DEFINITIONS = _reprice_for_inflation([
-    {"id": "kiri", "label": "霧景色", "cost": 2000, "css_class": "banner-kiri"},
+    {"id": "kiri", "label": "川霧景色", "cost": 2000, "css_class": "banner-kiri"},
     {"id": "yuuyake", "label": "夕焼け", "cost": 2000, "css_class": "banner-yuuyake"},
     {"id": "yukigesho", "label": "雪景色", "cost": 2000, "css_class": "banner-yukigesho"},
     {"id": "hoshizora", "label": "星空", "cost": 3000, "css_class": "banner-hoshizora"},
@@ -5067,7 +5327,7 @@ BANNER_DEFINITIONS.append(
 BANNER_BY_ID = {b["id"]: b for b in BANNER_DEFINITIONS}
 
 DM_THEME_DEFINITIONS = _reprice_for_inflation([
-    {"id": "kiri", "label": "霧", "cost": 1500, "css_class": "dm-theme-kiri"},
+    {"id": "kiri", "label": "川霧", "cost": 1500, "css_class": "dm-theme-kiri"},
     {"id": "yuuyake", "label": "夕焼け", "cost": 1500, "css_class": "dm-theme-yuuyake"},
     {"id": "mint", "label": "ミント", "cost": 1500, "css_class": "dm-theme-mint"},
 ])
@@ -5113,8 +5373,8 @@ MARKER_BY_ID = {m["id"]: m for m in MARKER_DEFINITIONS}
 # (ポイント品と別画面に分けない・ジェムは最高級品にしか使わない、という方針のため)。
 GEM_SHOP_DEFINITIONS = [
     {"id": "observer_glasses", "label": "観測者の眼鏡", "cost_gems": 2000, "icon": "🔍",
-     "desc": "遠くの霧もくっきり見通せるという、観測者の間で語られる縁起物。"},
-    {"id": "forecaster_compass", "label": "霧予報士の羅針盤", "cost_gems": 10000, "icon": "🧭",
+     "desc": "遠くの川霧もくっきり見通せるという、観測者の間で語られる縁起物。"},
+    {"id": "forecaster_compass", "label": "川霧予報士の羅針盤", "cost_gems": 10000, "icon": "🧭",
      "desc": "明日の川霧の気配を示すとされる、予報士憧れの逸品。"},
     {"id": "river_fog_crystal", "label": "川霧の結晶", "cost_gems": 40000, "icon": "💎", "premium": True,
      "desc": "濃い川霧の日にしか現れないという伝説の結晶。"},
@@ -5154,7 +5414,7 @@ BUBBLE_STYLE_BY_ID = {b["id"]: b for b in BUBBLE_STYLE_DEFINITIONS}
 AVATAR_BG_DEFINITIONS = _reprice_for_inflation([
     {"id": "glow_blue", "label": "青の光暈", "cost": 1800, "css_class": "avatar-bg-glow-blue", "added": NEW_ITEM_ADDED_AT},
     {"id": "glow_gold", "label": "金の光暈", "cost": 3500, "css_class": "avatar-bg-glow-gold", "added": NEW_ITEM_ADDED_AT},
-    {"id": "mist", "label": "霧の背景", "cost": 2200, "css_class": "avatar-bg-mist", "added": NEW_ITEM_ADDED_AT},
+    {"id": "mist", "label": "川霧の背景", "cost": 2200, "css_class": "avatar-bg-mist", "added": NEW_ITEM_ADDED_AT},
 ])
 AVATAR_BG_DEFINITIONS.append(
     {"id": "gem_avatar_bg_aurora", "label": "後光の輝き", "css_class": "shop-gem-premium-box",
@@ -5198,13 +5458,13 @@ SEASONAL_DEFINITIONS = _reprice_for_inflation([
         "available_from": "2026-10-01", "available_until": "2026-11-30", "added": NEW_ITEM_ADDED_AT,
     },
     {
-        "id": "newyear_2027", "label": "迎春の霧", "cost": 2200, "css_class": "seasonal-newyear",
+        "id": "newyear_2027", "label": "迎春の川霧", "cost": 2200, "css_class": "seasonal-newyear",
         "available_from": "2026-12-15", "available_until": "2027-01-15", "added": NEW_ITEM_ADDED_AT,
     },
 ])
 SEASONAL_DEFINITIONS.append(
     # 期間限定ではなく通年購入できる(available_from/untilを付けない)、ジェム限定の一点。
-    {"id": "gem_seasonal_aurora", "label": "永遠の黄金霧", "css_class": "shop-gem-premium-box",
+    {"id": "gem_seasonal_aurora", "label": "永遠の黄金川霧", "css_class": "shop-gem-premium-box",
      "currency": "gems", "cost_gems": 45000}
 )
 SEASONAL_BY_ID = {s["id"]: s for s in SEASONAL_DEFINITIONS}
@@ -5214,15 +5474,15 @@ GACHA_BIG_REFUND_MULTIPLIER = 2.5
 GACHA_BIG_REFUND_WEIGHT = 5
 GACHA_CONSOLATION_POINTS = 300
 
-# --- 霧予測ゲーム・デイリーゲーム共通の消費アイテム ---------------------------------
+# --- 川霧予測ゲーム・デイリーゲーム共通の消費アイテム ---------------------------------
 CONSUMABLE_DEFINITIONS = [
     {
         "id": "insurance_ticket", "label": "保険チケット", "cost": 300,
-        "desc": "霧予測ゲームの賭けがハズレても、賭けたポイントの半額が払い戻されます。",
+        "desc": "川霧予測ゲームの賭けがハズレても、賭けたポイントの半額が払い戻されます。",
     },
     {
         "id": "boost_ticket", "label": "倍率ブーストチケット", "cost": 250,
-        "desc": "霧予測ゲームの賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
+        "desc": "川霧予測ゲームの賭けの倍率が10%上がります(的中時の払い戻しが増えます)。",
     },
     {
         "id": "lottery_luck_ticket", "label": "ラッキーチケット", "cost": 200,
@@ -5234,7 +5494,7 @@ CONSUMABLE_DEFINITIONS = [
     },
     {
         "id": "super_boost_ticket", "label": "上級倍率ブーストチケット", "cost": 600,
-        "desc": "霧予測ゲームの賭けの倍率が25%上がります(倍率ブーストチケットの上位版。同時使用時はこちらが優先されます)。",
+        "desc": "川霧予測ゲームの賭けの倍率が25%上がります(倍率ブーストチケットの上位版。同時使用時はこちらが優先されます)。",
         "added": NEW_ITEM_ADDED_AT,
     },
     {
@@ -5250,13 +5510,13 @@ CONSUMABLE_INSURANCE_REFUND_RATIO = 0.5
 # ラッキーチケット使用時、100pt以上の枠の重みをこの倍率で底上げする(重みの再配分)。
 LOTTERY_LUCK_WEIGHT_MULTIPLIER = 3
 
-# --- 霧予測ゲーム ---------------------------------------------------------------
+# --- 川霧予測ゲーム ---------------------------------------------------------------
 # 「この地点でこの時刻に川霧が出るか」にポイントを賭けるゲーム。
 # 倍率 = 地点の難易度(過去の川霧発生率が低いほど高倍率) × 先の長さ(遠い予測ほど高倍率)
 #      × 時間精度(ざっくり日付だけ<時間帯<正確な1時間、細かく当てるほど高倍率)
 # 賭けた時点でポイントは引かれ(fog_bets.bet_amountがtotal_spent_pointsに含まれる)、
 # 的中すれば bet_amount * multiplier をgrant_pointsで払い戻す。外れれば戻ってこない
-# (名前どおりの「霧予測ゲーム」として、当てずっぽうの丁半博打にならないよう
+# (名前どおりの「川霧予測ゲーム」として、当てずっぽうの丁半博打にならないよう
 # 難易度に応じた倍率を付ける)。
 class _ConsumableUnavailable(Exception):
     """賭け金の残高チェックと同一トランザクション内でチケットを消費する際、
@@ -5278,7 +5538,7 @@ GAMBLE_PRECISIONS = [
 ]
 GAMBLE_PRECISION_BY_ID = {p["id"]: p for p in GAMBLE_PRECISIONS}
 
-# --- デイリー霧予報クイズ(無料・スキル型、霧予測ゲームと違いポイントを賭けない) -------
+# --- デイリー川霧予報クイズ(無料・スキル型、川霧予測ゲームと違いポイントを賭けない) -------
 # 毎日同じ地点を全員に出題する(日付から決定論的に選ぶ)ことで、その日1回だけの
 # 気軽な予想ゲームにする。的中報酬に連続的中日数のボーナスを付け、継続を後押しする。
 FOG_QUIZ_BASE_POINTS = 500
@@ -5312,6 +5572,7 @@ OBSERVATION_REPORT_REWARD_POINTS = 2000
 # corrected_code != reported_codeを使う)。
 IMPORTANCE_LEVELS = ("low", "medium", "high")
 IMPORTANCE_LABELS = {"low": "低", "medium": "中", "high": "高"}
+OBSERVATION_REPORT_REASON_MAX_LENGTH = 300
 GEM_REWARD_TOTAL = {"low": 10, "medium": 20, "high": 40}
 GEM_REWARD_ON_SUBMIT = {"low": 1, "medium": 1, "high": GEM_REWARD_TOTAL["high"]}
 GEM_REWARD_ON_APPROVE = {
@@ -5393,7 +5654,7 @@ def _todays_phenom_quiz_item(date_str):
 
 
 def _resolve_pending_daily_fog_quiz():
-    """観測日が終わっている(今日より前の)未解決のデイリー霧予報クイズを答え合わせする。
+    """観測日が終わっている(今日より前の)未解決のデイリー川霧予報クイズを答え合わせする。
     賭けの答え合わせ(_resolve_pending_fog_bets)・バッジ付与と同じく、ゲーム関連ページを
     開いたタイミングで遅延実行する(専用のcronは持たない)。"""
     conn = _users_conn()
@@ -5504,7 +5765,7 @@ def _gamble_window_for_bet(target_date, precision_id, hour=None, block_index=Non
 # collect.pyの毎時収集は画像取得+Gemini分類を伴うため、その時刻ちょうどに終わるとは限らず、
 # 実測では数十秒〜(まれに)数分かかる(logs/collect.logで確認済み: ある回はwindow_end+26秒、
 # 別の回は+2分46秒で完了していた)。window_endを過ぎた瞬間に答え合わせすると、まだ収集が
-# 終わっていないデータを「霧は観測されなかった」と誤認して外れ扱いにしてしまう
+# 終わっていないデータを「川霧は観測されなかった」と誤認して外れ扱いにしてしまう
 # (2026-09-03に実際に発生し、window_endのわずか14秒後に3件が誤って「はずれ」判定されていた:
 # 本来は川霧が観測されていたのに、その時点ではまだ該当時刻のデータがweather.dbに
 # 書き込まれておらず、他地点も含め「その時刻の行が1つも無い」状態で判定してしまっていた)。
@@ -5535,7 +5796,7 @@ def _resolve_pending_fog_bets():
             data_ready = window_end_dt in collected_datetimes
             if not data_ready and (now - window_end_dt) < GAMBLE_RESOLUTION_GRACE_PERIOD:
                 # 対象時刻の収集がまだ終わっていない可能性が高いため、今回は判定を見送る
-                # (猶予期間内は「まだ観測されていない」を「霧が出なかった」と混同しない)。
+                # (猶予期間内は「まだ観測されていない」を「川霧が出なかった」と混同しない)。
                 continue
             if station not in phenom_df.columns:
                 # 地点が無くなった等、答え合わせ不能。賭け金は返さずlostとして締める
@@ -5698,7 +5959,7 @@ def members_list():
             )[:5],
         },
         {
-            "id": "gamble_win", "label": "霧予測ゲーム勝利数", "unit": "回",
+            "id": "gamble_win", "label": "川霧予測ゲーム勝利数", "unit": "回",
             "count_key": "month_gamble_win_count",
             "entries": sorted(
                 [m for m in members if m["month_gamble_win_count"] > 0],
@@ -5999,7 +6260,7 @@ def member_profile_update(user_id):
 
 @app.route("/game")
 def game_home():
-    """ポイント・ショップ・霧予測ゲームをまとめたゲームのトップページ。"""
+    """ポイント・ショップ・川霧予測ゲームをまとめたゲームのトップページ。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -6016,7 +6277,7 @@ def game_home():
 @app.route("/game/shop")
 def game_shop():
     """ポイントでアバターフレーム・称号・名前の色・ダッシュボード配色・演出・
-    霧予測ゲーム用消費アイテムと交換する画面。"""
+    川霧予測ゲーム用消費アイテムと交換する画面。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -6618,7 +6879,7 @@ def game_shop_buy_consumable():
 
 @app.route("/game/gamble")
 def game_gamble():
-    """霧予測ゲーム: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
+    """川霧予測ゲーム: 地点・日付・時間精度を選び、倍率のプレビューを見ながら賭ける画面。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -6732,10 +6993,14 @@ def game_gamble_place():
         owned = users.consumable_quantities(conn, my_id)
         if use_insurance and owned.get("insurance_ticket", 0) < 1:
             return _finish("game_gamble", "保険チケットを持っていません。", success=False)
-        if use_boost and owned.get("boost_ticket", 0) < 1:
-            return _finish("game_gamble", "倍率ブーストチケットを持っていません。", success=False)
         if use_super_boost and owned.get("super_boost_ticket", 0) < 1:
             return _finish("game_gamble", "上級倍率ブーストチケットを持っていません。", success=False)
+        # 下のuse_boost実消費(_spend)は上級版が指定されていれば通常版を無視する(効果を
+        # 重複させないため)。ここの事前チェックもそれに合わせないと、上級版のみ所持する
+        # 利用者が両方のフラグを立てて送信した場合に、実際には使わない通常版の在庫不足で
+        # 誤って拒否されてしまう(2026-09-13の監査で指摘)。
+        if use_boost and not use_super_boost and owned.get("boost_ticket", 0) < 1:
+            return _finish("game_gamble", "倍率ブーストチケットを持っていません。", success=False)
 
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         applied_multiplier = {"value": multiplier}
@@ -6809,8 +7074,8 @@ def game_gamble_cancel(bet_id):
 
 @app.route("/game/daily")
 def game_daily():
-    """無料のデイリーゲーム(霧予報クイズ・現象当てクイズ・くじ)をまとめたページ。
-    霧予測ゲームと違いポイントを賭けないため、ポイントが無い新規ユーザーでも遊べる。"""
+    """無料のデイリーゲーム(川霧予報クイズ・現象当てクイズ・くじ)をまとめたページ。
+    川霧予測ゲームと違いポイントを賭けないため、ポイントが無い新規ユーザーでも遊べる。"""
     my_id = session.get("user_id")
     if not my_id:
         return redirect(url_for("login", next=request.path))
@@ -7917,12 +8182,14 @@ def shared_folder_delete(folder_id):
             abort(404)
         if folder["created_by"] != my_id and session.get("role") != "admin":
             abort(403)
-        if not users.shared_folder_is_empty(conn, folder_id):
+        # 空チェックと削除はusers.delete_shared_folder内で同じトランザクションとして行う
+        # (以前はここで別々に呼んでおり、チェックと削除の間に別リクエストがファイルを
+        # 追加するレースで未処理のIntegrityErrorになりうった、2026-09-13の監査で指摘)。
+        if not users.delete_shared_folder(conn, folder_id):
             return _finish(
                 "shared_files_page", "空でないフォルダは削除できません。",
                 success=False, folder=folder["parent_id"],
             )
-        users.delete_shared_folder(conn, folder_id)
         parent_id = folder["parent_id"]
     finally:
         conn.close()
@@ -8601,6 +8868,13 @@ def admin_accounts_delete(user_id):
         message = f"{target['name']}さんのアカウントを削除しました。"
     finally:
         conn.close()
+    # chat.dbはusers.dbと別ファイルのためON DELETE CASCADEが効かない。ここで明示的に
+    # 削除しないとAIチャット履歴が孤立したまま残り続ける(2026-09-13の監査で指摘)。
+    chat_conn = chat_log.connect(CHAT_DB_PATH)
+    try:
+        chat_log.delete_user_data(chat_conn, user_id)
+    finally:
+        chat_conn.close()
     _record_audit("アカウント削除", f"{target['name']}({target['email']})を削除")
     if session.get("user_id") == user_id:
         session.clear()
@@ -9046,11 +9320,11 @@ def admin_backup_restore():
 @requires_admin
 def admin_terminal():
     """サーバーのシェルにブラウザからアクセスするためのページ(ttydをiframeで埋め込む)。
-    ttydは全インターフェースでBasic認証をかけて待ち受けているため、ここでは単に
-    そのURLをiframeに埋め込むだけで、認証自体はttyd側が別途行う。Tailscale経由・LAN経由の
-    どちらでこのダッシュボードを開いても繋がるよう、ホスト名は固定せずrequest.hostから取る。"""
-    host = request.host.split(":")[0]
-    return render_template("admin_terminal.html", terminal_url=f"http://{host}:{TTYD_PORT}")
+    ttydはループバック限定で待ち受けており、nginxがTTYD_BASE_PATHを同一オリジンで
+    プロキシする(TTYD_BASE_PATHの定義部のコメント参照)。このページ自体がrequires_admin
+    配下なので、iframeのURLを受け取れるのは既に管理者と確認済みの閲覧者だけ。
+    認証自体はttyd側のBasic認証が別途行う(最後の防御層として残している)。"""
+    return render_template("admin_terminal.html", terminal_url=TTYD_BASE_PATH)
 
 
 @app.route("/admin/db")
@@ -9133,7 +9407,7 @@ def admin_accuracy_report():
 
 
 def _generate_report_pdf(start_date, end_date):
-    """指定期間の霧発生状況・気象概況・予測精度をまとめたPDFレポートを生成し、bytesで返す。
+    """指定期間の川霧発生状況・気象概況・予測精度をまとめたPDFレポートを生成し、bytesで返す。
     matplotlibのPdfPages機能を使う(新規ライブラリの追加は不要)。
     """
     from matplotlib.backends.backend_pdf import PdfPages
@@ -9147,7 +9421,7 @@ def _generate_report_pdf(start_date, end_date):
     period_weather_df = main_df[(main_df["datetime"] >= start_dt) & (main_df["datetime"] <= end_dt)]
 
     # 地点ごとのコード系列(0=現象なし、1〜10=PHENOM_LABELS)をまとめて計算しておき、
-    # 霧発生回数の集計・現象内訳の集計の両方で使い回す。
+    # 川霧発生回数の集計・現象内訳の集計の両方で使い回す。
     codes_by_station = {}
     for name in station_names:
         if name in period_df.columns:
@@ -9204,7 +9478,7 @@ def _generate_report_pdf(start_date, end_date):
         pdf.savefig(fig)
         plt.close(fig)
 
-        # 地域別サマリー(観測コマ数・霧発生回数・発生率を只見川/会津それぞれで比較できるように)。
+        # 地域別サマリー(観測コマ数・川霧発生回数・発生率を只見川/会津それぞれで比較できるように)。
         fig = plt.figure(figsize=(8.27, 6))
         fig.text(0.5, 0.92, "地域別サマリー", ha="center", fontsize=16, fontweight="bold")
         y = 0.75
@@ -9214,7 +9488,7 @@ def _generate_report_pdf(start_date, end_date):
             rate = (100.0 * region_fog / region_slots) if region_slots else 0.0
             fig.text(
                 0.5, y,
-                f"【{label}】地点数 {len(names)} / 霧発生 {region_fog}コマ"
+                f"【{label}】地点数 {len(names)} / 川霧発生 {region_fog}コマ"
                 f"(全{region_slots}コマ中、発生率 {rate:.1f}%)",
                 ha="center", fontsize=12,
             )
@@ -9234,7 +9508,7 @@ def _generate_report_pdf(start_date, end_date):
             counts = [c for _, c in sorted_counts]
             fig, ax = plt.subplots(figsize=(8.27, 11.69))
             ax.barh(names_sorted, counts, color="#1a5276")
-            ax.set_xlabel(f"霧発生回数(観測コマ数、全{total_slots}コマ中)")
+            ax.set_xlabel(f"川霧発生回数(観測コマ数、全{total_slots}コマ中)")
             ax.set_title(title)
             ax.tick_params(axis="y", labelsize=7)
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -9242,8 +9516,8 @@ def _generate_report_pdf(start_date, end_date):
             pdf.savefig(fig)
             plt.close(fig)
 
-        _station_fog_chart("只見川 地点別 霧発生回数", tadami_stations)
-        _station_fog_chart("会津 地点別 霧発生回数", aizu_stations)
+        _station_fog_chart("只見川 地点別 川霧発生回数", tadami_stations)
+        _station_fog_chart("会津 地点別 川霧発生回数", aizu_stations)
 
         # 気象概況(代表地点の実況値の期間平均・合計)。
         fig = plt.figure(figsize=(8.27, 6))
@@ -9270,7 +9544,7 @@ def _generate_report_pdf(start_date, end_date):
         pdf.savefig(fig)
         plt.close(fig)
 
-        # 現象内訳(全地点合算、霧に限らず層雲・霧雨・雨まで含めた内訳)。
+        # 現象内訳(全地点合算、川霧に限らず層雲・霧雨・雨まで含めた内訳)。
         if total_slots and any(phenom_code_totals.values()):
             sorted_items = sorted(phenom_code_totals.items(), key=lambda kv: kv[1])
             labels = [PHENOM_LABELS[c] for c, _ in sorted_items]
@@ -9316,6 +9590,9 @@ def period_report():
             return redirect(url_for("period_report"))
         if start_date > end_date:
             flash("開始日は終了日より前の日付にしてください。", "error")
+            return redirect(url_for("period_report"))
+        if _report_rate_limited(session.get("user_id")):
+            flash(f"短時間に生成しすぎです。{REPORT_RATE_LIMIT_WINDOW.seconds // 60}分ほど待ってからお試しください。", "error")
             return redirect(url_for("period_report"))
         try:
             pdf_bytes = _generate_report_pdf(start_date, end_date)

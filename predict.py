@@ -1,4 +1,4 @@
-"""霧予測の日次バッチ処理（毎日1回、backfill_weather.pyの後にcronで実行）。
+"""川霧予測の日次バッチ処理（毎日1回、backfill_weather.pyの後にcronで実行）。
 
 1. 答え合わせ: 過去に予測して記録した中で、対象時刻の実測がもう出ている分を検証する
    （data/predictions.db）
@@ -6,7 +6,7 @@
    （『予測と実際を見比べて誤差を学習し、完璧に近づけていく』の実体はここ。
    RandomForest/XGBoostは1件ずつのオンライン学習に向かないため、
    蓄積データで日次に学習し直す方式にしている）
-3. 予測: Open-Meteoの予報から地点ごとの現象コード・霧確率を予測し、グラフ・CSVを出力
+3. 予測: Open-Meteoの予報から地点ごとの現象コード・川霧確率を予測し、グラフ・CSVを出力
 4. 記録: 今回の予測を答え合わせ用に記録する（観測時間帯4〜19時分のみ、翌日以降に検証可能）
 """
 import argparse
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 from common import (
     BASE_DIR, DATA_XLSX, STATION_WEATHER_DB_PATH,
-    load_camera_coords, load_camera_regions, now_jst_naive, representative_coords,
+    load_camera_coords, load_camera_regions, now_jst_naive, representative_coords, send_alert,
 )
 import fog_data
 import fog_graphs
@@ -70,9 +70,12 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
         return
 
     # station -> {datetime_naive: actual_code} の逆引き用Series
+    # phenom_dfに同一datetimeの行が重複していると、set_index後のindexが一意でなくなり
+    # series.loc[target_dt]がスカラーではなくSeriesを返してint(actual)が例外になる
+    # (fog_features._lag_seriesと同じ理由でdrop_duplicatesが必要、2026-09-13の監査で指摘)。
     actual_by_station = {}
     for name in station_names:
-        s = phenom_df.set_index("datetime")[name].map(encode_phenomena_cell)
+        s = phenom_df.drop_duplicates(subset="datetime").set_index("datetime")[name].map(encode_phenomena_cell)
         actual_by_station[name] = s
 
     results = []
@@ -205,7 +208,7 @@ def main():
 
     verify_pending_predictions(conn, phenom_df, station_names, now_naive)
 
-    models = fog_model.train_location_models(
+    models, calib_data_by_station = fog_model.train_location_models(
         main_df, phenom_df, station_names, lat, lon,
         camera_coords=camera_coords, weather_conn=weather_conn,
     )
@@ -216,8 +219,14 @@ def main():
     rolled_back = fog_model.apply_regression_guard(models)
     if rolled_back:
         log.warning("Rolled back to previous model due to regression: %s", ", ".join(rolled_back))
+    # 較正モデルの学習・しきい値の較正後空間への変換は、ロールバック判定の後に行う
+    # (ロールバックされた地点は今回の候補パイプの確率を較正学習に混ぜない。
+    # fog_model.finalize_fog_calibrationのdocstring参照。2026-09-13の監査で指摘された、
+    # 較正とロールバックの順序バグの修正)。
+    fog_calibrator = fog_model.finalize_fog_calibration(models, calib_data_by_station, rolled_back)
     if not args.dry_run:
         fog_model.save_model_state(models)
+        fog_model.save_fog_calibrator(fog_calibrator)
 
     try:
         forecast_raw = fog_model.fetch_forecast_range(lat, lon, args.forecast_days)
@@ -250,6 +259,7 @@ def main():
     pred_df, prob_df, feature_snapshots = fog_model.build_location_forecast_codes(
         models, forecast_raw, lat, lon,
         forecast_by_station=forecast_by_station, camera_coords=camera_coords,
+        calibrator=fog_calibrator,
     )
 
     if not args.dry_run:
@@ -287,6 +297,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as e:
         log.exception("predict.py terminated abnormally")
+        # 日次の再学習・予報生成が丸ごと失敗すると、翌日の予測が更新されないまま
+        # 古い状態で表示され続けてしまう。ログだけでは気づきにくいため、collect.pyの
+        # 障害通知と同じsend_alertで即座にプッシュ通知する。
+        send_alert(f"predict.py が異常終了しました: {e}", source="predict.py")
         sys.exit(1)

@@ -128,7 +128,7 @@ def accuracy_trend(conn, station=None):
 
 def fog_pair_counts(conn, since=None, station=None):
     """答え合わせ済みの(station, 予測コード, 実際のコード)の組み合わせごとの件数を返す。
-    混同行列・地点/地域別のprecision/recall/F1・霧クラスの見逃し/空振り集計など、
+    混同行列・地点/地域別のprecision/recall/F1・川霧クラスの見逃し/空振り集計など、
     分析ページの各種指標をこの1つの集計結果から使い回す（個別に似たクエリを何度も
     発行しないため）。戻り値: [{"station":, "predicted_code":, "actual_code":, "n":}, ...]
     """
@@ -166,7 +166,10 @@ def fog_prob_bucket_counts(conn, since=None, station=None):
         params.append(station)
     where_sql = " AND ".join(where)
     rows = conn.execute(
-        f"""SELECT ROUND(predicted_fog_prob, 2) AS bucket, actual_code, COUNT(*)
+        # ROUND(x, 2)は0.01刻みで、docstring通りの0.05刻みになっていなかった
+        # (集計行数を減らすための丸めのはずが約5倍の行数になっていた、2026-09-13の監査で
+        # 指摘)。ROUND(x / 0.05) * 0.05で実際に0.05刻みに揃える。
+        f"""SELECT ROUND(ROUND(predicted_fog_prob / 0.05) * 0.05, 2) AS bucket, actual_code, COUNT(*)
             FROM predictions WHERE {where_sql}
             GROUP BY bucket, actual_code""", params,
     ).fetchall()
@@ -174,7 +177,7 @@ def fog_prob_bucket_counts(conn, since=None, station=None):
 
 
 def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
-    """from_dt_str〜to_dt_strの間で「霧」と予測されている地点・時刻を返す。
+    """from_dt_str〜to_dt_strの間で「川霧」と予測されている地点・時刻を返す。
     同じ(station, target_datetime)に複数回の予測記録がある場合、最新のrun_atのものを使う
     （予報は毎日更新されるため、直近の実行結果の方が精度が高い）。
     戻り値: [{"station":, "target_datetime":, "predicted_code":, "predicted_fog_prob":}, ...]

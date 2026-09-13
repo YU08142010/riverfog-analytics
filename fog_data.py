@@ -1,4 +1,4 @@
-"""weather_store.py(SQLite)を読み込み、霧予測モデル用のDataFrameに変換する。
+"""weather_store.py(SQLite)を読み込み、川霧予測モデル用のDataFrameに変換する。
 
 以前は只見川.xlsxをopenpyxlで直接読んでいたが、read_onlyモードでも1回の読み込みが
 行数に比例して重く、19,000行を超えた現状では10秒以上かかっていた(mtimeキャッシュで
@@ -99,6 +99,8 @@ def _load_river_fog_data_uncached(db_path, cameras_csv):
         F_HUMIDITY: raw["humidity"],
         F_VISIBILITY: raw["visibility_km"],
     })
-    for col in (F_TEMP, F_PRECIP, F_WIND_SPEED, F_SOLAR, F_SUNSHINE, F_DEWPOINT, F_HUMIDITY, F_VISIBILITY):
+    for col in (
+        F_TEMP, F_PRECIP, F_WIND_SPEED, F_WIND_DIR_DEG, F_SOLAR, F_SUNSHINE, F_DEWPOINT, F_HUMIDITY, F_VISIBILITY,
+    ):
         main_df[col] = pd.to_numeric(main_df[col], errors="coerce")
     return main_df, phenom_df, station_names

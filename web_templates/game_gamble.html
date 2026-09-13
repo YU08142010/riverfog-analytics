@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "_page_tabs.html" import page_tabs %}
-{% block title %}霧予測ゲーム{% endblock %}
+{% block title %}川霧予測ゲーム{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
     <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
     <li><a href="{{ url_for('game_home') }}">ゲーム</a></li>
-    <li>霧予測ゲーム</li>
+    <li>川霧予測ゲーム</li>
 </ul>
 {% endblock %}
 {% block content %}
@@ -13,11 +13,11 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "川霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 
 <div class="card">
-    <h2 style="margin-top:0;">霧予測ゲーム</h2>
+    <h2 style="margin-top:0;">川霧予測ゲーム</h2>
     <p class="muted" style="font-size:0.85rem;">
         指定した地点・時刻に川霧が出るかどうかにポイントを賭けます。川霧が出にくい地点ほど、
         また先の時刻を指定するほど、時刻を細かく指定するほど倍率が上がります。

@@ -1,4 +1,6 @@
-"""data/一式(+.env)を定期的にローカルへ自動バックアップするスクリプト。
+"""data/一式(.envは含まない)を定期的にローカルへ自動バックアップするスクリプト。
+.envはAPIキー等のシークレットを含み、世代管理されたバックアップを外部同期する運用も
+想定されるため、定期自動バックアップには含めない(手動ダウンロード版のみ.envを含む)。
 
 以前は管理画面から手動でZIPをダウンロードするしか手段が無く、誰もダウンロードしなければ
 バックアップが1件も存在しない状態だった。まずはその「自動バックアップが無い」問題を
@@ -54,7 +56,7 @@ def main():
     stamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     dest = BACKUP_DIR / f"river-fog-backup_{stamp}.zip"
     log.info("=== Backup started ===")
-    build_data_backup_zip(dest)
+    build_data_backup_zip(dest, include_env=False)
     size_mb = dest.stat().st_size / (1024 * 1024)
     log.info("Backup written: %s (%.1f MB)", dest.name, size_mb)
     prune_old_backups()

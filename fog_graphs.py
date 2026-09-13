@@ -91,7 +91,7 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
                                   history_days=5, prob_series=None,
                                   fog_threshold=DEFAULT_FOG_THRESHOLD, run_date_str=""):
     """1地点の「実測(直近history_days日) + 今後の予測」グラフ。
-    上段=気温/露点/湿度、中段=霧の予測確率、下段=現象コード(実測+予測)。
+    上段=気温/露点/湿度、中段=川霧の予測確率、下段=現象コード(実測+予測)。
     """
     last_observed = get_last_observed_datetime(phenom_df, col)
     hist_cutoff = last_observed - pd.Timedelta(days=history_days)
@@ -163,9 +163,9 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         if probs is not None:
             axp.fill_between(forecast_raw["datetime"], 0, probs, color="#2980b9", alpha=0.30, zorder=2)
             axp.plot(forecast_raw["datetime"], probs, color="#1a5276", linewidth=1.4, zorder=3,
-                     label="霧(1〜6)の予測確率")
+                     label="川霧(1〜3)の予測確率")
             axp.axhline(threshold_pct, color="#c0392b", linewidth=0.9, linestyle="--", alpha=0.8, zorder=1,
-                       label=f"霧警戒ライン（{threshold_pct:.0f}%）")
+                       label=f"川霧警戒ライン（{threshold_pct:.0f}%）")
         axp.set_ylim(0, 100)
         axp.set_yticks([0, 50, 100])
         axp.grid(True, axis="y", alpha=0.25)
@@ -197,7 +197,7 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
 
         if j == 0:
             ax1.set_ylabel("気温・露点温度（℃）", fontsize=10)
-            axp.set_ylabel("霧の確率\n（％）", fontsize=9)
+            axp.set_ylabel("川霧の確率\n（％）", fontsize=9)
             ax2.set_ylabel(col, fontsize=9)
             ax2.set_xlabel("実測（年/月/日）" if len(segments) > 1 else "日時（年/月/日）")
         else:
@@ -234,7 +234,7 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         gap_note = ""
 
     fig.suptitle(
-        f"【{col}】直近{history_days}日間の実測 ＋ 今後{n_days}日間の霧予測{gap_note}",
+        f"【{col}】直近{history_days}日間の実測 ＋ 今後{n_days}日間の川霧予測{gap_note}",
         fontsize=12, y=0.98,
     )
     fig.autofmt_xdate()
@@ -247,7 +247,7 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
 
 def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_str="",
                                station_names=None, file_suffix="", label_suffix=""):
-    """全地点サマリー。上段=日ごとの霧予測地点数、下段=地点×日の霧確率ヒートマップ。
+    """全地点サマリー。上段=日ごとの川霧予測地点数、下段=地点×日の川霧確率ヒートマップ。
     station_namesを指定すると、その地点だけに絞ったサマリーを生成する（2026-09に会津
     地方を追加した際、只見川・会津で別々のダッシュボードカードに分けられるようにするため）。
     対象地点にモデルが1つも無い場合は描画せずNoneを返す。
@@ -291,22 +291,22 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
         gridspec_kw={"height_ratios": [bar_ratio, heat_ratio], "hspace": 0.08},
     )
 
-    ax_bar.bar(x, counts, color="#3498db", width=0.6, label="霧が予測された地点数")
+    ax_bar.bar(x, counts, color="#3498db", width=0.6, label="川霧が予測された地点数")
     for bx, c in zip(x, counts):
         ax_bar.text(bx, c + 0.3, str(c), ha="center", va="bottom", fontsize=9)
     ax_bar.set_ylim(0, n_total + 1)
     ax_bar.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax_bar.set_ylabel(f"霧が予測された\n地点数（全{n_total}中）", fontsize=9)
-    ax_bar.set_title(f"日ごとの霧予測サマリー{label_suffix}（今後{n_days}日間）", fontsize=13)
+    ax_bar.set_ylabel(f"川霧が予測された\n地点数（全{n_total}中）", fontsize=9)
+    ax_bar.set_title(f"日ごとの川霧予測サマリー{label_suffix}（今後{n_days}日間）", fontsize=13)
     ax_bar.grid(True, axis="y", alpha=0.3)
 
     handles, labels = ax_bar.get_legend_handles_labels()
     if prob_df is not None and not all(np.isnan(mean_probs)):
         axr = ax_bar.twinx()
         line, = axr.plot(x, mean_probs, color="#c0392b", marker="o", markersize=4, linewidth=1.4,
-                         label="霧確率の平均（全地点・全時刻）")
+                         label="川霧確率の平均（全地点・全時刻）")
         axr.set_ylim(0, 100)
-        axr.set_ylabel("霧確率\nの平均(%)", fontsize=9)
+        axr.set_ylabel("川霧確率\nの平均(%)", fontsize=9)
         handles.append(line)
         labels.append(line.get_label())
     ax_bar.legend(handles, labels, loc="upper left", fontsize=8)
@@ -327,7 +327,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
                              color="white" if v >= 70 else "black")
     cbar = fig.colorbar(im, ax=[ax_bar, ax_heat], fraction=0.02, pad=0.01,
                         shrink=heat_ratio / (bar_ratio + heat_ratio), anchor=(0.0, 0.0))
-    cbar.set_label("霧確率の最大（％）", fontsize=8)
+    cbar.set_label("川霧確率の最大（％）", fontsize=8)
 
     out_path = os.path.join(out_dir, f"全地点サマリー{file_suffix}_{run_date_str}.png")
     fig.savefig(out_path, dpi=SAVE_DPI, bbox_inches="tight")
@@ -336,7 +336,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
 
 
 def export_prediction_csv(pred_df, prob_df, models, out_dir, run_date_str=""):
-    """予測結果CSV（縦持ち: 日時・地点・予測コード・現象名・霧確率・判定）。"""
+    """予測結果CSV（縦持ち: 日時・地点・予測コード・現象名・川霧確率・判定）。"""
     long_rows = []
     for col in models.keys():
         if col not in pred_df.columns:
@@ -349,8 +349,8 @@ def export_prediction_csv(pred_df, prob_df, models, out_dir, run_date_str=""):
             "地点": col,
             "予測コード": codes,
             "現象名": codes.map(_phenom_name),
-            "霧確率(%)": (probs * 100).round(1),
-            "判定": np.where(probs >= threshold, "霧", "-"),
+            "川霧確率(%)": (probs * 100).round(1),
+            "判定": np.where(probs >= threshold, "川霧", "-"),
         }))
     long_out = pd.concat(long_rows, ignore_index=True) if long_rows else pd.DataFrame()
     out_path = os.path.join(out_dir, f"予測結果_{run_date_str}.csv")

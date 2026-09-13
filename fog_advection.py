@@ -1,9 +1,9 @@
 """風向・風速と地点間の実測座標(cameras.csv)から、川霧の移流(どちらからどちらへ
 流れているか)を近似する特徴量。
 
-これまでのCROSS_STATION_FOG_FEATURE(広域霧指数)は「自地点を除く他地点全ての
-1時間前の霧発生率」を単純平均するだけで、地理的な位置関係も風向も一切見ていなかった。
-この移流霧指数は、地点ごとの実測緯度・経度(cameras.csv、捏造ではなく既存データ)と
+これまでのCROSS_STATION_FOG_FEATURE(広域川霧指数)は「自地点を除く他地点全ての
+1時間前の川霧発生率」を単純平均するだけで、地理的な位置関係も風向も一切見ていなかった。
+この移流川霧指数は、地点ごとの実測緯度・経度(cameras.csv、捏造ではなく既存データ)と
 実測の風向・風速から、「今の風なら他地点のどの実況が何時間後に自地点へ届くはずか」を
 物理的に(大まかに)逆算し、その到達予定時刻ちょうどの実況を重み付き平均する。
 
@@ -24,7 +24,7 @@ from fog_features import SUMMARY_FOG_CODES
 log = logging.getLogger("fog_advection")
 
 EARTH_RADIUS_KM = 6371.0088
-ADVECTION_FOG_FEATURE = "移流霧指数"
+ADVECTION_FOG_FEATURE = "移流川霧指数"
 
 # 距離/風速から逆算した到達予定時刻が、これを超える先(または風がほぼ無風)なら
 # 「その風でその距離を近い将来に運ばれてくる」とは見なさず、寄与させない。
@@ -52,14 +52,23 @@ def _bearing_deg(lat1, lon1, lat2, lon2):
     return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
 
 
-def compute_advection_fog_index(merged, phenom_cols, camera_coords, wind_dir_col, wind_speed_col):
+def compute_advection_fog_index(merged, phenom_cols, camera_coords, wind_dir_col, wind_speed_col,
+                                 station_wind=None):
     """自地点Tについて、風上側にある他地点Sの「今の風速でならちょうど今頃自地点に
-    届いているはずの時刻」の実況霧有無を、風向の一致度で重み付けして平均する。
+    届いているはずの時刻」の実況川霧有無を、風向の一致度で重み付けして平均する。
 
     merged: datetime, phenom_cols(現象コード生値), wind_dir_col, wind_speed_col を含むDataFrame。
     camera_coords: {地点名: (緯度, 経度)}(cameras.csvの実測値。座標の無い地点はスキップ)。
+    station_wind: {地点名: (wind_dir配列, wind_speed配列)}(mergedと同じ行数・順序)を渡すと、
+    その地点が移流の「届き先」(T)になる計算では、共通の代表地点の風(wind_dir_col/
+    wind_speed_col)の代わりにその地点自身の実測風向・風速を使う(この特徴量は風向・風速が
+    本質のため、代表地点1つの風より地点固有の実測風の方が物理的に正確なはず、と
+    2026-09-13の監査で指摘された)。station_windに無い地点、station_wind自体が未指定の
+    場合は従来通り共通の風にフォールバックする(プーリング救済モデルは全地点で共通の
+    気象値を前提に設計されているため、そちらの経路では意図的に渡さない)。
     戻り値: {地点名: pd.Series}(mergedと同じindexのSeries。寄与するペアが無い行はNaN)。
     """
+    station_wind = station_wind or {}
     stations_with_coords = [c for c in phenom_cols if c in camera_coords]
     if len(stations_with_coords) < 2:
         log.info("Advection fog index: not enough stations with coordinates (%d)", len(stations_with_coords))
@@ -93,20 +102,22 @@ def compute_advection_fog_index(merged, phenom_cols, camera_coords, wind_dir_col
                 result[t] = pd.Series(np.nan, index=merged.index)
                 continue
 
+            t_wind_dir, t_wind_speed = station_wind.get(t, (wind_dir, wind_speed))
+
             weighted_sum = np.zeros(len(merged), dtype="float64")
             weight_total = np.zeros(len(merged), dtype="float64")
             for s in stations_with_coords:
                 if s == t:
                     continue
                 distance_km, bearing_from_t = geo[(t, s)]
-                angle_diff = np.abs(((wind_dir - bearing_from_t + 180.0) % 360.0) - 180.0)
+                angle_diff = np.abs(((t_wind_dir - bearing_from_t + 180.0) % 360.0) - 180.0)
                 alignment = np.clip(np.cos(np.radians(angle_diff)), 0.0, None) ** ADVECTION_ALIGNMENT_POWER
 
-                travel_hours = distance_km / (wind_speed * 3.6)
+                travel_hours = distance_km / (t_wind_speed * 3.6)
                 lag_hours = np.round(travel_hours)
                 valid_lag = (
-                    np.isfinite(wind_dir)
-                    & (wind_speed >= ADVECTION_MIN_WIND_SPEED)
+                    np.isfinite(t_wind_dir)
+                    & (t_wind_speed >= ADVECTION_MIN_WIND_SPEED)
                     & np.isfinite(lag_hours)
                     & (lag_hours >= 0)
                     & (lag_hours <= ADVECTION_MAX_LAG_HOURS)

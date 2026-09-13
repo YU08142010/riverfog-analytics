@@ -13,19 +13,19 @@
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},
     {"label": "ショップ", "url": url_for('game_shop'), "active": request.path.startswith('/game/shop')},
-    {"label": "霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
+    {"label": "川霧予測ゲーム", "url": url_for('game_gamble'), "active": request.path.startswith('/game/gamble')},
 ]) }}
 
 <div class="card">
     <h2 style="margin-top:0;">現在のポイント</h2>
     <div style="font-size:1.6rem; font-weight:700; color: var(--color-primary);">{{ points }} pt</div>
     <p class="muted" style="font-size:0.82rem;">
-        以下はすべて無料で遊べます(ポイントは賭けません)。霧予測ゲームとは別に、1日1回ずつ挑戦できます。
+        以下はすべて無料で遊べます(ポイントは賭けません)。川霧予測ゲームとは別に、1日1回ずつ挑戦できます。
     </p>
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">今日の霧予報クイズ</h2>
+    <h2 style="margin-top:0;">今日の川霧予報クイズ</h2>
     <p class="muted" style="font-size:0.85rem;">
         今日の観測地点「<strong>{{ fog_quiz_station }}</strong>」に川霧が出るかどうかを無料で予想できます。
         的中で{{ fog_quiz_base_points }}pt、連続的中日数に応じてボーナス(1日あたり+{{ fog_quiz_streak_bonus }}pt、上限あり)が付きます。
@@ -36,7 +36,7 @@
     </p>
     {% if fog_quiz_today %}
         {% if fog_quiz_today.status == "pending" %}
-        <p>今日の予想:「{{ "霧が出る" if fog_quiz_today.guess else "霧は出ない" }}」で受付済みです。観測が終わり次第、結果がわかります。</p>
+        <p>今日の予想:「{{ "川霧が出る" if fog_quiz_today.guess else "川霧は出ない" }}」で受付済みです。観測が終わり次第、結果がわかります。</p>
         {% elif fog_quiz_today.status == "correct" %}
         <p><span class="role-tag admin">的中！ +{{ fog_quiz_today.payout }}pt</span></p>
         {% else %}
@@ -45,8 +45,8 @@
     {% else %}
     <form method="post" action="{{ url_for('game_daily_fog_quiz_guess') }}" data-ajax data-ajax-reload style="display:flex; gap:0.6rem; margin-top:0.6rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" name="guess" value="yes" class="button">霧が出る</button>
-        <button type="submit" name="guess" value="no" class="button cancel">霧は出ない</button>
+        <button type="submit" name="guess" value="yes" class="button">川霧が出る</button>
+        <button type="submit" name="guess" value="no" class="button cancel">川霧は出ない</button>
     </form>
     {% endif %}
 </div>

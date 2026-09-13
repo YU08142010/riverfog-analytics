@@ -329,15 +329,26 @@
 
     // このアプリには汎用のリアルタイム配信基盤が無いため、スレッドを開いている間
     // だけ数秒おきにポーリングして相手からの新着・入力中・既読状況を拾う。
-    var pollTimer = setInterval(function() {
-        if (document.visibilityState !== "visible") { return; }
+    // 新着が無いまま静かな状態が続くほど間隔を伸ばす(最大30秒)ことで、開きっぱなしの
+    // タブが増えてもサーバー負荷が線形に増え続けないようにする(2026-09-13の監査で
+    // 固定4秒間隔だった点を指摘された)。新着や入力中表示があれば4秒に戻す。
+    var POLL_MIN_DELAY = 4000, POLL_MAX_DELAY = 30000;
+    var pollDelay = POLL_MIN_DELAY;
+    var pollTimer = null;
+    function schedulePoll() {
+        pollTimer = setTimeout(runPoll, pollDelay);
+    }
+    function runPoll() {
+        if (document.visibilityState !== "visible") { schedulePoll(); return; }
         fetch(pollUrl + "?after=" + lastId, {headers: {"X-Requested-With": "XMLHttpRequest"}})
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                var hadActivity = false;
                 (data.messages || []).forEach(function(m) {
                     m.attachment = (m.attachments && m.attachments[0]) || null;
                     appendBubble(m, m.sender_id === myId);
                     lastId = m.id;
+                    hadActivity = true;
                 });
                 if (typeof data.other_online === "boolean") {
                     updateOnlineStatus(data.other_online);
@@ -352,11 +363,15 @@
                 if (Array.isArray(data.typing_names)) {
                     typingIndicator.textContent = data.typing_names.length
                         ? data.typing_names.join("、") + "さんが入力中..." : "";
+                    if (data.typing_names.length) { hadActivity = true; }
                 }
+                pollDelay = hadActivity ? POLL_MIN_DELAY : Math.min(pollDelay * 2, POLL_MAX_DELAY);
             })
-            .catch(function() {});
-    }, 4000);
-    window.addEventListener("beforeunload", function() { clearInterval(pollTimer); });
+            .catch(function() {})
+            .then(schedulePoll);
+    }
+    schedulePoll();
+    window.addEventListener("beforeunload", function() { clearTimeout(pollTimer); });
 
     // 入力中表示: keyupのたびに送るとサーバー負荷が無駄なので、2秒に1回までに間引く。
     var lastTypingPing = 0;

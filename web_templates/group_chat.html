@@ -317,15 +317,25 @@
         clearReply();
     });
 
-    var pollTimer = setInterval(function() {
-        if (document.visibilityState !== "visible") { return; }
+    // 新着が無いまま静かな状態が続くほど間隔を伸ばす(最大30秒)。dm_thread.htmlと同じ
+    // 考え方(2026-09-13の監査で固定4秒間隔だった点を指摘された)。
+    var POLL_MIN_DELAY = 4000, POLL_MAX_DELAY = 30000;
+    var pollDelay = POLL_MIN_DELAY;
+    var pollTimer = null;
+    function schedulePoll() {
+        pollTimer = setTimeout(runPoll, pollDelay);
+    }
+    function runPoll() {
+        if (document.visibilityState !== "visible") { schedulePoll(); return; }
         fetch(pollUrl + "?after=" + lastId, {headers: {"X-Requested-With": "XMLHttpRequest"}})
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                var hadActivity = false;
                 (data.messages || []).forEach(function(m) {
                     m.attachment = (m.attachments && m.attachments[0]) || null;
                     appendBubble(m, m.sender_id === myId);
                     lastId = m.id;
+                    hadActivity = true;
                 });
                 if (data.read_states) {
                     document.querySelectorAll(".dm-read-receipt").forEach(function(el) {
@@ -340,11 +350,15 @@
                 if (Array.isArray(data.typing_names)) {
                     typingIndicator.textContent = data.typing_names.length
                         ? data.typing_names.join("、") + "さんが入力中..." : "";
+                    if (data.typing_names.length) { hadActivity = true; }
                 }
+                pollDelay = hadActivity ? POLL_MIN_DELAY : Math.min(pollDelay * 2, POLL_MAX_DELAY);
             })
-            .catch(function() {});
-    }, 4000);
-    window.addEventListener("beforeunload", function() { clearInterval(pollTimer); });
+            .catch(function() {})
+            .then(schedulePoll);
+    }
+    schedulePoll();
+    window.addEventListener("beforeunload", function() { clearTimeout(pollTimer); });
 
     var lastTypingPing = 0;
     textarea.addEventListener("keyup", function() {

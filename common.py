@@ -334,10 +334,16 @@ def _patched_dns_for_hostname(hostname, ip):
             socket.getaddrinfo = original_getaddrinfo
 
 
-def build_data_backup_zip(dest_path, base_dir=BASE_DIR):
-    """data/一式 + .env をZIPにまとめてdest_pathに書き出す。
+def build_data_backup_zip(dest_path, base_dir=BASE_DIR, include_env=True):
+    """data/一式(+ include_env=Trueなら.env)をZIPにまとめてdest_pathに書き出す。
     webapp.pyのadmin_backup()(手動ダウンロード)とbackup.py(定期自動バックアップ)の
     両方から使う共通ロジック(以前はwebapp.py側にだけ書かれていた)。
+
+    定期自動バックアップ(backup.py)は世代管理された複数のZIPをサーバー上に残し続け、
+    外部同期する運用も想定されるため、.envのシークレット(APIキー等)を巻き込まないよう
+    include_env=Falseで呼ぶこと。管理画面からの手動ダウンロードは、管理者が意図して
+    フルバックアップを取得する一回限りの操作のため、従来通りinclude_env=True(既定)で
+    .envも含める。
     """
     data_dir = base_dir / "data"
     env_path = base_dir / ".env"
@@ -346,7 +352,7 @@ def build_data_backup_zip(dest_path, base_dir=BASE_DIR):
             for f in data_dir.rglob("*"):
                 if f.is_file():
                     zf.write(f, arcname=str(f.relative_to(data_dir)))
-        if env_path.exists():
+        if include_env and env_path.exists():
             zf.write(env_path, arcname=".env")
 
 

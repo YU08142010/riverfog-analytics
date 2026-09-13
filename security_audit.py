@@ -43,10 +43,14 @@ def main():
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        log.error(
-            "pip-auditの出力を解析できませんでした(returncode=%s): %s",
-            result.returncode, (result.stdout or result.stderr)[:1000],
-        )
+        detail = (result.stdout or result.stderr)[:1000]
+        log.error("pip-auditの出力を解析できませんでした(returncode=%s): %s", result.returncode, detail)
+        # 「通知が来ないこと自体を正常とみなす」運用のため、ここでアラートしないと
+        # pip-audit自体の出力形式が変わった・壊れた等で週次チェックが静かに機能停止
+        # しても誰も気づけない(上のsubprocess失敗時のアラートと非対称だった、
+        # 2026-09-13の監査で指摘)。
+        send_alert(f"pip-auditの出力を解析できませんでした(returncode={result.returncode}): {detail}",
+                   source="security-audit")
         return
 
     dependencies = data.get("dependencies", [])

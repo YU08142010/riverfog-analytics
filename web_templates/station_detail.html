@@ -31,8 +31,9 @@
         <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測結果を訂正する</button>
     </form>
     {% else %}
-    <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem;">
+    <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem; flex-wrap:wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="reason" required maxlength="300" placeholder="なぜこの現象だと思いますか?(例: 視界が悪く川霧に見えた)" style="padding:0.35rem; font-size:0.85rem; min-width:14rem; flex:1;">
         <select name="importance" style="padding:0.35rem; font-size:0.85rem;" title="重要度(高は承認なしで即ジェムが確定します)">
             <option value="low">重要度: 低</option>
             <option value="medium" selected>重要度: 中</option>
@@ -148,15 +149,26 @@
 <div class="content-grid-2">
 <div class="card">
     <h2>学習時のモデル精度推移</h2>
-    <p class="muted">再学習のたびの、この地点のaccuracy・霧F1(検証データでの評価値)の推移。</p>
+    <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(検証データでの評価値)の推移。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_model_metrics_chart', name=name) }}" alt="{{ name }}の学習時モデル精度推移グラフ"></div>
 </div>
 
 <div class="card">
     <h2>しきい値ごとのprecision/recall/F1</h2>
-    <p class="muted">霧と判定するしきい値を変えた場合のトレードオフ。点線が現在この地点で自動選択されているしきい値。</p>
+    <p class="muted">川霧と判定するしきい値を変えた場合のトレードオフ。点線が現在この地点で自動選択されているしきい値。</p>
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_threshold_chart', name=name) }}" alt="{{ name }}のしきい値ごとのprecision/recall/F1グラフ"></div>
 </div>
+</div>
+
+<div class="card">
+    <h2>採用モデルの決定木(代表1本)</h2>
+    <p class="muted">
+        採用中のモデル方式(RF/XGBoost/LightGBMのブレンド)が実際に使っている木の深さ・複雑さの雰囲気を示す図です。
+        いずれの方式も数百本の木の平均・合計で最終判定を出すため、ここに表示しているのはそのうちの代表1本にすぎません。
+        深い木ほど細かい条件分岐を表現できますが、過学習(学習データに寄りすぎること)のリスクとの兼ね合いでもあります。
+        深さが上限を超えると読みにくくなるため、表示は上位数階層までに絞り、それ以降は「…」で省略しています(実際のモデルの判定はその先も続きます)。
+    </p>
+    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_tree_diagram', name=name) }}" alt="{{ name }}の採用モデル決定木の図"></div>
 </div>
 
 {% if feature_snapshot %}
