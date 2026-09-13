@@ -27,6 +27,124 @@ SUMMARY_FOG_CODES = {1, 2, 3}  # 「川霧」とみなすコード（川霧F1・
 # ズレる問題があり、川霧(1〜3)のみに統一した。これによりアラート・ダッシュボード集計・
 # モデル評価指標もすべて川霧基準になる(全体霧単独の日はアラート対象外になる)。
 
+# --- 2コード同時観測(2026-09対応) -----------------------------------------------
+# 1つの観測に現象コードを最大2つまで同時記録できる(例:雨が降りながら川霧も出ている等)。
+# 順序が意味を持つ: 家族グループは{0} < {1,2,3} < {4,5,6} < {7,8} < {9,10}の順に
+# 数値が大きくなるよう並んでいる。2コードを組み合わせても川霧(1〜3、SUMMARY_FOG_CODES)は
+# 必ず数値的に小さい方=主コード側に入るため、「川霧が観測されたか」を問う既存のロジック
+# (較正・アラート・クイズ・賭けゲーム等)は主コードだけ見れば従来通り正しく動く
+# (primary_phenom_code参照)。将来コードを追加・採番し直す場合はこの前提を壊さないこと。
+PHENOM_CODE_GROUPS = (
+    frozenset({0}),
+    frozenset({1, 2, 3}),
+    frozenset({4, 5, 6}),
+    frozenset({7, 8}),
+    frozenset({9, 10}),
+)
+
+
+class PhenomCodeError(ValueError):
+    """現象コードの組み合わせが不正な場合に投げる(Gemini分類・手動訂正の書き込み境界で使う)。"""
+
+
+def _group_for_code(code):
+    for group in PHENOM_CODE_GROUPS:
+        if code in group:
+            return group
+    return None
+
+
+def validate_phenom_codes(codes):
+    """codes: 現象コードのリスト(1個または2個、各0〜10)。組み合わせが不正なら
+    PhenomCodeErrorを投げる(同じグループ内の2つ、0と他の組み合わせ、範囲外、重複等)。
+    有効なら何も返さない。"""
+    codes = list(codes)
+    if len(codes) not in (1, 2):
+        raise PhenomCodeError(f"現象コードは1つか2つ指定してください: {codes}")
+    for c in codes:
+        if not isinstance(c, (int, np.integer)) or isinstance(c, bool) or not (0 <= c <= 10):
+            raise PhenomCodeError(f"現象コードは0〜10の整数である必要があります: {c!r}")
+    if len(codes) == 2:
+        a, b = codes
+        if a == b:
+            raise PhenomCodeError(f"同じ現象コードを2つ指定することはできません: {codes}")
+        if 0 in (a, b):
+            raise PhenomCodeError("「現象なし」は他の現象コードと組み合わせられません")
+        if _group_for_code(a) == _group_for_code(b):
+            raise PhenomCodeError(f"同じグループ内の現象コードは組み合わせられません: {codes}")
+
+
+def encode_phenom_codes(codes):
+    """codes(1個または2個の現象コード)を検証したうえで、格納用の1つの整数値に変換する
+    (2個の場合は「小さい方*100+大きい方」にパックする。例: {1,5}->105、{6,10}->610)。
+    既存の単一コード用のINTEGER列(weather_store.phenomena.code等)にそのまま格納できる
+    (0〜10は単一コードとしてそのまま、100を超える値が2コード同時観測を表す)。"""
+    validate_phenom_codes(codes)
+    codes = sorted(set(codes))
+    return codes[0] if len(codes) == 1 else codes[0] * 100 + codes[1]
+
+
+def decode_phenom_value(value):
+    """encode_phenom_codes/encode_phenomena_cellが返す格納値を(primary, secondary)に
+    分解する。secondaryは単一コードまたは欠測ならNone。欠測(None/NaN)は(None, None)。"""
+    if value is None:
+        return None, None
+    try:
+        if value != value:  # NaN
+            return None, None
+    except TypeError:
+        pass
+    code = int(value)
+    if code <= 10:
+        return code, None
+    return code // 100, code % 100
+
+
+def primary_phenom_code(value):
+    """decode_phenom_value(value)の主コードをfloat(NaN可)で返す。「川霧が観測されたか」
+    のように主コードだけで判定できる箇所(較正・アラート・クイズ・賭けゲーム等)で使う。"""
+    primary, _secondary = decode_phenom_value(value)
+    return float(primary) if primary is not None else np.nan
+
+
+def phenom_codes_set(value):
+    """観測されている現象コードの集合を返す({1}や{1, 5}、欠測は空集合)。
+    特定のコードが主・副どちらでもいいので含まれるかを調べたい場合に使う。"""
+    primary, secondary = decode_phenom_value(value)
+    if primary is None:
+        return set()
+    return {primary} if secondary is None else {primary, secondary}
+
+
+def phenom_contains_any(value, code_set):
+    return bool(phenom_codes_set(value) & set(code_set))
+
+
+def phenom_label(value):
+    """主・副コードを結合したラベルを返す(例:「薄い川霧＋全体霧」)。
+    現象なしは「現象なし」、欠測は「-」。"""
+    primary, secondary = decode_phenom_value(value)
+    if primary is None:
+        return "-"
+    if primary == 0:
+        return "現象なし"
+    label = PHENOM_LABELS.get(primary, f"コード{primary}")
+    if secondary is not None:
+        label += "＋" + PHENOM_LABELS.get(secondary, f"コード{secondary}")
+    return label
+
+
+def format_phenom_display(value):
+    """人間が読むための表記に変換する(例:「1 5」、単一なら「1」、現象なしは「/」)。
+    Excelエクスポート・監査ログ等、人が直接読む場面専用(内部処理ではdecode_phenom_value
+    /primary_phenom_code等を使うこと)。"""
+    primary, secondary = decode_phenom_value(value)
+    if primary is None:
+        return None
+    if primary == 0:
+        return "/"
+    return str(primary) if secondary is None else f"{primary} {secondary}"
+
 # --- 特徴量の列名（DataFrame上の日本語列名。weather_visualizer.pyと揃えている） ---
 COL_TEMP = "気温(℃)"
 COL_PRECIP = "降水量(mm)"
@@ -54,24 +172,34 @@ SUN_FEATURE_NAME = "日の出まで残り時間"
 
 
 def encode_phenomena_cell(value):
-    """セルの値を現象コードに変換する。'/' -> 0、1〜10はそのまま、空欄/解釈不能はNaN。"""
+    """セルの値を現象コードの格納値に変換する。'/' -> 0、単一コード(1〜10)はそのまま、
+    2コード同時観測を表すパック値(encode_phenom_codes/decode_phenom_value参照)もそのまま
+    通す。空欄/解釈不能/無効な組み合わせはNaN。"""
     if value is None:
         return np.nan
     if isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool):
         if np.isnan(value):
             return np.nan
         code = int(value)
-        return float(code) if 0 <= code <= 10 else np.nan
-    s = str(value).strip()
-    if not s:
+    else:
+        s = str(value).strip()
+        if not s:
+            return np.nan
+        if s == "/":
+            return 0.0
+        try:
+            code = int(float(s))
+        except ValueError:
+            return np.nan
+    primary, secondary = decode_phenom_value(code)
+    if primary is None:
         return np.nan
-    if s == "/":
-        return 0.0
+    codes = [primary] if secondary is None else [primary, secondary]
     try:
-        code = int(float(s))
-    except ValueError:
+        validate_phenom_codes(codes)
+    except PhenomCodeError:
         return np.nan
-    return float(code) if 0 <= code <= 10 else np.nan
+    return float(code)
 
 
 def encode_wind_direction_degrees(value):
@@ -229,7 +357,7 @@ def prepare_features(df, lat, lon, feature_names=None, medians=None):
 
 
 def build_location_class_targets(phenom_df, phenom_cols):
-    """地点それぞれの現象コード（0="/"、1〜10、欠測はNaN）を作る。
+    """地点それぞれの現象コード(主コード側。0="/"、1〜10、欠測はNaN)を作る。
 
     以前は雨・霧雨(9・10)を学習ターゲットとして0(現象なし)に丸めていたが、これは
     「降水あり時の的中率が降水なし時より20pt以上低い」という精度分析(accuracy.html)の
@@ -239,8 +367,28 @@ def build_location_class_targets(phenom_df, phenom_cols):
     モデルが「雨・霧雨っぽい気象条件」と「本当に何も無い(0)」・「川霧(1〜3)」を区別する
     手がかりを学習データから奪わないようにする。川霧である確率(_fog_probability)は
     SUMMARY_FOG_CODESの列だけを合算するため、この変更の影響を受けない。
+
+    2コード同時観測(2026-09対応)の場合はprimary_phenom_code()で主コード(数値的に
+    小さい方)だけを取り出す。川霧(1〜3)は家族グループの並び上、2コード同時でも必ず
+    主コード側に入るため、この関数の出力だけで既存の川霧判定ロジック(学習・較正・
+    回帰防止等)は無改修のまま正しく動く。副コード側はbuild_location_secondary_targets
+    (fog_modelの副コード分類器=Stage B専用)を使う。
     """
     codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
-    targets = codes.copy()
+    targets = codes.apply(lambda col: col.map(primary_phenom_code))
+    targets.insert(0, "datetime", phenom_df["datetime"].values)
+    return targets
+
+
+def build_location_secondary_targets(phenom_df, phenom_cols):
+    """build_location_class_targetsと同じ形(datetime + 地点ごとの列)だが、値は
+    2コード同時観測の副コード(数値的に大きい方。単一コードや欠測はNaN)。
+    fog_model.pyの副コード分類器(Stage B)専用の学習ターゲット。"""
+    def _secondary(value):
+        _primary, secondary = decode_phenom_value(value)
+        return float(secondary) if secondary is not None else np.nan
+
+    codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
+    targets = codes.apply(lambda col: col.map(_secondary))
     targets.insert(0, "datetime", phenom_df["datetime"].values)
     return targets

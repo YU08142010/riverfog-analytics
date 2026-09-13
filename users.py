@@ -1625,7 +1625,9 @@ def set_equipped_gem_item(conn, user_id, item_id):
 def add_phenomena_correction(conn, station_name, target_datetime, original_code, corrected_code, user_id, at, source="human"):
     """カメラ画像の現象判定(Gemini)を訂正した記録を残す。同じ(地点, 日時)を
     再度訂正した場合は上書きする(訂正の訂正はよくあることなので、履歴は持たず
-    最新の1件だけを残す)。user_idはNone(自動異常検知による訂正)を許容する。"""
+    最新の1件だけを残す)。user_idはNone(自動異常検知による訂正)を許容する。
+    original_code/corrected_codeは、2コード同時観測(2026-09対応)の場合は
+    fog_features.encode_phenom_codesでパックした値(INTEGER列のままでスキーマ変更不要)。"""
     with conn:
         conn.execute(
             "INSERT INTO phenomena_corrections "
@@ -1662,7 +1664,9 @@ def create_observation_report(conn, station_name, target_datetime, reported_code
     報告が既にあれば新規作成しない(idx_observation_reports_pending_uniqueにより
     INSERT OR IGNOREが安全に効く)。挿入できたら新しいreport_idを、既に保留中の報告が
     あればNoneを返す(呼び出し側はNoneかどうかで成否を判定する)。
-    reason: 報告者が「なぜこの現象だと思ったか」を書いた自由記述(自動検知分はNone)。"""
+    reason: 報告者が「なぜこの現象だと思ったか」を書いた自由記述(自動検知分はNone)。
+    reported_codeは、2コード同時観測(2026-09対応)の場合はfog_features.encode_phenom_codes
+    でパックした値(INTEGER列のままでスキーマ変更不要)。"""
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO observation_reports "

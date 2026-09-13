@@ -59,8 +59,10 @@ import prediction_log
 import station_weather
 from fog_features import (
     COL_DEWPOINT, COL_HUMIDITY, COL_PRECIP, COL_SOLAR, COL_SUNSHINE, COL_TEMP,
-    COL_VISIBILITY, COL_WIND_DIR_DEG, COL_WIND_SPEED, PHENOM_COLORS, PHENOM_LABELS,
-    SLASH_COLOR, SUMMARY_FOG_CODES, encode_phenomena_cell,
+    COL_VISIBILITY, COL_WIND_DIR_DEG, COL_WIND_SPEED, PHENOM_COLORS,
+    PHENOM_LABELS, PhenomCodeError, SLASH_COLOR, SUMMARY_FOG_CODES, decode_phenom_value,
+    encode_phenom_codes, encode_phenomena_cell, format_phenom_display, phenom_codes_set,
+    phenom_label, primary_phenom_code,
 )
 
 # collect.py・fog_graphs.py と同じ日本語フォント設定（無ければグラフの日本語が文字化けするだけで、
@@ -868,20 +870,17 @@ def _contrasting_text_color(hex_color):
     return "#1c2733" if brightness > 140 else "#ffffff"
 
 
-def _phenom_label_color(code):
-    """現象コード(0〜10、またはNaN)をラベル・背景色・文字色に変換する。"""
-    if code is None:
+def _phenom_label_color(value):
+    """現象コード(単一0〜10、2コード同時観測のパック済み値、またはNaN)をラベル・
+    背景色・文字色に変換する。背景色は主コードの色のまま(2色分割はスコープ外、
+    シンプルに保つ)、ラベルはphenom_label()で主・副コードを結合したものになる。"""
+    primary, _secondary = decode_phenom_value(value)
+    if primary is None:
         return "-", "#ffffff", "#1c2733"
-    try:
-        if code != code:  # NaN
-            return "-", "#ffffff", "#1c2733"
-    except TypeError:
-        pass
-    code = int(code)
-    if code == 0:
+    if primary == 0:
         return "現象なし", SLASH_COLOR, _contrasting_text_color(SLASH_COLOR)
-    bg = PHENOM_COLORS.get(code, "#ffffff")
-    return PHENOM_LABELS.get(code, f"コード{code}"), bg, _contrasting_text_color(bg)
+    bg = PHENOM_COLORS.get(primary, "#ffffff")
+    return phenom_label(value), bg, _contrasting_text_color(bg)
 
 
 # 現象コード訂正UI(phenom-picker、station_detail.html/admin_observation_reports.html)が
@@ -1455,7 +1454,7 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
     merged = None
     if has_data:
         merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
-        codes = merged[station_name].apply(encode_phenomena_cell)
+        codes = merged[station_name].apply(encode_phenomena_cell).apply(primary_phenom_code)
         merged = merged.loc[codes.notna()].copy()
         merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
         has_data = not merged.empty
@@ -1550,7 +1549,7 @@ def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
             if station_name not in phenom_df.columns:
                 continue
             merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
-            codes = merged[station_name].apply(encode_phenomena_cell)
+            codes = merged[station_name].apply(encode_phenomena_cell).apply(primary_phenom_code)
             merged = merged.loc[codes.notna()].copy()
             merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
             fog_rows = merged.loc[merged["is_fog"]]
@@ -3179,8 +3178,11 @@ def _fog_confusion_stats(pairs, fog_codes=None):
     tp = fp = fn = tn = 0
     for row in pairs:
         n = row["n"]
-        pred_fog = row["predicted_code"] in fog_codes
-        actual_fog = row["actual_code"] in fog_codes
+        # predicted_code/actual_codeは2コード同時観測(2026-09対応)のパック済み値の
+        # こともあるが、川霧(SUMMARY_FOG_CODES)は家族グループの並び上、2コード同時でも
+        # 必ず主コード側に入るため、primary_phenom_codeで取り出すだけで正しく判定できる。
+        pred_fog = primary_phenom_code(row["predicted_code"]) in fog_codes
+        actual_fog = primary_phenom_code(row["actual_code"]) in fog_codes
         if pred_fog and actual_fog:
             tp += n
         elif pred_fog and not actual_fog:
@@ -3223,12 +3225,21 @@ def _accuracy_region_summary_safe():
 def _confusion_matrix_from_pairs(pairs):
     """prediction_log.fog_pair_countsの集計結果から(labels, matrix)を組み立てる。
     fog_model.compute_confusion_matrixと同じ形式だが、学習時の検証データではなく
-    実際の本番予測ログ(prediction_log)を元にする点が異なる。"""
-    labels = sorted({row["predicted_code"] for row in pairs} | {row["actual_code"] for row in pairs})
+    実際の本番予測ログ(prediction_log)を元にする点が異なる。predicted_code/actual_codeは
+    2コード同時観測(2026-09対応)のパック済み値のこともあるため、主コードだけを取り出して
+    従来通りの単一コード軸(0〜10)の混同行列にする(副コードまでの混同行列はスコープ外、
+    シンプルに保つ)。"""
+    def _primary(row, key):
+        p = primary_phenom_code(row[key])
+        return None if p != p else int(p)  # NaN
+
+    entries = [(row, _primary(row, "predicted_code"), _primary(row, "actual_code")) for row in pairs]
+    entries = [(row, p, a) for row, p, a in entries if p is not None and a is not None]
+    labels = sorted({p for _row, p, _a in entries} | {a for _row, _p, a in entries})
     index = {c: i for i, c in enumerate(labels)}
     matrix = np.zeros((len(labels), len(labels)), dtype=int)
-    for row in pairs:
-        matrix[index[row["actual_code"]], index[row["predicted_code"]]] += row["n"]
+    for row, p, a in entries:
+        matrix[index[a], index[p]] += row["n"]
     return labels, matrix
 
 
@@ -3281,7 +3292,10 @@ def _threshold_sweep_stats(buckets, fog_codes=None):
     fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
     if not buckets:
         return []
-    total_fog = sum(b["n"] for b in buckets if b["actual_code"] in fog_codes)
+    # actual_codeは2コード同時観測(2026-09対応)のパック済み値のこともあるため、
+    # primary_phenom_codeで主コードを取り出してから判定する(川霧は家族グループの並び上、
+    # 2コード同時でも必ず主コード側に入る)。
+    total_fog = sum(b["n"] for b in buckets if primary_phenom_code(b["actual_code"]) in fog_codes)
     if total_fog == 0:
         return []
     results = []
@@ -3290,7 +3304,7 @@ def _threshold_sweep_stats(buckets, fog_codes=None):
         for b in buckets:
             if b["prob"] < t:
                 continue
-            if b["actual_code"] in fog_codes:
+            if primary_phenom_code(b["actual_code"]) in fog_codes:
                 tp += b["n"]
             else:
                 fp += b["n"]
@@ -3327,11 +3341,12 @@ def _latest_observations():
 
     stations = []
     for name in station_names:
-        code = encode_phenomena_cell(phenom_row.get(name))
-        label, color, text_color = _phenom_label_color(code)
-        clean_code = int(code) if code == code else None  # NaNはNoneにする
+        raw = encode_phenomena_cell(phenom_row.get(name))
+        label, color, text_color = _phenom_label_color(raw)
+        primary, secondary = decode_phenom_value(raw)
         stations.append({
-            "name": name, "label": label, "color": color, "text_color": text_color, "code": clean_code,
+            "name": name, "label": label, "color": color, "text_color": text_color,
+            "code": primary, "code2": secondary,
         })
 
     return {
@@ -3697,9 +3712,17 @@ def images_hour_correct(date, hhmm):
     if not _can_correct_station(session.get("role"), station):
         abort(403)
     corrected_code = request.form.get("corrected_code", type=int)
-    if corrected_code is None or not (0 <= corrected_code <= 10):
+    corrected_code2 = request.form.get("corrected_code2", type=int)
+    if corrected_code is None:
         return _finish(
             "images_hour", "訂正後の現象コードを選んでください。", success=False, date=date, hhmm=hhmm,
+        )
+    codes = [corrected_code] if corrected_code2 is None else [corrected_code, corrected_code2]
+    try:
+        packed_corrected = encode_phenom_codes(codes)
+    except PhenomCodeError as e:
+        return _finish(
+            "images_hour", f"現象コードの組み合わせが不正です: {e}", success=False, date=date, hhmm=hhmm,
         )
 
     target_dt_str = f"{date} {hhmm[:2]}:{hhmm[2:]}:00"
@@ -3709,9 +3732,9 @@ def images_hour_correct(date, hhmm):
     conn = _users_conn()
     try:
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-        users.add_phenomena_correction(conn, station, target_dt_str, original_code, corrected_code, my_id, now_str)
+        users.add_phenomena_correction(conn, station, target_dt_str, original_code, packed_corrected, my_id, now_str)
         gem_note = ""
-        if corrected_code != original_code:
+        if packed_corrected != original_code:
             if users.grant_gems(
                 conn, my_id, f"direct_correction:{station}:{target_dt_str}",
                 GEM_REWARD_DIRECT_CORRECTION, now_str,
@@ -3719,7 +3742,8 @@ def images_hour_correct(date, hhmm):
                 gem_note = f"(+{GEM_REWARD_DIRECT_CORRECTION}ジェム)"
         _record_audit(
             "画像判定を訂正",
-            f"{station} {target_dt_str}: {original_code} → {corrected_code}",
+            f"{station} {target_dt_str}: {format_phenom_display(original_code) or '-'} → "
+            f"{format_phenom_display(packed_corrected) or '-'}",
         )
     finally:
         conn.close()
@@ -3945,10 +3969,13 @@ def simulator_page():
         dt = datetime.strptime(f"{date_str} {hour:02d}:00", "%Y-%m-%d %H:%M")
         weather = {field["col"]: values[field["key"]] for field in SIM_WEATHER_FIELDS}
         calibrator = fog_model.load_fog_calibrator()
-        predicted_code, fog_prob, class_proba = fog_model.simulate_station(
+        predicted_code, predicted_code2, fog_prob, class_proba, secondary_class_proba = fog_model.simulate_station(
             info, lat, lon, weather, dt, calibrator=calibrator,
         )
-        label, color, text_color = _phenom_label_color(predicted_code)
+        # 2コード同時観測(2026-09対応)。predicted_code2があれば、表示用ラベルは
+        # 主・副コードを結合したもの(phenom_label)にする。
+        display_value = predicted_code if predicted_code2 is None else encode_phenom_codes([predicted_code, predicted_code2])
+        label, color, text_color = _phenom_label_color(display_value)
         threshold = info.get("fog_threshold") or fog_model.DEFAULT_FOG_THRESHOLD
         result = {
             "label": label, "color": color, "text_color": text_color,
@@ -3957,6 +3984,10 @@ def simulator_page():
             "class_proba": [
                 {"code": c, "label": _phenom_label_color(c)[0], "prob": p}
                 for c, p in class_proba.items() if p >= 0.01
+            ],
+            "secondary_class_proba": [
+                {"code": c, "label": _phenom_label_color(c)[0], "prob": p}
+                for c, p in secondary_class_proba.items() if p >= 0.01
             ],
         }
 
@@ -3982,7 +4013,10 @@ def _scan_and_autocorrect_station_anomalies(name):
     リスクがあるため、現在は observation_reports の確認待ちキュー(source="auto_detected")
     に積むだけにとどめ、実際の訂正は管理者が/admin/observation_reportsで前後の画像を
     見て判断してから行う。地点別ページを開くたびにその地点だけ軽く走査する
-    (全地点を毎回スキャンする専用バッチは持たない)。"""
+    (全地点を毎回スキャンする専用バッチは持たない)。
+    ここでの現象コードは2コード同時観測(2026-09対応)のパック済み値のこともあるが、
+    完全一致による比較(prev_c/cur_c/next_c)はパック値同士でもそのまま正しく機能する
+    (パック値が異なれば元の組み合わせも異なる)ため、特別な分解処理は不要。"""
     now = time.monotonic()
     with _anomaly_scan_lock:
         last = _anomaly_scan_cache.get(name)
@@ -4097,8 +4131,16 @@ def station_correct_observation(name):
     if current is None or current.get("code") is None:
         return _finish("station_detail", "この地点の観測データがありません。", success=False, name=name)
     corrected_code = request.form.get("corrected_code", type=int)
-    if corrected_code is None or not (0 <= corrected_code <= 10):
+    corrected_code2 = request.form.get("corrected_code2", type=int)
+    if corrected_code is None:
         return _finish("station_detail", "訂正後の現象コードを選んでください。", success=False, name=name)
+    codes = [corrected_code] if corrected_code2 is None else [corrected_code, corrected_code2]
+    try:
+        packed_corrected = encode_phenom_codes(codes)
+    except PhenomCodeError as e:
+        return _finish("station_detail", f"現象コードの組み合わせが不正です: {e}", success=False, name=name)
+    original_codes = [current["code"]] if current.get("code2") is None else [current["code"], current["code2"]]
+    original_packed = encode_phenom_codes(original_codes)
     target_dt_str = observations["datetime"]
     if hasattr(target_dt_str, "strftime"):
         target_dt_str = target_dt_str.strftime("%Y-%m-%d %H:%M:%S")
@@ -4106,17 +4148,19 @@ def station_correct_observation(name):
     try:
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         users.add_phenomena_correction(
-            conn, name, target_dt_str, current["code"], corrected_code, my_id, now_str, source="human",
+            conn, name, target_dt_str, original_packed, packed_corrected, my_id, now_str, source="human",
         )
         gem_note = ""
-        if corrected_code != current["code"]:
+        if packed_corrected != original_packed:
             if users.grant_gems(
                 conn, my_id, f"direct_correction:{name}:{target_dt_str}",
                 GEM_REWARD_DIRECT_CORRECTION, now_str,
             ):
                 gem_note = f"(+{GEM_REWARD_DIRECT_CORRECTION}ジェム)"
         _record_audit(
-            "観測をその場で訂正", f"{name} {target_dt_str}: {current['code']} → {corrected_code}",
+            "観測をその場で訂正",
+            f"{name} {target_dt_str}: {format_phenom_display(original_packed)} → "
+            f"{format_phenom_display(packed_corrected)}",
         )
     finally:
         conn.close()
@@ -4175,12 +4219,14 @@ def admin_observation_reports():
             r[key] = {
                 "date": n_date, "hhmm": n_hhmm, "has_image": n_path.is_file(),
                 "code": code,
-                "label": PHENOM_LABELS.get(code, "現象なし" if code == 0 else "-"),
+                "label": phenom_label(code),
             }
         # 該当時刻自体の判定は前後と同じ形式で並べて見比べやすくする(値自体は報告時点の
         # reported_codeそのまま。訂正前の判断材料なので現時点の現象データを再取得する
-        # 意味は無い)。
-        r["current_label"] = PHENOM_LABELS.get(r["reported_code"], "現象なし" if r["reported_code"] == 0 else "-")
+        # 意味は無い)。reported_code_primary/secondaryは、2コード同時観測(2026-09対応)を
+        # 訂正ピッカーの初期状態(主・副コード)として展開するために分解しておく。
+        r["current_label"] = phenom_label(r["reported_code"])
+        r["reported_code_primary"], r["reported_code_secondary"] = decode_phenom_value(r["reported_code"])
         differs_from_both = (
             r["prev_image"]["code"] is not None and r["next_image"]["code"] is not None
             and r["prev_image"]["code"] == r["next_image"]["code"]
@@ -4204,8 +4250,16 @@ def admin_observation_report_resolve(report_id):
             abort(404)
         _enforce_observer_region(report["station_name"])
         corrected_code = request.form.get("corrected_code", type=int)
-        if corrected_code is None or not (0 <= corrected_code <= 10):
+        corrected_code2 = request.form.get("corrected_code2", type=int)
+        if corrected_code is None:
             return _finish("admin_observation_reports", "訂正後の現象コードを選んでください。", success=False)
+        codes = [corrected_code] if corrected_code2 is None else [corrected_code, corrected_code2]
+        try:
+            packed_corrected = encode_phenom_codes(codes)
+        except PhenomCodeError as e:
+            return _finish(
+                "admin_observation_reports", f"現象コードの組み合わせが不正です: {e}", success=False,
+            )
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         # original_codeは報告作成時点のreported_codeではなく、今この瞬間の実際の判定
         # (既に別経路で訂正済みならその訂正後コード、無ければ生のAI判定)を使う。報告から
@@ -4219,13 +4273,13 @@ def admin_observation_report_resolve(report_id):
         )
         users.add_phenomena_correction(
             conn, report["station_name"], report["target_datetime"],
-            current_code, corrected_code, my_id, now_str, source="human",
+            current_code, packed_corrected, my_id, now_str, source="human",
         )
         users.resolve_observation_report(
-            conn, report_id, "resolved", my_id, now_str, f"{corrected_code}に訂正",
+            conn, report_id, "resolved", my_id, now_str, f"{format_phenom_display(packed_corrected)}に訂正",
         )
         reward_note = ""
-        if report["source"] == "user" and report["reported_by"] and corrected_code != report["reported_code"]:
+        if report["source"] == "user" and report["reported_by"] and packed_corrected != report["reported_code"]:
             granted = users.grant_points(
                 conn, report["reported_by"], f"observation_report_reward:{report_id}",
                 OBSERVATION_REPORT_REWARD_POINTS, now_str,
@@ -4240,7 +4294,7 @@ def admin_observation_report_resolve(report_id):
                 )
                 if gem_granted:
                     reward_note = f"{reward_note}(+{approve_gems}ジェム)"
-        elif report["source"] == "auto_detected" and corrected_code != report["reported_code"]:
+        elif report["source"] == "auto_detected" and packed_corrected != report["reported_code"]:
             # 自動検知分には報告者がいないため、代わりに実際に確認・訂正した管理者へ
             # ジェムを付与する(報告者選択の重要度が無いため「中」相当の固定額)。
             gem_granted = users.grant_gems(
@@ -4252,7 +4306,8 @@ def admin_observation_report_resolve(report_id):
         _record_audit(
             "観測報告を確認・訂正",
             f"{report['station_name']} {report['target_datetime']}: "
-            f"{report['reported_code']} → {corrected_code} {reward_note}".strip(),
+            f"{format_phenom_display(report['reported_code'])} → "
+            f"{format_phenom_display(packed_corrected)} {reward_note}".strip(),
         )
     finally:
         conn.close()
@@ -5597,8 +5652,14 @@ PHENOM_QUIZ_CANDIDATES_CACHE_SECONDS = 600
 
 
 def _phenom_category_id_for_code(code):
+    # codeは2コード同時観測(2026-09対応)のパック済み値のこともあるため、主コードだけで
+    # 判定する(クイズは主コードのみで採点する、というシンプルな方針)。
+    primary = primary_phenom_code(code)
+    if primary != primary:  # NaN
+        return None
+    primary = int(primary)
     for cat in PHENOM_QUIZ_CATEGORIES:
-        if code in cat["codes"]:
+        if primary in cat["codes"]:
             return cat["id"]
     return None
 
@@ -5685,7 +5746,7 @@ def _resolve_pending_daily_fog_quiz():
                 continue
             day_start, day_end = f"{quiz_date} 00:00:00", f"{quiz_date} 23:59:59"
             window = phenom_df[(phenom_df["datetime"] >= day_start) & (phenom_df["datetime"] <= day_end)]
-            codes = window[station].apply(encode_phenomena_cell)
+            codes = window[station].apply(encode_phenomena_cell).apply(primary_phenom_code)
             occurred = bool(codes.dropna().isin(SUMMARY_FOG_CODES).any())
             correct = occurred == entry["guess"]
             new_streak = users.update_daily_fog_quiz_stats(conn, entry["user_id"], correct)
@@ -5723,7 +5784,7 @@ def _station_fog_rates():
             if name not in phenom_df.columns:
                 continue
             merged = main_df.merge(phenom_df[["datetime", name]], on="datetime", how="inner")
-            codes = merged[name].apply(encode_phenomena_cell)
+            codes = merged[name].apply(encode_phenomena_cell).apply(primary_phenom_code)
             valid = codes.notna()
             n = int(valid.sum())
             if n == 0:
@@ -5817,7 +5878,7 @@ def _resolve_pending_fog_bets():
                 (main_df["datetime"] >= bet["window_start"]) & (main_df["datetime"] <= bet["window_end"])
             ]
             merged = window.merge(phenom_df[["datetime", station]], on="datetime", how="inner")
-            codes = merged[station].apply(encode_phenomena_cell)
+            codes = merged[station].apply(encode_phenomena_cell).apply(primary_phenom_code)
             occurred = bool(codes.dropna().isin(SUMMARY_FOG_CODES).any())
             if occurred:
                 payout = int(round(bet["bet_amount"] * bet["multiplier"]))
@@ -9430,14 +9491,19 @@ def _generate_report_pdf(start_date, end_date):
     period_df = phenom_df[mask]
     period_weather_df = main_df[(main_df["datetime"] >= start_dt) & (main_df["datetime"] <= end_dt)]
 
-    # 地点ごとのコード系列(0=現象なし、1〜10=PHENOM_LABELS)をまとめて計算しておき、
-    # 川霧発生回数の集計・現象内訳の集計の両方で使い回す。
+    # 地点ごとのコード系列(0=現象なし、1〜10=PHENOM_LABELS、2コード同時観測=2026-09対応は
+    # パック済み値)をまとめて計算しておき、川霧発生回数の集計・現象内訳の集計の両方で使い回す。
     codes_by_station = {}
     for name in station_names:
         if name in period_df.columns:
             codes_by_station[name] = period_df[name].map(encode_phenomena_cell)
 
-    fog_counts = {name: int(codes.isin(SUMMARY_FOG_CODES).sum()) for name, codes in codes_by_station.items()}
+    # 川霧発生回数は主コードだけで判定できる(家族グループの並び上、2コード同時でも
+    # 川霧は必ず主コード側に入る)。
+    fog_counts = {
+        name: int(codes.apply(primary_phenom_code).isin(SUMMARY_FOG_CODES).sum())
+        for name, codes in codes_by_station.items()
+    }
     for name in station_names:
         fog_counts.setdefault(name, 0)
     total_slots = len(period_df)
@@ -9445,11 +9511,15 @@ def _generate_report_pdf(start_date, end_date):
     tadami_stations = [n for n in station_names if STATION_REGION.get(n) == "只見川"]
     aizu_stations = [n for n in station_names if STATION_REGION.get(n) == "会津"]
 
+    # 現象内訳は主・副どちらのコードもそれぞれ1件としてカウントする(2コード同時観測の
+    # 場合、value_counts()だとパック済み値が独立した1つの値として扱われ、内訳の
+    # どちらのコードにも計上されなくなってしまうため、phenom_codes_setで展開してから数える)。
     phenom_code_totals = {code: 0 for code in PHENOM_LABELS}
     for codes in codes_by_station.values():
-        vc = codes.value_counts()
-        for code in PHENOM_LABELS:
-            phenom_code_totals[code] += int(vc.get(code, 0))
+        for value in codes:
+            for code in phenom_codes_set(value):
+                if code in phenom_code_totals:
+                    phenom_code_totals[code] += 1
 
     accuracy = _accuracy_summary_safe()
     trend = _accuracy_trend_safe()

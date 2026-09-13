@@ -28,7 +28,7 @@ import fog_graphs
 import fog_model
 import prediction_log
 import station_weather
-from fog_features import encode_phenomena_cell
+from fog_features import PhenomCodeError, encode_phenom_codes, encode_phenomena_cell
 
 # 観測時間帯（collect.pyの毎時収集と合わせている）。この時間帯以外は実測が存在しないため
 # 予測しても答え合わせができない。
@@ -123,13 +123,19 @@ def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SN
         features = {
             col: (None if pd.isna(row[col]) else round(float(row[col]), 3))
             for col in df.columns
-            if col not in ("datetime", "predicted_code", "predicted_fog_prob")
+            if col not in (
+                "datetime", "predicted_code", "predicted_fog_prob",
+                "predicted_code2", "predicted_code2_prob",
+            )
         }
+        code2 = row.get("predicted_code2")
         payload[station] = {
             "target_datetime": row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
             "features": features,
             "predicted_code": int(row["predicted_code"]),
+            "predicted_code2": (None if pd.isna(code2) else int(code2)),
             "predicted_fog_prob": round(float(row["predicted_fog_prob"]), 4),
+            "predicted_code2_prob": round(float(row.get("predicted_code2_prob", 0.0)), 4),
             "fog_threshold": info.get("fog_threshold"),
             "model_type": info.get("model_type", ""),
             "blend_weight": info.get("blend_weight"),
@@ -147,8 +153,11 @@ def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SN
         log.warning("Failed to save feature snapshot: %s", e)
 
 
-def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
-    """今回の予測を答え合わせ用に記録する（観測時間帯のみ）。"""
+def record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df, secondary_prob_df, models):
+    """今回の予測を答え合わせ用に記録する（観測時間帯のみ）。副コード(2コード同時観測、
+    2026-09対応)が予測されていれば、encode_phenom_codesで主コードとパックした1つの値を
+    predicted_codeに格納する(prediction_log.pyのスキーマ変更不要。単一コードのみの
+    予測は従来通りそのままの値になる)。"""
     run_at_dt = datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
     rows = []
     n_past = 0
@@ -156,17 +165,28 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
     obs_mask = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)
     sub_pred = pred_df[obs_mask]
     sub_prob = prob_df[obs_mask]
+    sub_secondary = secondary_pred_df[obs_mask]
     for col in models.keys():
         if col not in sub_pred.columns:
             continue
         model_type = models[col].get("model_type", "")
-        for dt, code, prob in zip(sub_pred["datetime"], sub_pred[col], sub_prob[col]):
+        for dt, code, prob, code2 in zip(
+            sub_pred["datetime"], sub_pred[col], sub_prob[col], sub_secondary[col],
+        ):
             n_total += 1
             lead_hours = (dt.to_pydatetime() - run_at_dt).total_seconds() / 3600.0
             if lead_hours < 0:
                 n_past += 1
                 continue
-            rows.append((col, dt.strftime("%Y-%m-%d %H:%M:%S"), lead_hours, int(code), float(prob), model_type))
+            codes = [int(code)] if code2 is None else [int(code), int(code2)]
+            try:
+                packed = encode_phenom_codes(codes)
+            except PhenomCodeError:
+                # predict_secondary_codesが家族グループ制約を守っている限り通常は
+                # 起こらないが、念のためのフォールバック(主コードのみで記録する)。
+                log.warning("Invalid predicted code combination %s for %s; storing primary code only", codes, col)
+                packed = int(code)
+            rows.append((col, dt.strftime("%Y-%m-%d %H:%M:%S"), lead_hours, packed, float(prob), model_type))
     if n_total and n_past / n_total > 0.5:
         # 予報時刻がJSTのnaive値である前提が崩れる(API仕様変更でタイムゾーンがズレる等)と、
         # ほぼ全行がlead_hours<0で捨てられ「0件記録」という分かりにくい結果になる。
@@ -256,7 +276,7 @@ def main():
         log.warning("Per-station forecast fetch failed, falling back to the shared forecast: %s", e)
         forecast_by_station = {}
 
-    pred_df, prob_df, feature_snapshots = fog_model.build_location_forecast_codes(
+    pred_df, prob_df, secondary_pred_df, secondary_prob_df, feature_snapshots = fog_model.build_location_forecast_codes(
         models, forecast_raw, lat, lon,
         forecast_by_station=forecast_by_station, camera_coords=camera_coords,
         calibrator=fog_calibrator,
@@ -287,7 +307,7 @@ def main():
         fog_graphs.export_prediction_csv(pred_df, prob_df, models, str(out_dir), run_date_str=run_date_str)
         log.info("Saved graphs/CSV to %s", out_dir)
 
-        record_new_predictions(conn, run_at_str, pred_df, prob_df, models)
+        record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df, secondary_prob_df, models)
         conn.commit()
 
     weather_conn.close()

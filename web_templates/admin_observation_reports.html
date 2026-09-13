@@ -14,7 +14,8 @@
         担当地域(会津/只見川のどちらか一方)の報告のみ表示しています。
         {% endif %}
         各カードのボタンにマウスを乗せる/フォーカスした状態で、数字キー(0〜9、雨は「-」)で現象を選び、
-        「x」キーで却下できます。
+        「Enter」キーで訂正を確定、「x」キーで却下できます。
+        同時に発生している別の現象(例: 雨と川霧が同時)があれば「+ もう1つの現象を追加」で追加できます。
     </p>
 </div>
 
@@ -31,7 +32,7 @@
             </h3>
             <p class="muted" style="margin:0.2rem 0 0;">
                 対象日時: {{ r.target_datetime }} /
-                現在の判定: {{ phenom_labels.get(r.reported_code, "現象なし" if r.reported_code == 0 else "-") }} /
+                現在の判定: {{ r.current_label }} /
                 報告者: {{ r.reporter_name }} ({{ r.reported_at }})
             </p>
             {% if r.reason %}
@@ -70,19 +71,20 @@
 
     <div class="observation-report-actions">
         <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
-              class="phenom-picker-form" data-current-code="{{ r.reported_code }}"
+              class="phenom-picker-form" data-current-code="{{ r.reported_code_primary }}"
+              data-current-code2="{{ r.reported_code_secondary if r.reported_code_secondary is not none else '' }}"
               data-phenom-style='{{ phenom_style | tojson }}'
               data-dismiss-form-id="observation-report-dismiss-{{ r.id }}"
               style="display:flex; flex-direction:column; gap:0.4rem; max-width:26rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="corrected_code" class="phenom-picker-value" value="{{ r.reported_code }}" required>
+            <input type="hidden" name="corrected_code" class="phenom-picker-value" value="{{ r.reported_code_primary }}" required>
             <div class="phenom-picker-wrap">
                 <div class="phenom-picker-row phenom-picker-categories">
-                    <button type="button" class="phenom-btn" data-codes="0"><span class="phenom-dot" style="background:{{ phenom_style[0].bg }};"></span>現象なし</button>
-                    <button type="button" class="phenom-btn" data-codes="1,2,3"><span class="phenom-dot" style="background:{{ phenom_style[2].bg }};"></span>川霧<span class="phenom-key">1-3</span></button>
-                    <button type="button" class="phenom-btn" data-codes="4,5,6"><span class="phenom-dot" style="background:{{ phenom_style[5].bg }};"></span>全体霧<span class="phenom-key">4-6</span></button>
-                    <button type="button" class="phenom-btn" data-codes="7,8"><span class="phenom-dot" style="background:{{ phenom_style[7].bg }};"></span>層雲<span class="phenom-key">7-8</span></button>
-                    <button type="button" class="phenom-btn" data-codes="9,10"><span class="phenom-dot" style="background:{{ phenom_style[9].bg }};"></span>霧雨・雨<span class="phenom-key">9,-</span></button>
+                    <button type="button" class="phenom-btn"><span class="phenom-dot" style="background:{{ phenom_style[0].bg }};"></span>現象なし</button>
+                    <button type="button" class="phenom-btn"><span class="phenom-dot" style="background:{{ phenom_style[2].bg }};"></span>川霧<span class="phenom-key">1-3</span></button>
+                    <button type="button" class="phenom-btn"><span class="phenom-dot" style="background:{{ phenom_style[5].bg }};"></span>全体霧<span class="phenom-key">4-6</span></button>
+                    <button type="button" class="phenom-btn"><span class="phenom-dot" style="background:{{ phenom_style[7].bg }};"></span>層雲<span class="phenom-key">7-8</span></button>
+                    <button type="button" class="phenom-btn"><span class="phenom-dot" style="background:{{ phenom_style[9].bg }};"></span>霧雨・雨<span class="phenom-key">9,-</span></button>
                 </div>
                 <div class="phenom-picker-row phenom-picker-sublevels" hidden></div>
             </div>
@@ -90,6 +92,18 @@
                 <span class="muted" style="font-size:0.8rem;">選択中: <strong class="phenom-picker-selected-label"></strong></span>
                 <button type="submit" class="button">訂正</button>
             </div>
+            <div>
+                <button type="button" class="phenom-secondary-toggle-btn">+ もう1つの現象を追加</button>
+            </div>
+            <div class="phenom-picker-wrap phenom-picker-secondary" hidden>
+                <div class="phenom-picker-row phenom-picker-categories-2"></div>
+                <div class="phenom-picker-row phenom-picker-sublevels-2" hidden></div>
+                <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+                    <span class="muted" style="font-size:0.8rem;">2つ目: <strong class="phenom-picker-selected-label-2"></strong></span>
+                    <button type="button" class="phenom-secondary-clear-btn">選択を外す</button>
+                </div>
+            </div>
+            <input type="hidden" name="corrected_code2" class="phenom-picker-value-2" value="">
         </form>
         <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

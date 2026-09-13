@@ -1,43 +1,38 @@
 <script>
 (function() {
+    // 5つの家族グループ(fog_features.PHENOM_CODE_GROUPSと同じ並び)。2つ目の現象を
+    // 選ぶピッカーはこの定義からJSで組み立てる(1つ目はJinja側で静的に描画済み)。
+    var PHENOM_CATEGORIES = [
+        {codes: [0], label: "現象なし", key: "", dotCode: 0},
+        {codes: [1, 2, 3], label: "川霧", key: "1-3", dotCode: 2},
+        {codes: [4, 5, 6], label: "全体霧", key: "4-6", dotCode: 5},
+        {codes: [7, 8], label: "層雲", key: "7-8", dotCode: 7},
+        {codes: [9, 10], label: "霧雨・雨", key: "9,-", dotCode: 9},
+    ];
+
     document.querySelectorAll(".phenom-picker-form").forEach(function(form) {
         if (form.dataset.phenomPickerWired) return;
         form.dataset.phenomPickerWired = "1";
 
-        var catRow = form.querySelector(".phenom-picker-categories");
-        var subRow = form.querySelector(".phenom-picker-sublevels");
-        var valueInput = form.querySelector(".phenom-picker-value");
-        var selectedLabel = form.querySelector(".phenom-picker-selected-label");
         var style = JSON.parse(form.dataset.phenomStyle || "{}");
-        var currentCode = parseInt(form.dataset.currentCode, 10);
-
         function styleFor(code) {
             return style[code] || {label: "コード" + code, bg: "#ffffff", text: "#1c2733"};
         }
-
+        function groupIndexFor(code) {
+            for (var i = 0; i < PHENOM_CATEGORIES.length; i++) {
+                if (PHENOM_CATEGORIES[i].codes.indexOf(code) !== -1) return i;
+            }
+            return -1;
+        }
         function setActive(row, btn) {
             row.querySelectorAll(".phenom-btn").forEach(function(b) { b.classList.remove("active"); });
             if (btn) btn.classList.add("active");
         }
-
-        function codesKeyFor(code) {
-            for (var i = 0; i < catRow.children.length; i++) {
-                var codes = catRow.children[i].dataset.codes.split(",").map(Number);
-                if (codes.indexOf(code) !== -1) return catRow.children[i].dataset.codes;
-            }
-            return String(code);
-        }
-
-        function applyCode(code) {
-            valueInput.value = code;
-            selectedLabel.textContent = styleFor(code).label;
-        }
-
-        function showSublevels(catBtn, activeCode) {
-            var codes = catBtn.dataset.codes.split(",").map(Number);
-            subRow.innerHTML = "";
+        function showSublevels(row, catIdx, activeCode, onPick) {
+            var codes = PHENOM_CATEGORIES[catIdx].codes;
+            row.innerHTML = "";
             if (codes.length <= 1) {
-                subRow.hidden = true;
+                row.hidden = true;
                 return;
             }
             codes.forEach(function(code) {
@@ -52,46 +47,174 @@
                 b.dataset.code = code;
                 if (code === activeCode) b.classList.add("active");
                 b.addEventListener("click", function() {
-                    applyCode(code);
-                    setActive(subRow, b);
+                    setActive(row, b);
+                    onPick(code);
                 });
-                subRow.appendChild(b);
+                row.appendChild(b);
             });
-            subRow.hidden = false;
+            row.hidden = false;
         }
 
-        function selectCode(code) {
-            applyCode(code);
-            var catBtn = catRow.querySelector('.phenom-btn[data-codes="' + codesKeyFor(code) + '"]');
+        // ---- ピッカー1(主コード、必須。カテゴリ行はJinjaで静的に描画済み) ----
+        var catRow = form.querySelector(".phenom-picker-categories");
+        var subRow = form.querySelector(".phenom-picker-sublevels");
+        var valueInput = form.querySelector(".phenom-picker-value");
+        var selectedLabel = form.querySelector(".phenom-picker-selected-label");
+        var currentCode = parseInt(form.dataset.currentCode, 10);
+
+        function applyPrimary(code) {
+            valueInput.value = code;
+            selectedLabel.textContent = styleFor(code).label;
+            refreshSecondaryAvailability();
+        }
+
+        function selectPrimary(code) {
+            var catIdx = groupIndexFor(code);
+            var catBtn = catRow.children[catIdx];
             setActive(catRow, catBtn);
-            if (catBtn) showSublevels(catBtn, code);
+            if (catIdx !== -1) showSublevels(subRow, catIdx, code, applyPrimary);
+            applyPrimary(code);
         }
 
-        catRow.querySelectorAll(".phenom-btn").forEach(function(btn) {
+        Array.prototype.forEach.call(catRow.children, function(btn, catIdx) {
             btn.addEventListener("click", function() {
-                var codes = btn.dataset.codes.split(",").map(Number);
+                var codes = PHENOM_CATEGORIES[catIdx].codes;
                 setActive(catRow, btn);
                 if (codes.length === 1) {
                     subRow.hidden = true;
                     subRow.innerHTML = "";
-                    applyCode(codes[0]);
+                    applyPrimary(codes[0]);
                 } else {
                     var pick = codes.indexOf(currentCode) !== -1 ? currentCode : codes[0];
-                    showSublevels(btn, pick);
-                    applyCode(pick);
+                    showSublevels(subRow, catIdx, pick, applyPrimary);
+                    applyPrimary(pick);
                 }
             });
         });
 
-        // 初期状態: 現在のコードに対応するボタンをあらかじめ選択しておく
-        selectCode(currentCode);
+        // ---- ピッカー2(副コード、任意。2コード同時観測=2026-09対応) ----
+        var secondaryToggleBtn = form.querySelector(".phenom-secondary-toggle-btn");
+        var secondaryClearBtn = form.querySelector(".phenom-secondary-clear-btn");
+        var secondaryWrap = form.querySelector(".phenom-picker-secondary");
+        var catRow2 = form.querySelector(".phenom-picker-categories-2");
+        var subRow2 = form.querySelector(".phenom-picker-sublevels-2");
+        var valueInput2 = form.querySelector(".phenom-picker-value-2");
+        var selectedLabel2 = form.querySelector(".phenom-picker-selected-label-2");
+        var currentCode2Raw = form.dataset.currentCode2;
+        var currentCode2 = currentCode2Raw ? parseInt(currentCode2Raw, 10) : null;
+        var hasSecondaryUI = !!(secondaryWrap && catRow2 && subRow2 && valueInput2);
 
-        // キーボードショートカット: マウスホバー中、またはボタンにフォーカスが
-        // 当たっている間(Tab移動でも使えるように)、数字キー(0〜9)と「-」(雨=コード10)
-        // で直接選べる。却下ボタンとペアのフォームがあれば「x」で却下も送信できる。
+        function applySecondary(code) {
+            valueInput2.value = code;
+            selectedLabel2.textContent = styleFor(code).label;
+        }
+
+        function clearSecondary() {
+            valueInput2.value = "";
+            selectedLabel2.textContent = "";
+            setActive(catRow2, null);
+            subRow2.hidden = true;
+            subRow2.innerHTML = "";
+        }
+
+        function selectSecondary(code) {
+            var catIdx = groupIndexFor(code);
+            setActive(catRow2, catRow2.children[catIdx]);
+            if (catIdx !== -1) showSublevels(subRow2, catIdx, code, applySecondary);
+            applySecondary(code);
+        }
+
+        function refreshSecondaryAvailability() {
+            if (!hasSecondaryUI) return;
+            var primaryCode = parseInt(valueInput.value, 10);
+            var primaryGroup = groupIndexFor(primaryCode);
+            // 「現象なし」を主コードに選んでいる間は、他のどのコードとも組み合わせられない
+            // (fog_features.validate_phenom_codes参照)ため、2つ目の追加自体を隠す。
+            var allDisabled = primaryCode === 0;
+            Array.prototype.forEach.call(catRow2.children, function(btn, catIdx) {
+                var disabled = allDisabled || catIdx === 0 || catIdx === primaryGroup;
+                btn.disabled = disabled;
+                btn.classList.toggle("phenom-btn-disabled", disabled);
+            });
+            if (allDisabled) {
+                clearSecondary();
+                secondaryWrap.hidden = true;
+                if (secondaryToggleBtn) secondaryToggleBtn.hidden = true;
+            } else {
+                if (secondaryToggleBtn) secondaryToggleBtn.hidden = false;
+                if (valueInput2.value !== "" && groupIndexFor(parseInt(valueInput2.value, 10)) === primaryGroup) {
+                    // 主コードを変更した結果、既に開いていた副コードの選択が同じグループに
+                    // なってしまった場合は選択を外す(不正な組み合わせのまま送信させない)。
+                    clearSecondary();
+                }
+            }
+        }
+
+        if (hasSecondaryUI) {
+            PHENOM_CATEGORIES.forEach(function(cat, catIdx) {
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "phenom-btn";
+                var dot = document.createElement("span");
+                dot.className = "phenom-dot";
+                dot.style.background = styleFor(cat.dotCode).bg;
+                btn.appendChild(dot);
+                btn.appendChild(document.createTextNode(cat.label));
+                if (cat.key) {
+                    var keySpan = document.createElement("span");
+                    keySpan.className = "phenom-key";
+                    keySpan.textContent = cat.key;
+                    btn.appendChild(keySpan);
+                }
+                btn.addEventListener("click", function() {
+                    if (btn.disabled) return;
+                    var codes = cat.codes;
+                    setActive(catRow2, btn);
+                    if (codes.length === 1) {
+                        subRow2.hidden = true;
+                        subRow2.innerHTML = "";
+                        applySecondary(codes[0]);
+                    } else {
+                        var pick = codes.indexOf(currentCode2) !== -1 ? currentCode2 : codes[0];
+                        showSublevels(subRow2, catIdx, pick, applySecondary);
+                        applySecondary(pick);
+                    }
+                });
+                catRow2.appendChild(btn);
+            });
+
+            if (secondaryToggleBtn) {
+                secondaryToggleBtn.addEventListener("click", function() {
+                    secondaryWrap.hidden = !secondaryWrap.hidden;
+                    secondaryToggleBtn.textContent = secondaryWrap.hidden
+                        ? "+ もう1つの現象を追加" : "2つ目の現象を選択中";
+                });
+            }
+            if (secondaryClearBtn) {
+                secondaryClearBtn.addEventListener("click", function() {
+                    clearSecondary();
+                    secondaryWrap.hidden = true;
+                    if (secondaryToggleBtn) secondaryToggleBtn.textContent = "+ もう1つの現象を追加";
+                });
+            }
+        }
+
+        // 初期状態: 現在のコードに対応するボタンをあらかじめ選択しておく
+        selectPrimary(currentCode);
+        if (hasSecondaryUI && currentCode2 !== null && !isNaN(currentCode2)) {
+            secondaryWrap.hidden = false;
+            if (secondaryToggleBtn) secondaryToggleBtn.textContent = "2つ目の現象を選択中";
+            selectSecondary(currentCode2);
+        }
+
+        // キーボードショートカット(1つ目のピッカーのみ対象): マウスホバー中、または
+        // ボタンにフォーカスが当たっている間(Tab移動でも使えるように)、数字キー(0〜9)と
+        // 「-」(雨=コード10)で直接選べる。Enterでこのフォーム自体を送信(訂正確定)、
+        // 却下ボタンとペアのフォームがあれば「x」で却下を送信できる。
         var activeRoot = form.closest(".observation-report-actions") || form;
         var dismissForm = form.dataset.dismissFormId
             ? document.getElementById(form.dataset.dismissFormId) : null;
+        var submitBtn = form.querySelector('button[type="submit"]');
         var hovered = false, focusedWithin = false;
         function isActive() { return hovered || focusedWithin; }
         activeRoot.addEventListener("mouseenter", function() { hovered = true; });
@@ -100,6 +223,13 @@
         activeRoot.addEventListener("focusout", function() { focusedWithin = false; });
         document.addEventListener("keydown", function(e) {
             if (!isActive()) return;
+            if (e.key === "Enter") {
+                if (submitBtn) {
+                    e.preventDefault();
+                    submitBtn.click();
+                }
+                return;
+            }
             if ((e.key === "x" || e.key === "X") && dismissForm) {
                 var dismissBtn = dismissForm.querySelector('button[type="submit"]');
                 if (dismissBtn) {
@@ -113,7 +243,7 @@
             else if (e.key === "-") code = 10;
             if (code === null) return;
             e.preventDefault();
-            selectCode(code);
+            selectPrimary(code);
         });
     });
 })();

@@ -622,6 +622,12 @@ main {
 @media (max-width: 860px) {
     .layout { flex-direction: column; }
     .sidebar { position: static; flex-basis: auto; width: 100%; }
+    /* モバイルでは縦積みになるため、DOM順そのままだと本文より先に
+       サイドバー(観測報告ページなら無関係な管理者メニュー等)が表示され、
+       「目的のページではなく別の画面が開いた」ように見えてしまう
+       (2026-09指摘)。本文を先に、サイドバーは後に表示する。 */
+    .layout-content { order: 1; }
+    .sidebar { order: 2; }
 }
 
 .sidebar-panel {
@@ -2290,6 +2296,10 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 0.6rem 0.7rem;
 }
 .phenom-picker-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+/* .phenom-picker-wrap/.phenom-picker-rowは自前でdisplay:flexを指定しているため、
+   同じ詳細度のブラウザ既定の[hidden]{display:none}が負けてhidden属性だけでは
+   隠れない(2026-09、2つ目の現象ピッカーを隠す際に顕在化)。詳細度を上げて上書きする。 */
+.phenom-picker-wrap[hidden], .phenom-picker-row[hidden] { display: none; }
 .phenom-btn {
     display: inline-flex;
     align-items: center;
@@ -2320,4 +2330,16 @@ table.obs-table th.sticky-col { z-index: 3; }
     font-weight: 700;
 }
 .phenom-picker-selected-label { font-size: 0.85rem; }
+
+/* 2つ目の現象(2コード同時観測、2026-09対応)の追加/取り消しリンクと、選べない
+   組み合わせ(主コードと同じグループ・現象なし)のボタンの見た目。 */
+.phenom-secondary-toggle-btn, .phenom-secondary-clear-btn {
+    background: none; border: none; color: var(--color-primary); font-size: 0.8rem;
+    font-family: inherit; padding: 0.2rem 0; cursor: pointer; text-decoration: underline;
+}
+.phenom-btn:disabled, .phenom-btn.phenom-btn-disabled {
+    opacity: 0.35; cursor: not-allowed; box-shadow: none;
+}
+.phenom-btn:disabled:hover { box-shadow: none; }
+.phenom-picker-secondary { margin-top: 0.3rem; }
 

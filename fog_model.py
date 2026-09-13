@@ -56,9 +56,11 @@ from fog_features import (
     COL_VISIBILITY,
     COL_WIND_DIR_DEG,
     COL_WIND_SPEED,
+    PHENOM_CODE_GROUPS,
     SUMMARY_FOG_CODES,
     _lag_series,
     build_location_class_targets,
+    build_location_secondary_targets,
     prepare_features,
     select_feature_names,
 )
@@ -195,6 +197,18 @@ MIN_N_FOR_REGRESSION_CHECK = 30
 # 絶対値で落ちていれば「明らかに壊れている」とみなしてロールバックする簡易ガードを
 # フォールバックとして使う。
 SPARSE_REGRESSION_ABS_DROP = 0.3
+
+# --- 副コード(2コード同時観測)予測: Stage B(2026-09対応) ---------------------------
+# 主コード分類器(Stage A、上のRF/XGBoost/LightGBMブレンド)はそのまま無改修で使い続け、
+# 2つ目の現象コードだけを別建ての軽量なモデルで予測する。RandomizedSearchCVは使わず
+# 固定ハイパーパラメータのRandomForestのみとし、日次の全地点再学習コストをほぼ増やさない
+# ようにする(2026-09の監査で、11個の独立分類器を毎日フル学習する案は学習時間が
+# 10倍以上に増える懸念があると指摘され、この軽量な代替構成を採用した)。
+MIN_DUAL_CODE_POSITIVES = 20  # これ未満の陽性例しかない地点はStage B自体をスキップする
+SECONDARY_RETRAIN_INTERVAL_DAYS = 7  # 直近の学習からこの日数未満なら再学習せず引き継ぐ
+SECONDARY_MODEL_PARAMS = dict(
+    model__n_estimators=200, model__max_depth=8, model__min_samples_leaf=2, model__max_features="sqrt",
+)
 
 
 class _XGBLabelSafeClassifier(ClassifierMixin, BaseEstimator):
@@ -697,6 +711,129 @@ def _choose_fog_threshold(pipe, X_val, y_val):
     return best_t
 
 
+def _phenom_group_for_code(code):
+    for group in PHENOM_CODE_GROUPS:
+        if code in group:
+            return group
+    return None
+
+
+def _stage_a_extra_features(X, primary_pipe):
+    """Stage B(副コード分類器)に、Stage A(主コード分類器)自身の予測確率を追加特徴量として
+    与える(最大確率・1位2位差)。Stage Aが不確実なときほど2つ目の現象が同時に写っている
+    可能性が高いという想定の再利用で、Stage B専用に新たな重い学習をしなくて済む。"""
+    proba = np.asarray(primary_pipe.predict_proba(X))
+    sorted_proba = np.sort(proba, axis=1)
+    top1 = sorted_proba[:, -1]
+    margin = top1 - sorted_proba[:, -2] if proba.shape[1] >= 2 else np.zeros(len(X))
+    extra = X.copy()
+    extra["__stage_a_top1_prob"] = top1
+    extra["__stage_a_margin"] = margin
+    return extra
+
+
+def _fit_or_reuse_secondary_model(X_train, y_train, y2_train, X_test, y2_test, primary_pipe, prev_secondary):
+    """副コード(2コード同時観測の2つ目)を予測する軽量な2段構成を学習する。
+    - presence_pipe: 「2つ目のコードがあるか」の二値分類器
+    - identity_pipe: 「2つ目は具体的にどのコードか」の多クラス分類器(2コード同時だった
+      行のみで学習)
+    どちらもRandomizedSearchCVは使わずSECONDARY_MODEL_PARAMS固定のRandomForestのみ。
+    直近の学習(prev_secondary)からSECONDARY_RETRAIN_INTERVAL_DAYS日未満ならそのまま
+    引き継ぎ、陽性例がMIN_DUAL_CODE_POSITIVES未満の地点はスキップする。
+    """
+    now = datetime.now(JST)
+    if prev_secondary and prev_secondary.get("trained_at"):
+        try:
+            prev_trained_at = datetime.fromisoformat(prev_secondary["trained_at"])
+            if prev_trained_at.tzinfo is None:
+                prev_trained_at = prev_trained_at.replace(tzinfo=JST)
+            if (now - prev_trained_at).days < SECONDARY_RETRAIN_INTERVAL_DAYS:
+                return prev_secondary
+        except (TypeError, ValueError):
+            pass
+
+    skipped = {
+        "presence_pipe": None, "identity_pipe": None, "identity_classes_": None,
+        "presence_threshold": DEFAULT_FOG_THRESHOLD, "n_dual": int(y2_train.notna().sum()),
+        "trained_at": now.isoformat(), "skipped_reason": "insufficient_dual_samples",
+    }
+    if skipped["n_dual"] < MIN_DUAL_CODE_POSITIVES:
+        return skipped
+
+    presence_y_train = y2_train.notna().astype(int)
+    if presence_y_train.nunique() < 2:
+        return skipped
+
+    X_train_ext = _stage_a_extra_features(X_train, primary_pipe)
+    presence_pipe = _make_base_pipe("rf").set_params(**SECONDARY_MODEL_PARAMS)
+    presence_pipe.fit(X_train_ext, presence_y_train)
+
+    dual_mask_train = y2_train.notna()
+    identity_pipe = None
+    identity_classes_ = None
+    if dual_mask_train.sum() >= 2 and y2_train[dual_mask_train].nunique() >= 2:
+        identity_pipe = _make_base_pipe("rf").set_params(**SECONDARY_MODEL_PARAMS)
+        identity_pipe.fit(X_train_ext[dual_mask_train], y2_train[dual_mask_train].astype(int))
+        identity_classes_ = identity_pipe.named_steps["model"].classes_.tolist()
+    else:
+        return skipped
+
+    presence_threshold = DEFAULT_FOG_THRESHOLD
+    if len(X_test) > 0:
+        y2_test_bin = y2_test.notna().astype(int).to_numpy()
+        if 0 < y2_test_bin.sum() < len(y2_test_bin):
+            probs = presence_pipe.predict_proba(_stage_a_extra_features(X_test, primary_pipe))[:, 1]
+            best_t, best_f1 = DEFAULT_FOG_THRESHOLD, -1.0
+            for t in FOG_THRESHOLD_GRID:
+                f1 = f1_score(y2_test_bin, (probs >= t).astype(int), zero_division=0)
+                if f1 > best_f1:
+                    best_t, best_f1 = float(t), f1
+            presence_threshold = best_t
+
+    return {
+        "presence_pipe": presence_pipe, "identity_pipe": identity_pipe,
+        "identity_classes_": identity_classes_, "presence_threshold": presence_threshold,
+        "n_dual": skipped["n_dual"], "trained_at": now.isoformat(), "skipped_reason": None,
+    }
+
+
+def predict_secondary_codes(info, X, primary_pred):
+    """副コード(存在すれば)とその出現確率を予測する。主コードと同じ家族グループ、
+    および0(現象なし)は候補から除外してから最有力の候補を選ぶ(PHENOM_CODE_GROUPS参照)。
+    Stage Bが未学習(スキップ状態)の地点は全行None/0.0を返す。
+    戻り値: (secondary_codes: np.ndarray[object](Noneまたはint), secondary_probs: np.ndarray[float])
+    """
+    secondary = info.get("secondary") or {}
+    presence_pipe = secondary.get("presence_pipe")
+    identity_pipe = secondary.get("identity_pipe")
+    n = len(X)
+    if presence_pipe is None or identity_pipe is None:
+        return np.array([None] * n, dtype=object), np.zeros(n)
+
+    primary_pipe = info["pipe"]
+    X_ext = _stage_a_extra_features(X, primary_pipe)
+    presence_prob = np.asarray(presence_pipe.predict_proba(X_ext))[:, 1]
+    threshold = secondary.get("presence_threshold", DEFAULT_FOG_THRESHOLD)
+    has_secondary = presence_prob >= threshold
+
+    identity_proba = np.asarray(identity_pipe.predict_proba(X_ext))
+    identity_classes = np.asarray(secondary.get("identity_classes_") or identity_pipe.named_steps["model"].classes_)
+
+    secondary_codes = np.array([None] * n, dtype=object)
+    primary_arr = np.asarray(primary_pred)
+    for i in range(n):
+        if not has_secondary[i]:
+            continue
+        primary_group = _phenom_group_for_code(int(primary_arr[i]))
+        for idx in np.argsort(-identity_proba[i]):
+            cand = int(identity_classes[idx])
+            if cand == 0 or _phenom_group_for_code(cand) == primary_group:
+                continue
+            secondary_codes[i] = cand
+            break
+    return secondary_codes, presence_prob
+
+
 def _fit_best_model(X_train, y_train):
     """RandomForest単体・XGBoost単体・LightGBM単体・RF+XGBoost・RF+LightGBM・
     RF+XGBoost+LightGBMを候補として学習し、検証データでの正答率(accuracy)が
@@ -891,13 +1028,18 @@ def _apply_station_weather(main_df, station_name, weather_conn):
 
 
 def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
-                           camera_coords=None, weather_conn=None):
+                           camera_coords=None, weather_conn=None, prev_state=None):
     """地点それぞれについて独立した多クラス分類モデルを学習する。データ不足の地点は
-    全地点共通の「プーリングモデル」で補う。
+    全地点共通の「プーリングモデル」で補う。あわせて、2コード同時観測(2026-09対応)の
+    副コードを予測する軽量なStage B(presence_pipe/identity_pipe)も地点ごとに学習・
+    引き継ぐ(prev_state参照。Noneならload_model_state()で前回の保存内容を読む)。
 
-    戻り値: {地点名: {"pipe":, "features":, "fog_threshold":, "model_type":, "n":, ...}}
+    戻り値: {地点名: {"pipe":, "features":, "fog_threshold":, "model_type":, "n":, "secondary":, ...}}
     """
+    if prev_state is None:
+        prev_state = load_model_state()
     targets = build_location_class_targets(phenom_df, phenom_cols)
+    secondary_targets = build_location_secondary_targets(phenom_df, phenom_cols)
 
     low_confidence = load_low_confidence_set()
     if low_confidence:
@@ -908,6 +1050,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             n = int(mask.sum())
             if n:
                 targets.loc[mask, col] = np.nan
+                secondary_targets.loc[mask, col] = np.nan
                 excluded_total += n
         if excluded_total:
             log.info(
@@ -922,12 +1065,15 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
         n = int(mask.sum())
         if n:
             targets.loc[mask, phenom_cols] = np.nan
+            secondary_targets.loc[mask, phenom_cols] = np.nan
             log.info(
                 "Excluded %d backfilled (estimated, not observed) datetime row(s) from training "
                 "across %d station(s)", n, len(phenom_cols),
             )
 
+    secondary_targets_renamed = secondary_targets.rename(columns={c: f"{c}__secondary" for c in phenom_cols})
     merged = pd.merge(main_df, targets, on="datetime", how="inner")
+    merged = pd.merge(merged, secondary_targets_renamed, on="datetime", how="left")
     merged = merged.sort_values("datetime").reset_index(drop=True)
     cross_rates = _compute_cross_station_fog_rates(merged, phenom_cols)
 
@@ -985,6 +1131,7 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             if station_main_df is None:
                 continue
             s_merged = pd.merge(station_main_df, targets, on="datetime", how="inner")
+            s_merged = pd.merge(s_merged, secondary_targets_renamed, on="datetime", how="left")
             s_merged = s_merged.sort_values("datetime").reset_index(drop=True)
             s_lat, s_lon = coords
             s_merged, s_features, s_medians = prepare_features(s_merged, s_lat, s_lon)
@@ -1073,6 +1220,14 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             "advection_index_last": _last_valid_value(advection_idx[col]),
             "measure_medians": col_medians,
         }
+
+        y2_col = f"{col}__secondary"
+        y2_all = sub[y2_col] if y2_col in sub.columns else pd.Series(np.nan, index=sub.index)
+        _, _, y2_train, y2_test = _temporal_train_test_split(X, y2_all)
+        prev_secondary = (prev_state.get(col) or {}).get("secondary")
+        models[col]["secondary"] = _fit_or_reuse_secondary_model(
+            X_train, y_train, y2_train, X_test, y2_test, pipe, prev_secondary,
+        )
 
     n_individual = len(models)
     _rescue_with_pooled_model(
@@ -1291,6 +1446,13 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
             "advection_index_last": _last_valid_value(advection_idx[col]),
             "measure_medians": shared_medians,
+            # プーリング救済モデルは元々データが薄い地点向けの救済措置のため、そこからさらに
+            # 稀な「2コード同時」の副コードまで学習するのは無理があり、Stage B自体を対象外とする。
+            "secondary": {
+                "presence_pipe": None, "identity_pipe": None, "identity_classes_": None,
+                "presence_threshold": DEFAULT_FOG_THRESHOLD, "n_dual": None,
+                "trained_at": datetime.now(JST).isoformat(), "skipped_reason": "pooled_station",
+            },
         }
         rescued += 1
         if not can_evaluate:
@@ -1420,13 +1582,18 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
     forecast_by_station/camera_coordsが与えられ、かつその地点の予報が取得できていれば、
     共通の代表地点予報(forecast_raw/lat/lon)の代わりにその地点自身の予報を使う。
     calibratorを渡すとpredicted_fog_prob(prob_df/feature_snapshots両方)に較正を適用する。
-    戻り値: (pred_df, prob_df, feature_snapshots)。pred_df/prob_dfはdatetime列 + 地点ごとの列。
-    feature_snapshotsは {地点名: DataFrame(datetime, 各特徴量, predicted_code, predicted_fog_prob)}で、
-    「この予測にどの特徴量の値が使われたか」を後から参照する(station_detail.htmlの表示用)ために
-    予測結果と一緒に返す。
+    戻り値: (pred_df, prob_df, secondary_pred_df, secondary_prob_df, feature_snapshots)。
+    pred_df/prob_df/secondary_pred_df/secondary_prob_dfはいずれもdatetime列 + 地点ごとの列。
+    secondary_pred_dfは2コード同時観測(2026-09対応)の副コード(Stage B未学習の地点はNone)、
+    secondary_prob_dfはその出現確率。
+    feature_snapshotsは {地点名: DataFrame(datetime, 各特徴量, predicted_code, predicted_fog_prob,
+    predicted_code2, predicted_code2_prob)}で、「この予測にどの特徴量の値が使われたか」を
+    後から参照する(station_detail.htmlの表示用)ために予測結果と一緒に返す。
     """
     pred_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
     prob_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
+    secondary_pred_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
+    secondary_prob_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
     feature_snapshots = {}
     for col, info in models.items():
         feature_names = info["features"]
@@ -1462,12 +1629,17 @@ def build_location_forecast_codes(models, forecast_raw, lat, lon, forecast_by_st
             X[ADVECTION_FOG_FEATURE] = info.get("advection_index_last", 0.0)
         pred_df[col] = info["pipe"].predict(X).astype(int)
         prob_df[col] = compute_fog_probability(info["pipe"], X, calibrator=calibrator)
+        secondary_codes, secondary_probs = predict_secondary_codes(info, X, pred_df[col].to_numpy())
+        secondary_pred_df[col] = secondary_codes
+        secondary_prob_df[col] = secondary_probs
         snapshot = X.copy()
         snapshot.insert(0, "datetime", df["datetime"].values)
         snapshot["predicted_code"] = pred_df[col].values
         snapshot["predicted_fog_prob"] = prob_df[col].values
+        snapshot["predicted_code2"] = secondary_pred_df[col].values
+        snapshot["predicted_code2_prob"] = secondary_prob_df[col].values
         feature_snapshots[col] = snapshot
-    return pred_df, prob_df, feature_snapshots
+    return pred_df, prob_df, secondary_pred_df, secondary_prob_df, feature_snapshots
 
 
 def simulate_station(info, lat, lon, weather, dt, calibrator=None):
@@ -1483,8 +1655,10 @@ def simulate_station(info, lat, lon, weather, dt, calibrator=None):
     calibrator: load_fog_calibrator()で読んだ較正モデル。渡すとfog_probが較正後の値になり、
     しきい値グラフ等(本番のpredicted_fog_prob)と同じ確率空間で比較できる。
 
-    戻り値: (predicted_code, fog_prob, class_proba)。class_probaは{現象コード: 確率}を
-    確率降順に並べたdict。
+    戻り値: (predicted_code, predicted_code2, fog_prob, class_proba, secondary_class_proba)。
+    class_proba/secondary_class_probaは{現象コード: 確率}を確率降順に並べたdict
+    (secondary_class_probaはStage B未学習の地点では空dict)。predicted_code2は
+    2コード同時観測(2026-09対応)の副コード(無ければNone)。
     """
     raw = pd.DataFrame([{**weather, "datetime": pd.Timestamp(dt)}])
     feature_names = info["features"]
@@ -1507,7 +1681,21 @@ def simulate_station(info, lat, lon, weather, dt, calibrator=None):
         ((int(c), float(p)) for c, p in zip(pipe.classes_, proba)),
         key=lambda item: -item[1],
     ))
-    return predicted_code, fog_prob, class_proba
+
+    secondary_codes, _secondary_probs = predict_secondary_codes(info, X, np.array([predicted_code]))
+    predicted_code2 = secondary_codes[0]
+    secondary_class_proba = {}
+    secondary = info.get("secondary") or {}
+    identity_pipe = secondary.get("identity_pipe")
+    if identity_pipe is not None:
+        X_ext = _stage_a_extra_features(X, pipe)
+        id_proba = np.asarray(identity_pipe.predict_proba(X_ext))[0]
+        identity_classes = secondary.get("identity_classes_") or identity_pipe.named_steps["model"].classes_.tolist()
+        secondary_class_proba = dict(sorted(
+            ((int(c), float(p)) for c, p in zip(identity_classes, id_proba)),
+            key=lambda item: -item[1],
+        ))
+    return predicted_code, predicted_code2, fog_prob, class_proba, secondary_class_proba
 
 
 def _effective_score(info):

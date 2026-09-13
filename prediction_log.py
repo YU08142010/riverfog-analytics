@@ -9,6 +9,8 @@ answer合わせをし、その結果を含めて翌日また全期間で再学�
 import sqlite3
 from contextlib import closing
 
+import fog_features
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS predictions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,6 +28,12 @@ CREATE TABLE IF NOT EXISTS predictions (
 CREATE INDEX IF NOT EXISTS idx_predictions_pending
     ON predictions(target_datetime) WHERE actual_code IS NULL;
 """
+# predicted_code/actual_codeは、2コード同時観測(2026-09対応)の場合はパック済みの値
+# (fog_features.encode_phenom_codes参照。例:105は現象1と5の同時観測)を保持する。
+# 単一コードは0〜10のまま格納されるため、完全一致による的中判定(predicted_code=actual_code)
+# はスキーマ・SQLとも変更不要。川霧発生の有無だけを見る箇所は
+# fog_features.primary_phenom_code(value)で主コードを取り出してから判定すること
+# (川霧は家族グループの並び上、2コード同時でも必ず主コード側に入る)。
 
 
 def connect(db_path):
@@ -197,7 +205,7 @@ def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
         if key in seen:
             continue
         seen.add(key)
-        if code in fog_codes:
+        if fog_features.primary_phenom_code(code) in fog_codes:
             alerts.append({
                 "station": station, "target_datetime": target_dt,
                 "predicted_code": code, "predicted_fog_prob": prob,

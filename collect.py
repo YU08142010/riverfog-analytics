@@ -39,6 +39,7 @@ from common import (
     request_with_dns_fallback,
     send_alert,
 )
+import fog_features
 import station_weather
 import weather_store
 
@@ -136,6 +137,12 @@ class StationClassification(BaseModel):
     # ログ出力のみに使う診断用の項目。
     reasoning: str
     code: int
+    # 2コード同時観測(2026-09対応、例:雨が降りながら川霧も出ている)。はっきり異なる
+    # 系統の現象が同時に写っている場合のみ埋める。無ければNone(SYSTEM_INSTRUCTION参照)。
+    # 文字列("1 5"のような人間向け表記)ではなく整数フィールドにしているのは、
+    # 構造化出力のJSON schema上で「2つ目があるかどうか」をnull/数値のはっきりした
+    # 二択にするため（自由形式の文字列だとフォーマットのブレでパースに失敗しやすい）。
+    code2: int | None = None
     confidence: Literal["high", "medium", "low"]
 
 
@@ -349,6 +356,18 @@ SYSTEM_INSTRUCTION = (
     "4: 薄い全体霧\n5: 全体霧\n6: 全体濃い霧\n"
     "7: 薄い層雲\n8: 濃い層雲\n9: 霧雨\n10: 雨\n"
     "\n"
+    "1つの画像に、はっきり異なる系統の現象が同時に写っている場合は、code2にもう1つの"
+    "コードを入れてください（無ければcode2は入れないでください）。\n"
+    "現象コードは次の5つのグループに分かれています: "
+    "(A)現象なし{0} (B)川霧{1,2,3} (C)全体霧{4,5,6} (D)層雲{7,8} (E)霧雨・雨{9,10}。\n"
+    "- 同じグループ内の2つのコードを両方選んではいけません"
+    "（例: 1と3を両方選ばない。「薄いか濃いか」はどちらか1つのコードの強度で表現し、"
+    "2つのコードには分けない）。\n"
+    "- 0（現象なし）は他のどのコードとも組み合わせてはいけません。\n"
+    "- 現象が1つしか見当たらない場合はcode2を入れず、無理に2つ目を探さないでください"
+    "（例: 川面付近は川霧で霞み、かつ空は層雲に覆われている、のように実際に異なる系統の"
+    "現象が同時にはっきり見える場合のみcode2を使う）。\n"
+    "\n"
     "判定基準の目安（カテゴリ名だけでは境界が曖昧なため、具体的な見え方で判断してください）:\n"
     "- 現象なし(0)と薄い現象(1・4・7)の境界: 対岸や空の輪郭がわずかでも明確に見分けられる場合は"
     "現象なし(0)とし、肉眼で視程の低下がはっきり分かる場合のみ薄い現象とする。\n"
@@ -383,9 +402,11 @@ SYSTEM_INSTRUCTION = (
     "\n"
     "reasoningには、判定の決め手になった視覚的な根拠を1文程度で簡潔に記述してください"
     "（例:「対岸の輪郭が薄く霞んで見えるため」「川面付近にのみ白い帯状の霞みがあるため」）。"
-    "必ずreasoningで見えている根拠を整理してから、それに基づいてcodeとconfidenceを決めてください。\n"
+    "必ずreasoningで見えている根拠を整理してから、それに基づいてcode（code2があれば併せて）と"
+    "confidenceを決めてください。\n"
     "\n"
-    "confidenceには、その判定の確信度をhigh/medium/lowのいずれかで入れてください。\n"
+    "confidenceには、その判定の確信度をhigh/medium/lowのいずれかで入れてください"
+    "（code2がある場合は、2つのコードそれぞれの確信度も踏まえたうえで判断してください）。\n"
     "- high: 画像が明瞭で、該当コードであることに疑いがない\n"
     "- medium: おおむね妥当だが、画質・逆光・時間帯（薄暮など）により多少の不確実性がある\n"
     "- low: 不鮮明・逆光・薄暮・レンズ汚れの影響が大きい等の理由で、この判定に自信が持てない"
@@ -393,7 +414,9 @@ SYSTEM_INSTRUCTION = (
 
 
 def _phenom_label_for_prompt(code):
-    return "現象なし" if code == 0 else PHENOM_LABELS.get(code, f"コード{code}")
+    # codeは2コード同時観測(2026-09対応)のパック済み値のこともあるため、
+    # fog_features.phenom_labelで主・副コードを結合したラベルにする。
+    return fog_features.phenom_label(code)
 
 
 def _build_contents(name_bytes_pairs, weather_context=None, first_pass_by_name=None, first_pass_invalid=None):
@@ -548,7 +571,9 @@ def _classify_with_model(contents, model, api_keys, label="classification"):
 def _parse_classifications(parsed, index_to_name):
     """Geminiのレスポンスを (地点名->code の辞書, 無効画像と判定された地点名のset,
     confidence:lowだった地点名のlist, 地点名->confidenceの辞書, 地点名->reasoningの辞書)
-    に変換する。
+    に変換する。返すcodeは、code2があれば2コード同時観測(2026-09対応)をパックした値
+    (fog_features.encode_phenom_codes参照)。
+
     confidenceは無効画像(-1)判定についても記録する。レンズの水滴・泥汚れと実際の霧を
     見分けるのは境界が曖昧な判定であり、この確信度が低い/中程度の場合は
     classify_images側で通常の現象コードと同様にエスカレーション(上位モデルでの再判定)の
@@ -578,7 +603,15 @@ def _parse_classifications(parsed, index_to_name):
         if not (0 <= item.code <= 10):
             log.warning("Phenomenon code out of range in Gemini response: %s (%s)", item.code, name)
             continue
-        result[name] = item.code
+        codes = [item.code] if item.code2 is None else [item.code, item.code2]
+        try:
+            result[name] = fog_features.encode_phenom_codes(codes)
+        except fog_features.PhenomCodeError as e:
+            # Geminiが誤って同じグループの2つ・0との組み合わせ等を返した場合、
+            # code2ごと捨てて単一コードとして扱う(丸ごと欠測にして学習データを
+            # 減らすよりはましなフォールバック)。
+            log.warning("Invalid phenomenon code combination from Gemini: %s (%s): %s", codes, name, e)
+            result[name] = item.code
     return result, invalid_stations, low_confidence, confidence_by_name, reasoning_by_name
 
 
@@ -863,9 +896,9 @@ def _build_summary_prompt(cameras, phenom_by_name, weather, run_time):
         code = phenom_by_name.get(name)
         if code is None:
             return "不明(取得失敗)"
-        if code == 0:
-            return "現象なし"
-        return PHENOM_LABELS.get(code, f"コード{code}")
+        # codeは2コード同時観測(2026-09対応)のパック済み値のこともあるため、
+        # fog_features.phenom_labelで主・副コードを結合したラベルにする。
+        return fog_features.phenom_label(code)
 
     for region_label in ("只見川", "会津"):
         names_in_region = [name for name, _cam_id in cameras if regions.get(name) == region_label]

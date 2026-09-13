@@ -72,8 +72,10 @@ def record_weather(conn, dt_str, weather):
 
 
 def record_phenomena(conn, dt_str, phenom_by_name):
-    """phenom_by_name: {地点名: コード}。0="/"(現象なし)、1〜10=現象コード、
-    None=未分類(空欄)。collect.pyのphenom_by_nameと同じ表現をそのまま受け取る。"""
+    """phenom_by_name: {地点名: コード}。0="/"(現象なし)、1〜10=単一の現象コード、
+    100超=2コード同時観測をパックした値(fog_features.encode_phenom_codes参照。
+    例:105は現象1と5の同時観測)、None=未分類(空欄)。collect.pyのphenom_by_nameと
+    同じ表現をそのまま受け取る。code列自体はINTEGERのままでスキーマ変更は不要。"""
     rows = [(dt_str, name, (None if code is None else int(code))) for name, code in phenom_by_name.items()]
     if not rows:
         return
@@ -105,7 +107,8 @@ def load_weather_df(conn):
 
 def load_phenomena_wide_df(conn, station_names):
     """地点名を列にしたワイド形式のDataFrame(datetime, 地点名1, 地点名2, ...)を返す。
-    セルの値は只見川.xlsxと同じ表現(現象なし="/"文字列、1〜10はint、未分類はNone)にし、
+    セルの値は只見川.xlsxと同じ表現(現象なし="/"文字列、単一コードはint、
+    2コード同時観測はパック済みint(100超)、未分類はNone)にし、
     fog_features.encode_phenomena_cellをそのまま使う既存呼び出し元との互換性を保つ。
     """
     df = pd.read_sql_query("SELECT datetime, station_name, code FROM phenomena", conn)
@@ -195,6 +198,7 @@ def export_to_xlsx(conn, dest_path, cameras_csv, template_xlsx, station_names=No
 
     import openpyxl
 
+    import fog_features
     from common import COL_DATETIME, COL_PHENOM_START, set_weather_measures
 
     if station_names is None:
@@ -224,7 +228,15 @@ def export_to_xlsx(conn, dest_path, cameras_csv, template_xlsx, station_names=No
         set_weather_measures(ws, r, weather)
         for i, name in enumerate(station_names):
             value = row[name]
-            cell_value = None if pd.isna(value) else value
+            # 2コード同時観測(パック済み整数、例:105="1 5")は人が読める表記に変換する。
+            # 現象なし("/")・未分類(None)はload_phenomena_wide_df時点で既にその表現
+            # なので、ここではそのまま通す。
+            if pd.isna(value):
+                cell_value = None
+            elif value == "/":
+                cell_value = "/"
+            else:
+                cell_value = fog_features.format_phenom_display(int(value))
             ws.cell(row=r, column=COL_PHENOM_START + i).value = cell_value
     wb.save(dest_path)
     return len(merged)
