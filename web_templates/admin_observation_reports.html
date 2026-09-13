@@ -67,15 +67,26 @@
     {% endif %}
 
     <div class="observation-report-actions">
-        <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload>
+        <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
+              class="phenom-picker-form" data-current-code="{{ r.reported_code }}"
+              data-phenom-labels='{{ phenom_labels | tojson }}'
+              style="display:flex; flex-direction:column; gap:0.4rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <select name="corrected_code">
-                <option value="0">現象なし</option>
-                {% for code, label in phenom_labels.items() %}
-                <option value="{{ code }}" {{ "selected" if code == r.reported_code }}>{{ label }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="button">訂正</button>
+            <input type="hidden" name="corrected_code" class="phenom-picker-value" value="{{ r.reported_code }}" required>
+            <div class="phenom-picker">
+                <div class="phenom-picker-row phenom-picker-categories">
+                    <button type="button" class="phenom-btn" data-codes="0" style="background:#e0e0e0; color:#222;">現象なし</button>
+                    <button type="button" class="phenom-btn" data-codes="1,2,3" style="background:#3498db; color:#fff;">川霧<span class="phenom-key">1-3</span></button>
+                    <button type="button" class="phenom-btn" data-codes="4,5,6" style="background:#7f8c8d; color:#fff;">全体霧<span class="phenom-key">4-6</span></button>
+                    <button type="button" class="phenom-btn" data-codes="7,8" style="background:#e0a458; color:#222;">層雲<span class="phenom-key">7-8</span></button>
+                    <button type="button" class="phenom-btn" data-codes="9,10" style="background:#27ae60; color:#fff;">霧雨・雨<span class="phenom-key">9,-</span></button>
+                </div>
+                <div class="phenom-picker-row phenom-picker-sublevels" hidden></div>
+            </div>
+            <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+                <span class="muted" style="font-size:0.8rem;">選択中: <strong class="phenom-picker-selected-label"></strong></span>
+                <button type="submit" class="button">訂正</button>
+            </div>
         </form>
         <form method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -86,5 +97,8 @@
 {% endfor %}
 {% else %}
 <div class="card"><p class="muted">未対応の報告はありません。</p></div>
+{% endif %}
+{% if reports %}
+{% include "_phenom_picker_assets.html" %}
 {% endif %}
 {% endblock %}
