@@ -13,6 +13,8 @@
         {% if session.get("role") != "admin" %}
         担当地域(会津/只見川のどちらか一方)の報告のみ表示しています。
         {% endif %}
+        各カードのボタンにマウスを乗せる/フォーカスした状態で、数字キー(0〜9、雨は「-」)で現象を選び、
+        「x」キーで却下できます。
     </p>
 </div>
 
@@ -69,17 +71,18 @@
     <div class="observation-report-actions">
         <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
               class="phenom-picker-form" data-current-code="{{ r.reported_code }}"
-              data-phenom-labels='{{ phenom_labels | tojson }}'
-              style="display:flex; flex-direction:column; gap:0.4rem;">
+              data-phenom-style='{{ phenom_style | tojson }}'
+              data-dismiss-form-id="observation-report-dismiss-{{ r.id }}"
+              style="display:flex; flex-direction:column; gap:0.4rem; max-width:26rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="corrected_code" class="phenom-picker-value" value="{{ r.reported_code }}" required>
-            <div class="phenom-picker">
+            <div class="phenom-picker-wrap">
                 <div class="phenom-picker-row phenom-picker-categories">
-                    <button type="button" class="phenom-btn" data-codes="0" style="background:#e0e0e0; color:#222;">現象なし</button>
-                    <button type="button" class="phenom-btn" data-codes="1,2,3" style="background:#3498db; color:#fff;">川霧<span class="phenom-key">1-3</span></button>
-                    <button type="button" class="phenom-btn" data-codes="4,5,6" style="background:#7f8c8d; color:#fff;">全体霧<span class="phenom-key">4-6</span></button>
-                    <button type="button" class="phenom-btn" data-codes="7,8" style="background:#e0a458; color:#222;">層雲<span class="phenom-key">7-8</span></button>
-                    <button type="button" class="phenom-btn" data-codes="9,10" style="background:#27ae60; color:#fff;">霧雨・雨<span class="phenom-key">9,-</span></button>
+                    <button type="button" class="phenom-btn" data-codes="0"><span class="phenom-dot" style="background:{{ phenom_style[0].bg }};"></span>現象なし</button>
+                    <button type="button" class="phenom-btn" data-codes="1,2,3"><span class="phenom-dot" style="background:{{ phenom_style[2].bg }};"></span>川霧<span class="phenom-key">1-3</span></button>
+                    <button type="button" class="phenom-btn" data-codes="4,5,6"><span class="phenom-dot" style="background:{{ phenom_style[5].bg }};"></span>全体霧<span class="phenom-key">4-6</span></button>
+                    <button type="button" class="phenom-btn" data-codes="7,8"><span class="phenom-dot" style="background:{{ phenom_style[7].bg }};"></span>層雲<span class="phenom-key">7-8</span></button>
+                    <button type="button" class="phenom-btn" data-codes="9,10"><span class="phenom-dot" style="background:{{ phenom_style[9].bg }};"></span>霧雨・雨<span class="phenom-key">9,-</span></button>
                 </div>
                 <div class="phenom-picker-row phenom-picker-sublevels" hidden></div>
             </div>
@@ -88,9 +91,9 @@
                 <button type="submit" class="button">訂正</button>
             </div>
         </form>
-        <form method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
+        <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="button button-danger">却下</button>
+            <button type="submit" class="button button-danger">却下<span class="phenom-key">x</span></button>
         </form>
     </div>
 </div>

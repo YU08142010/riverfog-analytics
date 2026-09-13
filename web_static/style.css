@@ -2274,7 +2274,50 @@ table.obs-table th.sticky-col { z-index: 3; }
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
-    align-items: center;
+    align-items: flex-start;
 }
-.observation-report-actions select { padding: 0.4rem; }
+
+/* 現象コード選択ピッカー(station_detail.html/admin_observation_reports.html共通、
+   _phenom_picker_assets.htmlから読み込まれる)。以前は<select>の11択ドロップダウンで、
+   毎回開いて探す手間があった。カテゴリ→詳細の2段階ボタンに置き換えている。 */
+.phenom-picker-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.7rem;
+}
+.phenom-picker-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.phenom-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.75rem;
+    font-size: 0.82rem;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    cursor: pointer;
+    transition: box-shadow 0.12s ease, transform 0.1s ease;
+    box-shadow: 0 1px 2px rgba(16, 42, 67, 0.08);
+}
+.phenom-btn:hover { box-shadow: 0 2px 6px rgba(16, 42, 67, 0.18); }
+.phenom-btn:active { transform: scale(0.96); }
+.phenom-btn .phenom-dot {
+    width: 0.6rem; height: 0.6rem; border-radius: 50%; flex: none;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.phenom-key { font-size: 0.68rem; opacity: 0.7; font-weight: 400; margin-left: 0.3rem; }
+.phenom-btn.active {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-primary) inset;
+    font-weight: 700;
+}
+.phenom-picker-selected-label { font-size: 0.85rem; }
 

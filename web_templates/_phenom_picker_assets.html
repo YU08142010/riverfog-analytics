@@ -1,26 +1,19 @@
-<style>
-    .phenom-picker-row { display:flex; gap:0.35rem; flex-wrap:wrap; }
-    .phenom-btn {
-        border:2px solid transparent; border-radius:var(--radius-sm, 6px); padding:0.4rem 0.7rem;
-        font-size:0.82rem; cursor:pointer; line-height:1.1; display:inline-flex; flex-direction:column;
-        align-items:center; gap:0.1rem;
-    }
-    .phenom-btn .phenom-key { font-size:0.68rem; opacity:0.75; }
-    .phenom-btn.active { border-color:#111; box-shadow:0 0 0 2px rgba(0,0,0,0.15) inset; }
-</style>
 <script>
 (function() {
     document.querySelectorAll(".phenom-picker-form").forEach(function(form) {
         if (form.dataset.phenomPickerWired) return;
         form.dataset.phenomPickerWired = "1";
-        var picker = form.querySelector(".phenom-picker");
+
         var catRow = form.querySelector(".phenom-picker-categories");
         var subRow = form.querySelector(".phenom-picker-sublevels");
         var valueInput = form.querySelector(".phenom-picker-value");
         var selectedLabel = form.querySelector(".phenom-picker-selected-label");
-        var labels = JSON.parse(form.dataset.phenomLabels || "{}");
-        labels[0] = "現象なし";
+        var style = JSON.parse(form.dataset.phenomStyle || "{}");
         var currentCode = parseInt(form.dataset.currentCode, 10);
+
+        function styleFor(code) {
+            return style[code] || {label: "コード" + code, bg: "#ffffff", text: "#1c2733"};
+        }
 
         function setActive(row, btn) {
             row.querySelectorAll(".phenom-btn").forEach(function(b) { b.classList.remove("active"); });
@@ -35,6 +28,11 @@
             return String(code);
         }
 
+        function applyCode(code) {
+            valueInput.value = code;
+            selectedLabel.textContent = styleFor(code).label;
+        }
+
         function showSublevels(catBtn, activeCode) {
             var codes = catBtn.dataset.codes.split(",").map(Number);
             subRow.innerHTML = "";
@@ -43,15 +41,18 @@
                 return;
             }
             codes.forEach(function(code) {
+                var s = styleFor(code);
                 var b = document.createElement("button");
                 b.type = "button";
                 b.className = "phenom-btn";
-                b.textContent = labels[code] || ("コード" + code);
+                b.textContent = s.label;
+                b.style.background = s.bg;
+                b.style.color = s.text;
+                b.style.borderColor = s.bg;
                 b.dataset.code = code;
                 if (code === activeCode) b.classList.add("active");
                 b.addEventListener("click", function() {
-                    valueInput.value = code;
-                    selectedLabel.textContent = labels[code] || ("コード" + code);
+                    applyCode(code);
                     setActive(subRow, b);
                 });
                 subRow.appendChild(b);
@@ -60,8 +61,7 @@
         }
 
         function selectCode(code) {
-            valueInput.value = code;
-            selectedLabel.textContent = labels[code] || ("コード" + code);
+            applyCode(code);
             var catBtn = catRow.querySelector('.phenom-btn[data-codes="' + codesKeyFor(code) + '"]');
             setActive(catRow, catBtn);
             if (catBtn) showSublevels(catBtn, code);
@@ -74,25 +74,40 @@
                 if (codes.length === 1) {
                     subRow.hidden = true;
                     subRow.innerHTML = "";
-                    valueInput.value = codes[0];
-                    selectedLabel.textContent = labels[codes[0]] || ("コード" + codes[0]);
+                    applyCode(codes[0]);
                 } else {
-                    showSublevels(btn, codes.indexOf(currentCode) !== -1 ? currentCode : codes[0]);
-                    if (codes.indexOf(currentCode) === -1) {
-                        valueInput.value = codes[0];
-                        selectedLabel.textContent = labels[codes[0]] || ("コード" + codes[0]);
-                    }
+                    var pick = codes.indexOf(currentCode) !== -1 ? currentCode : codes[0];
+                    showSublevels(btn, pick);
+                    applyCode(pick);
                 }
             });
         });
 
+        // 初期状態: 現在のコードに対応するボタンをあらかじめ選択しておく
         selectCode(currentCode);
 
-        var hovered = false;
-        picker.addEventListener("mouseenter", function() { hovered = true; });
-        picker.addEventListener("mouseleave", function() { hovered = false; });
+        // キーボードショートカット: マウスホバー中、またはボタンにフォーカスが
+        // 当たっている間(Tab移動でも使えるように)、数字キー(0〜9)と「-」(雨=コード10)
+        // で直接選べる。却下ボタンとペアのフォームがあれば「x」で却下も送信できる。
+        var activeRoot = form.closest(".observation-report-actions") || form;
+        var dismissForm = form.dataset.dismissFormId
+            ? document.getElementById(form.dataset.dismissFormId) : null;
+        var hovered = false, focusedWithin = false;
+        function isActive() { return hovered || focusedWithin; }
+        activeRoot.addEventListener("mouseenter", function() { hovered = true; });
+        activeRoot.addEventListener("mouseleave", function() { hovered = false; });
+        activeRoot.addEventListener("focusin", function() { focusedWithin = true; });
+        activeRoot.addEventListener("focusout", function() { focusedWithin = false; });
         document.addEventListener("keydown", function(e) {
-            if (!hovered) return;
+            if (!isActive()) return;
+            if ((e.key === "x" || e.key === "X") && dismissForm) {
+                var dismissBtn = dismissForm.querySelector('button[type="submit"]');
+                if (dismissBtn) {
+                    e.preventDefault();
+                    dismissBtn.click();
+                }
+                return;
+            }
             var code = null;
             if (e.key >= "0" && e.key <= "9") code = parseInt(e.key, 10);
             else if (e.key === "-") code = 10;

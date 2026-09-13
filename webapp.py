@@ -884,6 +884,15 @@ def _phenom_label_color(code):
     return PHENOM_LABELS.get(code, f"コード{code}"), bg, _contrasting_text_color(bg)
 
 
+# 現象コード訂正UI(phenom-picker、station_detail.html/admin_observation_reports.html)が
+# ボタンの背景色・文字色を、ダッシュボード等で使っているのと同じ実際の色でそのまま
+# 出せるように、コード0〜10分をまとめて渡す。
+PHENOM_STYLE = {
+    code: dict(zip(("label", "bg", "text"), _phenom_label_color(code)))
+    for code in range(11)
+}
+
+
 def _validate_date(date_str):
     if not DATE_RE.match(date_str):
         abort(404)
@@ -4180,7 +4189,7 @@ def admin_observation_reports():
         r["looks_isolated"] = differs_from_both
     return render_template(
         "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
-        importance_labels=IMPORTANCE_LABELS,
+        phenom_style=PHENOM_STYLE, importance_labels=IMPORTANCE_LABELS,
     )
 
 
@@ -4329,6 +4338,7 @@ def station_detail(name):
         feature_snapshot=_load_station_feature_snapshot(name),
         can_correct=_can_correct_station(session.get("role"), name),
         phenom_labels=PHENOM_LABELS,
+        phenom_style=PHENOM_STYLE,
     )
 
 
