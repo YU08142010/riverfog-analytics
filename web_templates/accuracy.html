@@ -11,7 +11,7 @@
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_chart') }}" alt="全地点の的中率推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点の的中率推移グラフ" data-chart-url="{{ url_for('accuracy_chart') }}"></div></div>
     <p class="muted">累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
         （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
     {% if overall_fog_stats and overall_fog_stats.precision is not none %}
@@ -36,7 +36,7 @@
 <div class="card">
     <h2>地域別の的中率・川霧F1</h2>
     <p class="muted">会津地方は観測を始めてからまだ日が浅く学習データが少ないため、只見川地域との差を確認できます。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_region_chart') }}" alt="地域別の的中率・川霧F1グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="地域別の的中率・川霧F1グラフ" data-chart-url="{{ url_for('accuracy_region_chart') }}"></div></div>
     <div class="table-scroll">
     <table class="obs-table" style="width:auto;">
         <thead><tr><th>地域</th><th>件数</th><th>的中率</th><th>川霧recall</th><th>川霧precision</th><th>川霧F1</th></tr></thead>
@@ -60,7 +60,7 @@
 {% if summary and summary.by_lead_day %}
 <div class="card">
     <h2>リードタイム別の的中率</h2>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_lead_time_chart') }}" alt="リードタイム別の的中率グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="リードタイム別の的中率グラフ" data-chart-url="{{ url_for('accuracy_lead_time_chart') }}"></div></div>
     <div class="table-scroll">
 <table class="obs-table" style="width:auto;">
         <thead><tr><th>予測から何日後</th><th>件数</th><th>正解数</th><th>的中率</th></tr></thead>
@@ -82,7 +82,7 @@
 <div class="card">
     <h2>混同行列(全地点合算・本番予測)</h2>
     <p class="muted">縦軸が実際の現象、横軸が予測した現象。対角線上が的中、それ以外は誤判定(どの現象をどの現象と間違えやすいか)を示す。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="chart-themed" src="{{ url_for('accuracy_confusion_matrix') }}" alt="混同行列" style="max-width:520px;"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="混同行列" data-chart-kind="heatmap" data-chart-url="{{ url_for('accuracy_confusion_matrix') }}" style="max-width:520px;"></div></div>
 </div>
 
 <div class="card">
@@ -93,7 +93,7 @@
         点線は現在各地点で自動選択されているしきい値の分布ではなく、全地点合算データでの
         参考値であることに注意。地点ごとの正確な採用しきい値は各地点の観測ページで確認できる。
     </p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_threshold_chart') }}" alt="しきい値ごとのprecision/recall/F1グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="しきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('accuracy_threshold_chart') }}"></div></div>
 </div>
 
 {% if summary and by_station %}
@@ -172,7 +172,7 @@
 <div class="card">
     <h2>学習精度の推移(全地点平均)</h2>
     <p class="muted">毎日の再学習ごとに記録したaccuracy・川霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_training_metrics_chart') }}" alt="学習精度の推移グラフ(全地点平均)"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="学習精度の推移グラフ(全地点平均)" data-chart-url="{{ url_for('accuracy_training_metrics_chart') }}"></div></div>
 </div>
 
 <div class="card">
@@ -182,19 +182,19 @@
         川霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
         正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります)。
     </p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_model_compare_chart') }}" alt="モデル方式ごとの性能比較グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="モデル方式ごとの性能比較グラフ" data-chart-url="{{ url_for('accuracy_model_compare_chart') }}"></div></div>
 </div>
 
 <div class="card">
     <h2>混同行列(全地点合算・学習時検証データ)</h2>
     <p class="muted">実際の現象(縦軸)と予測(横軸)を突き合わせた集計です。対角線上が多いほど的中していることを意味します。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="chart-themed" src="{{ url_for('accuracy_training_confusion_matrix') }}" alt="混同行列(全地点合算・学習時検証データ)" style="max-width:520px;"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="混同行列(全地点合算・学習時検証データ)" data-chart-kind="heatmap" data-chart-url="{{ url_for('accuracy_training_confusion_matrix') }}" style="max-width:520px;"></div></div>
 </div>
 
 <div class="card">
     <h2>特徴量の重要度(全地点)</h2>
     <p class="muted">どの気象要素が川霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_feature_importance_chart') }}" alt="特徴量の重要度グラフ(全地点)"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(全地点)" data-chart-url="{{ url_for('accuracy_feature_importance_chart') }}"></div></div>
 </div>
 
 <div class="card">
@@ -204,7 +204,7 @@
         に限定した特徴量重要度です。全地点の傾向と比較すると、精度が伸び悩む要因が見えることがあります。
     </p>
     {% if low_accuracy_stations %}
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('accuracy_feature_importance_low_accuracy_chart') }}" alt="特徴量の重要度グラフ(精度が低い地点のみ)"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(精度が低い地点のみ)" data-chart-url="{{ url_for('accuracy_feature_importance_low_accuracy_chart') }}"></div></div>
     {% else %}
     <p class="muted">accuracyを算出できた地点がまだありません。</p>
     {% endif %}

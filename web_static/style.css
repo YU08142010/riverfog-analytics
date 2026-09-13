@@ -1010,6 +1010,18 @@ button.button:disabled {
 .chart-wrap img { display: block; }
 .chart-wrap img.loading { visibility: hidden; height: 0; }
 
+/* Plotlyへの移行(2026-09-14)で追加。<div class="chart-themed" data-chart-url="...">を
+   mountPlotlyChart(base.html)がfetch+Plotly.newPlotで埋める。読み込み完了前も高さを
+   確保しておき、グラフ表示時にページがガタつく(レイアウトシフトする)のを防ぐ。 */
+.chart-wrap div.chart-themed {
+    display: block;
+    width: 100%;
+    min-height: 320px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+}
+.chart-wrap div.chart-themed.loading { visibility: hidden; }
+
 .strength-meter {
     height: 6px;
     border-radius: 3px;

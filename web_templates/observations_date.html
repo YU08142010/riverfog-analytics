@@ -14,7 +14,7 @@
         <a class="button" href="{{ url_for('download_xlsx') }}">只見川.xlsxをダウンロード</a>
         <a class="button" href="{{ url_for('download_xlsx_aizu') }}">会津.xlsxをダウンロード</a>
     </p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('observations_date_chart', date=date) }}" alt="{{ date }}の観測値推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ date }}の観測値推移グラフ" data-chart-url="{{ url_for('observations_date_chart', date=date) }}"></div></div>
 </div>
 
 <div class="card">

@@ -17,7 +17,7 @@
 
     {% if summary_file %}
     <h3 style="font-size:0.95rem;">全地点サマリー</h3>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=summary_file) }}" alt="全地点の予測サマリーグラフ"></div>
+    <p><a class="button" href="{{ url_for('predictions_file', date=date, filename=summary_file) }}" target="_blank" rel="noopener">開く</a></p>
     {% endif %}
 
     {% if stations %}
@@ -34,8 +34,10 @@
     {% endif %}
     {% endfor %}
     {% for s in stations %}
-    <h4 id="station-{{ loop.index }}" style="font-size:0.9rem; margin-top:1.4rem;">{{ s.name }}</h4>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=date, filename=s.file) }}" alt="{{ s.name }}の予測グラフ"></div>
+    <h4 id="station-{{ loop.index }}" style="font-size:0.9rem; margin-top:1.4rem; display:flex; align-items:center; gap:0.6rem;">
+        {{ s.name }}
+        <a class="button" href="{{ url_for('predictions_file', date=date, filename=s.file) }}" target="_blank" rel="noopener" style="font-size:0.8rem;">開く</a>
+    </h4>
     {% endfor %}
     {% endif %}
 

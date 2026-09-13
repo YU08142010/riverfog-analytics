@@ -27,6 +27,6 @@
 </div>
 
 <div class="card">
-    <img class="full-graph" src="{{ url_for('weather_fog_graph_png', station=station) }}" alt="{{ station }}の気象条件別川霧発生状況">
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ station }}の気象条件別川霧発生状況" data-chart-url="{{ url_for('weather_fog_graph_png', station=station) }}"></div></div>
 </div>
 {% endblock %}

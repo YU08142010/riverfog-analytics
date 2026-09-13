@@ -8,8 +8,10 @@
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/plotly-cartesian-2.35.2.min.js') }}"></script>
 {% block extra_head %}{% endblock %}
 <script>
+window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
 (function() {
     try {
         var saved = localStorage.getItem("theme");
@@ -173,6 +175,12 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
     // サーバー側で描画する分析ページ等のグラフPNGもテーマに合わせられるように、
     // クッキーにも書いておく(反映されるのは次にそのページを開いた時から)。
     document.cookie = "theme=" + next + "; path=/; max-age=31536000; samesite=lax";
+    // Plotlyグラフ(.chart-themed)は上のクッキーと違い、サーバー往復なしでその場で
+    // 配色を変える。画面上に既にマウント済みの全グラフ(window.PLOTLY_CHARTS)に対し、
+    // applyChartThemeでrelayout/restyleする。
+    (window.PLOTLY_CHARTS || []).forEach(function(el) {
+        if (document.body.contains(el)) { applyChartTheme(el, next); }
+    });
 });
 
 // ハンバーガーメニュー(狭い画面でナビを折りたたむ)。
@@ -418,6 +426,87 @@ document.addEventListener("click", function(e) {
     URL.revokeObjectURL(url);
 });
 
+// Plotlyへの移行(2026-09-14)で追加。matplotlib版PNG(<img class="chart-themed">)と
+// 同じ「テーマに合わせて配色する」役割を、<div class="chart-themed" data-chart-url="...">
+// を対象にクライアント側で行う。サーバーはテーマ非依存でJSON(plotly.io.to_json())を
+// 返すだけなので、テーマ切替時もサーバーへ再取得しに行く必要が無い(下のtheme-toggle-btn
+// ハンドラ参照)。
+window.PLOTLY_CHARTS = [];
+
+function currentChartTheme() {
+    var t = document.documentElement.getAttribute("data-theme");
+    if (t === "dark" || t === "light") { return t; }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+// elのlayoutに実際に存在する軸(xaxis, xaxis2, yaxis2...)だけを対象に、Plotly.relayoutの
+// ドット記法で配色パッチを組み立てる。サブプロットを使う図(予測グラフ等)でも
+// xaxis2/yaxis2等が正しく拾えるよう、_render_*関数側は空のlayoutでも
+// 必ずxaxis/yaxisキー自体は明示しておくこと。
+function chartThemeLayoutPatch(el, theme) {
+    var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733", grid: "#c7d0da"};
+    var patch = {
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "font.color": pal.fg,
+        "legend.font.color": pal.fg,
+    };
+    var layout = (el && el.layout) || {};
+    Object.keys(layout).forEach(function(key) {
+        if (!/^[xy]axis\d*$/.test(key)) { return; }
+        patch[key + ".gridcolor"] = pal.grid;
+        patch[key + ".zerolinecolor"] = pal.grid;
+        patch[key + ".linecolor"] = pal.grid;
+        patch[key + ".tickfont.color"] = pal.fg;
+        patch[key + ".title.font.color"] = pal.fg;
+    });
+    return patch;
+}
+
+// 混同行列(data-chart-kind="heatmap")はカラーバーの目盛り色がtrace側(marker.colorbar)に
+// あるため、layoutの一括relayoutでは拾えず個別にPlotly.restyleする必要がある。
+function applyChartTheme(el, theme) {
+    if (!window.Plotly || !el.layout) { return; }
+    Plotly.relayout(el, chartThemeLayoutPatch(el, theme));
+    if (el.dataset.chartKind === "heatmap") {
+        var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733"};
+        Plotly.restyle(el, {
+            "colorbar.tickfont.color": pal.fg,
+            "colorbar.title.font.color": pal.fg,
+        });
+    }
+}
+
+function mountPlotlyChart(el) {
+    var url = el.dataset.chartUrl;
+    if (!url || !window.Plotly) { return; }
+    var wrap = el.closest(".chart-wrap");
+    el.classList.add("loading");
+    if (wrap) { wrap.classList.add("is-loading"); }
+    var stop = function() {
+        el.classList.remove("loading");
+        if (wrap) { wrap.classList.remove("is-loading"); }
+    };
+    fetch(url)
+        .then(function(resp) {
+            if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+            return resp.json();
+        })
+        .then(function(fig) {
+            return Plotly.newPlot(el, fig.data, fig.layout || {}, {responsive: true, displaylogo: false});
+        })
+        .then(function() {
+            applyChartTheme(el, currentChartTheme());
+            window.PLOTLY_CHARTS.push(el);
+            stop();
+        })
+        .catch(function(err) {
+            el.textContent = "グラフの読み込みに失敗しました";
+            console.error("chart load failed:", url, err);
+            stop();
+        });
+}
+
 document.addEventListener("DOMContentLoaded", function() {
     document.querySelectorAll(".chart-wrap img").forEach(function(img) {
         var wrap = img.closest(".chart-wrap");
@@ -430,6 +519,10 @@ document.addEventListener("DOMContentLoaded", function() {
         };
         img.addEventListener("load", stop);
         img.addEventListener("error", stop);
+    });
+
+    document.querySelectorAll(".chart-themed[data-chart-url]").forEach(function(el) {
+        mountPlotlyChart(el);
     });
 
     // table.obs-tableのth文字列を各tdのdata-labelに自動反映する

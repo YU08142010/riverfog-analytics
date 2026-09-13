@@ -40,8 +40,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import matplotlib.patches as mpatches
 from matplotlib import font_manager
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
 
 from common import (
     AIZU_EXPORT_XLSX_PATH, AIZU_TEMPLATE_XLSX, BASE_DIR, CAMERAS_CSV, DATA_XLSX,
@@ -849,11 +851,15 @@ def _check_csrf():
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HHMM_RE = re.compile(r"^\d{4}$")
 
-STATION_FORECAST_RE = re.compile(r"^(.+)_予測_\d{8}\.png$")
-SUMMARY_RE = re.compile(r"^全地点サマリー_\d{8}\.png$")
+# 2026-09-14、予測グラフをPlotly(.html)に移行したが、移行前の過去アーカイブは
+# 今後もずっと.pngのまま残る。.htmlだけにマッチするよう単純に切り替えると、過去の
+# 日付の予測グラフが一覧から消えてしまう(実質的なデータ消失に見える)ため、
+# 両方にマッチするよう拡張しておくこと。
+STATION_FORECAST_RE = re.compile(r"^(.+)_予測_\d{8}\.(png|html)$")
+SUMMARY_RE = re.compile(r"^全地点サマリー_\d{8}\.(png|html)$")
 SUMMARY_REGION_RE = {
-    "只見川": re.compile(r"^全地点サマリー_只見_\d{8}\.png$"),
-    "会津": re.compile(r"^全地点サマリー_会津_\d{8}\.png$"),
+    "只見川": re.compile(r"^全地点サマリー_只見_\d{8}\.(png|html)$"),
+    "会津": re.compile(r"^全地点サマリー_会津_\d{8}\.(png|html)$"),
 }
 CSV_RE = re.compile(r"^予測結果_\d{8}\.csv$")
 
@@ -1386,7 +1392,7 @@ def _chart_rc_context():
     """グラフの文字色・グリッド色をテーマに合わせ、背景を透過にするrcParamsのコンテキスト。
     _cached_pngでキャッシュする場合は、cache_keyにテーマも含めること(サーバー全体で
     共有するキャッシュのため、含めないと片方のテーマで生成された画像がもう片方の
-    利用者にも出てしまう)。"""
+    利用者にも出てしまう)。matplotlibで描画するPDFレポート(_generate_report_pdf)専用。"""
     if _chart_theme() == "dark":
         fg, grid = "#e6edf3", "#3a4552"
     else:
@@ -1398,6 +1404,42 @@ def _chart_rc_context():
         "axes.facecolor": "none", "savefig.facecolor": "none",
         "savefig.transparent": True,
     })
+
+
+# Plotlyへの移行(2026-09-14)で追加。matplotlib版(_chart_rc_context)と同じ配色を、
+# ブラウザ側でPlotly.relayoutするためのパレットとして持つ。サーバー側ではテーマを
+# 意識せず常にニュートラルにグラフを描画し、base.htmlの共通スクリプトが
+# window.CHART_THEME_PALETTEを読んでテーマ切替時にクライアント側でrelayoutする
+# (matplotlib版と違い、テーマ切替のたびにサーバーへ再取得しに行く必要が無い)。
+_CHART_THEME_PALETTE = {
+    "light": {"fg": "#1c2733", "grid": "#c7d0da"},
+    "dark": {"fg": "#e6edf3", "grid": "#3a4552"},
+}
+
+
+@app.context_processor
+def _inject_chart_theme_palette():
+    return {"chart_theme_palette": _CHART_THEME_PALETTE}
+
+
+# Plotlyグラフ用のJSONキャッシュ。_png_cache/_cached_pngと同じ「監視対象ファイルの
+# mtimeが変わるまで結果を使い回す」仕組みを、PNGバイト列ではなくplotly.io.to_json()の
+# JSON文字列に対して行う版。移行が全ルートに行き渡るまでは_cached_png/_png_cacheと
+# 並行して存在する(移行し終えたルートから順にこちらへ切り替える)。
+_chart_json_cache_lock = threading.Lock()
+_chart_json_cache = {}
+
+
+def _cached_chart_json(cache_key, watch_paths, render_fn):
+    mtimes = tuple(_safe_mtime(p) for p in watch_paths)
+    with _chart_json_cache_lock:
+        cached = _chart_json_cache.get(cache_key)
+        if cached is not None and cached[0] == mtimes:
+            return cached[1]
+    data = render_fn()
+    with _chart_json_cache_lock:
+        _chart_json_cache[cache_key] = (mtimes, data)
+    return data
 
 
 def _render_line_chart_png(dates, rates, title):
@@ -1429,6 +1471,42 @@ def _render_line_chart_png(dates, rates, title):
     return buf.getvalue()
 
 
+def _render_line_chart_plotly(dates, rates, title):
+    """_render_line_chart_pngのPlotly版(2026-09-14、matplotlibからの移行第1弾)。
+    PNGバイト列ではなくFigureのJSON文字列を返す。文字色・グリッド色はテーマに
+    依存させず(サーバー側はニュートラルに描画)、base.htmlのmountPlotlyChart/
+    chartThemeLayoutPatchがブラウザ側でPlotly.relayoutして反映する。そのため
+    以降の全てのaxis(xaxis/yaxis, サブプロットがあればxaxis2/yaxis2...)は、
+    空でも必ずlayoutに明示しておくこと(chartThemeLayoutPatchがel.layoutの
+    キーを見て対象軸を探すため)。"""
+    if dates:
+        x = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
+        data = [go.Scatter(
+            x=x, y=rates, mode="lines+markers",
+            line={"color": "#1a5276", "width": 1.4},
+            marker={"size": 6},
+            hovertemplate="%{x|%Y-%m-%d}: %{y:.1f}%<extra></extra>",
+        )]
+        annotations = []
+    else:
+        data = []
+        annotations = [{
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        }]
+    layout = {
+        "title": {"text": title, "font": {"size": 14}},
+        "xaxis": {"type": "date"},
+        "yaxis": {"title": {"text": "的中率(%)"}, "range": [0, 100]},
+        "margin": {"t": 48, "r": 20, "b": 40, "l": 50},
+        "showlegend": False,
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
+
+
 # 気象条件別の川霧発生グラフの2群比較色。dataviz skillの検証済みパレットの
 # カテゴリ1番目(青)・2番目(オレンジ)を固定順で使う(CVD安全性が確認済みの組み合わせ)。
 _WEATHER_FOG_NO_COLOR = "#2a78d6"
@@ -1439,14 +1517,14 @@ _WEATHER_FOG_BOXPLOT_FEATURES = [
 ]
 
 
-def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
+def _render_weather_fog_boxplot_plotly(main_df, phenom_df, station_name):
     """station_nameの川霧発生有無ごとに、気象条件(気温・湿度・風速・降水量)の分布を
     箱ひげ図で比較する。同じdatetimeの気象値と現象コードを突き合わせ、SUMMARY_FOG_CODES
     (川霧のコード)に該当するかどうかで「川霧あり」「川霧なし」の2群に分ける。
     2群の識別だけなのでカテゴリ色は2色のみ使用し、標本数(n=)を各箱に添えて
-    比較の信頼性が一目で分かるようにする。"""
-    fig, axes = plt.subplots(2, 2, figsize=(9, 7))
-
+    比較の信頼性が一目で分かるようにする。matplotlib版から移行(2026-09-14)。
+    matplotlib版は各箱の下にtick_labelsで「川霧なし/あり(n=...)」を表示していたため、
+    凡例ではなくx軸カテゴリ名そのものにnを埋め込んで同じ見た目を再現する。"""
     has_data = (
         main_df is not None and phenom_df is not None
         and not main_df.empty and station_name in phenom_df.columns
@@ -1459,38 +1537,46 @@ def _render_weather_fog_boxplot_png(main_df, phenom_df, station_name):
         merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
         has_data = not merged.empty
 
+    title = f"{station_name}: 気象条件別の川霧発生状況"
     if not has_data:
-        for ax in axes.flat:
-            ax.axis("off")
-        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
-    else:
-        for ax, (col, label) in zip(axes.flat, _WEATHER_FOG_BOXPLOT_FEATURES):
-            values = merged[[col, "is_fog"]].dropna()
-            no_fog_vals = values.loc[~values["is_fog"], col]
-            fog_vals = values.loc[values["is_fog"], col]
-            if no_fog_vals.empty and fog_vals.empty:
-                ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-                ax.set_title(label, fontsize=10)
-                continue
-            bp = ax.boxplot(
-                [no_fog_vals, fog_vals],
-                tick_labels=[f"川霧なし\n(n={len(no_fog_vals)})", f"川霧あり\n(n={len(fog_vals)})"],
-                patch_artist=True, widths=0.5, medianprops={"color": "#0b0b0b"},
-            )
-            for patch, color in zip(bp["boxes"], [_WEATHER_FOG_NO_COLOR, _WEATHER_FOG_YES_COLOR]):
-                patch.set_facecolor(color)
-                patch.set_alpha(0.75)
-            ax.set_title(label, fontsize=10)
-            ax.grid(True, axis="y", alpha=0.25)
-            ax.tick_params(axis="x", labelsize=8)
-        fig.suptitle(f"{station_name}: 気象条件別の川霧発生状況", fontsize=12)
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": title, "font": {"size": 14}},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "データがありません", "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False,
+            }],
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return pio.to_json(fig)
 
-    fig.tight_layout(rect=(0, 0, 1, 0.95) if has_data else (0, 0, 1, 1))
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+    subplot_titles = [label for _, label in _WEATHER_FOG_BOXPLOT_FEATURES]
+    fig = make_subplots(rows=2, cols=2, subplot_titles=subplot_titles,
+                         vertical_spacing=0.18, horizontal_spacing=0.1)
+    positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
+    for (row, col), (col_name, label) in zip(positions, _WEATHER_FOG_BOXPLOT_FEATURES):
+        values = merged[[col_name, "is_fog"]].dropna()
+        no_fog_vals = values.loc[~values["is_fog"], col_name]
+        fog_vals = values.loc[values["is_fog"], col_name]
+        no_fog_label = f"川霧なし(n={len(no_fog_vals)})"
+        fog_label = f"川霧あり(n={len(fog_vals)})"
+        fig.add_trace(go.Box(
+            y=no_fog_vals, x=[no_fog_label] * len(no_fog_vals), name=no_fog_label,
+            marker_color=_WEATHER_FOG_NO_COLOR, showlegend=False,
+        ), row=row, col=col)
+        fig.add_trace(go.Box(
+            y=fog_vals, x=[fog_label] * len(fog_vals), name=fog_label,
+            marker_color=_WEATHER_FOG_YES_COLOR, showlegend=False,
+        ), row=row, col=col)
+    fig.update_layout(
+        title={"text": title, "font": {"size": 14}},
+        showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin={"t": 90, "r": 20, "b": 40, "l": 50},
+        height=560,
+    )
+    return pio.to_json(fig)
 
 
 # 気象条件ごとの川霧発生時ヒストグラムのビン幅(気温は2℃刻みなど、項目ごとに固定)。
@@ -1532,14 +1618,14 @@ def _bucket_by_edges(values, edges):
     return labels, pct
 
 
-def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
+def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names):
     """気象条件(気温・湿度・風速・降水量・露点温度・湿数・日射量・日照時間・視程)ごとに、
-    川霧が発生していた瞬間の値だけをヒストグラムにする。_render_weather_fog_boxplot_png
+    川霧が発生していた瞬間の値だけをヒストグラムにする。_render_weather_fog_boxplot_plotly
     とは違い地点ごとに分けず、全地点分の「川霧あり」行をまとめて1つの分布として扱う
     (同じ日時でも複数地点で同時に川霧が発生していればその分だけ重みが乗る)。項目ごとに
-    固定の刻み幅でビンを揃える(気温なら2℃刻み)。"""
-    fig, axes = plt.subplots(3, 3, figsize=(12, 11))
-
+    固定の刻み幅でビンを揃える(気温なら2℃刻み)。matplotlib版から移行(2026-09-14)。
+    ax.hist(bins=edges, weights=...)と同じ「割合(%)のヒストグラム」を、go.Histogramの
+    自動ビニングに任せず自前でカウントして再現する(ビン幅を項目ごとに固定するため)。"""
     values_by_col = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
     has_data = main_df is not None and phenom_df is not None and not main_df.empty
     if has_data:
@@ -1559,48 +1645,57 @@ def _render_river_fog_histogram_png(main_df, phenom_df, station_names):
                 values_by_col[col].extend(fog_rows[col].dropna().tolist())
         has_data = any(values_by_col.values())
 
+    title = "全地点合算：川霧発生時の気象条件ヒストグラム"
     if not has_data:
-        for ax in axes.flat:
-            ax.axis("off")
-        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
-    else:
-        for ax, (col, label, step) in zip(axes.flat, _RIVER_FOG_HISTOGRAM_FEATURES):
-            values = values_by_col[col]
-            if not values:
-                ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-                ax.set_title(label, fontsize=10)
-                continue
-            if isinstance(step, list):
-                bin_labels, pct = _bucket_by_edges(values, step)
-                bars = ax.bar(
-                    range(len(bin_labels)), pct, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
-                    edgecolor="white", linewidth=0.5, width=0.85,
-                )
-                ax.set_xticks(range(len(bin_labels)))
-                ax.set_xticklabels(bin_labels, rotation=45, ha="right", fontsize=8)
-                ax.bar_label(bars, fmt="%.1f", fontsize=7, padding=2)
-            else:
-                lo = (min(values) // step) * step
-                hi = (max(values) // step) * step + step
-                n_bins = int(round((hi - lo) / step))
-                edges = [lo + i * step for i in range(n_bins + 1)]
-                ax.hist(
-                    values, bins=edges, color=_WEATHER_FOG_YES_COLOR, alpha=0.85,
-                    edgecolor="white", linewidth=0.5, rwidth=0.92,
-                    weights=[100.0 / len(values)] * len(values),
-                )
-                ax.tick_params(axis="x", labelsize=8)
-            ax.set_title(f"{label}(n={len(values)})", fontsize=10)
-            ax.set_ylabel("割合(%)")
-            ax.grid(True, axis="y", alpha=0.25)
-        fig.suptitle("全地点合算：川霧発生時の気象条件ヒストグラム", fontsize=12)
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": title, "font": {"size": 14}},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "データがありません", "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False,
+            }],
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return pio.to_json(fig)
 
-    fig.tight_layout(rect=(0, 0, 1, 0.95) if has_data else (0, 0, 1, 1))
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+    subplot_titles = [f"{label}(n={len(values_by_col[col])})" for col, label, _ in _RIVER_FOG_HISTOGRAM_FEATURES]
+    fig = make_subplots(rows=3, cols=3, subplot_titles=subplot_titles,
+                         vertical_spacing=0.12, horizontal_spacing=0.08)
+    positions = [(r, c) for r in range(1, 4) for c in range(1, 4)]
+    for (row, col), (col_name, label, step) in zip(positions, _RIVER_FOG_HISTOGRAM_FEATURES):
+        values = values_by_col[col_name]
+        if not values:
+            continue
+        if isinstance(step, list):
+            bin_labels, pct = _bucket_by_edges(values, step)
+            fig.add_trace(go.Bar(
+                x=bin_labels, y=pct, marker_color=_WEATHER_FOG_YES_COLOR,
+                text=[f"{v:.1f}" for v in pct], textposition="outside",
+            ), row=row, col=col)
+            fig.update_xaxes(tickangle=-45, row=row, col=col)
+        else:
+            lo = (min(values) // step) * step
+            hi = (max(values) // step) * step + step
+            n_bins = int(round((hi - lo) / step))
+            counts = [0] * n_bins
+            for v in values:
+                idx = min(int((v - lo) // step), n_bins - 1)
+                counts[idx] += 1
+            pct = [c * 100.0 / len(values) for c in counts]
+            centers = [lo + (i + 0.5) * step for i in range(n_bins)]
+            fig.add_trace(go.Bar(
+                x=centers, y=pct, marker_color=_WEATHER_FOG_YES_COLOR, width=step * 0.92,
+            ), row=row, col=col)
+        fig.update_yaxes(title_text="割合(%)", row=row, col=col)
+    fig.update_layout(
+        title={"text": title, "font": {"size": 14}},
+        showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin={"t": 90, "r": 20, "b": 20, "l": 50},
+        height=780,
+    )
+    return pio.to_json(fig)
 
 
 # 1日分の観測値推移グラフの項目(列名, 表示ラベル, 色, プロット種別)。
@@ -1614,34 +1709,47 @@ _WEATHER_TIMESERIES_ITEMS = [
 ]
 
 
-def _render_weather_timeseries_png(day_main, date_label):
-    """1日分の気温・視程・湿度・降水量の推移をPNGにして返す。項目ごとに軸を分けた
-    2x2の小さい図にする(2軸グラフだと目盛りを読み違えやすいため)。"""
-    fig, axes = plt.subplots(2, 2, figsize=(9, 6), sharex=True)
+def _render_weather_timeseries_plotly(day_main, date_label):
+    """1日分の気温・視程・湿度・降水量の推移を返す。項目ごとに軸を分けた2x2の小さい図に
+    する(2軸グラフだと目盛りを読み違えやすいため)。matplotlib版から移行(2026-09-14)。"""
+    title = f"{date_label} の観測値推移"
     if day_main is None or day_main.empty:
-        for ax in axes.flat:
-            ax.axis("off")
-        fig.text(0.5, 0.5, "データがありません", ha="center", va="center")
-    else:
-        x = day_main["datetime"]
-        for ax, (col, label, color, kind) in zip(axes.flat, _WEATHER_TIMESERIES_ITEMS):
-            if kind == "bar":
-                ax.bar(x, day_main[col], width=1 / 48, color=color, alpha=0.7)
-                ax.set_ylim(bottom=0)
-            else:
-                ax.plot(x, day_main[col], color=color, linewidth=1.4, marker="o", markersize=3)
-            ax.set_title(label, fontsize=10)
-            ax.grid(True, alpha=0.3)
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        fig.autofmt_xdate()
-        fig.suptitle(f"{date_label} の観測値推移", fontsize=12)
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": title, "font": {"size": 14}},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "データがありません", "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False,
+            }],
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return pio.to_json(fig)
 
-    fig.tight_layout(rect=(0, 0, 1, 0.95) if day_main is not None and not day_main.empty else (0, 0, 1, 1))
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+    x = day_main["datetime"]
+    subplot_titles = [label for _, label, _, _ in _WEATHER_TIMESERIES_ITEMS]
+    fig = make_subplots(rows=2, cols=2, subplot_titles=subplot_titles,
+                         vertical_spacing=0.18, horizontal_spacing=0.1)
+    positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
+    for (row, col), (col_name, label, color, kind) in zip(positions, _WEATHER_TIMESERIES_ITEMS):
+        if kind == "bar":
+            fig.add_trace(go.Bar(x=x, y=day_main[col_name], marker_color=color, opacity=0.7),
+                           row=row, col=col)
+            fig.update_yaxes(rangemode="tozero", row=row, col=col)
+        else:
+            fig.add_trace(go.Scatter(
+                x=x, y=day_main[col_name], mode="lines+markers",
+                line={"color": color, "width": 1.4}, marker={"size": 5},
+            ), row=row, col=col)
+        fig.update_xaxes(tickformat="%H:%M", row=row, col=col)
+    fig.update_layout(
+        title={"text": title, "font": {"size": 14}},
+        showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin={"t": 90, "r": 20, "b": 20, "l": 50},
+        height=560,
+    )
+    return pio.to_json(fig)
 
 
 def _accuracy_trend_safe(station=None):
@@ -1736,6 +1844,40 @@ def _render_metrics_trend_png(trend, title="学習時のモデル精度推移(�
     return buf.getvalue()
 
 
+def _render_metrics_trend_plotly(trend, title="学習時のモデル精度推移(全地点平均)"):
+    """_render_metrics_trend_pngのPlotly版(2026-09-14)。"""
+    all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
+    acc_pts = [(d, t["accuracy"]) for d, t in zip(all_dates, trend) if t["accuracy"] is not None]
+    fog_pts = [(d, t["fog_f1"]) for d, t in zip(all_dates, trend) if t["fog_f1"] is not None]
+    data = []
+    annotations = []
+    if all_dates:
+        if acc_pts:
+            xs, ys = zip(*acc_pts)
+            data.append(go.Scatter(x=xs, y=ys, mode="lines+markers", name="accuracy(平均,%)",
+                                    line={"color": "#1a5276", "width": 1.4}, marker={"size": 6}))
+        if fog_pts:
+            xs, ys = zip(*fog_pts)
+            data.append(go.Scatter(x=xs, y=ys, mode="lines+markers", name="川霧F1(平均,%)",
+                                    line={"color": "#c0392b", "width": 1.4}, marker={"size": 6, "symbol": "square"}))
+    else:
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+    layout = {
+        "title": {"text": title, "font": {"size": 14}},
+        "xaxis": {"type": "date"},
+        "yaxis": {"title": {"text": "スコア(%)"}, "range": [0, 100]},
+        "margin": {"t": 48, "r": 20, "b": 40, "l": 50},
+        "legend": {"x": 0, "y": 1, "font": {"size": 11}},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
+
+
 def _is_valid_number(v):
     """NoneでもNaNでもない数値かを判定する（NaN != NaNを利用）。"""
     return v is not None and v == v
@@ -1791,6 +1933,45 @@ def _render_model_compare_png(state):
     return buf.getvalue()
 
 
+def _render_model_compare_plotly(state):
+    """_render_model_compare_pngのPlotly版(2026-09-14)。"""
+    labels = [
+        "RandomForest単体", "XGBoost単体", "LightGBM単体",
+        "RF+XGBoost", "RF+LightGBM", "RF+XGBoost+LightGBM", "採用中(自動選択)",
+    ]
+    keys = ["rf_only", "xgb_only", "lgbm_only", "hybrid_only", "rf_lgbm_only", "triple_only", None]
+    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#c0392b", "#d35400", "#16a085", "#1a5276"]
+    values, counts = [], []
+    for key in keys:
+        vals = []
+        for info in state.values():
+            if key is None:
+                v = info.get("fog_f1")
+            else:
+                sub = info.get(key)
+                v = sub.get("fog_f1") if sub else None
+            if _is_valid_number(v):
+                vals.append(float(v) * 100.0)
+        values.append(sum(vals) / len(vals) if vals else None)
+        counts.append(len(vals))
+    plotted = [v if v is not None else 0 for v in values]
+    text = [
+        f"{v:.1f}%<br>(n={n}地点)" if v is not None else "データなし"
+        for v, n in zip(values, counts)
+    ]
+    data = [go.Bar(x=labels, y=plotted, marker={"color": colors}, text=text, textposition="outside")]
+    layout = {
+        "title": {"text": "モデル方式ごとの性能比較(全地点平均)", "font": {"size": 14}},
+        "xaxis": {"tickangle": -20},
+        "yaxis": {"title": {"text": "川霧F1(平均, %)"}, "range": [0, 100]},
+        "margin": {"t": 48, "r": 20, "b": 110, "l": 50},
+        "showlegend": False,
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
+
+
 def _render_feature_importance_png(importance, top_n=15):
     """特徴量重要度の上位top_n件を横棒グラフにする。"""
     top = importance[:top_n]
@@ -1812,6 +1993,39 @@ def _render_feature_importance_png(importance, top_n=15):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+def _render_feature_importance_plotly(importance, top_n=15):
+    """_render_feature_importance_pngのPlotly版(2026-09-14)。matplotlib版は
+    件数に応じてfigsizeの高さを変えていたが、Plotly版はlayout.heightをpx単位で
+    同様に可変にする(件数が多いほど縦に伸ばし、ラベルが詰まらないようにする)。"""
+    top = importance[:top_n]
+    annotations = []
+    if not top:
+        data = []
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+    else:
+        names = [n for n, _ in top][::-1]
+        vals = [v for _, v in top][::-1]
+        data = [go.Bar(
+            x=vals, y=names, orientation="h", marker={"color": "#1a5276"},
+            text=[f"{v:.3f}" for v in vals], textposition="outside",
+        )]
+    height = max(320, int(35 * max(len(top), 1)) + 90)
+    layout = {
+        "title": {"text": "特徴量の重要度(上位)", "font": {"size": 14}},
+        "xaxis": {"title": {"text": "重要度(平均)"}},
+        "yaxis": {},
+        "height": height,
+        "margin": {"t": 48, "r": 40, "b": 40, "l": 160},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
 
 
 def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算)"):
@@ -1847,6 +2061,59 @@ def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点�
     return buf.getvalue()
 
 
+def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地点合算)"):
+    """_render_confusion_matrix_pngのPlotly版(2026-09-14)。セルの数値は
+    go.Heatmapの組み込みtextではなくlayout.annotationsで1セルずつ置く
+    (matplotlib版と同じく、セルの値がvmaxの60%を超えるかどうかで文字色を
+    白/濃色に固定するため。この色はセルの背景色に対する可読性の話であって
+    テーマとは無関係なので、chartThemeLayoutPatchのfont.color一括変更では
+    上書きされない)。カラーバーの目盛り色だけはtrace側(colorbar)にあるため、
+    base.htmlのapplyChartThemeがdata-chart-kind="heatmap"を見てPlotly.restyle
+    で別途対応する。"""
+    annotations = []
+    if matrix is None or len(labels) == 0:
+        data = []
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+        layout = {
+            "title": {"text": title, "font": {"size": 14}},
+            "xaxis": {"visible": False}, "yaxis": {"visible": False},
+            "margin": {"t": 48, "r": 20, "b": 20, "l": 20},
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "annotations": annotations,
+        }
+        return pio.to_json(go.Figure(data=data, layout=layout))
+
+    label_texts = [PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
+    vmax = matrix.max() if matrix.size else 0
+    data = [go.Heatmap(
+        z=matrix, x=label_texts, y=label_texts, colorscale="Blues",
+        hovertemplate="実際: %{y}<br>予測: %{x}<br>件数: %{z}<extra></extra>",
+        showscale=True,
+    )]
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            v = matrix[i, j]
+            color = "white" if vmax and v > vmax * 0.6 else "#1c2733"
+            annotations.append({
+                "x": label_texts[j], "y": label_texts[i], "text": str(int(v)),
+                "showarrow": False, "font": {"color": color, "size": 11},
+            })
+    layout = {
+        "title": {"text": title, "font": {"size": 14}},
+        "xaxis": {"title": {"text": "予測"}, "tickangle": -30},
+        "yaxis": {"title": {"text": "実際"}, "autorange": "reversed"},
+        "margin": {"t": 48, "r": 20, "b": 90, "l": 90},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
+
+
 def _render_lead_time_chart_png(by_lead_day):
     """リードタイム(予測から何日後か)別の的中率を棒グラフにする。表だけだと
     『日数が経つほど精度が落ちる』傾向が伝わりにくいための補足グラフ。"""
@@ -1873,6 +2140,34 @@ def _render_lead_time_chart_png(by_lead_day):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+def _render_lead_time_chart_plotly(by_lead_day):
+    """_render_lead_time_chart_pngのPlotly版(2026-09-14)。"""
+    rows = [r for r in by_lead_day if r["n"] > 0]
+    annotations = []
+    if rows:
+        labels = [f"{r['lead_day']}日後" for r in rows]
+        rates = [100.0 * r["correct"] / r["n"] for r in rows]
+        text = [f"{rate:.1f}%<br>(n={r['n']})" for rate, r in zip(rates, rows)]
+        data = [go.Bar(x=labels, y=rates, marker={"color": "#1a5276"}, text=text, textposition="outside")]
+    else:
+        data = []
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+    layout = {
+        "title": {"text": "リードタイム別の的中率", "font": {"size": 14}},
+        "xaxis": {},
+        "yaxis": {"title": {"text": "的中率(%)"}, "range": [0, 100]},
+        "margin": {"t": 48, "r": 20, "b": 40, "l": 50},
+        "showlegend": False,
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
 
 
 def _render_region_compare_chart_png(region_summary):
@@ -1907,6 +2202,41 @@ def _render_region_compare_chart_png(region_summary):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+def _render_region_compare_chart_plotly(region_summary):
+    """_render_region_compare_chart_pngのPlotly版(2026-09-14)。"""
+    rows = [r for r in region_summary if r["n"] > 0]
+    annotations = []
+    if rows:
+        labels = [r["region"] for r in rows]
+        acc = [100.0 * r["correct"] / r["n"] for r in rows]
+        f1_text = [f"{100.0 * r['f1']:.1f}" if r["f1"] is not None else "データなし" for r in rows]
+        f1_vals = [100.0 * r["f1"] if r["f1"] is not None else 0 for r in rows]
+        data = [
+            go.Bar(x=labels, y=acc, name="的中率(%)", marker={"color": "#1a5276"},
+                   text=[f"{v:.1f}" for v in acc], textposition="outside"),
+            go.Bar(x=labels, y=f1_vals, name="川霧F1(%)", marker={"color": "#c0392b"},
+                   text=f1_text, textposition="outside"),
+        ]
+    else:
+        data = []
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+    layout = {
+        "title": {"text": "地域別の的中率・川霧F1", "font": {"size": 14}},
+        "xaxis": {},
+        "yaxis": {"title": {"text": "スコア(%)"}, "range": [0, 100]},
+        "barmode": "group",
+        "margin": {"t": 48, "r": 20, "b": 40, "l": 50},
+        "legend": {"x": 1, "y": 1, "xanchor": "right", "yanchor": "top", "font": {"size": 11}},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
 
 
 def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
@@ -1945,14 +2275,62 @@ def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい�
     return buf.getvalue()
 
 
-def _draw_tree_on_axis(ax, root, max_display_depth, is_rf):
-    """fog_tree_viz.assign_layoutで計算した位置に沿って、木構造を箱と線で描画する。
-    分岐ノードは水色、葉ノードはRFなら緑(判定コードを表示)・XGBoost/LightGBMなら
-    黄土色(その木単体の葉の値を表示、複数の木を合計/平均して初めて最終予測になるため
-    単体では「予測クラス」を意味しない)、省略ノード(「…」)はグレーで描く。
-    戻り値: 描画したxの範囲に使った葉の本数(呼び出し側でxlim計算に使う)。
-    """
+def _render_threshold_sweep_plotly(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
+    """_render_threshold_sweep_pngのPlotly版(2026-09-14)。現在採用中のしきい値の
+    縦線は、Plotlyのlayout.shapesだと凡例に出ない(matplotlibのaxvline(label=...)と
+    違う仕様)ため、2点だけのScatter(破線)として凡例名付きで描く。"""
+    data = []
+    annotations = []
+    if sweep:
+        ts = [s["threshold"] for s in sweep]
+        precisions = [s["precision"] for s in sweep]
+        recalls = [s["recall"] for s in sweep]
+        f1s = [s["f1"] for s in sweep]
+        data.append(go.Scatter(
+            x=ts, y=precisions, mode="lines+markers", name="precision(空振りの少なさ)",
+            line={"color": "#2a78d6", "width": 1.4}, marker={"size": 6, "symbol": "circle"},
+        ))
+        data.append(go.Scatter(
+            x=ts, y=recalls, mode="lines+markers", name="recall(見逃しの少なさ)",
+            line={"color": "#eb6834", "width": 1.4}, marker={"size": 6, "symbol": "square"},
+        ))
+        data.append(go.Scatter(
+            x=ts, y=f1s, mode="lines+markers", name="F1",
+            line={"color": "#16a085", "width": 1.6}, marker={"size": 7, "symbol": "triangle-up"},
+        ))
+        if current_threshold is not None:
+            data.append(go.Scatter(
+                x=[current_threshold, current_threshold], y=[0, 1.05], mode="lines",
+                name=f"採用中({current_threshold:.2f})",
+                line={"color": "#7f2020", "width": 1.2, "dash": "dash"},
+            ))
+    else:
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
+    layout = {
+        "title": {"text": title, "font": {"size": 14}},
+        "xaxis": {"title": {"text": "しきい値(この確率以上を「川霧」と判定)"}, "range": [0, 1]},
+        "yaxis": {"title": {"text": "スコア"}, "range": [0, 1.05]},
+        "margin": {"t": 48, "r": 20, "b": 50, "l": 50},
+        "legend": {"x": 1, "y": 1, "xanchor": "right", "yanchor": "top", "font": {"size": 11}},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
+    }
+    return pio.to_json(go.Figure(data=data, layout=layout))
+
+
+def _draw_tree_on_plotly(fig, col, root, max_display_depth, is_rf):
+    """_draw_tree_on_axisのPlotly版(2026-09-14)。箱・線はfig.add_shape/add_trace、
+    ラベルはfig.add_annotationで描く(matplotlib版と同じ固定色のFancyBboxPatch相当)。
+    matplotlib版には無かった改善点として、透明なマーカーの重ね描きでホバー時に
+    省略ノード(「…」)の実際の深さ・ノード数や、9文字超で省略された特徴量の
+    フルネームを表示できるようにする(matplotlib版では完全に読み取れなかった情報)。"""
     positions = fog_tree_viz.assign_layout(root, max_display_depth)
+    edge_x, edge_y = [], []
+    hover_x, hover_y, hover_text = [], [], []
 
     def draw(node):
         if node is None:
@@ -1961,84 +2339,109 @@ def _draw_tree_on_axis(ax, root, max_display_depth, is_rf):
         if node["is_leaf"] or truncated:
             if truncated:
                 label, color = "…", "#9aa5b1"
+                sub_n = fog_tree_viz.tree_node_count(node)
+                sub_depth = fog_tree_viz.tree_actual_max_depth(node)
+                hover = f"以降は省略(実際はさらに深さ{sub_depth}まで、{sub_n}ノード続く)"
             elif is_rf:
                 label = PHENOM_LABELS.get(node["value"], "現象なし" if node["value"] == 0 else str(node["value"]))
                 color = "#7fb8a4"
+                hover = f"判定: {label}"
             else:
                 label = f"{node['value']:+.2f}"
                 color = "#e6c789"
-            ax.add_patch(mpatches.FancyBboxPatch(
-                (x - 0.40, y - 0.34), 0.80, 0.68, boxstyle="round,pad=0.02",
-                linewidth=0.8, edgecolor="#5a6570", facecolor=color, alpha=0.9, zorder=2,
-            ))
-            # ノードの箱の色は固定(ダーク/ライトどちらのテーマでも同じ淡い色)のため、
-            # 文字色もテーマのtext.color(ダークモードでは白系)に任せず、常に読める
-            # 濃い色で固定する。
-            ax.text(x, y, label, ha="center", va="center", fontsize=6.3, zorder=3, color="#1c2733")
+                hover = f"この木単体の葉の値: {label}"
+            fig.add_shape(
+                type="rect", x0=x - 0.40, x1=x + 0.40, y0=y - 0.34, y1=y + 0.34,
+                line={"color": "#5a6570", "width": 0.8}, fillcolor=color, opacity=0.9,
+                row=1, col=col,
+            )
+            fig.add_annotation(x=x, y=y, text=label, showarrow=False,
+                                font={"size": 9, "color": "#1c2733"}, row=1, col=col)
+            hover_x.append(x)
+            hover_y.append(y)
+            hover_text.append(hover)
             return
-        feat = node["feature"]
-        if len(feat) > 9:
-            feat = feat[:8] + "…"
-        label = f"{feat}\n≤{node['threshold']:.2f}"
-        ax.add_patch(mpatches.FancyBboxPatch(
-            (x - 0.44, y - 0.34), 0.88, 0.68, boxstyle="round,pad=0.02",
-            linewidth=0.8, edgecolor="#5a6570", facecolor="#a9c6de", alpha=0.9, zorder=2,
-        ))
-        ax.text(x, y, label, ha="center", va="center", fontsize=6.0, zorder=3, color="#1c2733")
+        feat_full = node["feature"]
+        feat = feat_full if len(feat_full) <= 9 else feat_full[:8] + "…"
+        label = f"{feat}<br>≤{node['threshold']:.2f}"
+        fig.add_shape(
+            type="rect", x0=x - 0.44, x1=x + 0.44, y0=y - 0.34, y1=y + 0.34,
+            line={"color": "#5a6570", "width": 0.8}, fillcolor="#a9c6de", opacity=0.9,
+            row=1, col=col,
+        )
+        fig.add_annotation(x=x, y=y, text=label, showarrow=False,
+                            font={"size": 8.5, "color": "#1c2733"}, row=1, col=col)
+        hover_x.append(x)
+        hover_y.append(y)
+        hover_text.append(f"{feat_full} ≤ {node['threshold']:.2f}")
         for child in (node.get("left"), node.get("right")):
             if child is None:
                 continue
             cx, cy, _ = positions[id(child)]
-            ax.plot([x, cx], [y + 0.34, cy - 0.34], color="#8a97a3", linewidth=0.7, zorder=1)
+            edge_x.extend([x, cx, None])
+            edge_y.extend([y + 0.34, cy - 0.34, None])
         draw(node["left"])
         draw(node["right"])
 
     draw(root)
+    fig.add_trace(go.Scatter(
+        x=edge_x, y=edge_y, mode="lines", line={"color": "#8a97a3", "width": 0.7},
+        hoverinfo="skip", showlegend=False,
+    ), row=1, col=col)
+    fig.add_trace(go.Scatter(
+        x=hover_x, y=hover_y, mode="markers",
+        marker={"size": 30, "color": "rgba(0,0,0,0)"},
+        hovertext=hover_text, hoverinfo="text", showlegend=False,
+    ), row=1, col=col)
     xs = [p[0] for p in positions.values()]
     return (min(xs), max(xs)) if xs else (0, 0)
 
 
-def _render_tree_depth_diagram_png(extracted, station_name):
-    """extract_representative_treeが返した木構造(方式ごと)を、横に並べて描画する。
-    採用中のモデルが実際にどれくらいの深さ・複雑さの木を使っているかを直感的に示す図。
-    深さ14等のRFをノード単位でそのまま描くと指数的にノード数が増えて読めなくなるため、
-    表示は上位数階層までに絞り(fog_tree_viz.DEFAULT_MAX_DISPLAY_DEPTH)、実際の最大深さは
-    各サブプロットのタイトルに明記する(表示を打ち切っているだけで、実際のモデルの判定は
-    その先も続いている点に注意)。"""
+def _render_tree_depth_diagram_plotly(extracted, station_name):
+    """_render_tree_depth_diagram_pngのPlotly版(2026-09-14)。"""
     kinds = list(extracted.keys())
     max_display = fog_tree_viz.DEFAULT_MAX_DISPLAY_DEPTH
     if not kinds:
-        fig, ax = plt.subplots(figsize=(6, 2.2))
-        ax.text(0.5, 0.5, "この地点はまだモデルがありません", ha="center", va="center",
-                transform=ax.transAxes, color=plt.rcParams["text.color"])
-        ax.axis("off")
-    else:
-        fig, axes = plt.subplots(1, len(kinds), figsize=(6.4 * len(kinds), 6.8))
-        axes = [axes] if len(kinds) == 1 else list(axes)
-        for ax, kind in zip(axes, kinds):
-            info = extracted[kind]
-            x_min, x_max = _draw_tree_on_axis(ax, info["root"], max_display, kind == "RF")
-            ax.set_xlim(x_min - 0.6, x_max + 0.6)
-            ax.set_ylim(max_display + 0.6, -0.6)
-            ax.axis("off")
-            configured = info["configured_max_depth"]
-            configured_label = "無制限" if configured is None else str(configured)
-            # ax.axis("off")で軸を消すと、なぜかax.set_titleの文字色がrcParamsの
-            # text.colorを正しく引き継がず、ダークモードで背景とほぼ同化して読めなくなる
-            # 現象を確認したため(2026-09-13)、明示的にcolorを指定する。
-            ax.set_title(
-                f"{kind}\n採用木の実際の深さ: {info['actual_max_depth']} / "
-                f"設定上限: {configured_label} / 本数: {info['n_estimators']}\n"
-                f"(表示は上位{max_display}階層まで、それ以降は「…」に省略)",
-                fontsize=8.3, color=plt.rcParams["text.color"],
-            )
-    fig.suptitle(f"{station_name}: 採用モデルの決定木(代表1本)", fontsize=11, color=plt.rcParams["text.color"])
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": f"{station_name}: 採用モデルの決定木(代表1本)", "font": {"size": 14}},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "この地点はまだモデルがありません", "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False,
+            }],
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            margin={"t": 60, "r": 20, "b": 20, "l": 20},
+        )
+        return pio.to_json(fig)
+
+    subplot_titles = []
+    for kind in kinds:
+        info = extracted[kind]
+        configured = info["configured_max_depth"]
+        configured_label = "無制限" if configured is None else str(configured)
+        subplot_titles.append(
+            f"{kind}: 実際の深さ{info['actual_max_depth']} / "
+            f"設定上限{configured_label} / 本数{info['n_estimators']}"
+        )
+    fig = make_subplots(rows=1, cols=len(kinds), subplot_titles=subplot_titles, horizontal_spacing=0.06)
+    for i, kind in enumerate(kinds, start=1):
+        info = extracted[kind]
+        x_min, x_max = _draw_tree_on_plotly(fig, i, info["root"], max_display, kind == "RF")
+        fig.update_xaxes(range=[x_min - 0.6, x_max + 0.6], visible=False, row=1, col=i)
+        fig.update_yaxes(range=[max_display + 0.6, -0.6], visible=False, row=1, col=i)
+    fig.update_layout(
+        title={
+            "text": f"{station_name}: 採用モデルの決定木(代表1本、表示は上位{max_display}階層まで、"
+                    "「…」にカーソルを合わせると続きの深さ・ノード数を表示)",
+            "font": {"size": 13},
+        },
+        showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin={"t": 100, "r": 20, "b": 20, "l": 20},
+        height=520,
+    )
+    return pio.to_json(fig)
 
 
 def _low_accuracy_stations(state, n=5):
@@ -3581,19 +3984,23 @@ def observations_date(date):
     return render_template("observations_date.html", date=date, station_names=station_names, rows=rows)
 
 
-@app.route("/observations/<date>/chart.png")
+@app.route("/observations/<date>/chart.json")
 def observations_date_chart(date):
     date = _validate_date(date)
-    try:
-        main_df, _, _ = fog_data.load_river_fog_data()
-    except Exception as e:
-        log.warning("Failed to load observation data: %s", e)
-        main_df = None
-    day_main = None
-    if main_df is not None:
-        day_main = main_df[main_df["datetime"].dt.strftime("%Y-%m-%d") == date].sort_values("datetime")
-    png = _render_weather_timeseries_png(day_main, date)
-    return Response(png, mimetype="image/png")
+
+    def render():
+        try:
+            main_df, _, _ = fog_data.load_river_fog_data()
+        except Exception as e:
+            log.warning("Failed to load observation data: %s", e)
+            main_df = None
+        day_main = None
+        if main_df is not None:
+            day_main = main_df[main_df["datetime"].dt.strftime("%Y-%m-%d") == date].sort_values("datetime")
+        return _render_weather_timeseries_plotly(day_main, date)
+
+    data = _cached_chart_json(f"observations_date_chart:{date}", [WEATHER_DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
 @app.route("/download/xlsx")
@@ -4408,7 +4815,7 @@ def weather_fog_graph_page():
     )
 
 
-@app.route("/graphs/weather-fog.png")
+@app.route("/graphs/weather-fog.json")
 def weather_fog_graph_png():
     station = _validate_station(request.args.get("station", STATION_NAMES[0]))
 
@@ -4419,10 +4826,10 @@ def weather_fog_graph_png():
                 main_df, phenom_df, _ = fog_data.load_river_fog_data()
             except Exception as e:
                 log.warning("Failed to load data for weather-fog graph: %s", e)
-        return _render_weather_fog_boxplot_png(main_df, phenom_df, station)
+        return _render_weather_fog_boxplot_plotly(main_df, phenom_df, station)
 
-    png = _cached_png(f"weather_fog_graph:{station}", [WEATHER_DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json(f"weather_fog_graph:{station}", [WEATHER_DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
 @app.route("/river-fog-histogram")
@@ -4438,7 +4845,7 @@ def river_fog_histogram_page():
     return render_template("river_fog_histogram.html", correction_counts=correction_counts)
 
 
-@app.route("/graphs/weather-fog-histogram.png")
+@app.route("/graphs/weather-fog-histogram.json")
 def weather_fog_histogram_png():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。"""
     def render():
@@ -4448,10 +4855,10 @@ def weather_fog_histogram_png():
                 main_df, phenom_df, station_names = fog_data.load_river_fog_data()
             except Exception as e:
                 log.warning("Failed to load data for river-fog histogram: %s", e)
-        return _render_river_fog_histogram_png(main_df, phenom_df, station_names or STATION_NAMES)
+        return _render_river_fog_histogram_plotly(main_df, phenom_df, station_names or STATION_NAMES)
 
-    png = _cached_png("weather_fog_histogram", [WEATHER_DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("weather_fog_histogram", [WEATHER_DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
 @app.route("/stations/<name>/comments", methods=["POST"])
@@ -4592,7 +4999,7 @@ def station_timelapse_json(name):
     return jsonify({"items": items})
 
 
-@app.route("/stations/<name>/chart.png")
+@app.route("/stations/<name>/chart.json")
 def station_chart(name):
     name = _validate_station(name)
 
@@ -4600,14 +5007,13 @@ def station_chart(name):
         trend = _accuracy_trend_safe(station=name)
         dates = [r["date"] for r in trend if r["n"] > 0]
         rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-        with _chart_rc_context():
-            return _render_line_chart_png(dates, rates, f"{name} の的中率推移")
+        return _render_line_chart_plotly(dates, rates, f"{name} の的中率推移")
 
-    png = _cached_png(f"station_chart:{name}:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json(f"station_chart:{name}", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/stations/<name>/model_metrics_chart.png")
+@app.route("/stations/<name>/model_metrics_chart.json")
 def station_model_metrics_chart(name):
     """地点別のモデル学習時精度推移(item 7)。全地点平均のみだった従来の
     admin_models_chartと違い、この地点固有の学習履歴だけに絞る。"""
@@ -4615,15 +5021,14 @@ def station_model_metrics_chart(name):
 
     def render():
         trend = _load_metrics_history_trend(station=name)
-        with _chart_rc_context():
-            return _render_metrics_trend_png(trend, title=f"{name} の学習時モデル精度推移")
+        return _render_metrics_trend_plotly(trend, title=f"{name} の学習時モデル精度推移")
 
-    png = _cached_png(f"station_model_metrics_chart:{name}:{_chart_theme()}",
-                       [fog_model.METRICS_HISTORY_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json(f"station_model_metrics_chart:{name}",
+                               [fog_model.METRICS_HISTORY_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/stations/<name>/threshold_chart.png")
+@app.route("/stations/<name>/threshold_chart.json")
 def station_threshold_chart(name):
     """地点別のしきい値ごとのprecision/recall/F1(item 8)。実際の本番予測ログ
     (predicted_fog_prob)から算出するので、学習時の検証データに依存しない。"""
@@ -4633,17 +5038,16 @@ def station_threshold_chart(name):
         sweep = _threshold_sweep_stats(_fog_prob_buckets_safe(station=name))
         state = fog_model.load_model_state()
         current = (state.get(name) or {}).get("fog_threshold")
-        with _chart_rc_context():
-            return _render_threshold_sweep_png(
-                sweep, current_threshold=current,
-                title=f"{name} のしきい値ごとのprecision/recall/F1",
-            )
+        return _render_threshold_sweep_plotly(
+            sweep, current_threshold=current,
+            title=f"{name} のしきい値ごとのprecision/recall/F1",
+        )
 
-    png = _cached_png(f"station_threshold_chart:{name}:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json(f"station_threshold_chart:{name}", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/stations/<name>/tree_diagram.png")
+@app.route("/stations/<name>/tree_diagram.json")
 def station_tree_diagram(name):
     """採用中のモデル(RF/XGBoost/LightGBMのうち実際にブレンドに使われている方式)が
     実際にどれくらいの深さの木を使っているかを示す図。木の深さは分岐条件を重ねるほど
@@ -4671,13 +5075,12 @@ def station_tree_diagram(name):
                 extracted = fog_model.extract_representative_tree(info["pipe"], feature_names)
             except Exception as e:
                 log.warning("Failed to extract tree diagram for %s: %s", name, e)
-        with _chart_rc_context():
-            return _render_tree_depth_diagram_png(extracted, name)
+        return _render_tree_depth_diagram_plotly(extracted, name)
 
-    png = _cached_png(
-        f"station_tree_diagram:{name}:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render,
+    data = _cached_chart_json(
+        f"station_tree_diagram:{name}", [fog_model.MODEL_STATE_PATH], render,
     )
-    return Response(png, mimetype="image/png")
+    return Response(data, mimetype="application/json")
 
 
 @app.route("/accuracy")
@@ -4722,61 +5125,56 @@ def accuracy_page():
     )
 
 
-@app.route("/accuracy/chart.png")
+@app.route("/accuracy/chart.json")
 def accuracy_chart():
     def render():
         trend = _accuracy_trend_safe()
         dates = [r["date"] for r in trend if r["n"] > 0]
         rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-        with _chart_rc_context():
-            return _render_line_chart_png(dates, rates, "全地点の的中率推移")
+        return _render_line_chart_plotly(dates, rates, "全地点の的中率推移")
 
-    png = _cached_png(f"accuracy_chart:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_chart", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/lead_time_chart.png")
+@app.route("/accuracy/lead_time_chart.json")
 def accuracy_lead_time_chart():
     def render():
         summary = _accuracy_summary_safe()
         by_lead_day = summary["by_lead_day"] if summary else []
-        with _chart_rc_context():
-            return _render_lead_time_chart_png(by_lead_day)
+        return _render_lead_time_chart_plotly(by_lead_day)
 
-    png = _cached_png(f"accuracy_lead_time_chart:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_lead_time_chart", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/region_chart.png")
+@app.route("/accuracy/region_chart.json")
 def accuracy_region_chart():
     def render():
-        with _chart_rc_context():
-            return _render_region_compare_chart_png(_accuracy_region_summary_safe())
+        return _render_region_compare_chart_plotly(_accuracy_region_summary_safe())
 
-    png = _cached_png(f"accuracy_region_chart:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_region_chart", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/confusion_matrix.png")
+@app.route("/accuracy/confusion_matrix.json")
 def accuracy_confusion_matrix():
     def render():
         labels, matrix = _confusion_matrix_from_pairs(_fog_pair_counts_safe())
-        with _chart_rc_context():
-            return _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算・本番予測)")
+        return _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地点合算・本番予測)")
 
-    png = _cached_png(f"accuracy_confusion_matrix:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_confusion_matrix", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/threshold_chart.png")
+@app.route("/accuracy/threshold_chart.json")
 def accuracy_threshold_chart():
     def render():
         sweep = _threshold_sweep_stats(_fog_prob_buckets_safe())
-        with _chart_rc_context():
-            return _render_threshold_sweep_png(sweep, title="しきい値ごとのprecision/recall/F1(全地点合算)")
+        return _render_threshold_sweep_plotly(sweep, title="しきい値ごとのprecision/recall/F1(全地点合算)")
 
-    png = _cached_png(f"accuracy_threshold_chart:{_chart_theme()}", [DB_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_threshold_chart", [DB_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
 # 以下5つは元々/admin/models配下(管理者専用)にあった学習時(検証データ)のチャート。
@@ -4784,64 +5182,59 @@ def accuracy_threshold_chart():
 # が持つ最新の学習結果(検証データでの評価)が元になっている。
 
 
-@app.route("/accuracy/training_metrics_chart.png")
+@app.route("/accuracy/training_metrics_chart.json")
 def accuracy_training_metrics_chart():
     def render():
-        with _chart_rc_context():
-            return _render_metrics_trend_png(_load_metrics_history_trend())
+        return _render_metrics_trend_plotly(_load_metrics_history_trend())
 
-    png = _cached_png(f"accuracy_training_metrics_chart:{_chart_theme()}",
-                       [fog_model.METRICS_HISTORY_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_training_metrics_chart",
+                               [fog_model.METRICS_HISTORY_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/model_compare_chart.png")
+@app.route("/accuracy/model_compare_chart.json")
 def accuracy_model_compare_chart():
     def render():
         state = fog_model.load_model_state()
-        with _chart_rc_context():
-            return _render_model_compare_png(state)
+        return _render_model_compare_plotly(state)
 
-    png = _cached_png(f"accuracy_model_compare_chart:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_model_compare_chart", [fog_model.MODEL_STATE_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/training_confusion_matrix.png")
+@app.route("/accuracy/training_confusion_matrix.json")
 def accuracy_training_confusion_matrix():
     def render():
         state = fog_model.load_model_state()
         labels, matrix = fog_model.compute_confusion_matrix(state)
-        with _chart_rc_context():
-            return _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算・学習時検証データ)")
+        return _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地点合算・学習時検証データ)")
 
-    png = _cached_png(f"accuracy_training_confusion_matrix:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_training_confusion_matrix", [fog_model.MODEL_STATE_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/feature_importance_chart.png")
+@app.route("/accuracy/feature_importance_chart.json")
 def accuracy_feature_importance_chart():
     def render():
         state = fog_model.load_model_state()
         importance = fog_model.compute_feature_importance(state)
-        with _chart_rc_context():
-            return _render_feature_importance_png(importance)
+        return _render_feature_importance_plotly(importance)
 
-    png = _cached_png(f"accuracy_feature_importance_chart:{_chart_theme()}", [fog_model.MODEL_STATE_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_feature_importance_chart", [fog_model.MODEL_STATE_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
-@app.route("/accuracy/feature_importance_low_accuracy_chart.png")
+@app.route("/accuracy/feature_importance_low_accuracy_chart.json")
 def accuracy_feature_importance_low_accuracy_chart():
     def render():
         state = fog_model.load_model_state()
         only_stations = set(_low_accuracy_stations(state))
         importance = fog_model.compute_feature_importance(state, only_stations=only_stations)
-        with _chart_rc_context():
-            return _render_feature_importance_png(importance)
+        return _render_feature_importance_plotly(importance)
 
-    png = _cached_png(f"accuracy_feature_importance_low_accuracy_chart:{_chart_theme()}",
-                       [fog_model.MODEL_STATE_PATH], render)
-    return Response(png, mimetype="image/png")
+    data = _cached_chart_json("accuracy_feature_importance_low_accuracy_chart",
+                               [fog_model.MODEL_STATE_PATH], render)
+    return Response(data, mimetype="application/json")
 
 
 @app.route("/changelog")

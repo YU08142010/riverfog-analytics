@@ -162,7 +162,11 @@
     <h2>今後の予測グラフ</h2>
     {% if forecast_file %}
     <p class="muted">{{ latest_pred_date }}</p>
+    {% if forecast_file.endswith('.html') %}
+    <div class="chart-wrap"><iframe src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" style="width:100%; height:800px; border:none;" title="{{ name }}の予測グラフ"></iframe></div>
+    {% else %}
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" alt="{{ name }}の予測グラフ"></div>
+    {% endif %}
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>この地点の予測グラフはまだありません。</span></div>
     {% endif %}
@@ -170,7 +174,7 @@
 
 <div class="card">
     <h2>的中率の推移</h2>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_chart', name=name) }}" alt="{{ name }}の的中率推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の的中率推移グラフ" data-chart-url="{{ url_for('station_chart', name=name) }}"></div></div>
 </div>
 </div>
 
@@ -178,13 +182,13 @@
 <div class="card">
     <h2>学習時のモデル精度推移</h2>
     <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(検証データでの評価値)の推移。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_model_metrics_chart', name=name) }}" alt="{{ name }}の学習時モデル精度推移グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の学習時モデル精度推移グラフ" data-chart-url="{{ url_for('station_model_metrics_chart', name=name) }}"></div></div>
 </div>
 
 <div class="card">
     <h2>しきい値ごとのprecision/recall/F1</h2>
     <p class="muted">川霧と判定するしきい値を変えた場合のトレードオフ。点線が現在この地点で自動選択されているしきい値。</p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_threshold_chart', name=name) }}" alt="{{ name }}のしきい値ごとのprecision/recall/F1グラフ"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}のしきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('station_threshold_chart', name=name) }}"></div></div>
 </div>
 </div>
 
@@ -196,7 +200,7 @@
         深い木ほど細かい条件分岐を表現できますが、過学習(学習データに寄りすぎること)のリスクとの兼ね合いでもあります。
         深さが上限を超えると読みにくくなるため、表示は上位数階層までに絞り、それ以降は「…」で省略しています(実際のモデルの判定はその先も続きます)。
     </p>
-    <div class="chart-wrap"><div class="spinner"></div><img class="full-graph chart-themed" src="{{ url_for('station_tree_diagram', name=name) }}" alt="{{ name }}の採用モデル決定木の図"></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の採用モデル決定木の図" data-chart-url="{{ url_for('station_tree_diagram', name=name) }}"></div></div>
 </div>
 
 {% if feature_snapshot %}
