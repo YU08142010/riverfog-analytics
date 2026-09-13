@@ -20,15 +20,27 @@
     </div>
     {% if current.code is not none and session.get("user_id") %}
     {% if can_correct %}
-    <form method="post" action="{{ url_for('station_correct_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem;">
+    <form method="post" action="{{ url_for('station_correct_observation', name=name) }}" data-ajax
+          class="phenom-picker-form" data-current-code="{{ current.code }}"
+          data-phenom-labels='{{ phenom_labels | tojson }}'
+          style="display:inline-flex; flex-direction:column; gap:0.4rem; margin-left:0.5rem; vertical-align:top;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <select name="corrected_code" style="padding:0.35rem; font-size:0.85rem;">
-            <option value="0" {{ "selected" if current.code == 0 }}>現象なし</option>
-            {% for code, label in phenom_labels.items() %}
-            <option value="{{ code }}" {{ "selected" if code == current.code }}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測結果を訂正する</button>
+        <input type="hidden" name="corrected_code" class="phenom-picker-value" value="{{ current.code }}" required>
+        <div class="phenom-picker">
+            <div class="phenom-picker-row phenom-picker-categories">
+                <button type="button" class="phenom-btn" data-codes="0" style="background:#e0e0e0; color:#222;">現象なし</button>
+                <button type="button" class="phenom-btn" data-codes="1,2,3" style="background:#3498db; color:#fff;">川霧<span class="phenom-key">1-3</span></button>
+                <button type="button" class="phenom-btn" data-codes="4,5,6" style="background:#7f8c8d; color:#fff;">全体霧<span class="phenom-key">4-6</span></button>
+                <button type="button" class="phenom-btn" data-codes="7,8" style="background:#e0a458; color:#222;">層雲<span class="phenom-key">7-8</span></button>
+                <button type="button" class="phenom-btn" data-codes="9,10" style="background:#27ae60; color:#fff;">霧雨・雨<span class="phenom-key">9,-</span></button>
+            </div>
+            <div class="phenom-picker-row phenom-picker-sublevels" hidden></div>
+        </div>
+        <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+            <span class="muted" style="font-size:0.8rem;">選択中: <strong class="phenom-picker-selected-label"></strong></span>
+            <button type="submit" class="button" style="font-size:0.8rem; padding:0.4rem 0.7rem;">この観測結果を訂正する</button>
+        </div>
+        <p class="muted" style="font-size:0.72rem; margin:0;">分類ボタンにマウスを乗せた状態で数字キー(0〜9、雨は「-」)でも直接選べます。</p>
     </form>
     {% else %}
     <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem; flex-wrap:wrap;">
@@ -45,6 +57,115 @@
     {% endif %}
     {% else %}
     <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
+    {% endif %}
+    {% if can_correct %}
+    <style>
+        .phenom-picker-row { display:flex; gap:0.35rem; flex-wrap:wrap; }
+        .phenom-btn {
+            border:2px solid transparent; border-radius:var(--radius-sm, 6px); padding:0.4rem 0.7rem;
+            font-size:0.82rem; cursor:pointer; line-height:1.1; display:inline-flex; flex-direction:column;
+            align-items:center; gap:0.1rem;
+        }
+        .phenom-btn .phenom-key { font-size:0.68rem; opacity:0.75; }
+        .phenom-btn.active { border-color:#111; box-shadow:0 0 0 2px rgba(0,0,0,0.15) inset; }
+    </style>
+    <script>
+    (function() {
+        document.querySelectorAll(".phenom-picker-form").forEach(function(form) {
+            var picker = form.querySelector(".phenom-picker");
+            var catRow = form.querySelector(".phenom-picker-categories");
+            var subRow = form.querySelector(".phenom-picker-sublevels");
+            var valueInput = form.querySelector(".phenom-picker-value");
+            var selectedLabel = form.querySelector(".phenom-picker-selected-label");
+            var labels = JSON.parse(form.dataset.phenomLabels || "{}");
+            labels[0] = "現象なし";
+            var currentCode = parseInt(form.dataset.currentCode, 10);
+
+            function setActive(row, btn) {
+                row.querySelectorAll(".phenom-btn").forEach(function(b) { b.classList.remove("active"); });
+                if (btn) btn.classList.add("active");
+            }
+
+            function selectCode(code) {
+                valueInput.value = code;
+                selectedLabel.textContent = labels[code] || ("コード" + code);
+                var catBtn = catRow.querySelector('.phenom-btn[data-codes="' + codesKeyFor(code) + '"]');
+                setActive(catRow, catBtn);
+                if (catBtn) showSublevels(catBtn, code);
+            }
+
+            function codesKeyFor(code) {
+                for (var i = 0; i < catRow.children.length; i++) {
+                    var codes = catRow.children[i].dataset.codes.split(",").map(Number);
+                    if (codes.indexOf(code) !== -1) return catRow.children[i].dataset.codes;
+                }
+                return String(code);
+            }
+
+            function showSublevels(catBtn, activeCode) {
+                var codes = catBtn.dataset.codes.split(",").map(Number);
+                subRow.innerHTML = "";
+                if (codes.length <= 1) {
+                    subRow.hidden = true;
+                    return;
+                }
+                codes.forEach(function(code) {
+                    var b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "phenom-btn";
+                    b.textContent = labels[code] || ("コード" + code);
+                    b.dataset.code = code;
+                    if (code === activeCode) b.classList.add("active");
+                    b.addEventListener("click", function() {
+                        valueInput.value = code;
+                        selectedLabel.textContent = labels[code] || ("コード" + code);
+                        setActive(subRow, b);
+                    });
+                    subRow.appendChild(b);
+                });
+                subRow.hidden = false;
+            }
+
+            catRow.querySelectorAll(".phenom-btn").forEach(function(btn) {
+                btn.addEventListener("click", function() {
+                    var codes = btn.dataset.codes.split(",").map(Number);
+                    setActive(catRow, btn);
+                    if (codes.length === 1) {
+                        subRow.hidden = true;
+                        subRow.innerHTML = "";
+                        valueInput.value = codes[0];
+                        selectedLabel.textContent = labels[codes[0]] || ("コード" + codes[0]);
+                    } else {
+                        showSublevels(btn, codes.indexOf(currentCode) !== -1 ? currentCode : codes[0]);
+                        if (codes.indexOf(currentCode) === -1) {
+                            valueInput.value = codes[0];
+                            selectedLabel.textContent = labels[codes[0]] || ("コード" + codes[0]);
+                        }
+                    }
+                });
+            });
+
+            // 初期状態: 現在のコードに対応するボタンをあらかじめ選択しておく
+            selectCode(currentCode);
+
+            // キーボードショートカット: このピッカーにマウスを乗せている間だけ、
+            // 数字キー(0〜9)と「-」(雨=コード10)で直接選べる。他の入力欄への
+            // 誤爆を避けるため、ホバー中に限定する。
+            var hovered = false;
+            picker.addEventListener("mouseenter", function() { hovered = true; });
+            picker.addEventListener("mouseleave", function() { hovered = false; });
+            document.addEventListener("keydown", function(e) {
+                if (!hovered) return;
+                var code = null;
+                if (e.key >= "0" && e.key <= "9") code = parseInt(e.key, 10);
+                else if (e.key === "-") code = 10;
+                if (code === null) return;
+                e.preventDefault();
+                selectCode(code);
+            });
+        });
+    })();
+    </script>
     {% endif %}
 
     {% if share_targets %}
