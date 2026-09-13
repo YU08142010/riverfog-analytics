@@ -32,6 +32,36 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <h2>二次コード(複数現象の同時記録)予測の状況</h2>
+    <p class="muted" style="font-size:0.85rem;">
+        2026-09に追加した「1回の観測に現象コードを2つまで同時に記録・予測する」機能の状況です。
+        観測開始から日が浅い地点(特に会津地方)や、2つ同時に記録された実績がまだ少ない地点では、
+        データ不足のため二次コードの予測自体が無効になっています
+        (現在の基準: 2コード同時観測の実績が{{ min_dual_code_positives }}件未満の地点はスキップ。
+        地点ごとの状況は下の「地点ごとのモデル状況」表を参照)。
+    </p>
+    <p class="muted">
+        観測での記録状況: 分類済み{{ dual_code_utilization.total }}件中、2コード同時記録
+        {{ dual_code_utilization.dual }}件
+        {% if dual_code_utilization.total %}
+        （{{ "%.1f"|format(100.0 * dual_code_utilization.dual / dual_code_utilization.total) }}%）
+        {% endif %}
+    </p>
+    {% if secondary_accuracy.n_actual_has %}
+    <p class="muted">
+        予測精度(実測に2つ目の現象が記録されていた{{ secondary_accuracy.n_actual_has }}件が対象):
+        recall(見逃しの少なさ) {{ "%.1f"|format(secondary_accuracy.recall * 100) }}%
+        {% if secondary_accuracy.precision is not none %}
+        / precision(空振りの少なさ) {{ "%.1f"|format(secondary_accuracy.precision * 100) }}%
+        {% endif %}
+        {% if secondary_accuracy.f1 is not none %} / F1 {{ "%.1f"|format(secondary_accuracy.f1 * 100) }}%{% endif %}
+    </p>
+    {% else %}
+    <p class="muted">まだ2つ目の現象込みで答え合わせできた予測がありません(機能追加直後のため、しばらくすると集計されるようになります)。</p>
+    {% endif %}
+</div>
+
 {% if region_summary %}
 <div class="card">
     <h2>地域別の的中率・川霧F1</h2>
@@ -217,7 +247,7 @@
     <table class="obs-table" style="width:100%;">
         <thead><tr>
             <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
-            <th>accuracy</th><th>川霧F1(採用中)</th><th>学習日時</th>
+            <th>accuracy</th><th>川霧F1(採用中)</th><th>学習日時</th><th>二次コード予測</th>
         </tr></thead>
         <tbody>
         {% for r in model_rows %}
@@ -229,6 +259,15 @@
             <td>{{ "%.3f"|format(r.accuracy) if r.accuracy is not none else "-" }}</td>
             <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none and r.fog_f1 == r.fog_f1 else "n/a" }}</td>
             <td>{{ r.trained_at or "-" }}</td>
+            <td>
+                {% if r.secondary_skipped_reason is none %}
+                有効(n={{ r.secondary_n_dual }}件{% if r.secondary_trained_at %}、{{ r.secondary_trained_at[:10] }}更新{% endif %})
+                {% elif r.secondary_skipped_reason == "pooled_station" %}
+                非対応(プーリング救済地点)
+                {% else %}
+                データ不足{% if r.secondary_n_dual is not none %}(n={{ r.secondary_n_dual }}件){% endif %}
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         </tbody>

@@ -1388,15 +1388,24 @@ def _chart_theme():
     return "dark" if request.cookies.get("theme") == "dark" else "light"
 
 
+# Plotly移行(2026-09-14)前からの唯一の配色定義。matplotlib版(_chart_rc_context、
+# PDFレポート専用)とPlotly版(ブラウザ側でのrelayout用、window.CHART_THEME_PALETTE)の
+# 両方がここを参照する。以前は同じ色をそれぞれ別々にハードコードしており、
+# 片方だけ配色を変えるとPDFとWebでグラフの見た目がずれていく懸念があったため、
+# 単一の定義に統一した(2026-09-14)。
+_CHART_THEME_PALETTE = {
+    "light": {"fg": "#1c2733", "grid": "#c7d0da"},
+    "dark": {"fg": "#e6edf3", "grid": "#3a4552"},
+}
+
+
 def _chart_rc_context():
     """グラフの文字色・グリッド色をテーマに合わせ、背景を透過にするrcParamsのコンテキスト。
     _cached_pngでキャッシュする場合は、cache_keyにテーマも含めること(サーバー全体で
     共有するキャッシュのため、含めないと片方のテーマで生成された画像がもう片方の
     利用者にも出てしまう)。matplotlibで描画するPDFレポート(_generate_report_pdf)専用。"""
-    if _chart_theme() == "dark":
-        fg, grid = "#e6edf3", "#3a4552"
-    else:
-        fg, grid = "#1c2733", "#c7d0da"
+    pal = _CHART_THEME_PALETTE[_chart_theme()]
+    fg, grid = pal["fg"], pal["grid"]
     return matplotlib.rc_context({
         "text.color": fg, "axes.labelcolor": fg, "axes.edgecolor": fg,
         "xtick.color": fg, "ytick.color": fg, "grid.color": grid,
@@ -1404,17 +1413,6 @@ def _chart_rc_context():
         "axes.facecolor": "none", "savefig.facecolor": "none",
         "savefig.transparent": True,
     })
-
-
-# Plotlyへの移行(2026-09-14)で追加。matplotlib版(_chart_rc_context)と同じ配色を、
-# ブラウザ側でPlotly.relayoutするためのパレットとして持つ。サーバー側ではテーマを
-# 意識せず常にニュートラルにグラフを描画し、base.htmlの共通スクリプトが
-# window.CHART_THEME_PALETTEを読んでテーマ切替時にクライアント側でrelayoutする
-# (matplotlib版と違い、テーマ切替のたびにサーバーへ再取得しに行く必要が無い)。
-_CHART_THEME_PALETTE = {
-    "light": {"fg": "#1c2733", "grid": "#c7d0da"},
-    "dark": {"fg": "#e6edf3", "grid": "#3a4552"},
-}
 
 
 @app.context_processor
@@ -3542,6 +3540,35 @@ def _accuracy_by_weather_safe():
     return result
 
 
+_dual_code_utilization_cache = {"data": None, "at": 0.0}
+_dual_code_utilization_cache_lock = threading.Lock()
+
+
+def _dual_code_utilization_safe():
+    """複数現象コード機能(2026-09追加)が実際にどれだけ使われているかの目安
+    (weather_store.dual_code_utilizationのキャッシュ付きラッパー)。"""
+    now = time.monotonic()
+    with _dual_code_utilization_cache_lock:
+        cached = _dual_code_utilization_cache["data"]
+        if cached is not None and now - _dual_code_utilization_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
+            return cached
+    if not WEATHER_DB_PATH.exists():
+        return {"total": 0, "dual": 0, "by_station": []}
+    try:
+        conn = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
+        try:
+            result = weather_store.dual_code_utilization(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to read dual-code utilization: %s", e)
+        return {"total": 0, "dual": 0, "by_station": []}
+    with _dual_code_utilization_cache_lock:
+        _dual_code_utilization_cache["data"] = result
+        _dual_code_utilization_cache["at"] = now
+    return result
+
+
 # 川霧クラスのprecision/recall/F1・混同行列・地域比較は、いずれも答え合わせ済みの
 # (地点, 予測コード, 実際のコード)の組み合わせ件数(prediction_log.fog_pair_counts)
 # という1つの集計結果から計算できるため、accuracy_summaryと同じTTLキャッシュで共有する。
@@ -3598,6 +3625,34 @@ def _fog_confusion_stats(pairs, fog_codes=None):
     recall = tp / (tp + fn) if (tp + fn) else None
     f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
     return {"tp": tp, "fp": fp, "fn": fn, "tn": tn, "precision": precision, "recall": recall, "f1": f1}
+
+
+def _secondary_code_accuracy_stats(pairs):
+    """(station, predicted_code, actual_code, n)のリストから、副コード(2コード同時観測時の
+    2つ目、2026-09対応)に絞った精度指標を計算する。predicted_code/actual_codeはパック済み値の
+    こともあるため、decode_phenom_valueで(主, 副)に分解してから副コードだけを比較する
+    (主コードの精度は_fog_confusion_stats等の既存指標で別途見られるため、ここでは
+    「実測に副コードがある場合に、予測もそれを言い当てられているか」だけに絞る)。
+    戻り値のn_actual_hasが0の場合は、まだ副コード込みで答え合わせできた実測が無いということ
+    (2026-09に追加したばかりの機能のため、当面はここが小さい/0のままでも異常ではない)。"""
+    n_actual_has = n_pred_has = n_both_correct = 0
+    for row in pairs:
+        n = row["n"]
+        _, actual_secondary = decode_phenom_value(row["actual_code"])
+        _, pred_secondary = decode_phenom_value(row["predicted_code"])
+        if actual_secondary is not None:
+            n_actual_has += n
+        if pred_secondary is not None:
+            n_pred_has += n
+        if actual_secondary is not None and pred_secondary is not None and actual_secondary == pred_secondary:
+            n_both_correct += n
+    precision = n_both_correct / n_pred_has if n_pred_has else None
+    recall = n_both_correct / n_actual_has if n_actual_has else None
+    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+    return {
+        "n_actual_has": n_actual_has, "n_pred_has": n_pred_has, "n_correct": n_both_correct,
+        "precision": precision, "recall": recall, "f1": f1,
+    }
 
 
 def _accuracy_station_metrics_safe():
@@ -4779,10 +4834,26 @@ def station_detail(name):
 
     station_weather_latest = _latest_station_weather(name, observations)
 
+    # 二次コード(2つ目の現象、2026-09対応)予測がこの地点で有効かどうか。
+    # skipped_reasonがNoneなら有効、"insufficient_dual_samples"ならデータ不足、
+    # "pooled_station"ならプーリング救済地点のため非対応(いずれも仕様通りであり、
+    # 単なるエラーではないことが伝わるよう文言を分ける)。
+    station_model_info = fog_model.load_model_state().get(name)
+    secondary_status = None
+    if station_model_info is not None:
+        secondary = station_model_info.get("secondary") or {}
+        secondary_status = {
+            "skipped_reason": secondary.get("skipped_reason", "insufficient_dual_samples"),
+            "n_dual": secondary.get("n_dual"),
+            "trained_at": secondary.get("trained_at"),
+        }
+
     return render_template(
         "station_detail.html",
         name=name,
         current=current,
+        secondary_status=secondary_status,
+        min_dual_code_positives=fog_model.MIN_DUAL_CODE_POSITIVES,
         station_weather_latest=station_weather_latest,
         observations_datetime=observations["datetime"] if observations else None,
         latest_pred_date=latest_pred_date,
@@ -5098,7 +5169,12 @@ def accuracy_page():
     else:
         by_station = []
     region_summary = _accuracy_region_summary_safe()
-    overall_fog_stats = _fog_confusion_stats(_fog_pair_counts_safe())
+    fog_pairs = _fog_pair_counts_safe()
+    overall_fog_stats = _fog_confusion_stats(fog_pairs)
+    # 二次コード(2コード同時観測時の2つ目、2026-09対応)の予測精度・記録状況。
+    # 主コードの精度とは別に、この機能自体が実際に価値を生んでいるかを見えるようにする。
+    secondary_accuracy = _secondary_code_accuracy_stats(fog_pairs)
+    dual_code_utilization = _dual_code_utilization_safe()
 
     # 以前は管理者専用の「モデル管理」ページにしかなかった学習時(検証データ)の指標。
     # 2026-09-12、正答率・F1のような分析情報は管理者専用でなくてよいとの判断で
@@ -5107,6 +5183,10 @@ def accuracy_page():
     model_rows = []
     for col in sorted(model_state.keys()):
         info = model_state[col]
+        # secondary(Stage B、2026-09対応)は学習できた地点ではdict、まだ一度も
+        # 学習を試みていない古いmodel_state(移行前)ではキー自体が無いことがあるため、
+        # get()で存在しない場合も"データなし"として扱えるようにする。
+        secondary = info.get("secondary") or {}
         model_rows.append({
             "station": col,
             "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
@@ -5115,13 +5195,18 @@ def accuracy_page():
             "fog_f1": info.get("fog_f1"),
             "pooled": info.get("pooled"),
             "trained_at": info.get("trained_at"),
+            "secondary_skipped_reason": secondary.get("skipped_reason", "insufficient_dual_samples"),
+            "secondary_n_dual": secondary.get("n_dual"),
+            "secondary_trained_at": secondary.get("trained_at"),
         })
     low_accuracy_stations = _low_accuracy_stations(model_state)
 
     return render_template(
         "accuracy.html", summary=summary, by_weather=by_weather, by_station=by_station,
         region_summary=region_summary, overall_fog_stats=overall_fog_stats,
+        secondary_accuracy=secondary_accuracy, dual_code_utilization=dual_code_utilization,
         model_rows=model_rows, low_accuracy_stations=low_accuracy_stations,
+        min_dual_code_positives=fog_model.MIN_DUAL_CODE_POSITIVES,
     )
 
 

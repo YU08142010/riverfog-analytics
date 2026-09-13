@@ -87,6 +87,29 @@ def record_phenomena(conn, dt_str, phenom_by_name):
         )
 
 
+def dual_code_utilization(conn):
+    """現象コードのうち、2コード同時観測(パック済み値、code>10)として記録された割合を
+    返す(2026-09に追加した複数現象コード機能が実際にどれだけ使われているかの目安。
+    地点別の内訳付き、2コード同時観測が1件も無い地点は除いて件数降順で返す)。
+    戻り値: {"total": 分類済み総数, "dual": 2コード同時観測の数,
+             "by_station": [{"station":, "total":, "dual":}, ...]}
+    """
+    row = conn.execute(
+        "SELECT COUNT(*), SUM(CASE WHEN code > 10 THEN 1 ELSE 0 END) "
+        "FROM phenomena WHERE code IS NOT NULL"
+    ).fetchone()
+    total, dual = row[0] or 0, row[1] or 0
+    by_station = conn.execute(
+        "SELECT station_name, COUNT(*), SUM(CASE WHEN code > 10 THEN 1 ELSE 0 END) "
+        "FROM phenomena WHERE code IS NOT NULL GROUP BY station_name"
+    ).fetchall()
+    stations = sorted(
+        ({"station": s, "total": t, "dual": d} for s, t, d in by_station if d),
+        key=lambda r: r["dual"], reverse=True,
+    )
+    return {"total": total, "dual": dual, "by_station": stations}
+
+
 def weather_row_exists(conn, dt_str):
     """指定datetimeの気象観測行が既に存在するか。backfill_images.pyが「まだ一度も
     収集されていない時刻」に誤って現象コードだけ記録してしまわないためのガード用。"""

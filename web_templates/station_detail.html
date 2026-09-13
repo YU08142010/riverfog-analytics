@@ -53,7 +53,7 @@
             </div>
         </div>
         <input type="hidden" name="corrected_code2" class="phenom-picker-value-2" value="">
-        <p class="muted" style="font-size:0.72rem; margin:0;">ボタンにマウスを乗せる、またはTabでフォーカスした状態で、数字キー(0〜9、雨は「-」)でも直接選べます。Enterキーで訂正を確定できます。同時に発生している別の現象があれば「+ もう1つの現象を追加」で追加できます。</p>
+        <p class="muted" style="font-size:0.72rem; margin:0;">ボタンにマウスを乗せる、またはTabでフォーカスした状態で、数字キー(0〜9、雨は「-」)でも直接選べます。Enterキーで訂正を確定できます。同時に発生している別の現象があれば「+ もう1つの現象を追加」で追加でき、追加後はShift+数字キーでも2つ目を選べます。</p>
     </form>
     {% else %}
     <form method="post" action="{{ url_for('station_report_observation', name=name) }}" data-ajax style="display:inline-flex; gap:0.4rem; align-items:center; margin-left:0.5rem; flex-wrap:wrap;">
@@ -191,6 +191,32 @@
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}のしきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('station_threshold_chart', name=name) }}"></div></div>
 </div>
 </div>
+
+{% if secondary_status %}
+<div class="card">
+    <h2>二次コード(複数現象の同時記録)予測</h2>
+    {% if secondary_status.skipped_reason is none %}
+    <p class="muted">
+        この地点は2つ目の現象コードの予測に対応しています
+        (2コード同時観測の実績 n={{ secondary_status.n_dual }}件
+        {%- if secondary_status.trained_at %}、{{ secondary_status.trained_at[:10] }}時点で学習{% endif -%}
+        )。
+    </p>
+    {% elif secondary_status.skipped_reason == "pooled_station" %}
+    <p class="muted">
+        この地点は単独では学習データが不足しており、近隣地点と合算した「プーリング救済モデル」を
+        採用しているため、2つ目の現象コードの予測は現在対応していません。
+    </p>
+    {% else %}
+    <p class="muted">
+        この地点は2コード同時観測の実績がまだ少なく
+        (n={{ secondary_status.n_dual if secondary_status.n_dual is not none else 0 }}件 /
+        必要な目安 {{ min_dual_code_positives }}件)、2つ目の現象コードの予測は現在無効です。
+        観測時に2つ目の現象を記録する機会が増えるとともに、今後対応する見込みです。
+    </p>
+    {% endif %}
+</div>
+{% endif %}
 
 <div class="card">
     <h2>採用モデルの決定木(代表1本)</h2>

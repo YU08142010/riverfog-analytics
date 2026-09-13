@@ -288,13 +288,16 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
         run_date_str = now_naive.strftime("%Y%m%d")
 
+        sample_chart_path = None
         for col in models.keys():
-            fog_graphs.plot_single_location_forecast(
+            chart_path = fog_graphs.plot_single_location_forecast(
                 main_df, phenom_df, col, forecast_raw, pred_df[col], str(out_dir),
                 history_days=HISTORY_DAYS, prob_series=prob_df[col],
                 fog_threshold=models[col].get("fog_threshold", fog_model.DEFAULT_FOG_THRESHOLD),
                 run_date_str=run_date_str,
             )
+            if sample_chart_path is None:
+                sample_chart_path = chart_path
         fog_graphs.plot_all_location_summary(pred_df, models, str(out_dir), prob_df=prob_df,
                                              run_date_str=run_date_str)
         regions = load_camera_regions()
@@ -305,7 +308,12 @@ def main():
                 station_names=region_stations, file_suffix=file_suffix, label_suffix=f"（{region_label}）",
             )
         fog_graphs.export_prediction_csv(pred_df, prob_df, models, str(out_dir), run_date_str=run_date_str)
-        log.info("Saved graphs/CSV to %s", out_dir)
+        # グラフの出力形式(.html=Plotly / .png=旧matplotlib)をログに残しておく。
+        # デプロイのタイミングによっては、その日のcron実行が新旧どちらのfog_graphs.pyで
+        # 動いたのか実行後に見分けづらいため(2026-09-14、Plotly移行の本番反映確認時に
+        # このログが無く判断に迷ったことを踏まえて追加)。
+        chart_format = sample_chart_path.rsplit(".", 1)[-1] if sample_chart_path else "?"
+        log.info("Saved graphs/CSV to %s (chart format: .%s)", out_dir, chart_format)
 
         record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df, secondary_prob_df, models)
         conn.commit()

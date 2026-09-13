@@ -207,10 +207,12 @@
             selectSecondary(currentCode2);
         }
 
-        // キーボードショートカット(1つ目のピッカーのみ対象): マウスホバー中、または
-        // ボタンにフォーカスが当たっている間(Tab移動でも使えるように)、数字キー(0〜9)と
-        // 「-」(雨=コード10)で直接選べる。Enterでこのフォーム自体を送信(訂正確定)、
-        // 却下ボタンとペアのフォームがあれば「x」で却下を送信できる。
+        // キーボードショートカット: マウスホバー中、またはボタンにフォーカスが
+        // 当たっている間(Tab移動でも使えるように)、数字キー(0〜9)と「-」(雨=コード10)で
+        // 1つ目(主コード)を直接選べる。Shift+同じキーなら2つ目(副コード、2026-09対応)を
+        // 選べる(2026-09-14追加、それまでは主コードのみキーボード対応だった)。
+        // Enterでこのフォーム自体を送信(訂正確定)、却下ボタンとペアのフォームがあれば
+        // 「x」で却下を送信できる。
         var activeRoot = form.closest(".observation-report-actions") || form;
         var dismissForm = form.dataset.dismissFormId
             ? document.getElementById(form.dataset.dismissFormId) : null;
@@ -236,6 +238,27 @@
                     e.preventDefault();
                     dismissBtn.click();
                 }
+                return;
+            }
+            if (e.shiftKey && hasSecondaryUI) {
+                // e.codeは物理キー位置ベース(Shiftを押しても"Digit1"等のまま変わらない)
+                // なので、Shift+数字がUS配列で記号(!@#等)になる問題やキーボード配列の
+                // 違いを受けずに判定できる(e.keyだとShift+1が"!"になり数字判定が壊れる)。
+                var secCode = null;
+                var digitMatch = /^Digit([0-9])$/.exec(e.code);
+                if (digitMatch) { secCode = parseInt(digitMatch[1], 10); }
+                else if (e.code === "Minus") { secCode = 10; }
+                if (secCode === null) return;
+                var catIdx = groupIndexFor(secCode);
+                var btn2 = catIdx !== -1 ? catRow2.children[catIdx] : null;
+                if (!btn2 || btn2.disabled) return;
+                e.preventDefault();
+                if (secondaryWrap.hidden) {
+                    secondaryWrap.hidden = false;
+                    if (secondaryToggleBtn) secondaryToggleBtn.textContent = "2つ目の現象を選択中";
+                }
+                setActive(catRow2, btn2);
+                selectSecondary(secCode);
                 return;
             }
             var code = null;
