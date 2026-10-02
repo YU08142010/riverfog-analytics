@@ -652,7 +652,11 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
     if not resized_by_name:
         return {}, set(), {}, {}
 
-    weather_context = _weather_context_text(weather)
+    # 気象のヒント(高湿度・低風速なら霧が出やすい等)をプロンプトに含めると、ラベル(目的変数)が
+    # 予測モデルの説明変数(同じ気象値)の影響を受けてしまい、予測精度の評価が甘くなる。人間が確認した画像での
+    # 比較(2026-10-02、管理者タブ「仮検証」のラベル品質ページ)でも、ヒントなしの方が良かったため、
+    # 既定ではヒントを付けない。従来の挙動に戻す場合は.envにGEMINI_WEATHER_HINT=1を設定する。
+    weather_context = _weather_context_text(weather) if os.environ.get("GEMINI_WEATHER_HINT", "0") == "1" else ""
     contents, index_to_name = _build_contents(list(resized_by_name.items()), weather_context=weather_context)
     primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     parsed = _classify_with_model(contents, primary_model, api_keys)
