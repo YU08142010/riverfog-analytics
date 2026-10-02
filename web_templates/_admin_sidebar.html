@@ -16,7 +16,7 @@
         {"name": "精度レポート", "endpoint": "admin_accuracy_report", "icon": "accuracy"},
         {"name": "カメラ稼働率", "endpoint": "admin_camera_health", "icon": "camera-health"},
         {"name": "Gemini状況", "endpoint": "admin_gemini", "icon": "gemini"},
-    ]},
+    ] + ([{"name": "仮検証(二値モデル)", "endpoint": "admin_experiment", "icon": "model"}] if experiment_tab_available else [])},
     {"label": "コンテンツ", "links": [
         {"name": "お知らせ/アンケート", "endpoint": "admin_announcements", "extra_prefix": "/admin/announcements/", "icon": "announcement"},
         {"name": "アカウント管理", "endpoint": "admin_accounts", "badge": pending_count, "icon": "account"},

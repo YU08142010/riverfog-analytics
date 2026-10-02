@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}仮検証(二値モデル){% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+{% set experiment_tab_active = 'model' %}
+{% include "_experiment_tabs.html" %}
+
+{% macro metric_table(rows) %}
+<div class="table-scroll">
+<table class="obs-table" style="width:100%;">
+    <thead><tr>
+        <th>方式</th><th>PR-AUC</th><th>川霧F1</th><th>適合率</th><th>再現率</th><th>Brier</th><th>Brier skill</th><th>(参考)最良F1</th><th>評価件数</th><th>川霧件数</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr {% if r.id == 'V4' %}style="font-weight:600;"{% endif %}>
+        <td>{{ r.label }}</td>
+        <td>{{ fmt(r.ap) }}</td><td>{{ fmt(r.f1) }}</td><td>{{ fmt(r.precision) }}</td><td>{{ fmt(r.recall) }}</td>
+        <td>{{ fmt(r.brier, 4) }}</td><td>{{ fmt(r.bss, 2) }}</td><td>{{ fmt(r.best_f1) }}</td>
+        <td>{{ "{:,}".format(r.n) }}</td><td>{{ "{:,}".format(r.fog_n) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endmacro %}
+
+<div class="card">
+    <h2>仮検証: 二値・全地点共通モデル + Open-Meteo過去予報</h2>
+    <p class="muted">
+        現行の本番モデル(<code>fog_model.py</code> / <code>predict.py</code>)には一切手を加えず、別系統で次の2点だけを検証します。
+        ここの結果が、本番の予測・グラフ・答え合わせに影響することはありません。
+    </p>
+    <ul>
+        <li><strong>提案1</strong>: 目的変数を「川霧の有無(コード1〜3)」の二値にし、全地点で1つのLightGBMを共有する(地点ごとのモデルや11クラス分類をやめる)。</li>
+        <li><strong>提案2</strong>: 学習・評価に、実況(再解析値)ではなく、Open-Meteoの過去の予報値を使う(本番は実況で学習し、予報値で予測しているため、入力の性質がずれている)。</li>
+    </ul>
+    <p>
+        {% if running %}
+            <span class="muted">実行中です。数分〜十数分かかります。完了したらページを再読み込みしてください。</span>
+            {% if status and status.step %}<span class="muted">(現在の段階: {{ status.step }} / 更新 {{ status.updated_at }})</span>{% endif %}
+        {% else %}
+            <form method="post" action="{{ url_for('admin_run', key='experiment') }}" style="display:inline;" data-ajax data-ajax-reload>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="button">今すぐ再計算する</button>
+            </form>
+            {% if status and status.state == 'error' %}
+                <span style="color:var(--color-danger);">前回の実行は失敗しました: {{ status.error }}</span>
+            {% endif %}
+        {% endif %}
+        {% if view %}<span class="muted">最終計算: {{ view.meta.generated_at }}(所要 {{ view.meta.duration_sec }} 秒)</span>{% endif %}
+    </p>
+</div>
+
+{% if not view %}
+<div class="card">
+    <p class="muted">まだ結果がありません。上の「今すぐ再計算する」を押すと計算を始めます。</p>
+</div>
+{% else %}
+
+<div class="card">
+    <h2>要点(数値から自動生成)</h2>
+    <ul>
+        {% for line in view.conclusions %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <p class="muted">F1のしきい値は、評価データを使わず、学習データの内側(月ごとに分けた検証)で決めています。「(参考)最良F1」は評価データ自身で最大になるしきい値を選んだ楽観的な値で、方式の比較には使わないでください。</p>
+</div>
+
+<div class="card">
+    <h2>データの概要</h2>
+    <p class="muted">
+        {{ view.meta.date_range[0] }} 〜 {{ view.meta.date_range[1] }} / {{ view.meta.n_stations }}地点 /
+        {{ "{:,}".format(view.meta.n_rows) }}行(地点×時刻、実況と過去予報の両方がそろう時刻のみ) /
+        川霧の発生率 {{ "%.2f"|format(view.meta.fog_rate * 100) }}%。
+        過去予報は{{ view.meta.historical_forecast.range[0] }}〜{{ view.meta.historical_forecast.range[1] }}分(代表地点1か所)。
+    </p>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>月</th><th>行数</th><th>川霧の件数</th><th>地点数</th></tr></thead>
+        <tbody>
+        {% for m in view.meta.months %}
+        <tr><td>{{ m.month }}</td><td>{{ "{:,}".format(m.n) }}</td><td>{{ "{:,}".format(m.fog_n) }}</td><td>{{ m.stations }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">ラベルがある月は限られており、10月〜2月(川霧の本番と思われる時期)のラベルはまだありません。結果は夏〜初秋のデータに基づく暫定値です。</p>
+</div>
+
+<div class="card">
+    <h2>方式の比較</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="方式ごとのPR-AUCと川霧F1" data-chart-url="{{ url_for('admin_experiment_chart', name='variants') }}"></div></div>
+    <ul class="muted">
+        {% for id, v in view.variants.items() %}<li><strong>{{ short[id] }}</strong>: {{ v.desc }}</li>{% endfor %}
+    </ul>
+</div>
+
+{% if view.cond %}
+<div class="card">
+    <h2>川霧の出やすさの条件指標</h2>
+    <p class="muted">
+        先行研究で示された条件(気温{{ view.cond.definition['気温'] }}、気温露点差{{ view.cond.definition['気温露点差'] }}、風速{{ view.cond.definition['風速'] }})に、
+        時間帯({{ view.cond.definition['時間帯'] }})を加えた4条件のうち、いくつ満たしているか(0〜4)を指標にしています。
+        数値の範囲は研究の値をそのまま使い、このデータで調整していません。時間帯の枠だけは、データを見て決めたもので、やや楽観的になりえます。
+        「条件指標のみ(ルール)」は、この数だけから学習期間の発生率を確率とする単純なルールで、「V4+条件指標」は、V4のモデルに条件の成否と数を特徴量として足したものです。
+    </p>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="条件の数ごとの川霧の発生率" data-chart-url="{{ url_for('admin_experiment_chart', name='cond') }}"></div></div>
+    {% set fc = view.cond.forecast %}
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>満たした条件の数</th><th>該当行数</th><th>川霧の件数</th><th>川霧の発生率(過去予報値)</th><th>全体比</th></tr></thead>
+        <tbody>
+        {% for r in fc.by_count %}
+        <tr><td>{{ r.count }}個</td><td>{{ "{:,}".format(r.n) }}</td><td>{{ "{:,}".format(r.fog_n) }}</td>
+            <td>{{ "%.1f"|format((r.rate or 0) * 100) }}%</td><td>{{ fmt(r.ratio, 1) }}倍</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if fc.by_month %}
+    <p class="muted">月ごとの一貫性(川霧が20件以上ある月): {% for m in fc.by_month %}{{ m.month }}: 3個以上 {{ "%.1f"|format(m.rate_3plus * 100) }}% / 1個以下 {{ "%.1f"|format(m.rate_1minus * 100) }}%{% if not loop.last %} | {% endif %}{% endfor %}</p>
+    {% endif %}
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度(条件指標を足したモデル)" data-chart-url="{{ url_for('admin_experiment_chart', name='importance_cond') }}"></div></div>
+    <p class="muted">気温20〜25℃は夏〜初秋の川霧向けの条件です。気温が下がる10月以降(ラベルがまだありません)にこの範囲のまま使えるかは、冬のデータが貯まってから確認が必要です。</p>
+</div>
+{% endif %}
+
+{% if view.chrono %}
+<div class="card">
+    <h2>時系列ホールドアウト(学習: {{ view.chrono.window[0] }} より前 → 評価: {{ view.chrono.window[0] }}〜{{ view.chrono.window[1] }})</h2>
+    <p class="muted">運用に最も近い評価です(過去で学習して未来を予測)。学習 {{ "{:,}".format(view.chrono.n_train) }}行 / 評価 {{ "{:,}".format(view.chrono.n_test) }}行。評価期間は川霧が少ない時期で、件数が少ないため、数値のぶれが大きい点に注意してください。</p>
+    {{ metric_table(view.chrono_rows) }}
+</div>
+{% endif %}
+
+{% if view.lomo %}
+<div class="card">
+    <h2>月別leave-one-out(その月を除いた全期間で学習 → その月を評価)</h2>
+    <p class="muted">評価した月: {{ view.lomo.test_months|join(', ') }}(川霧が{{ 150 }}時間以上ある月のみ)。学習に評価月より後のデータも含むため、時系列としては楽観的ですが、評価件数が多く安定しています。</p>
+    {{ metric_table(view.lomo_rows) }}
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="月別のPR-AUC" data-chart-url="{{ url_for('admin_experiment_chart', name='months') }}"></div></div>
+</div>
+{% endif %}
+
+{% if view.comp %}
+<div class="card">
+    <h2>現行の本番との比較(同じ地点・同じ時刻)</h2>
+    <p class="muted">
+        predictions.dbの検証済み予測のうち、評価期間({{ view.chrono.window[0] }}以降)の同じ地点・時刻だけを取り出して比べています
+        (本番は1つの時刻に複数の発表時刻の予測があるため、リードタイムが最も短い1件を使用。中央値 {{ "%.1f"|format(view.comp.median_lead_hours) }}時間前の予報)。
+        {{ "{:,}".format(view.comp.n) }}件、川霧 {{ view.comp.fog_n }}件(発生率 {{ "%.2f"|format(view.comp.rate * 100) }}%)。
+    </p>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>方式</th><th>川霧F1</th><th>適合率</th><th>再現率</th><th>PR-AUC</th><th>Brier</th></tr></thead>
+        <tbody>
+        <tr><td>現行の本番</td><td>{{ fmt(view.comp.production.f1) }}</td><td>{{ fmt(view.comp.production.precision) }}</td><td>{{ fmt(view.comp.production.recall) }}</td><td>{{ fmt(view.comp.production.ap) }}</td><td>{{ fmt(view.comp.production.brier, 4) }}</td></tr>
+        <tr style="font-weight:600;"><td>二値 予報値→予報値</td><td>{{ fmt(view.comp.new_v4.f1) }}</td><td>{{ fmt(view.comp.new_v4.precision) }}</td><td>{{ fmt(view.comp.new_v4.recall) }}</td><td>{{ fmt(view.comp.new_v4.ap) }}</td><td>{{ fmt(view.comp.new_v4.brier, 4) }}</td></tr>
+        <tr><td>発生率だけを返す基準</td><td colspan="4" class="muted">-</td><td>{{ fmt(view.comp.climatology_brier, 4) }}</td></tr>
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">注意: 本番は11クラスの分類結果が「川霧」に入るかどうかでF1を出し、新モデルは学習データだけで決めたしきい値でF1を出しています。PR-AUCとBrierはどちらも確率そのものの評価で、しきい値に依存しません。</p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>適合率-再現率曲線</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="適合率-再現率曲線" data-chart-url="{{ url_for('admin_experiment_chart', name='pr') }}"></div></div>
+</div>
+
+<div class="card">
+    <h2>確率の信頼性(較正)</h2>
+    <p class="muted">予測した確率が、実際の発生率と合っているかの確認です。対角線より上は確率が低すぎ、下は高すぎます。</p>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="較正曲線" data-chart-url="{{ url_for('admin_experiment_chart', name='reliability') }}"></div></div>
+</div>
+
+<div class="card">
+    <h2>時刻別の精度</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="時刻別の川霧F1" data-chart-url="{{ url_for('admin_experiment_chart', name='hours') }}"></div></div>
+</div>
+
+<div class="card">
+    <h2>特徴量の重要度</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度" data-chart-url="{{ url_for('admin_experiment_chart', name='importance') }}"></div></div>
+    <p class="muted">相対湿度と気温露点差のように、ほぼ同じ情報を持つ特徴量があると、重要度が分散して見えます。1つずつの値を過信せず、傾向をつかむ目的で見てください。</p>
+    {% if view.gain %}
+    <details>
+        <summary>参考: 全データで学習したモデルのgain(分割での貢献度の比率)</summary>
+        <div class="table-scroll">
+        <table class="obs-table">
+            <thead><tr><th>特徴量</th><th>gainの比率</th></tr></thead>
+            <tbody>{% for g in view.gain %}<tr><td>{{ g.feature }}</td><td>{{ "%.1f"|format(g.gain_share * 100) }}%</td></tr>{% endfor %}</tbody>
+        </table>
+        </div>
+    </details>
+    {% endif %}
+</div>
+
+{% if view.spread %}
+<div class="card">
+    <h2>気温露点差ごとの川霧の発生率(予報値)</h2>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>気温露点差</th><th>件数</th><th>川霧の発生率</th></tr></thead>
+        <tbody>{% for s in view.spread %}<tr><td>{{ s.range }}</td><td>{{ "{:,}".format(s.n) }}</td><td>{{ "%.2f"|format(s.fog_rate * 100) + "%" if s.fog_rate is not none else "-" }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+    <p class="muted">露点差が小さい(空気が湿っている)ほど川霧が出やすい傾向はありますが、小さくても発生率は数%にとどまり、露点差だけでは川霧を言い当てにくいことを示します。</p>
+</div>
+{% endif %}
+
+{% if view.stations %}
+<div class="card">
+    <h2>地点別(二値 予報値→予報値、月別leave-one-out、川霧が多い順)</h2>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>地点</th><th>川霧件数</th><th>評価件数</th><th>PR-AUC</th><th>気候値のPR-AUC</th><th>川霧F1</th></tr></thead>
+        <tbody>
+        {% for r in view.stations %}
+        <tr><td>{{ r.station }}</td><td>{{ r.fog_n }}</td><td>{{ "{:,}".format(r.n) }}</td><td>{{ fmt(r.ap) }}</td><td>{{ fmt(r.clim_ap) }}</td><td>{{ fmt(r.f1) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">川霧が20時間以上ある地点のみ表示しています。</p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>この検証の限界(解釈の際の注意)</h2>
+    <ul>
+        <li><strong>過去予報の性質</strong>: Open-Meteoのhistorical-forecast-apiは、各時刻の直近のモデル出力をつなげたもので、リードタイムは約0〜1日です。数日先の予報の精度は、この検証では評価できません(本番の2日目以降の予測の評価ではありません)。</li>
+        <li><strong>気象は代表地点1か所</strong>: 本番の地点別予報や地点固有の観測値(station_weather)は使っていません。地点の違いは「地点別川霧発生率」で表しています。</li>
+        <li><strong>季節</strong>: 10月〜2月のラベルがないため、秋〜冬の川霧への性能は不明です。「月」の特徴量は、学習にない月へ外挿してしまうため使っていません。</li>
+        <li><strong>ラベルの品質</strong>: ラベルはGeminiによる画像判定です。確信度lowのラベルは本番と同様に除外していますが、誤判定は含まれます。</li>
+        <li><strong>評価の揺らぎ</strong>: 川霧は全体の約{{ "%.1f"|format(view.meta.fog_rate * 100) }}%と少なく、特に時系列ホールドアウトは件数が少ないため、小数点以下の差は偶然の範囲に収まりえます。</li>
+        <li><strong>本番への反映</strong>: この画面の結果は参考値です。本番モデルは自動では置き換わりません。</li>
+    </ul>
+</div>
+
+{% endif %}
+
+{% if log_lines %}
+<div class="card">
+    <h2>実行ログ(末尾)</h2>
+    <div class="table-scroll"><pre class="log-viewer">{{ log_lines|join('\n') }}</pre></div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}仮検証(ラベル品質){% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+{% set experiment_tab_active = 'labels' %}
+{% include "_experiment_tabs.html" %}
+
+<div class="card">
+    <h2>ラベル品質の調査</h2>
+    <p class="muted">
+        予測モデルの学習・評価に使っている川霧のラベル(Geminiによる画像判定)が、どのくらい・どのように間違っているかを調べるページです。
+        人間による訂正の記録(<code>phenomena_corrections</code>)と、人間が「問題なし」と確認した記録(<code>observation_reports</code>)を集計しています。
+        判定者は匿名化(A, B, …)しており、個人は特定できません。ここから本番のデータが変更されることはありません。
+    </p>
+    <p>
+        {% if running %}<span class="muted">集計中です。数秒後に再読み込みしてください。</span>
+        {% else %}
+        <form method="post" action="{{ url_for('admin_run', key='label_audit') }}" style="display:inline;" data-ajax data-ajax-reload>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button">今すぐ再集計する</button>
+        </form>
+        {% endif %}
+        {% if audit %}<span class="muted">最終集計: {{ audit.meta.generated_at }}</span>{% endif %}
+    </p>
+</div>
+
+{% if not audit %}
+<div class="card"><p class="muted">まだ集計結果がありません。「今すぐ再集計する」を押してください。</p></div>
+{% else %}
+
+<div class="card">
+    <h2>要点</h2>
+    <ul>
+        {% set conf = {} %}{% for r in audit.by_confidence %}{% set _ = conf.update({r.confidence: r}) %}{% endfor %}
+        {% set fog_row = (audit.confidence_by_group | selectattr('group', 'equalto', '川霧(1〜3)') | list | first) %}
+        <li><strong>Geminiの確信度は、誤りの目印としては弱い</strong>:
+            人間が確認した{{ audit.meta.n_reviewed }}件のうち、訂正された割合は
+            high {{ "%.0f"|format((conf.high.corrected_rate or 0) * 100) }}%({{ conf.high.corrected }}/{{ conf.high.reviewed }})、
+            medium {{ "%.0f"|format((conf.medium.corrected_rate or 0) * 100) }}%({{ conf.medium.corrected }}/{{ conf.medium.reviewed }})、
+            low {{ "%.0f"|format((conf.low.corrected_rate or 0) * 100) }}%({{ conf.low.corrected }}/{{ conf.low.reviewed }})。
+            確信度が高くても6割以上が訂正されており、confidence が high でも安心できません。
+            確認の対象が自動検出で疑わしいとされたラベルに偏っているため、ラベル全体の誤り率ではありません。</li>
+        {% if fog_row %}
+        <li><strong>川霧のラベルの多くは medium</strong>:
+            Geminiが川霧(1〜3)と判定した{{ fog_row.high + fog_row.medium + fog_row.low }}件のうち、high {{ fog_row.high }}件、medium {{ fog_row.medium }}件、low {{ fog_row.low }}件。
+            「現象なし」ではほとんどが high なのと対照的です。学習では現在 low だけを除外しており、
+            medium を単純に除外すると川霧のデータが大きく減るため、除外ではなく別の対処(例: 重みを下げる、再判定する)が必要です。</li>
+        {% endif %}
+        <li><strong>過検出の傾向</strong>:
+            人間に訂正された川霧(1〜3)のラベル{{ audit.flow.n_gemini_fog_labels_reviewed_as_corrected }}件のうち、
+            {{ audit.flow.fog_to_clear }}件は「現象なし」に、{{ audit.flow.fog_to_other }}件は別の現象に直されました。
+            逆に「現象なし」から川霧に直されたのは{{ audit.flow.clear_to_fog }}件です。</li>
+        <li><strong>判定者どうしの一致度は、現状では測れません</strong>:
+            同じ画像を2人以上が訂正したケースが{{ audit.reviewers.targets_reviewed_by_2plus_people }}件(訂正対象{{ audit.reviewers.distinct_targets }}件中)です。
+            人間の判断のばらつきを測るには、同じ画像を複数人が独立に判定する課題が必要です。</li>
+        {% if audit.escalation %}
+        <li><strong>上位モデルによる再判定(自動修正)</strong>:
+            設定モデル <code>{{ (audit.escalation.configured_models or {}).get('GEMINI_ESCALATION_MODEL', '(未設定)') }}</code>、
+            連続失敗 {{ audit.escalation.get('consecutive_failures', '-') }}回。
+            本日の再判定の失敗 {{ audit.escalation.get('today_escalation_failed', '-') }}回、成功 {{ audit.escalation.get('today_escalation_reasoning', '-') }}件。</li>
+        {% endif %}
+    </ul>
+    <p class="muted">これらは、自動検出で疑わしいとされたラベルが中心の標本から出した数値です。ラベル全体の誤り率ではありません。</p>
+</div>
+
+<div class="card">
+    <h2>Geminiの確信度と訂正の関係</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="確信度別の訂正率" data-chart-url="{{ url_for('admin_experiment_label_chart', name='conf') }}"></div></div>
+    <p class="muted">{{ audit.by_confidence_note }}</p>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>確信度</th><th>人間が確認した件数</th><th>うち訂正</th><th>訂正された割合</th><th>全ラベルに占める割合</th></tr></thead>
+        <tbody>
+        {% for r in audit.by_confidence %}
+        <tr><td>{{ r.confidence }}</td><td>{{ r.reviewed }}</td><td>{{ r.corrected }}</td>
+            <td>{{ "%.0f"|format((r.corrected_rate or 0) * 100) }}%</td><td>{{ "%.1f"|format(r.share_of_all_labels * 100) }}%</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h2>どう訂正されたか</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="訂正の内訳" data-chart-kind="heatmap" data-chart-url="{{ url_for('admin_experiment_label_chart', name='flow') }}" style="max-width:560px;"></div></div>
+    <p class="muted">コード: 0=現象なし、1〜3=川霧(薄い/普通/濃い)、4〜6=全体霧、7・8=層雲、9=霧雨、10=雨。対角線(変化なし)は{{ audit.flow.unchanged }}件のみです。</p>
+</div>
+
+<div class="card">
+    <h2>誤りの具体例(川霧 → 現象なし に訂正されたもの)</h2>
+    <p class="muted">
+        <strong>観察メモ(2026-10-02、訂正された画像18枚を目視で確認した私の印象。正解データではありません)</strong>:
+        激しい瀬の白波・泡を「川面から立ち上る白いもや」と取り違えたもの、レンズに付いた水滴、平坦な曇天光のもの、が目立ちました。
+        一方、本当にうっすら霞んでいて、人によって「現象なし」か「薄い霧」か判断が分かれそうな画像も混じっています(これが個人差の源と思われます)。
+    </p>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>日時</th><th>地点</th><th>Gemini→人間</th><th>確信度</th><th>Geminiの判定理由</th></tr></thead>
+        <tbody>
+        {% for e in audit.examples %}
+        <tr><td>{{ e.datetime }}</td><td>{{ e.station }}</td><td>{{ e.gemini }} → {{ e.human }}</td><td>{{ e.confidence or '-' }}</td><td>{{ e.reasoning or '-' }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">画像は「観測アーカイブ」から日時・地点で確認できます。</p>
+</div>
+
+<div class="card">
+    <h2>時刻別・地点別</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="時刻別の訂正件数" data-chart-url="{{ url_for('admin_experiment_label_chart', name='hours') }}"></div></div>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>地点(訂正が多い順)</th><th>人間が確認した件数</th><th>うち訂正</th></tr></thead>
+        <tbody>{% for s in audit.by_station %}<tr><td>{{ s.station }}</td><td>{{ s.reviewed }}</td><td>{{ s.corrected }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h2>学習データの構成(Geminiの判定した現象 × 確信度)</h2>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="現象別の確信度" data-chart-url="{{ url_for('admin_experiment_label_chart', name='groups') }}"></div></div>
+    <p class="muted">川霧(1〜3)の何割が medium か、が、medium を除外または重み付けを下げた場合に失われる川霧データの量の目安です。</p>
+</div>
+
+<div class="card">
+    <h2>判定者(匿名)</h2>
+    <div class="table-scroll">
+    <table class="obs-table">
+        <thead><tr><th>判定者</th><th>訂正件数</th></tr></thead>
+        <tbody>{% for r in audit.reviewers.counts %}<tr><td>{{ r.reviewer }}</td><td>{{ r.n }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+    <p class="muted">上位2人で訂正全体の{{ "%.0f"|format((audit.reviewers.top2_share or 0) * 100) }}%を占めます。同じ画像を複数人が訂正した例はないため、個人差(判定者ごとの基準のずれ)はまだ測れません。</p>
+</div>
+
+{% endif %}
+
+<div class="card">
+    <h2>Geminiの設定の比較(人間が確認した画像での実測)</h2>
+    {% if ev_rows %}
+    <p class="muted">
+        正解は、人間が訂正した画像(訂正後のコード)と、人間が「問題なし」と確認した画像(元のコード)です。一回限りの評価で、実行日時: {{ eval_generated or '-' }}。
+        1回のリクエストに最大10地点をまとめて渡しています。「気象あり」は、本番と同様に撮影時刻の気温・湿度・風速・降水量と「高湿度・低風速・無降水は霧が発生しやすい」というヒントをプロンプトに含めた場合、「気象なし」は含めない場合です。
+    </p>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="Gemini設定の比較" data-chart-url="{{ url_for('admin_experiment_label_chart', name='models') }}"></div></div>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>設定</th><th>モデル</th><th>件数</th><th>グループ一致率</th><th>川霧F1</th><th>適合率</th><th>再現率</th><th>現象なしを川霧と誤判定</th><th>訂正済みでの一致率</th><th>確認済みでの一致率</th></tr></thead>
+        <tbody>
+        {% for r in ev_rows %}
+        <tr><td>{{ r.name }}{% if r.stopped %}<br><span class="muted">(途中で停止)</span>{% endif %}</td><td>{{ r.model }}</td><td>{{ r.n or '-' }}</td>
+            <td>{{ fmt(r.group, 3) }}</td><td>{{ fmt(r.fog_f1, 3) }}</td><td>{{ fmt(r.fog_prec, 3) }}</td><td>{{ fmt(r.fog_rec, 3) }}</td>
+            <td>{{ fmt(r.fp_on_truth_clear, 3) }}</td><td>{{ fmt(r.group_acc_corrected, 3) }}</td><td>{{ fmt(r.group_acc_confirmed, 3) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">
+        注意: 正解データは、元のGeminiの判定が疑わしいとされた画像に偏っています(訂正済みの画像では、元の判定は定義上ほぼ誤り)。
+        そのため、絶対的な正解率ではなく、設定どうしの相対的な比較として見てください。件数が少ない(約190件)ので、小さな差は偶然の範囲に収まりえます。
+    </p>
+    {% else %}
+    <p class="muted">まだ評価が実行されていません。</p>
+    {% endif %}
+</div>
+
+{% if model_rows %}
+<div class="card">
+    <h2>再判定(エスカレーション)に使うモデルの候補比較</h2>
+    <p class="muted">人間が確認した80件(気象ヒントなし)での比較です。「完走せず」は、Google側の高負荷(503エラー・タイムアウト)で最後まで実行できなかったことを示し、モデルの精度とは関係ありません。件数が少ないため、小さな差は偶然の範囲です。</p>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>設定</th><th>評価できた件数</th><th>グループ一致率</th><th>川霧F1</th><th>適合率</th><th>再現率</th><th>現象なしを川霧と誤判定</th></tr></thead>
+        <tbody>
+        {% for r in model_rows %}
+        <tr><td>{{ r.name }}{% if r.failed %}<br><span class="muted">(完走せず)</span>{% endif %}</td><td>{{ r.n or '-' }}</td>
+            <td>{{ fmt(r.group, 3) }}</td><td>{{ fmt(r.fog_f1, 3) }}</td><td>{{ fmt(r.fog_prec, 3) }}</td><td>{{ fmt(r.fog_rec, 3) }}</td><td>{{ fmt(r.fp_on_truth_clear, 3) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>対応履歴</h2>
+    {% if actions %}
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%;">
+        <thead><tr><th>日付</th><th>内容</th><th>理由・詳細</th></tr></thead>
+        <tbody>{% for a in actions %}<tr><td>{{ a.date }}</td><td>{{ a.title }}</td><td>{{ a.detail }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">まだ対応は記録されていません。</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>この調査の限界</h2>
+    <ul>
+        <li>人間の訂正は2026-09-01以降の約{{ audit.meta.n_reviewed if audit else '-' }}件のみで、5人程度の観測者によるものです。</li>
+        <li>訂正の対象は自動検出で疑わしいとされたラベルが中心で、無作為な標本ではありません。誤り率を全体に一般化することはできません。</li>
+        <li>観察メモは私(AI)の目視の印象で、人間の判定やGeminiの判定と同列の正解ではありません。</li>
+    </ul>
+</div>
+{% endblock %}

@@ -446,6 +446,8 @@ RUNNABLE_SCRIPTS = {
     "collect": "collect.py",
     "predict": "predict.py",
     "backfill_weather": "backfill_weather.py",
+    "experiment": "experiment_model.py",  # 管理者タブ「仮検証」(二値モデル+過去予報)の再計算
+    "label_audit": "label_audit.py",  # 管理者タブ「仮検証」のラベル品質ページの再集計
 }
 
 SYSTEMD_UNITS = ["river-fog-collect.timer", "river-fog-collect.service", "river-fog-web.service"]
@@ -10332,6 +10334,16 @@ def respond_announcement(announcement_id):
         return jsonify({"message": message, "success": True})
     flash(message, "success")
     return redirect(request.referrer or url_for("dashboard"))
+
+
+# 管理者タブ「仮検証(二値モデル)」。本番の予測モデルとは別系統の検証結果を表示する
+# (experiment_model.py / experiment_view.py)。読み込みに失敗しても他の画面に影響しないよう、
+# 失敗時はログに残してこのタブだけ無効にする。
+try:
+    import experiment_view
+    experiment_view.register(app, requires_admin, _cached_chart_json, _is_script_running)
+except Exception:
+    log.exception("Failed to register the experiment (仮検証) admin tab")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+<nav class="page-tabs" style="display:flex; gap:0.5rem; margin-bottom:0.8rem; flex-wrap:wrap;">
+    <a class="button {{ '' if experiment_tab_active == 'model' else 'cancel' }}" href="{{ url_for('admin_experiment') }}">予測モデルの検証</a>
+    <a class="button {{ '' if experiment_tab_active == 'labels' else 'cancel' }}" href="{{ url_for('admin_experiment_labels') }}">ラベル品質の調査</a>
+</nav>
