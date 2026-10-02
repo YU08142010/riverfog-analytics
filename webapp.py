@@ -6957,6 +6957,21 @@ def _check_slot_change_allowed(current_item_id, current_billing_info, target_ite
     return None
 
 
+def _next_billing_first_of_month(base_dt=None):
+    """次回請求日として「翌月1日 00:00:00 JST」の文字列を返す。
+    base_dt が None の場合は現在時刻(JST)を使う。
+    月額使用料の請求タイミングを月初に統一するために使う。"""
+    if base_dt is None:
+        base_dt = datetime.now(JST)
+    if base_dt.month == 12:
+        first = base_dt.replace(year=base_dt.year + 1, month=1, day=1,
+                                hour=0, minute=0, second=0, microsecond=0)
+    else:
+        first = base_dt.replace(month=base_dt.month + 1, day=1,
+                                hour=0, minute=0, second=0, microsecond=0)
+    return first.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _charge_billing_if_due(conn, user_id, kind, item_id, next_billing_at, fee, advance_billing_fn):
     """装備しようとしているアイテムの月額使用料の次回請求日が過ぎていれば、装着を許可する
     前にその場で1ヶ月分を請求する(装備中のものだけを課金する使用料モデルのため、装着操作
@@ -6978,7 +6993,7 @@ def _charge_billing_if_due(conn, user_id, kind, item_id, next_billing_at, fee, a
     source = f"subscription_fee:{kind}:{item_id}:{next_billing_at}"
     charged = users.grant_points(conn, user_id, source, -fee, now_str)
     if charged:
-        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = _next_billing_first_of_month(now)
         advance_billing_fn(next_billing_str)
     return True, ""
 
@@ -6997,7 +7012,7 @@ def game_shop_buy():
             return _finish("game_shop", "そのフレームは既に持っています。", success=False)
         now = datetime.now(JST)
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = _next_billing_first_of_month(now)
         ok = users.spend_points_if_available(
             conn, my_id, frame["cost"],
             lambda c: users.purchase_frame(c, my_id, frame["id"], frame["cost"], now_str, next_billing_str),
@@ -7100,7 +7115,7 @@ def game_shop_buy_cosmetic(category):
                 return _finish("game_shop", "ジェムが足りません。", success=False)
             gems = users.available_gems(conn, my_id)
         else:
-            next_billing_str = (now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+            next_billing_str = _next_billing_first_of_month(now)
             ok = users.spend_points_if_available(
                 conn, my_id, item["cost"],
                 lambda c: users.purchase_cosmetic(
@@ -7253,7 +7268,7 @@ def _charge_due_subscriptions():
     try:
         wall_now = datetime.now(JST)
         now_str = wall_now.strftime("%Y-%m-%d %H:%M:%S")
-        next_billing_str = (wall_now + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = _next_billing_first_of_month(wall_now)
 
         for user_id, frame_id, _cost, next_billing_at in users.list_equipped_frames_due(conn, now_str):
             frame_def = FRAME_BY_ID.get(frame_id)
@@ -7345,7 +7360,7 @@ def game_shop_gacha():
     try:
         now_dt = datetime.now(JST)
         now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        next_billing_str = (now_dt + relativedelta(months=1)).strftime("%Y-%m-%d %H:%M:%S")
+        next_billing_str = _next_billing_first_of_month(now_dt)
         candidates = []
         for category, (catalog, cosmetic_category, label) in COSMETIC_CATALOGS.items():
             owned = users.owned_cosmetic_ids(conn, my_id, cosmetic_category)
