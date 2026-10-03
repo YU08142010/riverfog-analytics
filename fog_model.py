@@ -1214,6 +1214,13 @@ def train_location_models(main_df, phenom_df, phenom_cols, lat, lon,
             "model_type": pipe.model_type, "blend_weight": pipe.weight,
             "fog_threshold": threshold, "pooled": False,
             "y_test": y_test.to_numpy(), "y_pred": np.asarray(y_pred),
+            # apply_regression_guardで前回モデルにも同じテストデータを予測させるため(保存はしない。
+            # save_model_state参照)。
+            "X_test": X_test,
+            "test_datetimes": sub["datetime"].iloc[len(X_train):].to_numpy(),
+            # このモデルが学習に使った最後の日時。翌日以降の回帰判定で、このモデルが学習済みの
+            # 行を比較から除くために保存する(_paired_test_predictions参照)。
+            "train_end": pd.Timestamp(sub["datetime"].iloc[len(X_train) - 1]),
             "rf_only": rf_only, "xgb_only": xgb_only, "lgbm_only": lgbm_only,
             "hybrid_only": hybrid_only, "rf_lgbm_only": rf_lgbm_only, "triple_only": triple_only,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
@@ -1376,6 +1383,7 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
 
     log.info("Training pooled model to rescue %d location(s) (%d total rows)", len(skipped_cols), len(pooled))
     pooled_result = _fit_best_model(Xp_train, yp_train)
+    pooled_train_end = pd.Timestamp(pooled["__datetime"].iloc[len(Xp_train) - 1])
     pooled_pipe, pooled_tuned, pooled_threshold = (
         pooled_result["pipe"], pooled_result["tuned"], pooled_result["threshold"],
     )
@@ -1441,6 +1449,9 @@ def _rescue_with_pooled_model(models, merged, phenom_cols, feature_names, cross_
             "fog_threshold": pooled_threshold, "pooled": True,
             "y_test": (y_test2.to_numpy() if y_test2 is not None else None),
             "y_pred": (np.asarray(y_pred2) if y_pred2 is not None else None),
+            "X_test": (X_test2 if can_evaluate else None),
+            "test_datetimes": (sub["datetime"].iloc[len(X_train2):].to_numpy() if can_evaluate else None),
+            "train_end": pooled_train_end,
             "rf_only": rf_only2, "xgb_only": xgb_only2, "lgbm_only": lgbm_only2,
             "hybrid_only": hybrid_only2, "rf_lgbm_only": rf_lgbm_only2, "triple_only": triple_only2,
             "cross_fog_index_last": _last_valid_value(cross_rates[col]),
@@ -1780,7 +1791,17 @@ def save_model_state(models, path=MODEL_STATE_PATH):
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     trained_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-    state = {col: {**info, "trained_at": trained_at} for col, info in models.items()}
+    # X_testは回帰判定(apply_regression_guard)のためだけに持つ一時データなので保存しない。
+    # trained_atは、ロールバックで前回モデルを使い続ける地点では前回の値(そのモデルを実際に
+    # 学習した日時)を残す。以前は毎回上書きしていたため、何週間も更新が止まっている地点も
+    # 「今日学習した」ように見えていた(2026-10-03の調査で判明)。
+    state = {
+        col: {
+            **{k: v for k, v in info.items() if k not in ("X_test", "test_datetimes")},
+            "trained_at": info.get("trained_at") or trained_at,
+        }
+        for col, info in models.items()
+    }
     # 前世代を1つだけ.bakとして残す(このファイルが破損した場合のフォールバック用。
     # 歴代全部は保持しない。精度の推移自体はappend_metrics_historyの履歴CSVで追える)。
     if path.exists():
@@ -1810,46 +1831,90 @@ def _score_from_predictions(y_true, y_pred, fog_labels=None):
     return float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
 
 
-def _bootstrap_scores(y_true, y_pred, n_boot, seed):
-    """テストデータをn_boot回、復元抽出でリサンプリングし、そのたびのスコアを配列で返す。
-    川霧F1を使うかどうか(元のテストデータ全体に川霧の実例があるか)は最初に1回だけ判定し、
-    以後の全リサンプルで同じ評価基準を使う。判定をリサンプルごとに繰り返すと、川霧の実例が
-    少ない地点では特定のリサンプルだけ偶然川霧が0件になってNaN扱い(→全体F1にフォールバック)
-    となり、同じブートストラップ分布の中で川霧F1と全体F1が混在してしまう
-    (2026-09-13の監査で、稀にしか川霧が起きない地点ほど回帰判定がぶれる原因として指摘された)。
+def _fog_labels_present(y_true):
+    """y_trueに実際に含まれる川霧コード(SUMMARY_FOG_CODES)のリスト。無ければNone
+    (その場合は川霧F1ではなく全体F1で評価する。_fog_class_f1と同じ考え方)。"""
+    present = set(pd.Series(y_true).unique())
+    labels = [c for c in sorted(SUMMARY_FOG_CODES) if c in present]
+    return labels or None
+
+
+def _paired_test_predictions(prev_info, new_info):
+    """今回のテストデータに対する (y_true, 今回モデルの予測, 前回モデルの予測) を返す。
+    比較できない場合(今回モデルに評価用データが無い、前回モデルが今回の特徴量で予測できない等)はNone。
+
+    以前は「前回モデルを前回の学習時に採点したスコア」と「今回モデルを今回のテストデータで
+    採点したスコア」を比べていた。テスト期間が違ううえ、川霧の実例が無い期間では全体F1、
+    ある期間では川霧F1と指標まで変わるため、前回のテスト期間に川霧が無かった地点
+    (全体F1で0.9前後)は、今回川霧を含む期間で採点された新モデル(川霧F1で0前後)に毎回
+    「劣化」と判定されていた。しかもロールバック後は前回モデルと前回のテスト結果が
+    そのまま保存されるため、同じ比較が毎日繰り返され、一度ロールバックされると二度と
+    更新されなかった(2026-10-03の調査で、14地点が9月中旬〜下旬から固定されていた)。
+    そこで、前回モデルにも今回のテストデータを予測させ、同じデータ・同じ指標で比べる。
     """
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    n = len(y_true)
-    original_fog_f1 = _fog_class_f1(y_true, y_pred)
-    use_fog_f1 = not (isinstance(original_fog_f1, float) and np.isnan(original_fog_f1))
-    fog_labels = sorted(SUMMARY_FOG_CODES) if use_fog_f1 else None
+    X_test = new_info.get("X_test")
+    y_test = new_info.get("y_test")
+    new_pred = new_info.get("y_pred")
+    test_datetimes = new_info.get("test_datetimes")
+    prev_pipe = prev_info.get("pipe")
+    prev_train_end = prev_info.get("train_end")
+    if X_test is None or y_test is None or new_pred is None or prev_pipe is None or len(X_test) == 0:
+        return None
+    # 前回モデルが学習に使った期間と今回のテスト期間は重なる(テストは直近20%なので、前日の
+    # モデルは今日のテスト行のほとんどを学習済み)。重なった行で比べると前回モデルが不当に
+    # 有利になるため、前回モデルの学習最終日時より後の行だけで比べる。学習最終日時が記録されて
+    # いない古い形式のモデル(2026-10-03より前に保存されたもの)は公平に比べられないので、
+    # 比較せず今回のモデルを採用する。
+    if prev_train_end is None or test_datetimes is None:
+        log.info("%s: previous model has no recorded training cutoff; adopting the new model without comparison",
+                 new_info.get("_station", "?"))
+        return None
+    unseen = pd.to_datetime(pd.Series(test_datetimes)).to_numpy() > np.datetime64(pd.Timestamp(prev_train_end))
+    if not unseen.any():
+        return None
+    X_test = X_test[unseen]
+    y_test = np.asarray(y_test)[unseen]
+    new_pred = np.asarray(new_pred)[unseen]
+    # 今回と前回で特徴量の構成が違うことがある(個別モデル⇔プーリング救済の切り替え等)ため、
+    # そのまま予測できなければ前回モデルの特徴量だけを取り出して試す。
+    candidates = [X_test]
+    prev_features = prev_info.get("features")
+    if prev_features and all(f in X_test.columns for f in prev_features):
+        candidates.append(X_test[list(prev_features)])
+    last_error = None
+    for X in candidates:
+        try:
+            prev_pred = np.asarray(prev_pipe.predict(X))
+            break
+        except Exception as e:
+            last_error = e
+    else:
+        log.warning("Could not evaluate the previous model on the current test data: %s", last_error)
+        return None
+    return np.asarray(y_test), np.asarray(new_pred), prev_pred
+
+
+def _paired_bootstrap_prob_not_worse(y_true, new_pred, prev_pred, fog_labels, n_boot=REGRESSION_N_BOOTSTRAP, seed=1):
+    """同じテストデータを復元抽出でn_boot回リサンプリングし、そのたび同じ行で今回・前回の
+    スコアを計算して「今回 >= 前回」となった割合を返す(0〜1)。同じ行で比べる対応のある
+    比較なので、テストデータ自体の難しさの違いが差に混ざらない。"""
     rng = np.random.default_rng(seed)
-    return np.array([
-        _score_from_predictions(y_true[idx], y_pred[idx], fog_labels=fog_labels)
-        for idx in rng.integers(0, n, size=(n_boot, n))
-    ])
-
-
-def _bootstrap_prob_not_worse(prev_info, new_info, n_boot=REGRESSION_N_BOOTSTRAP):
-    """前回・今回それぞれのテストデータを独立にブートストラップし、「今回のスコアが
-    前回以上になる」割合を推定して返す（0〜1）。前回の生データ(y_test/y_pred)が
-    保存されていない（形式が古い等）場合はNoneを返し、判定不能を表す。
-    """
-    prev_y, prev_pred = prev_info.get("y_test"), prev_info.get("y_pred")
-    new_y, new_pred = new_info.get("y_test"), new_info.get("y_pred")
-    if prev_y is None or prev_pred is None or new_y is None or new_pred is None:
-        return None
-    if len(prev_y) == 0 or len(new_y) == 0:
-        return None
-    prev_scores = _bootstrap_scores(prev_y, prev_pred, n_boot, seed=1)
-    new_scores = _bootstrap_scores(new_y, new_pred, n_boot, seed=2)
-    return float(np.mean(new_scores >= prev_scores))
+    n = len(y_true)
+    not_worse = 0
+    for idx in rng.integers(0, n, size=(n_boot, n)):
+        yt = y_true[idx]
+        new_score = _score_from_predictions(yt, new_pred[idx], fog_labels=fog_labels)
+        prev_score = _score_from_predictions(yt, prev_pred[idx], fog_labels=fog_labels)
+        if new_score >= prev_score:
+            not_worse += 1
+    return not_worse / n_boot
 
 
 def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
     """新しく学習したモデルが前回より統計的に有意に劣化していると判断できる地点があれば、
     その地点だけ前回のモデルへ自動的に差し戻す（models を直接書き換える）。
+    比較は、今回のテストデータで前回・今回の両モデルを採点する対応のある比較で行う
+    (_paired_test_predictions参照)。比較できない地点は今回のモデルを採用する。
     戻り値：ロールバックした地点名のリスト。
     """
     if prev_state is None:
@@ -1859,32 +1924,39 @@ def apply_regression_guard(models, prev_state=None, path=MODEL_STATE_PATH):
         prev = prev_state.get(col)
         if prev is None:
             continue
-        if info.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK or prev.get("n", 0) < MIN_N_FOR_REGRESSION_CHECK:
-            new_score = _effective_score_or_none(info)
-            prev_score = _effective_score_or_none(prev)
-            if (
-                new_score is not None and prev_score is not None
-                and new_score < prev_score - SPARSE_REGRESSION_ABS_DROP
-            ):
-                log.warning(
-                    "Sparse-sample regression detected for %s (n=%s/%s, new score=%.3f, "
-                    "previous score=%.3f); rolling back to previous model "
-                    "(too few samples for the bootstrap check, used the absolute-drop guard instead)",
-                    col, info.get("n", 0), prev.get("n", 0), new_score, prev_score,
-                )
-                models[col] = {**prev, "model_type": normalize_model_type_label(prev.get("model_type"))}
-                rolled_back.append(col)
+        paired = _paired_test_predictions(prev, {**info, "_station": col})
+        if paired is None:
             continue
-        prob_not_worse = _bootstrap_prob_not_worse(prev, info)
-        if prob_not_worse is None:
+        y_true, new_pred, prev_pred = paired
+        fog_labels = _fog_labels_present(y_true)
+        metric = "fog_f1" if fog_labels else "f1"
+        new_score = _score_from_predictions(y_true, new_pred, fog_labels=fog_labels)
+        prev_score = _score_from_predictions(y_true, prev_pred, fog_labels=fog_labels)
+        if len(y_true) < MIN_N_FOR_REGRESSION_CHECK:
+            # テストデータが少なすぎてブートストラップが当てにならない場合は、大きく下がった
+            # ときだけ差し戻す(SPARSE_REGRESSION_ABS_DROP)。
+            regressed = new_score < prev_score - SPARSE_REGRESSION_ABS_DROP
+            how = f"absolute-drop guard, only {len(y_true)} test row(s)"
+        else:
+            prob_not_worse = _paired_bootstrap_prob_not_worse(y_true, new_pred, prev_pred, fog_labels)
+            regressed = prob_not_worse < (1.0 - REGRESSION_CONFIDENCE)
+            how = f"paired bootstrap prob(new>=prev)={prob_not_worse:.3f}"
+        if not regressed:
             continue
-        if prob_not_worse < (1.0 - REGRESSION_CONFIDENCE):
-            log.warning(
-                "Regression detected for %s (new score=%.3f, previous score=%.3f, "
-                "bootstrap prob(new>=prev)=%.3f < %.2f); rolling back to previous model",
-                col, _effective_score(info), _effective_score(prev),
-                prob_not_worse, 1.0 - REGRESSION_CONFIDENCE,
-            )
-            models[col] = {**prev, "model_type": normalize_model_type_label(prev.get("model_type"))}
-            rolled_back.append(col)
+        log.warning(
+            "Regression detected for %s on the same %d test row(s) (%s: new=%.3f, previous=%.3f, %s); "
+            "rolling back to previous model",
+            col, len(y_true), metric, new_score, prev_score, how,
+        )
+        # 差し戻した前回モデルの精度は、今回のテストデータで測り直した値に置き換える
+        # (前回学習時の古いテスト期間の値のままだと、管理画面や履歴CSVに実態と違う精度が残る)。
+        models[col] = {
+            **prev,
+            "model_type": normalize_model_type_label(prev.get("model_type")),
+            "y_test": y_true, "y_pred": prev_pred,
+            "accuracy": float(accuracy_score(y_true, prev_pred)),
+            "f1": float(f1_score(y_true, prev_pred, average="weighted", zero_division=0)),
+            "fog_f1": _fog_class_f1(y_true, prev_pred),
+        }
+        rolled_back.append(col)
     return rolled_back
