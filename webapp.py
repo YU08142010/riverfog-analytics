@@ -891,7 +891,7 @@ def _phenom_label_color(value):
     return phenom_label(value), bg, _contrasting_text_color(bg)
 
 
-# 現象コード訂正UI(phenom-picker、station_detail.html/admin_observation_reports.html)が
+# 現象コード訂正UI(phenom-picker、station_detail.html/observation_reports.html)が
 # ボタンの背景色・文字色を、ダッシュボード等で使っているのと同じ実際の色でそのまま
 # 出せるように、コード0〜10分をまとめて渡す。
 PHENOM_STYLE = {
@@ -4475,7 +4475,7 @@ def _scan_and_autocorrect_station_anomalies(name):
     """孤立した1時間だけのブレ(前後の観測が一致し、その1時間だけ現象コードが違う)を
     観測・判定ミスの疑いとして検知する。以前は即座に自動訂正していたが、誤検知の
     リスクがあるため、現在は observation_reports の確認待ちキュー(source="auto_detected")
-    に積むだけにとどめ、実際の訂正は管理者が/admin/observation_reportsで前後の画像を
+    に積むだけにとどめ、実際の訂正は管理者・観測者が/observation_reportsで前後の画像を
     見て判断してから行う。地点別ページを開くたびにその地点だけ軽く走査する
     (全地点を毎回スキャンする専用バッチは持たない)。
     ここでの現象コードは2コード同時観測(2026-09対応)のパック済み値のこともあるが、
@@ -4631,9 +4631,17 @@ def station_correct_observation(name):
     return _finish("station_detail", f"観測結果を訂正しました{gem_note}。", name=name)
 
 
+# 観測報告は管理者専用機能ではなく観測業務の一部(観測者ロールも使う。requires_observer参照)のため、
+# 以前の/admin/observation_reports(管理者メニュー配下、左に管理者サイドバーが出る)から
+# トップレベルの独立したページへ移した(2026-10-03)。旧URLはブックマーク用にリダイレクトだけ残す。
 @app.route("/admin/observation_reports")
+def legacy_admin_observation_reports():
+    return redirect(url_for("observation_reports"), code=301)
+
+
+@app.route("/observation_reports")
 @requires_observer
-def admin_observation_reports():
+def observation_reports():
     role = session.get("role")
     region = _observer_region_for_role(role)
     conn = _users_conn()
@@ -4698,14 +4706,14 @@ def admin_observation_reports():
         )
         r["looks_isolated"] = differs_from_both
     return render_template(
-        "admin_observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
+        "observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
         phenom_style=PHENOM_STYLE, importance_labels=IMPORTANCE_LABELS,
     )
 
 
-@app.route("/admin/observation_reports/<int:report_id>/resolve", methods=["POST"])
+@app.route("/observation_reports/<int:report_id>/resolve", methods=["POST"])
 @requires_observer
-def admin_observation_report_resolve(report_id):
+def observation_report_resolve(report_id):
     my_id = session.get("user_id")
     conn = _users_conn()
     try:
@@ -4716,13 +4724,13 @@ def admin_observation_report_resolve(report_id):
         corrected_code = request.form.get("corrected_code", type=int)
         corrected_code2 = request.form.get("corrected_code2", type=int)
         if corrected_code is None:
-            return _finish("admin_observation_reports", "訂正後の現象コードを選んでください。", success=False)
+            return _finish("observation_reports", "訂正後の現象コードを選んでください。", success=False)
         codes = [corrected_code] if corrected_code2 is None else [corrected_code, corrected_code2]
         try:
             packed_corrected = encode_phenom_codes(codes)
         except PhenomCodeError as e:
             return _finish(
-                "admin_observation_reports", f"現象コードの組み合わせが不正です: {e}", success=False,
+                "observation_reports", f"現象コードの組み合わせが不正です: {e}", success=False,
             )
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         # original_codeは報告作成時点のreported_codeではなく、今この瞬間の実際の判定
@@ -4775,12 +4783,12 @@ def admin_observation_report_resolve(report_id):
         )
     finally:
         conn.close()
-    return _finish("admin_observation_reports", "訂正しました。")
+    return _finish("observation_reports", "訂正しました。")
 
 
-@app.route("/admin/observation_reports/<int:report_id>/dismiss", methods=["POST"])
+@app.route("/observation_reports/<int:report_id>/dismiss", methods=["POST"])
 @requires_observer
-def admin_observation_report_dismiss(report_id):
+def observation_report_dismiss(report_id):
     my_id = session.get("user_id")
     conn = _users_conn()
     try:
@@ -4793,7 +4801,7 @@ def admin_observation_report_dismiss(report_id):
         _record_audit("観測報告を却下", f"{report['station_name']} {report['target_datetime']}")
     finally:
         conn.close()
-    return _finish("admin_observation_reports", "却下しました。")
+    return _finish("observation_reports", "却下しました。")
 
 
 @app.route("/stations/<name>")

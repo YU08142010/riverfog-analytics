@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}観測報告{% endblock %}
-{% block sidebar %}{% if session.get("role") == "admin" %}{% include "_admin_sidebar.html" %}{% endif %}{% endblock %}
 {% block content %}
 <div class="card">
     <h2>観測報告(未対応 {{ reports|length }}件)</h2>
@@ -71,7 +70,7 @@
     {% endif %}
 
     <div class="observation-report-actions">
-        <form method="post" action="{{ url_for('admin_observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
+        <form method="post" action="{{ url_for('observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
               class="phenom-picker-form" data-current-code="{{ r.reported_code_primary }}"
               data-current-code2="{{ r.reported_code_secondary if r.reported_code_secondary is not none else '' }}"
               data-phenom-style='{{ phenom_style | tojson }}'
@@ -106,7 +105,7 @@
             </div>
             <input type="hidden" name="corrected_code2" class="phenom-picker-value-2" value="">
         </form>
-        <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('admin_observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
+        <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="button button-danger">却下<span class="phenom-key">x</span></button>
         </form>

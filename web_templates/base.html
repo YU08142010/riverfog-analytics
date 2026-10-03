@@ -39,7 +39,7 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
         <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
         {% if session.get('role') in ('admin', 'observer', 'aizu_observer', 'tadami_observer') %}
         {% set obs_pending = pending_observation_report_count() %}
-        <a href="{{ url_for('admin_observation_reports') }}" class="{{ 'active' if request.path.startswith('/admin/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
+        <a href="{{ url_for('observation_reports') }}" class="{{ 'active' if request.path.startswith('/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
         {% endif %}
         <a href="{{ url_for('simulator_page') }}" class="{{ 'active' if request.path.startswith(url_for('simulator_page')) else '' }}">{{ icon("simulator") }}シミュレーター</a>
         <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith('/observations') or request.path.startswith('/images') or request.path.startswith('/predictions') else '' }}">{{ icon("data") }}観測アーカイブ</a>
