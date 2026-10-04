@@ -2,7 +2,7 @@
 
 『予測していたデータを実際のデータと見比べて誤差を学習し、完璧に近づけていく』
 というループの核となる部分。日々の予測をすべて記録しておき、実測が確定した後で
-answer合わせをし、その結果を含めて翌日また全期間で再学習する（fog_model.train_location_models
+answer合わせをし、その結果を含めて翌日また全期間で再学習する（fog_model.train_shared_model
 は毎回、最新の実測データも含めて学習し直すため、この記録自体は学習の入力ではなく
 「答え合わせと精度の推移を追跡するための台帳」という位置づけ）。
 """
@@ -28,12 +28,24 @@ CREATE TABLE IF NOT EXISTS predictions (
 CREATE INDEX IF NOT EXISTS idx_predictions_pending
     ON predictions(target_datetime) WHERE actual_code IS NULL;
 """
-# predicted_code/actual_codeは、2コード同時観測(2026-09対応)の場合はパック済みの値
-# (fog_features.encode_phenom_codes参照。例:105は現象1と5の同時観測)を保持する。
-# 単一コードは0〜10のまま格納されるため、完全一致による的中判定(predicted_code=actual_code)
-# はスキーマ・SQLとも変更不要。川霧発生の有無だけを見る箇所は
-# fog_features.primary_phenom_code(value)で主コードを取り出してから判定すること
-# (川霧は家族グループの並び上、2コード同時でも必ず主コード側に入る)。
+# predicted_code: 2026-10-04以降は二値の予測(1=川霧あり、0=川霧なし。全地点共通の二値
+#   LightGBM、fog_model.py参照)。それ以前の行は旧方式(地点別の多クラス分類)の現象コード
+#   (0〜10、2コード同時観測はパック値)のまま残っている。
+# actual_code: 実測の現象コード(0〜10、2コード同時観測は「小さい方*100+大きい方」のパック値。
+#   fog_features.encode_phenom_codes参照)。
+# 的中の判定は、新旧どちらの行も「川霧かどうか」が一致したかで行う(_CORRECT_SQL)。
+# 二値の1は川霧コード(SUMMARY_FOG_CODES)に含まれ、0は含まれないため、同じ判定式が
+# 旧方式の現象コードにも二値の予測にもそのまま使える。
+_FOG_CODES_SQL = ", ".join(str(c) for c in sorted(fog_features.SUMMARY_FOG_CODES))
+
+
+def _fog_sql(col):
+    """SQL式: 列の値(現象コード/パック値/二値の予測)が川霧かどうか(1/0)。
+    川霧は家族グループの並び上、2コード同時観測でも必ず主コード(パック値の上2桁)側に入る。"""
+    return f"((CASE WHEN {col} > 10 THEN {col} / 100 ELSE {col} END) IN ({_FOG_CODES_SQL}))"
+
+
+_CORRECT_SQL = f"CASE WHEN {_fog_sql('predicted_code')} = {_fog_sql('actual_code')} THEN 1 ELSE 0 END"
 
 
 def connect(db_path):
@@ -83,7 +95,8 @@ def verify_predictions(conn, verified_at, results):
 
 
 def accuracy_summary(conn, since=None):
-    """答え合わせ済みの予測について、全体・地点別・リードタイム別の的中率を返す。"""
+    """答え合わせ済みの予測について、全体・地点別・リードタイム別の的中率
+    (「川霧かどうか」が一致した割合)を返す。"""
     where = "WHERE actual_code IS NOT NULL"
     params = ()
     if since:
@@ -91,19 +104,19 @@ def accuracy_summary(conn, since=None):
         params = (since,)
 
     overall = conn.execute(
-        f"""SELECT COUNT(*), SUM(CASE WHEN predicted_code = actual_code THEN 1 ELSE 0 END)
+        f"""SELECT COUNT(*), SUM({_CORRECT_SQL})
             FROM predictions {where}""", params,
     ).fetchone()
 
     by_lead_bucket = conn.execute(
         f"""SELECT CAST(lead_hours / 24 AS INTEGER) AS lead_day,
-                   COUNT(*), SUM(CASE WHEN predicted_code = actual_code THEN 1 ELSE 0 END)
+                   COUNT(*), SUM({_CORRECT_SQL})
             FROM predictions {where}
             GROUP BY lead_day ORDER BY lead_day""", params,
     ).fetchall()
 
     by_station = conn.execute(
-        f"""SELECT station, COUNT(*), SUM(CASE WHEN predicted_code = actual_code THEN 1 ELSE 0 END)
+        f"""SELECT station, COUNT(*), SUM({_CORRECT_SQL})
             FROM predictions {where}
             GROUP BY station ORDER BY station""", params,
     ).fetchall()
@@ -116,7 +129,8 @@ def accuracy_summary(conn, since=None):
 
 
 def accuracy_trend(conn, station=None):
-    """target_datetimeの日付ごとの的中率推移を返す。stationを指定すればその地点のみ。
+    """target_datetimeの日付ごとの的中率(「川霧かどうか」の一致率)の推移を返す。
+    stationを指定すればその地点のみ。
     戻り値: [{"date": "YYYY-MM-DD", "n": int, "correct": int}, ...]（日付昇順）
     """
     where = "WHERE actual_code IS NOT NULL"
@@ -127,7 +141,7 @@ def accuracy_trend(conn, station=None):
 
     rows = conn.execute(
         f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
-                   SUM(CASE WHEN predicted_code = actual_code THEN 1 ELSE 0 END)
+                   SUM({_CORRECT_SQL})
             FROM predictions {where}
             GROUP BY d ORDER BY d""", params,
     ).fetchall()
@@ -158,11 +172,13 @@ def fog_pair_counts(conn, since=None, station=None):
 
 
 def fog_prob_bucket_counts(conn, since=None, station=None):
-    """答え合わせ済みかつpredicted_fog_probが記録されている予測を、確率を0.05刻みに
+    """答え合わせ済みかつpredicted_fog_probが記録されている予測を、確率を0.01刻みに
     丸めた上で件数を集計する。しきい値を変えた場合のprecision/recall/F1を後から
     計算するための元データ（生の行を全部返すとレコード数が多い場合に重いため、
-    しきい値の刻み幅と同じ粒度に丸めて集計してから返す）。
-    戻り値: [{"prob": 0.05刻みの確率, "actual_code":, "n":}, ...]
+    しきい値の刻み幅(fog_model.FOG_THRESHOLD_GRID、0.01刻み)と同じ粒度に丸めて集計する。
+    2026-10-04の二値LightGBMへの切り替えで、採用されるしきい値が0.1前後と小さくなり、
+    以前の0.05刻みでは粗すぎるようになったため0.01刻みにした）。
+    戻り値: [{"prob": 0.01刻みの確率, "actual_code":, "n":}, ...]
     """
     where = ["actual_code IS NOT NULL", "predicted_fog_prob IS NOT NULL"]
     params = []
@@ -174,10 +190,7 @@ def fog_prob_bucket_counts(conn, since=None, station=None):
         params.append(station)
     where_sql = " AND ".join(where)
     rows = conn.execute(
-        # ROUND(x, 2)は0.01刻みで、docstring通りの0.05刻みになっていなかった
-        # (集計行数を減らすための丸めのはずが約5倍の行数になっていた、2026-09-13の監査で
-        # 指摘)。ROUND(x / 0.05) * 0.05で実際に0.05刻みに揃える。
-        f"""SELECT ROUND(ROUND(predicted_fog_prob / 0.05) * 0.05, 2) AS bucket, actual_code, COUNT(*)
+        f"""SELECT ROUND(predicted_fog_prob, 2) AS bucket, actual_code, COUNT(*)
             FROM predictions WHERE {where_sql}
             GROUP BY bucket, actual_code""", params,
     ).fetchall()
@@ -185,7 +198,8 @@ def fog_prob_bucket_counts(conn, since=None, station=None):
 
 
 def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
-    """from_dt_str〜to_dt_strの間で「川霧」と予測されている地点・時刻を返す。
+    """from_dt_str〜to_dt_strの間で「川霧」と予測されている地点・時刻を返す
+    (二値の予測では1=川霧あり。旧方式の現象コードの行は主コードが川霧かで判定する)。
     同じ(station, target_datetime)に複数回の予測記録がある場合、最新のrun_atのものを使う
     （予報は毎日更新されるため、直近の実行結果の方が精度が高い）。
     戻り値: [{"station":, "target_datetime":, "predicted_code":, "predicted_fog_prob":}, ...]

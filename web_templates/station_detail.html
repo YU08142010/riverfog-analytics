@@ -181,74 +181,44 @@
 <div class="content-grid-2">
 <div class="card">
     <h2>学習時のモデル精度推移</h2>
-    <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(検証データでの評価値)の推移。</p>
+    <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(学習に使っていない評価期間での値)の推移。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の学習時モデル精度推移グラフ" data-chart-url="{{ url_for('station_model_metrics_chart', name=name) }}"></div></div>
 </div>
 
 <div class="card">
     <h2>しきい値ごとのprecision/recall/F1</h2>
-    <p class="muted">川霧と判定するしきい値を変えた場合のトレードオフ。点線が現在この地点で自動選択されているしきい値。</p>
+    <p class="muted">川霧と判定するしきい値を変えた場合のトレードオフ(この地点の本番予測ログから集計)。点線が現在のしきい値(全地点共通)。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}のしきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('station_threshold_chart', name=name) }}"></div></div>
 </div>
 </div>
 
-{% if secondary_status %}
-<div class="card">
-    <h2>二次コード(複数現象の同時記録)予測</h2>
-    {% if secondary_status.skipped_reason is none %}
-    <p class="muted">
-        この地点は2つ目の現象コードの予測に対応しています
-        (2コード同時観測の実績 n={{ secondary_status.n_dual }}件
-        {%- if secondary_status.trained_at %}、{{ secondary_status.trained_at[:10] }}時点で学習{% endif -%}
-        )。
-    </p>
-    {% elif secondary_status.skipped_reason == "pooled_station" %}
-    <p class="muted">
-        この地点は単独では学習データが不足しており、近隣地点と合算した「プーリング救済モデル」を
-        採用しているため、2つ目の現象コードの予測は現在対応していません。
-    </p>
-    {% else %}
-    <p class="muted">
-        この地点は2コード同時観測の実績がまだ少なく
-        (n={{ secondary_status.n_dual if secondary_status.n_dual is not none else 0 }}件 /
-        必要な目安 {{ min_dual_code_positives }}件)、2つ目の現象コードの予測は現在無効です。
-        観測時に2つ目の現象を記録する機会が増えるとともに、今後対応する見込みです。
-    </p>
-    {% endif %}
-</div>
-{% endif %}
-
 <div class="card">
     <h2>採用モデルの決定木(代表1本)</h2>
     <p class="muted">
-        採用中のモデル方式(RF/XGBoost/LightGBMのブレンド)が実際に使っている木の深さ・複雑さの雰囲気を示す図です。
-        いずれの方式も数百本の木の平均・合計で最終判定を出すため、ここに表示しているのはそのうちの代表1本にすぎません。
+        採用中のモデル(全地点共通の二値LightGBM)が実際に使っている木の深さ・複雑さの雰囲気を示す図です。
+        LightGBMは数百本の木の合計で最終判定を出すため、ここに表示しているのはそのうちの1本目にすぎません。
         深い木ほど細かい条件分岐を表現できますが、過学習(学習データに寄りすぎること)のリスクとの兼ね合いでもあります。
         深さが上限を超えると読みにくくなるため、表示は上位数階層までに絞り、それ以降は「…」で省略しています(実際のモデルの判定はその先も続きます)。
     </p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の採用モデル決定木の図" data-chart-url="{{ url_for('station_tree_diagram', name=name) }}"></div></div>
 </div>
 
-{% if feature_snapshot %}
+{% if feature_snapshot and feature_snapshot.predicted_fog is defined %}
 <div class="card">
     <details>
         <summary style="cursor:pointer; font-weight:600;">予測の内訳(技術詳細)を見る</summary>
         <div style="margin-top:0.8rem;">
             <p class="muted">
                 {{ feature_snapshot.target_datetime }} 時点の予測({{ feature_snapshot.generated_at }}生成)に
-                実際に使われた入力値です。この地点では下記「モデル種別」の方式(検証データでの
-                正答率が最も高かったものを地点ごとに自動選択しています)で予測しており、
-                下の「川霧確率」がその結果です。
+                実際に使われた入力値です。全地点共通のモデルが「川霧確率」を計算し、
+                それが「判定しきい値」以上なら「川霧あり」と予測します。
             </p>
             <table class="obs-table" style="width:auto;">
                 <tbody>
-                <tr><td>予測された現象</td><td>{{ "霧・層雲系(コード" ~ feature_snapshot.predicted_code ~ ")" if feature_snapshot.predicted_code > 0 else "現象なし" }}</td></tr>
+                <tr><td>予測</td><td>{{ "川霧あり" if feature_snapshot.predicted_fog else "川霧なし" }}</td></tr>
                 <tr><td>川霧確率</td><td>{{ "%.1f"|format(feature_snapshot.predicted_fog_prob * 100) }}%</td></tr>
                 <tr><td>判定しきい値</td><td>{{ "%.2f"|format(feature_snapshot.fog_threshold) if feature_snapshot.fog_threshold is not none else "-" }}</td></tr>
                 <tr><td>モデル種別</td><td>{{ feature_snapshot.model_type or "-" }}</td></tr>
-                {% if feature_snapshot.blend_weight is not none %}
-                <tr><td>ブレンド重み(RF側)</td><td>{{ "%.2f"|format(feature_snapshot.blend_weight) }}</td></tr>
-                {% endif %}
                 </tbody>
             </table>
             <p class="muted" style="font-size:0.85rem; margin-top:0.8rem;">入力に使われた特徴量の値</p>

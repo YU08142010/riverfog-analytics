@@ -16,49 +16,21 @@
         （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
     {% if overall_fog_stats and overall_fog_stats.precision is not none %}
     <p class="muted">
-        川霧クラス（防災上重要な「川霧かどうか」だけを陽性として見た場合）:
+        川霧かどうか(川霧を陽性とした場合):
         precision(空振りの少なさ) {{ "%.1f"|format(overall_fog_stats.precision * 100) }}% /
         recall(見逃しの少なさ) {{ "%.1f"|format(overall_fog_stats.recall * 100) }}%
         {% if overall_fog_stats.f1 is not none %} / F1 {{ "%.1f"|format(overall_fog_stats.f1 * 100) }}%{% endif %}
         <br>見逃し(川霧なのに川霧じゃないと予測): {{ overall_fog_stats.fn }}件 / 空振り(川霧じゃないのに川霧と予測): {{ overall_fog_stats.fp }}件
     </p>
     <p class="muted" style="font-size:0.8rem;">
-        「的中率」は川霧が珍しい現象であるほど、常に「川霧じゃない」と予測するだけでも高く出てしまいます。
+        予測は「川霧あり/なし」の二値で、的中率は「川霧かどうか」が一致した割合です
+        (2026-10-04より前の多クラス予測の記録も、川霧かどうかで判定し直しています)。
+        川霧は珍しい現象なので、常に「川霧なし」と予測するだけでも的中率は高く出ます。
         実際に川霧を捉えられているかはrecall(見逃しの少なさ)の方が参考になります。
     </p>
     {% endif %}
     {% else %}
     <p class="muted">答え合わせ済みの予測がまだありません。</p>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2>二次コード(複数現象の同時記録)予測の状況</h2>
-    <p class="muted" style="font-size:0.85rem;">
-        2026-09に追加した「1回の観測に現象コードを2つまで同時に記録・予測する」機能の状況です。
-        観測開始から日が浅い地点(特に会津地方)や、2つ同時に記録された実績がまだ少ない地点では、
-        データ不足のため二次コードの予測自体が無効になっています
-        (現在の基準: 2コード同時観測の実績が{{ min_dual_code_positives }}件未満の地点はスキップ。
-        地点ごとの状況は下の「地点ごとのモデル状況」表を参照)。
-    </p>
-    <p class="muted">
-        観測での記録状況: 分類済み{{ dual_code_utilization.total }}件中、2コード同時記録
-        {{ dual_code_utilization.dual }}件
-        {% if dual_code_utilization.total %}
-        （{{ "%.1f"|format(100.0 * dual_code_utilization.dual / dual_code_utilization.total) }}%）
-        {% endif %}
-    </p>
-    {% if secondary_accuracy.n_actual_has %}
-    <p class="muted">
-        予測精度(実測に2つ目の現象が記録されていた{{ secondary_accuracy.n_actual_has }}件が対象):
-        recall(見逃しの少なさ) {{ "%.1f"|format(secondary_accuracy.recall * 100) }}%
-        {% if secondary_accuracy.precision is not none %}
-        / precision(空振りの少なさ) {{ "%.1f"|format(secondary_accuracy.precision * 100) }}%
-        {% endif %}
-        {% if secondary_accuracy.f1 is not none %} / F1 {{ "%.1f"|format(secondary_accuracy.f1 * 100) }}%{% endif %}
-    </p>
-    {% else %}
-    <p class="muted">まだ2つ目の現象込みで答え合わせできた予測がありません(機能追加直後のため、しばらくすると集計されるようになります)。</p>
     {% endif %}
 </div>
 
@@ -111,7 +83,7 @@
 
 <div class="card">
     <h2>混同行列(全地点合算・本番予測)</h2>
-    <p class="muted">縦軸が実際の現象、横軸が予測した現象。対角線上が的中、それ以外は誤判定(どの現象をどの現象と間違えやすいか)を示す。</p>
+    <p class="muted">縦軸が実際、横軸が予測(川霧あり/なし)。左上と右下が的中、右上が空振り、左下が見逃し。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="混同行列" data-chart-kind="heatmap" data-chart-url="{{ url_for('accuracy_confusion_matrix') }}" style="max-width:520px;"></div></div>
 </div>
 
@@ -120,8 +92,7 @@
     <p class="muted">
         川霧と判定するしきい値(予測確率がこの値以上なら「川霧」とする)を変えた場合に、
         precision(空振りの少なさ)・recall(見逃しの少なさ)・F1がどう変わるかを示す。
-        点線は現在各地点で自動選択されているしきい値の分布ではなく、全地点合算データでの
-        参考値であることに注意。地点ごとの正確な採用しきい値は各地点の観測ページで確認できる。
+        しきい値は全地点共通で、現在の値は各地点の観測ページのグラフに点線で示している。
     </p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="しきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('accuracy_threshold_chart') }}"></div></div>
 </div>
@@ -194,80 +165,67 @@
 
 <h2 style="margin:2rem 0 0.5rem;">学習時のモデル精度(検証データ)</h2>
 <p class="muted">
-    ここから下は、本番の予測ログではなく、モデルを学習した際に取り分けた検証データでの評価値です。
-    再学習のたびにfog_model.pyが計算し直すもので、地点ごとに実際に採用されているモデル方式の比較や、
-    どの気象要素が効いているかを確認できます。
+    ここから下は、本番の予測ログではなく、モデルを学習する際に学習から外しておいた直近の
+    評価期間のデータでの成績です。本番と同じく、その時刻に実際に出されていた気象の予報を入力にして
+    採点しています(取得できなかった場合は実測値)。毎日の再学習のたびに計算し直します。
+    {% if model_type %}<br>採用中のモデル: {{ model_type }}(全地点共通。学習日時 {{ model_trained_at or "-" }}、
+    しきい値 {{ "%.0f"|format(fog_threshold * 100) if fog_threshold is not none else "-" }}%)
+    {% if global_metrics %}<br>評価期間: {{ global_metrics.test_start[:16] }} 〜 {{ global_metrics.test_end[:16] }}
+    、入力: {{ "予報値" if global_metrics.input == "forecast" else "実測値" }}
+    (学習データ {{ global_metrics.n_train }}件、うち川霧 {{ global_metrics.n_train_fog }}件)
+    {% endif %}{% endif %}
 </p>
 
 <div class="card">
     <h2>学習精度の推移(全地点平均)</h2>
-    <p class="muted">毎日の再学習ごとに記録したaccuracy・川霧F1の平均値です。右肩上がりなら精度が改善していることを意味します。</p>
+    <p class="muted">毎日の再学習ごとに記録した、評価期間でのaccuracy・川霧F1の地点平均です
+    (2026-10-04より前は旧方式の地点別モデルの値)。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="学習精度の推移グラフ(全地点平均)" data-chart-url="{{ url_for('accuracy_training_metrics_chart') }}"></div></div>
 </div>
 
 <div class="card">
-    <h2>モデル方式ごとの性能比較</h2>
+    <h2>採用モデルと基準(気候値)の比較</h2>
     <p class="muted">
-        RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・RF+LightGBM・RF+XGBoost+LightGBMの
-        川霧F1を全地点で平均して比較します。「採用中(自動選択)」は、地点ごとにこの中から検証データでの
-        正答率が最も高かった方式を選んだ結果の平均です(採用される方式は地点によって異なります)。
+        評価期間の全地点のデータで、採用中のモデルと、「地点×時刻ごとの過去の川霧発生率」をそのまま
+        確率とみなすだけの基準(気候値)を比べます。モデルが基準を上回っていれば、気象の情報から
+        「いつ・どこで出やすいか」以上のことを学べていることを意味します。
     </p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="モデル方式ごとの性能比較グラフ" data-chart-url="{{ url_for('accuracy_model_compare_chart') }}"></div></div>
 </div>
 
 <div class="card">
     <h2>混同行列(全地点合算・学習時検証データ)</h2>
-    <p class="muted">実際の現象(縦軸)と予測(横軸)を突き合わせた集計です。対角線上が多いほど的中していることを意味します。</p>
+    <p class="muted">評価期間の実際(縦軸)と予測(横軸)を、川霧あり/なしで突き合わせた集計です。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="混同行列(全地点合算・学習時検証データ)" data-chart-kind="heatmap" data-chart-url="{{ url_for('accuracy_training_confusion_matrix') }}" style="max-width:520px;"></div></div>
 </div>
 
 <div class="card">
-    <h2>特徴量の重要度(全地点)</h2>
-    <p class="muted">どの気象要素が川霧予測に効いているか(地点ごとに採用中のモデルを構成する各方式のfeature_importances_を、ブレンド比で加重平均)。</p>
+    <h2>特徴量の重要度</h2>
+    <p class="muted">どの特徴量が川霧の予測に効いているか(採用中のLightGBMで、各特徴量による分岐が損失をどれだけ減らしたか(gain)の割合)。</p>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(全地点)" data-chart-url="{{ url_for('accuracy_feature_importance_chart') }}"></div></div>
-</div>
-
-<div class="card">
-    <h2>特徴量の重要度(精度が低い地点のみ)</h2>
-    <p class="muted">
-        accuracyが低い地点{% if low_accuracy_stations %}({{ low_accuracy_stations|join('、') }}){% endif %}
-        に限定した特徴量重要度です。全地点の傾向と比較すると、精度が伸び悩む要因が見えることがあります。
-    </p>
-    {% if low_accuracy_stations %}
-    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(精度が低い地点のみ)" data-chart-url="{{ url_for('accuracy_feature_importance_low_accuracy_chart') }}"></div></div>
-    {% else %}
-    <p class="muted">accuracyを算出できた地点がまだありません。</p>
-    {% endif %}
 </div>
 
 {% if model_rows %}
 <div class="card">
-    <h2>地点ごとのモデル状況(最新)</h2>
+    <h2>地点ごとの成績(評価期間)</h2>
+    <p class="muted">全地点で同じモデルを使っています。評価期間に川霧が無かった地点は、川霧F1・recallを計算できません(「-」)。</p>
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
         <thead><tr>
-            <th>地点</th><th>種類</th><th>プーリング</th><th>n</th>
-            <th>accuracy</th><th>川霧F1(採用中)</th><th>学習日時</th><th>二次コード予測</th>
+            <th>地点</th><th>学習データ</th><th>地点別川霧発生率</th><th>評価件数(うち川霧)</th>
+            <th>accuracy</th><th>川霧F1</th><th>recall</th><th>precision</th>
         </tr></thead>
         <tbody>
         {% for r in model_rows %}
         <tr>
             <td><a href="{{ url_for('station_detail', name=r.station) }}">{{ r.station }}</a></td>
-            <td>{{ r.model_type or "-" }}</td>
-            <td>{{ "はい" if r.pooled else "いいえ" }}</td>
             <td>{{ r.n if r.n is not none else "-" }}</td>
+            <td>{{ "%.1f"|format(r.station_fog_rate * 100) ~ "%" if r.station_fog_rate is not none else "-" }}</td>
+            <td>{{ r.n_test if r.n_test is not none else "-" }}({{ r.n_test_fog if r.n_test_fog is not none else "-" }})</td>
             <td>{{ "%.3f"|format(r.accuracy) if r.accuracy is not none else "-" }}</td>
-            <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none and r.fog_f1 == r.fog_f1 else "n/a" }}</td>
-            <td>{{ r.trained_at or "-" }}</td>
-            <td>
-                {% if r.secondary_skipped_reason is none %}
-                有効(n={{ r.secondary_n_dual }}件{% if r.secondary_trained_at %}、{{ r.secondary_trained_at[:10] }}更新{% endif %})
-                {% elif r.secondary_skipped_reason == "pooled_station" %}
-                非対応(プーリング救済地点)
-                {% else %}
-                データ不足{% if r.secondary_n_dual is not none %}(n={{ r.secondary_n_dual }}件){% endif %}
-                {% endif %}
-            </td>
+            <td>{{ "%.3f"|format(r.fog_f1) if r.fog_f1 is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(r.recall) if r.recall is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(r.precision) if r.precision is not none else "-" }}</td>
         </tr>
         {% endfor %}
         </tbody>

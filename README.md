@@ -71,7 +71,7 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 | `users.py` | SQLite (`data/users.db`。下記「実DBのパスに関する重要な注意」参照) の唯一のスキーマ定義元。`SCHEMA` という1つの文字列を `executescript` で流し込む方式。新しいテーブル/カラムは全てここに追加する。カラム追加は `_ensure_*_columns()` というマイグレーションヘルパーを書き、`connect(db_path)` から呼ぶ。 |
 | `collect.py` | カメラ画像からGeminiで霧の現象を分類する収集パイプライン。低信頼度(-1)判定はより強いモデルへのエスカレーションで再分類する。 |
 | `fog_features.py` | `SUMMARY_FOG_CODES`(現在は `{1,2,3}` = 川霧のみ)など特徴量定義。この定数は霧確率計算・アラート・モデル評価の全てに効いてくるので変更時は影響範囲を必ず説明してから進めること。 |
-| `fog_model.py` | 霧予測モデル。`compute_fog_probability()` など。 |
+| `fog_model.py` | 川霧予測モデル。全地点共通のLightGBM二値分類(川霧あり/なし、2026-10-04〜)。`train_shared_model()`(学習・評価)、`apply_regression_guard()`(前回モデルとの比較・自動ロールバック)、`build_location_forecast()`(予報の二値化)など。予測DB(`predictions.db`)の`predicted_code`は二値(1=川霧あり)で、的中は「川霧かどうか」の一致で判定する(`prediction_log.py`参照)。 |
 | `fog_data.py` / `fog_graphs.py` | データ読み込みとグラフ描画のヘルパー。 |
 | `chat_log.py` | AIチャット機能のログ。 |
 | `common.py` | 共通定数(`BASE_DIR`, `CAMERAS_CSV`, `DATA_XLSX`, `JST` など)。 |

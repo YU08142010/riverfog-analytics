@@ -32,10 +32,13 @@ from fog_features import (
     PHENOM_COLORS,
     PHENOM_LABELS,
     SLASH_COLOR,
-    SUMMARY_FOG_CODES,
     encode_phenomena_cell,
 )
-from fog_model import DEFAULT_FOG_THRESHOLD
+from fog_model import BINARY_LABELS, DEFAULT_FOG_THRESHOLD
+
+# 予報の帯(二値の予測)の色。「川霧あり」は実測の帯の「川霧」(コード2)と同じ色にそろえる。
+BINARY_FOG_COLOR = PHENOM_COLORS[2]
+BINARY_CLEAR_COLOR = "#d5d8dc"
 
 
 def _phenom_name(code):
@@ -67,11 +70,24 @@ def _phenom_code_bar(x, codes, hover_prefix):
     )
 
 
+def _binary_forecast_bar(x, preds):
+    """予報の二値予測(1=川霧あり、0=川霧なし)を、実測の現象コードの帯と同じ形の縦棒で表す。"""
+    preds = [int(p) for p in preds]
+    return go.Bar(
+        x=x, y=[1] * len(x), base=-0.5, width=_HOUR_MS * 0.9,
+        marker={"color": [BINARY_FOG_COLOR if p == 1 else BINARY_CLEAR_COLOR for p in preds],
+                "line": {"width": 0}},
+        hovertext=[f"予報: {BINARY_LABELS[p]}" for p in preds], hoverinfo="text", showlegend=False,
+    )
+
+
 def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_series, out_dir,
                                   history_days=5, prob_series=None,
                                   fog_threshold=DEFAULT_FOG_THRESHOLD, run_date_str=""):
     """1地点の「実測(直近history_days日) + 今後の予測」グラフ。4段構成
-    (気温/露点温度、相対湿度、川霧の予測確率、現象コード)のインタラクティブHTML。
+    (気温/露点温度、相対湿度、川霧の予測確率、現象の帯)のインタラクティブHTML。
+    現象の帯は、実測の部分は現象コード、予報の部分は二値の予測(川霧あり/なし。
+    pred_seriesは1/0)を表す。
 
     matplotlib版からの変更点(2026-09-14): (1) 気温/露点温度と相対湿度を同じ軸に
     重ねるtwinx()をやめ、湿度を専用の2段目に分けた(2軸グラフは読み違えやすいため
@@ -127,13 +143,12 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
             x=[forecast_raw["datetime"].min(), forecast_raw["datetime"].max()],
             y=[threshold_pct, threshold_pct], mode="lines",
             line={"color": "#c0392b", "width": 1.2, "dash": "dash"},
-            name=f"川霧警戒ライン({threshold_pct:.0f}%)",
+            name=f"川霧と判定するしきい値({threshold_pct:.0f}%)",
         ), row=3, col=1)
 
     if len(hist_phenom):
         fig.add_trace(_phenom_code_bar(hist_phenom["datetime"], hist_codes, "実測"), row=4, col=1)
-    fig.add_trace(_phenom_code_bar(forecast_raw["datetime"], pred_codes.astype("float64"), "予報"),
-                  row=4, col=1)
+    fig.add_trace(_binary_forecast_bar(forecast_raw["datetime"], pred_codes), row=4, col=1)
 
     fig.add_vrect(x0=fc_start, x1=fc_end, fillcolor="gray", opacity=0.08, line_width=0,
                   row="all", col="all")
@@ -150,7 +165,8 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         title={
             "text": f"【{col}】直近{history_days}日間の実測 ＋ 今後{n_days}日間の川霧予測"
                     "<br><span style=\"font-size:0.75em;\">"
-                    "(グレーの帯＝予測ゾーン。現象コードの帯はホバーで名前を表示)</span>",
+                    "(グレーの帯＝予測ゾーン。一番下の帯は実測が現象コード、予報が川霧あり/なし。"
+                    "ホバーで名前を表示)</span>",
             "font": {"size": 14},
         },
         # 横並びの凡例は8系列あり、埋め込み先(station_detail.htmlのiframe等)の幅が
@@ -197,7 +213,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
     prob_dates = prob_df["datetime"].dt.date if prob_df is not None else None
     for d in dates:
         group = df[df["date"] == d]
-        counts.append(sum(1 for col in fog_cols if group[col].astype(int).isin(SUMMARY_FOG_CODES).any()))
+        counts.append(sum(1 for col in fog_cols if (group[col].astype(int) == 1).any()))
         if prob_df is not None and fog_cols:
             mask = prob_dates == d
             mean_probs.append(float(prob_df.loc[mask, fog_cols].to_numpy().mean() * 100.0) if mask.any()
@@ -260,21 +276,20 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
 
 
 def export_prediction_csv(pred_df, prob_df, models, out_dir, run_date_str=""):
-    """予測結果CSV（縦持ち: 日時・地点・予測コード・現象名・川霧確率・判定）。"""
+    """予測結果CSV（縦持ち: 日時・地点・川霧の予測(あり/なし)・川霧確率・しきい値）。"""
     long_rows = []
     for col in models.keys():
         if col not in pred_df.columns:
             continue
         threshold = models[col].get("fog_threshold", DEFAULT_FOG_THRESHOLD)
-        codes = pred_df[col].astype(int)
+        preds = pred_df[col].astype(int)
         probs = prob_df[col] if prob_df is not None and col in prob_df.columns else pd.Series(np.nan, index=pred_df.index)
         long_rows.append(pd.DataFrame({
             "日時": pred_df["datetime"].dt.strftime("%Y/%m/%d %H:%M"),
             "地点": col,
-            "予測コード": codes,
-            "現象名": codes.map(_phenom_name),
+            "川霧の予測": preds.map(lambda p: BINARY_LABELS[p]),
             "川霧確率(%)": (probs * 100).round(1),
-            "判定": np.where(probs >= threshold, "川霧", "-"),
+            "しきい値(%)": round(threshold * 100, 1),
         }))
     long_out = pd.concat(long_rows, ignore_index=True) if long_rows else pd.DataFrame()
     out_path = os.path.join(out_dir, f"予測結果_{run_date_str}.csv")

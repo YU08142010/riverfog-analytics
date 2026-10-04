@@ -370,25 +370,11 @@ def build_location_class_targets(phenom_df, phenom_cols):
 
     2コード同時観測(2026-09対応)の場合はprimary_phenom_code()で主コード(数値的に
     小さい方)だけを取り出す。川霧(1〜3)は家族グループの並び上、2コード同時でも必ず
-    主コード側に入るため、この関数の出力だけで既存の川霧判定ロジック(学習・較正・
-    回帰防止等)は無改修のまま正しく動く。副コード側はbuild_location_secondary_targets
-    (fog_modelの副コード分類器=Stage B専用)を使う。
+    主コード側に入るため、川霧かどうか(fog_model.pyの二値の学習ターゲット)は主コード
+    だけで正しく判定できる。
     """
     codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
     targets = codes.apply(lambda col: col.map(primary_phenom_code))
     targets.insert(0, "datetime", phenom_df["datetime"].values)
     return targets
 
-
-def build_location_secondary_targets(phenom_df, phenom_cols):
-    """build_location_class_targetsと同じ形(datetime + 地点ごとの列)だが、値は
-    2コード同時観測の副コード(数値的に大きい方。単一コードや欠測はNaN)。
-    fog_model.pyの副コード分類器(Stage B)専用の学習ターゲット。"""
-    def _secondary(value):
-        _primary, secondary = decode_phenom_value(value)
-        return float(secondary) if secondary is not None else np.nan
-
-    codes = phenom_df[phenom_cols].apply(lambda col: col.map(encode_phenomena_cell))
-    targets = codes.apply(lambda col: col.map(_secondary))
-    targets.insert(0, "datetime", phenom_df["datetime"].values)
-    return targets

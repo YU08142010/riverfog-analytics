@@ -425,7 +425,6 @@ TTYD_BASE_PATH = "/admin/terminal-ws/"
 # 相対パスをiframeで埋め込んでいる(cockpit.conf側もUrlRoot=/cockpitに設定済み)。
 
 ALERT_HOURS_AHEAD = 24
-ALERT_MIN_FOG_PROB = 0.95
 TIMELAPSE_MAX_ITEMS = 48
 
 ALLOWED_LOGS = {
@@ -1883,91 +1882,40 @@ def _is_valid_number(v):
     return v is not None and v == v
 
 
-def _render_model_compare_png(state):
-    """RandomForest単体・XGBoost単体・LightGBM単体・RF+XGBoost・RF+LightGBM・
-    RF+XGBoost+LightGBMの川霧F1平均を棒グラフで比較する。地点ごとに実際に採用される
-    モデル方式はこのうち検証データでの正答率が最も高かったものが自動選択されるため
-    (fog_model._fit_best_model参照)、「採用中」バーは方式が地点によって異なる
-    ものの平均を示す。
-    """
-    labels = [
-        "RandomForest単体", "XGBoost単体", "LightGBM単体",
-        "RF+XGBoost", "RF+LightGBM", "RF+XGBoost+LightGBM", "採用中(自動選択)",
-    ]
-    keys = ["rf_only", "xgb_only", "lgbm_only", "hybrid_only", "rf_lgbm_only", "triple_only", None]
-    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#c0392b", "#d35400", "#16a085", "#1a5276"]
-    values, counts = [], []
-    for key in keys:
-        vals = []
-        for info in state.values():
-            if key is None:
-                v = info.get("fog_f1")
-            else:
-                sub = info.get(key)
-                v = sub.get("fog_f1") if sub else None
-            if _is_valid_number(v):
-                vals.append(float(v) * 100.0)
-        values.append(sum(vals) / len(vals) if vals else None)
-        counts.append(len(vals))
-
-    fig, ax = plt.subplots(figsize=(10.5, 4.2))
-    x = list(range(len(labels)))
-    plotted = [v if v is not None else 0 for v in values]
-    ax.bar(x, plotted, color=colors, width=0.55)
-    for i, (v, n) in enumerate(zip(values, counts)):
-        label = f"{v:.1f}%\n(n={n}地点)" if v is not None else "データなし"
-        ax.text(i, (v or 0) + 2, label, ha="center", fontsize=8.5)
-    ax.set_xticks(x)
-    # 7方式分のラベル(特に"RF+XGBoost+LightGBM"のような長いもの)が横並びだと重なるため、
-    # 斜めにして間隔を確保する。
-    ax.set_xticklabels(labels, fontsize=8.5, rotation=20, ha="right")
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("川霧F1(平均, %)")
-    ax.set_title("モデル方式ごとの性能比較(全地点平均)", fontsize=11)
-    ax.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
 def _render_model_compare_plotly(state):
-    """_render_model_compare_pngのPlotly版(2026-09-14)。"""
-    labels = [
-        "RandomForest単体", "XGBoost単体", "LightGBM単体",
-        "RF+XGBoost", "RF+LightGBM", "RF+XGBoost+LightGBM", "採用中(自動選択)",
-    ]
-    keys = ["rf_only", "xgb_only", "lgbm_only", "hybrid_only", "rf_lgbm_only", "triple_only", None]
-    colors = ["#7f8c8d", "#8e44ad", "#27ae60", "#c0392b", "#d35400", "#16a085", "#1a5276"]
-    values, counts = [], []
-    for key in keys:
-        vals = []
-        for info in state.values():
-            if key is None:
-                v = info.get("fog_f1")
-            else:
-                sub = info.get(key)
-                v = sub.get("fog_f1") if sub else None
-            if _is_valid_number(v):
-                vals.append(float(v) * 100.0)
-        values.append(sum(vals) / len(vals) if vals else None)
-        counts.append(len(vals))
-    plotted = [v if v is not None else 0 for v in values]
-    text = [
-        f"{v:.1f}%<br>(n={n}地点)" if v is not None else "データなし"
-        for v, n in zip(values, counts)
-    ]
-    data = [go.Bar(x=labels, y=plotted, marker={"color": colors}, text=text, textposition="outside")]
+    """採用中のモデル(全地点共通の二値LightGBM)と基準(気候値: 地点×時刻ごとの過去の
+    川霧発生率をそのまま確率とみなす)を、評価期間(学習に使っていない直近のデータ)で比較する。
+    気候値を上回っていなければ、モデルは「いつ・どこで出やすいか」以上のことを気象から
+    学べていないことになる。"""
+    metrics = fog_model.shared_global_metrics(state) or {}
+    model_m, clim_m = metrics.get("model") or {}, metrics.get("climatology") or {}
+    names = [("f1", "川霧F1"), ("ap", "PR-AUC"), ("recall", "recall(見逃しの少なさ)"),
+             ("precision", "precision(空振りの少なさ)")]
+    annotations = []
+    data = []
+    if model_m:
+        for label, m, color in (("採用中(LightGBM二値)", model_m, "#1a5276"),
+                                ("基準: 気候値(地点×時刻の発生率)", clim_m, "#7f8c8d")):
+            values = [m.get(k) for k, _ in names]
+            data.append(go.Bar(
+                x=[n for _, n in names], y=[v * 100 if v is not None else 0 for v in values], name=label,
+                marker={"color": color}, textposition="outside",
+                text=[f"{v * 100:.1f}" if v is not None else "データなし" for v in values],
+            ))
+    else:
+        annotations.append({
+            "text": "データがありません", "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5, "showarrow": False,
+        })
     layout = {
-        "title": {"text": "モデル方式ごとの性能比較(全地点平均)", "font": {"size": 14}},
-        "xaxis": {"tickangle": -20},
-        "yaxis": {"title": {"text": "川霧F1(平均, %)"}, "range": [0, 100]},
-        "margin": {"t": 48, "r": 20, "b": 110, "l": 50},
-        "showlegend": False,
+        "title": {"text": "採用モデルと基準(気候値)の比較(評価期間)", "font": {"size": 14}},
+        "yaxis": {"title": {"text": "スコア(%)"}, "range": [0, 100]},
+        "barmode": "group",
+        "margin": {"t": 48, "r": 20, "b": 60, "l": 50},
+        "legend": {"x": 1, "y": 1, "xanchor": "right", "yanchor": "top", "font": {"size": 11}},
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(0,0,0,0)",
+        "annotations": annotations,
     }
     return pio.to_json(go.Figure(data=data, layout=layout))
 
@@ -2017,7 +1965,7 @@ def _render_feature_importance_plotly(importance, top_n=15):
     height = max(320, int(35 * max(len(top), 1)) + 90)
     layout = {
         "title": {"text": "特徴量の重要度(上位)", "font": {"size": 14}},
-        "xaxis": {"title": {"text": "重要度(平均)"}},
+        "xaxis": {"title": {"text": "重要度(gainの割合)"}},
         "yaxis": {},
         "height": height,
         "margin": {"t": 48, "r": 40, "b": 40, "l": 160},
@@ -2037,7 +1985,7 @@ def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点�
         ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
     else:
-        label_texts = [PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
+        label_texts = [c if isinstance(c, str) else PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
         im = ax.imshow(matrix, cmap="Blues")
         ax.set_xticks(range(len(labels)))
         ax.set_yticks(range(len(labels)))
@@ -2087,7 +2035,7 @@ def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地�
         }
         return pio.to_json(go.Figure(data=data, layout=layout))
 
-    label_texts = [PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
+    label_texts = [c if isinstance(c, str) else PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
     vmax = matrix.max() if matrix.size else 0
     data = [go.Heatmap(
         z=matrix, x=label_texts, y=label_texts, colorscale="Blues",
@@ -2242,7 +2190,7 @@ def _render_region_compare_chart_plotly(region_summary):
 def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
     """川霧と判定するしきい値(fog_probがこの値以上なら「川霧」)を変えた場合の
     precision(空振りの少なさ)・recall(見逃しの少なさ)・F1の変化を折れ線で示す。
-    現在採用中のしきい値(fog_model._choose_fog_thresholdが選んだ値)を縦線で示し、
+    現在採用中のしきい値(学習時に検証データでF1が最大になるよう選んだ値)を縦線で示し、
     他のしきい値を選んだ場合とのトレードオフを比較できるようにする。"""
     fig, ax = plt.subplots(figsize=(8, 3.4))
     if sweep:
@@ -2464,13 +2412,13 @@ def _upcoming_fog_alerts_safe():
     try:
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
-            alerts = prediction_log.upcoming_fog_alerts(conn, from_str, to_str, SUMMARY_FOG_CODES)
+            # 予測は二値化済み(確率がしきい値以上なら川霧あり)なので、「川霧あり」と予測された
+            # 行をそのままアラートにする。以前は多クラス分類の確率に対して別途95%以上という
+            # 条件を付けていたが、二値LightGBM(2026-10-04〜)ではしきい値の選択が
+            # その役割を担う(確率は実際の発生率に近い値で出るため、95%はほぼ到達しない)。
+            return prediction_log.upcoming_fog_alerts(conn, from_str, to_str, SUMMARY_FOG_CODES)
         finally:
             conn.close()
-        return [
-            a for a in alerts
-            if a["predicted_fog_prob"] is not None and a["predicted_fog_prob"] >= ALERT_MIN_FOG_PROB
-        ]
     except Exception as e:
         log.warning("Failed to read upcoming fog alerts: %s", e)
         return []
@@ -2617,19 +2565,18 @@ CHAT_SYSTEM_INSTRUCTION = (
     "利用者からの質問に日本語で簡潔に答えてください。\n"
     "\n"
     "【このシステムの仕組み(常に正しい前提知識として使ってよい)】\n"
-    "- 川霧の発生予測には、RandomForest単体・XGBoost単体・LightGBM単体、およびRF+XGBoost・"
-    "RF+LightGBM・RF+XGBoost+LightGBMのブレンドという複数のモデル方式を候補として地点ごとに"
-    "学習し、検証データでの正答率が最も高かった方式を地点ごとに自動選択して使っている"
-    "(地点によって採用される方式は異なる)。ブレンド方式が採用された場合の混合比"
-    "(ブレンド重み)も地点ごとに検証データから自動選択される。\n"
-    "- 観測データが少ない地点は、単独では十分な精度のモデルを学習できないため、複数地点をまとめた"
-    "「pooled」モデル(地点別川霧発生率などの特徴量を加えた共通モデル)で代替している。\n"
-    "- 川霧と判定するしきい値(fog_threshold)は0.5固定ではなく、地点ごとに検証データでF1が"
-    "最良になる値を自動選択している。\n"
+    "- 川霧の発生予測には、全地点で共通の1つのLightGBMモデルを使い、「川霧あり/なし」の二値で"
+    "予測している(2026-10-04に、地点ごとに複数方式から選ぶ多クラス分類から切り替えた)。"
+    "地点ごとの違いは、地点ごとの気象値と、その地点の過去の川霧発生率などの特徴量で表している。\n"
+    "- モデルは川霧である確率を出し、確率がしきい値(fog_threshold、全地点共通)以上なら「川霧あり」と"
+    "判定する。しきい値は、直近の検証用データでF1が最良になる値を自動選択している。\n"
+    "- しきい値の選択と精度の評価は、本番と同じく気象の予報値を入力にして行っている"
+    "(過去に実際に出されていた予報を使う)。精度は学習に使っていない直近21日分のデータで評価し、"
+    "「地点×時刻ごとの過去の発生率」をそのまま答えるだけの基準(気候値)とも比較している。\n"
     "- 特徴量には気温・湿度・降水量・視程などの気象観測値に加え、その地点の過去の川霧発生率や、"
     "他地点も含めた広域の川霧の出やすさを示す指数なども使っている。\n"
-    "- 定期的な再学習のたびに、新モデルが統計的に有意に前のモデルより良いと確認できない場合は、"
-    "自動的に前のモデルへロールバックする安全機構がある(精度低下を防ぐため)。\n"
+    "- 毎日の再学習のたびに、新しいモデルの確率の誤差が評価期間で気候値より統計的に有意に"
+    "悪ければ(学習が壊れている等)、自動的に前のモデルを使い続ける安全機構がある。\n"
     "- 予測精度がなぜ変動するか(季節性、学習データの偏り、直近の異常な気象、モデルの再学習・"
     "自動ロールバック等)といった、システムの仕組みや機械学習全般に関する質問には、"
     "上記の前提知識・渡された数値データ・一般的な機械学習の知識をもとに答えて構わない。\n"
@@ -2686,7 +2633,7 @@ def _build_chat_context():
 
     alerts = _upcoming_fog_alerts_safe()
     if alerts:
-        lines.append("【今後24時間以内の川霧アラート(予測確率95%以上)】")
+        lines.append("【今後24時間以内の川霧アラート(「川霧あり」と予測された地点・時刻)】")
         for a in alerts[:10]:
             prob_pct = round((a["predicted_fog_prob"] or 0) * 100)
             lines.append(f"- {a['station']}: {a['target_datetime']}頃(確率{prob_pct}%)")
@@ -2754,23 +2701,26 @@ def _build_chat_context():
         model_state = fog_model.load_model_state()
     except Exception:
         model_state = {}
-    if model_state:
-        n_total = len(model_state)
-        n_pooled = sum(1 for info in model_state.values() if info.get("pooled"))
-        accs = [info["accuracy"] for info in model_state.values() if _is_valid_number(info.get("accuracy"))]
-        avg_acc_part = ""
-        if accs:
-            avg_acc_part = f"、検証accuracy平均{round(100.0 * sum(accs) / len(accs), 1)}%"
-        lines.append(f"【モデル状況】学習済み{n_total}地点(うちpooledモデル{n_pooled}地点){avg_acc_part}")
+    global_metrics = fog_model.shared_global_metrics(model_state) if model_state else None
+    if global_metrics:
+        any_info = next(iter(model_state.values()))
+        m, c = global_metrics.get("model") or {}, global_metrics.get("climatology") or {}
+
+        def _pct(v):
+            return "-" if v is None else f"{round(100.0 * v, 1)}%"
+        lines.append(
+            f"【モデル状況】{any_info.get('model_type')}を{len(model_state)}地点で使用"
+            f"(学習日時{any_info.get('trained_at')}、しきい値{_pct(global_metrics.get('threshold'))})"
+        )
+        lines.append(
+            f"評価期間({global_metrics.get('test_start')}〜{global_metrics.get('test_end')}、"
+            f"{'予報値' if global_metrics.get('input') == 'forecast' else '実測値'}を入力)の成績: "
+            f"モデル 川霧F1 {_pct(m.get('f1'))}・recall {_pct(m.get('recall'))}・precision {_pct(m.get('precision'))}"
+            f" / 基準(気候値) 川霧F1 {_pct(c.get('f1'))}"
+        )
         low_acc = _low_accuracy_stations(model_state, n=3)
         if low_acc:
-            lines.append("検証accuracyが低い地点(下位3件): " + "、".join(low_acc))
-        model_type_parts = [
-            f"{name}: {fog_model.normalize_model_type_label(info.get('model_type'))}"
-            for name, info in model_state.items()
-        ]
-        if model_type_parts:
-            lines.append("【地点ごとの採用モデル方式(全地点)】" + "、".join(model_type_parts))
+            lines.append("評価期間のaccuracyが低い地点(下位3件): " + "、".join(low_acc))
 
     predict_log_path = ALLOWED_LOGS.get("predict")
     if predict_log_path and predict_log_path.exists():
@@ -3510,7 +3460,8 @@ def _accuracy_by_weather_safe():
             weather_row = weather_by_dt.get(target_dt)
             if weather_row is None:
                 continue
-            correct = 1 if predicted_code == actual_code else 0
+            # 的中 = 「川霧かどうか」が一致(prediction_log.pyの説明参照)。
+            correct = 1 if fog_model.is_fog_code(predicted_code) == fog_model.is_fog_code(actual_code) else 0
             precip = weather_row[COL_PRECIP]
             precip_key = "降水あり" if precip is not None and precip > 0 else "降水なし"
             precip_buckets.setdefault(precip_key, {"n": 0, "correct": 0})
@@ -3539,35 +3490,6 @@ def _accuracy_by_weather_safe():
     with _accuracy_by_weather_cache_lock:
         _accuracy_by_weather_cache["data"] = result
         _accuracy_by_weather_cache["at"] = now
-    return result
-
-
-_dual_code_utilization_cache = {"data": None, "at": 0.0}
-_dual_code_utilization_cache_lock = threading.Lock()
-
-
-def _dual_code_utilization_safe():
-    """複数現象コード機能(2026-09追加)が実際にどれだけ使われているかの目安
-    (weather_store.dual_code_utilizationのキャッシュ付きラッパー)。"""
-    now = time.monotonic()
-    with _dual_code_utilization_cache_lock:
-        cached = _dual_code_utilization_cache["data"]
-        if cached is not None and now - _dual_code_utilization_cache["at"] < ACCURACY_SUMMARY_CACHE_SECONDS:
-            return cached
-    if not WEATHER_DB_PATH.exists():
-        return {"total": 0, "dual": 0, "by_station": []}
-    try:
-        conn = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
-        try:
-            result = weather_store.dual_code_utilization(conn)
-        finally:
-            conn.close()
-    except Exception as e:
-        log.warning("Failed to read dual-code utilization: %s", e)
-        return {"total": 0, "dual": 0, "by_station": []}
-    with _dual_code_utilization_cache_lock:
-        _dual_code_utilization_cache["data"] = result
-        _dual_code_utilization_cache["at"] = now
     return result
 
 
@@ -3604,8 +3526,8 @@ def _fog_pair_counts_safe():
 def _fog_confusion_stats(pairs, fog_codes=None):
     """(station, predicted_code, actual_code, n)のリストから、「川霧」を陽性クラスとみなした
     TP(的中)/FP(空振り: 川霧じゃないのに川霧と予測)/FN(見逃し: 川霧なのに川霧じゃないと予測)/TNと、
-    precision/recall/F1を計算する。fog_model._choose_fog_thresholdと同じくSUMMARY_FOG_CODES
-    を陽性クラスの定義に使うので、学習時のしきい値選択と同じ基準で比較できる。"""
+    precision/recall/F1を計算する。予測は二値(1=川霧あり)、旧方式の行は現象コードで、
+    どちらもSUMMARY_FOG_CODES(二値の1を含む)で川霧かどうかを判定する。"""
     fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
     tp = fp = fn = tn = 0
     for row in pairs:
@@ -3629,34 +3551,6 @@ def _fog_confusion_stats(pairs, fog_codes=None):
     return {"tp": tp, "fp": fp, "fn": fn, "tn": tn, "precision": precision, "recall": recall, "f1": f1}
 
 
-def _secondary_code_accuracy_stats(pairs):
-    """(station, predicted_code, actual_code, n)のリストから、副コード(2コード同時観測時の
-    2つ目、2026-09対応)に絞った精度指標を計算する。predicted_code/actual_codeはパック済み値の
-    こともあるため、decode_phenom_valueで(主, 副)に分解してから副コードだけを比較する
-    (主コードの精度は_fog_confusion_stats等の既存指標で別途見られるため、ここでは
-    「実測に副コードがある場合に、予測もそれを言い当てられているか」だけに絞る)。
-    戻り値のn_actual_hasが0の場合は、まだ副コード込みで答え合わせできた実測が無いということ
-    (2026-09に追加したばかりの機能のため、当面はここが小さい/0のままでも異常ではない)。"""
-    n_actual_has = n_pred_has = n_both_correct = 0
-    for row in pairs:
-        n = row["n"]
-        _, actual_secondary = decode_phenom_value(row["actual_code"])
-        _, pred_secondary = decode_phenom_value(row["predicted_code"])
-        if actual_secondary is not None:
-            n_actual_has += n
-        if pred_secondary is not None:
-            n_pred_has += n
-        if actual_secondary is not None and pred_secondary is not None and actual_secondary == pred_secondary:
-            n_both_correct += n
-    precision = n_both_correct / n_pred_has if n_pred_has else None
-    recall = n_both_correct / n_actual_has if n_actual_has else None
-    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
-    return {
-        "n_actual_has": n_actual_has, "n_pred_has": n_pred_has, "n_correct": n_both_correct,
-        "precision": precision, "recall": recall, "f1": f1,
-    }
-
-
 def _accuracy_station_metrics_safe():
     """地点ごとに川霧クラスのprecision/recall/F1をまとめる(地点別的中率テーブルに
     列を足すためのもの)。戻り値: {地点名: _fog_confusion_statsの戻り値}"""
@@ -3677,30 +3571,28 @@ def _accuracy_region_summary_safe():
     result = []
     for region, rows in sorted(by_region.items()):
         n = sum(r["n"] for r in rows)
-        correct = sum(r["n"] for r in rows if r["predicted_code"] == r["actual_code"])
+        correct = sum(
+            r["n"] for r in rows
+            if fog_model.is_fog_code(r["predicted_code"]) == fog_model.is_fog_code(r["actual_code"])
+        )
         result.append({"region": region, "n": n, "correct": correct, **_fog_confusion_stats(rows)})
     return result
 
 
 def _confusion_matrix_from_pairs(pairs):
-    """prediction_log.fog_pair_countsの集計結果から(labels, matrix)を組み立てる。
-    fog_model.compute_confusion_matrixと同じ形式だが、学習時の検証データではなく
-    実際の本番予測ログ(prediction_log)を元にする点が異なる。predicted_code/actual_codeは
-    2コード同時観測(2026-09対応)のパック済み値のこともあるため、主コードだけを取り出して
-    従来通りの単一コード軸(0〜10)の混同行列にする(副コードまでの混同行列はスコープ外、
-    シンプルに保つ)。"""
-    def _primary(row, key):
-        p = primary_phenom_code(row[key])
-        return None if p != p else int(p)  # NaN
-
-    entries = [(row, _primary(row, "predicted_code"), _primary(row, "actual_code")) for row in pairs]
-    entries = [(row, p, a) for row, p, a in entries if p is not None and a is not None]
-    labels = sorted({p for _row, p, _a in entries} | {a for _row, _p, a in entries})
-    index = {c: i for i, c in enumerate(labels)}
-    matrix = np.zeros((len(labels), len(labels)), dtype=int)
-    for row, p, a in entries:
-        matrix[index[a], index[p]] += row["n"]
-    return labels, matrix
+    """prediction_log.fog_pair_countsの集計結果から、「川霧かどうか」の二値の混同行列
+    (labels, matrix)を組み立てる(行=実際、列=予測)。予測は二値(1=川霧あり)、旧方式の
+    行は現象コードで、どちらもfog_model.is_fog_codeで川霧かどうかを判定する。"""
+    matrix = np.zeros((2, 2), dtype=int)
+    for row in pairs:
+        if row["predicted_code"] is None or row["actual_code"] is None:
+            continue
+        a = int(fog_model.is_fog_code(row["actual_code"]))
+        p = int(fog_model.is_fog_code(row["predicted_code"]))
+        matrix[a, p] += row["n"]
+    if not matrix.sum():
+        return [], np.zeros((0, 0))
+    return list(fog_model.BINARY_LABELS), matrix
 
 
 _fog_prob_buckets_cache = {"data": None, "at": 0.0}
@@ -3746,8 +3638,7 @@ MIN_SAMPLES_FOR_THRESHOLD_PRECISION = 10
 
 def _threshold_sweep_stats(buckets, fog_codes=None):
     """しきい値ごとのprecision/recall/F1を計算する。fog_model.FOG_THRESHOLD_GRIDと
-    同じ刻みを使うので、学習時にfog_model._choose_fog_thresholdが選んだしきい値と
-    同じ基準で比較できる。戻り値: [{"threshold":, "precision":, "recall":, "f1":}, ...]
+    同じ刻みを使うので、学習時に選ばれたしきい値と同じ基準で比較できる。戻り値: [{"threshold":, "precision":, "recall":, "f1":}, ...]
     """
     fog_codes = SUMMARY_FOG_CODES if fog_codes is None else fog_codes
     if not buckets:
@@ -4432,27 +4323,14 @@ def simulator_page():
             lat, lon = representative_coords()
         dt = datetime.strptime(f"{date_str} {hour:02d}:00", "%Y-%m-%d %H:%M")
         weather = {field["col"]: values[field["key"]] for field in SIM_WEATHER_FIELDS}
-        calibrator = fog_model.load_fog_calibrator()
-        predicted_code, predicted_code2, fog_prob, class_proba, secondary_class_proba = fog_model.simulate_station(
-            info, lat, lon, weather, dt, calibrator=calibrator,
-        )
-        # 2コード同時観測(2026-09対応)。predicted_code2があれば、表示用ラベルは
-        # 主・副コードを結合したもの(phenom_label)にする。
-        display_value = predicted_code if predicted_code2 is None else encode_phenom_codes([predicted_code, predicted_code2])
-        label, color, text_color = _phenom_label_color(display_value)
-        threshold = info.get("fog_threshold") or fog_model.DEFAULT_FOG_THRESHOLD
+        is_fog, fog_prob = fog_model.simulate_station(info, station, lat, lon, weather, dt)
+        # 「川霧あり」は観測の「川霧」(コード2)と同じ色で表示する。
+        _, color, text_color = _phenom_label_color(2 if is_fog else 0)
         result = {
-            "label": label, "color": color, "text_color": text_color,
-            "fog_prob": fog_prob, "fog_threshold": threshold, "is_fog_alert": fog_prob >= threshold,
+            "label": fog_model.BINARY_LABELS[is_fog], "is_fog": bool(is_fog),
+            "color": color, "text_color": text_color,
+            "fog_prob": fog_prob, "fog_threshold": info.get("fog_threshold"),
             "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
-            "class_proba": [
-                {"code": c, "label": _phenom_label_color(c)[0], "prob": p}
-                for c, p in class_proba.items() if p >= 0.01
-            ],
-            "secondary_class_proba": [
-                {"code": c, "label": _phenom_label_color(c)[0], "prob": p}
-                for c, p in secondary_class_proba.items() if p >= 0.01
-            ],
         }
 
     return render_template(
@@ -4844,26 +4722,10 @@ def station_detail(name):
 
     station_weather_latest = _latest_station_weather(name, observations)
 
-    # 二次コード(2つ目の現象、2026-09対応)予測がこの地点で有効かどうか。
-    # skipped_reasonがNoneなら有効、"insufficient_dual_samples"ならデータ不足、
-    # "pooled_station"ならプーリング救済地点のため非対応(いずれも仕様通りであり、
-    # 単なるエラーではないことが伝わるよう文言を分ける)。
-    station_model_info = fog_model.load_model_state().get(name)
-    secondary_status = None
-    if station_model_info is not None:
-        secondary = station_model_info.get("secondary") or {}
-        secondary_status = {
-            "skipped_reason": secondary.get("skipped_reason", "insufficient_dual_samples"),
-            "n_dual": secondary.get("n_dual"),
-            "trained_at": secondary.get("trained_at"),
-        }
-
     return render_template(
         "station_detail.html",
         name=name,
         current=current,
-        secondary_status=secondary_status,
-        min_dual_code_positives=fog_model.MIN_DUAL_CODE_POSITIVES,
         station_weather_latest=station_weather_latest,
         observations_datetime=observations["datetime"] if observations else None,
         latest_pred_date=latest_pred_date,
@@ -5130,8 +4992,8 @@ def station_threshold_chart(name):
 
 @app.route("/stations/<name>/tree_diagram.json")
 def station_tree_diagram(name):
-    """採用中のモデル(RF/XGBoost/LightGBMのうち実際にブレンドに使われている方式)が
-    実際にどれくらいの深さの木を使っているかを示す図。木の深さは分岐条件を重ねるほど
+    """採用中のモデル(全地点共通の二値LightGBM)が実際にどれくらいの深さの木を
+    使っているかを示す図。木の深さは分岐条件を重ねるほど
     複雑な判定ができる一方、過学習のリスクとの兼ね合いでもあるため、モデルの複雑さを
     直感的に把握できるよう追加した(2026-09-13、利用者からの要望)。"""
     name = _validate_station(name)
@@ -5142,16 +5004,6 @@ def station_tree_diagram(name):
         extracted = {}
         if info is not None and info.get("pipe") is not None:
             feature_names = list(info.get("features", []))
-            if (
-                info.get("pooled") and "station_fog_rate" in info
-                and fog_model.STATION_FOG_RATE_FEATURE not in feature_names
-            ):
-                # プーリング救済モデルは実際には地点別川霧発生率も特徴量として使っているが、
-                # info["features"]には含まれていない(build_location_forecast_codes等は
-                # Xの末尾に追加する形で辻褄を合わせているため予測自体は問題ないが、
-                # 特徴量名の一覧としては不完全だった)。木の特徴量ラベルが正しく出るよう
-                # ここで補う(2026-09-13、この可視化機能を作った際に発覚)。
-                feature_names.append(fog_model.STATION_FOG_RATE_FEATURE)
             try:
                 extracted = fog_model.extract_representative_tree(info["pipe"], feature_names)
             except Exception as e:
@@ -5179,12 +5031,7 @@ def accuracy_page():
     else:
         by_station = []
     region_summary = _accuracy_region_summary_safe()
-    fog_pairs = _fog_pair_counts_safe()
-    overall_fog_stats = _fog_confusion_stats(fog_pairs)
-    # 二次コード(2コード同時観測時の2つ目、2026-09対応)の予測精度・記録状況。
-    # 主コードの精度とは別に、この機能自体が実際に価値を生んでいるかを見えるようにする。
-    secondary_accuracy = _secondary_code_accuracy_stats(fog_pairs)
-    dual_code_utilization = _dual_code_utilization_safe()
+    overall_fog_stats = _fog_confusion_stats(_fog_pair_counts_safe())
 
     # 以前は管理者専用の「モデル管理」ページにしかなかった学習時(検証データ)の指標。
     # 2026-09-12、正答率・F1のような分析情報は管理者専用でなくてよいとの判断で
@@ -5193,30 +5040,25 @@ def accuracy_page():
     model_rows = []
     for col in sorted(model_state.keys()):
         info = model_state[col]
-        # secondary(Stage B、2026-09対応)は学習できた地点ではdict、まだ一度も
-        # 学習を試みていない古いmodel_state(移行前)ではキー自体が無いことがあるため、
-        # get()で存在しない場合も"データなし"として扱えるようにする。
-        secondary = info.get("secondary") or {}
         model_rows.append({
             "station": col,
-            "model_type": fog_model.normalize_model_type_label(info.get("model_type")),
             "n": info.get("n"),
+            "station_fog_rate": info.get("station_fog_rate"),
+            "n_test": info.get("n_test"),
+            "n_test_fog": info.get("n_test_fog"),
             "accuracy": info.get("accuracy"),
             "fog_f1": info.get("fog_f1"),
-            "pooled": info.get("pooled"),
-            "trained_at": info.get("trained_at"),
-            "secondary_skipped_reason": secondary.get("skipped_reason", "insufficient_dual_samples"),
-            "secondary_n_dual": secondary.get("n_dual"),
-            "secondary_trained_at": secondary.get("trained_at"),
+            "recall": info.get("recall"),
+            "precision": info.get("precision"),
         })
-    low_accuracy_stations = _low_accuracy_stations(model_state)
+    any_info = next(iter(model_state.values()), {}) if model_state else {}
 
     return render_template(
         "accuracy.html", summary=summary, by_weather=by_weather, by_station=by_station,
         region_summary=region_summary, overall_fog_stats=overall_fog_stats,
-        secondary_accuracy=secondary_accuracy, dual_code_utilization=dual_code_utilization,
-        model_rows=model_rows, low_accuracy_stations=low_accuracy_stations,
-        min_dual_code_positives=fog_model.MIN_DUAL_CODE_POSITIVES,
+        model_rows=model_rows, global_metrics=fog_model.shared_global_metrics(model_state),
+        model_type=any_info.get("model_type"), model_trained_at=any_info.get("trained_at"),
+        fog_threshold=any_info.get("fog_threshold"),
     )
 
 
@@ -5316,19 +5158,6 @@ def accuracy_feature_importance_chart():
         return _render_feature_importance_plotly(importance)
 
     data = _cached_chart_json("accuracy_feature_importance_chart", [fog_model.MODEL_STATE_PATH], render)
-    return Response(data, mimetype="application/json")
-
-
-@app.route("/accuracy/feature_importance_low_accuracy_chart.json")
-def accuracy_feature_importance_low_accuracy_chart():
-    def render():
-        state = fog_model.load_model_state()
-        only_stations = set(_low_accuracy_stations(state))
-        importance = fog_model.compute_feature_importance(state, only_stations=only_stations)
-        return _render_feature_importance_plotly(importance)
-
-    data = _cached_chart_json("accuracy_feature_importance_low_accuracy_chart",
-                               [fog_model.MODEL_STATE_PATH], render)
     return Response(data, mimetype="application/json")
 
 

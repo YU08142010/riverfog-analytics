@@ -91,22 +91,10 @@
     <p>
         川霧である確率: <strong>{{ "%.1f"|format(result.fog_prob * 100) }}%</strong>
         <span class="muted">
-            (この地点の川霧アラートしきい値: {{ "%.0f"|format(result.fog_threshold * 100) }}%{{ " ・ しきい値を超えています" if result.is_fog_alert else "" }})
+            (しきい値 {{ "%.0f"|format(result.fog_threshold * 100) }}%以上で「川霧あり」と判定{{ " ・ しきい値を超えています" if result.is_fog else "" }})
         </span>
     </p>
     <p class="muted">使用モデル: {{ result.model_type }}</p>
-    {% if result.class_proba %}
-    <div class="table-scroll">
-    <table class="obs-table" style="width:auto;">
-        <thead><tr><th>現象</th><th>確率</th></tr></thead>
-        <tbody>
-        {% for row in result.class_proba %}
-        <tr><td>{{ row.label }}</td><td>{{ "%.1f"|format(row.prob * 100) }}%</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% endif %}
 </div>
 {% endif %}
 {% endblock %}

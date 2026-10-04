@@ -2,11 +2,11 @@
 
 1. 答え合わせ: 過去に予測して記録した中で、対象時刻の実測がもう出ている分を検証する
    （data/predictions.db）
-2. 再学習: 実測データ（新しく確定した分も含む）全体でモデルを学習し直す
-   （『予測と実際を見比べて誤差を学習し、完璧に近づけていく』の実体はここ。
-   RandomForest/XGBoostは1件ずつのオンライン学習に向かないため、
-   蓄積データで日次に学習し直す方式にしている）
-3. 予測: Open-Meteoの予報から地点ごとの現象コード・川霧確率を予測し、グラフ・CSVを出力
+2. 再学習: 実測データ全体で、全地点共通の二値LightGBM(川霧あり/なし)を学習し直す
+   (fog_model.train_shared_model)。前回のモデルより確率の誤差が有意に悪化していれば
+   前回のモデルに戻す(fog_model.apply_regression_guard)。
+3. 予測: Open-Meteoの予報から地点ごとの川霧の確率を計算し、しきい値で二値化した予測
+   (1=川霧あり、0=川霧なし)とあわせてグラフ・CSVを出力する
 4. 記録: 今回の予測を答え合わせ用に記録する（観測時間帯4〜19時分のみ、翌日以降に検証可能）
 """
 import argparse
@@ -28,7 +28,7 @@ import fog_graphs
 import fog_model
 import prediction_log
 import station_weather
-from fog_features import PhenomCodeError, encode_phenom_codes, encode_phenomena_cell
+from fog_features import encode_phenomena_cell
 
 # 観測時間帯（collect.pyの毎時収集と合わせている）。この時間帯以外は実測が存在しないため
 # 予測しても答え合わせができない。
@@ -62,21 +62,19 @@ log = logging.getLogger("predict")
 
 
 def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
-    """答え合わせ: 対象時刻の実測が確定している未検証の予測を検証する。"""
+    """答え合わせ: 対象時刻の実測が確定している未検証の予測を検証する。
+    実測は現象コード(0〜10、2コード同時観測はパック値)のまま記録し、的中の判定は
+    集計時に「川霧かどうか」で行う(prediction_log参照)。"""
     now_str = now_naive.strftime("%Y-%m-%d %H:%M:%S")
     pending = prediction_log.fetch_pending(conn, now_str)
     if not pending:
         log.info("No pending predictions to verify")
         return
 
-    # station -> {datetime_naive: actual_code} の逆引き用Series
-    # phenom_dfに同一datetimeの行が重複していると、set_index後のindexが一意でなくなり
-    # series.loc[target_dt]がスカラーではなくSeriesを返してint(actual)が例外になる
-    # (fog_features._lag_seriesと同じ理由でdrop_duplicatesが必要、2026-09-13の監査で指摘)。
-    actual_by_station = {}
-    for name in station_names:
-        s = phenom_df.drop_duplicates(subset="datetime").set_index("datetime")[name].map(encode_phenomena_cell)
-        actual_by_station[name] = s
+    # phenom_dfに同一datetimeの行が重複しているとSeriesのlocがスカラーを返さなくなるため
+    # drop_duplicatesしてから引く。
+    deduped = phenom_df.drop_duplicates(subset="datetime").set_index("datetime")
+    actual_by_station = {name: deduped[name].map(encode_phenomena_cell) for name in station_names}
 
     results = []
     verified_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
@@ -100,7 +98,7 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
     summary = prediction_log.accuracy_summary(conn)
     overall = summary["overall"]
     if overall["n"]:
-        log.info("Overall accuracy so far: %d/%d (%.1f%%)",
+        log.info("Overall accuracy (fog / no fog) so far: %d/%d (%.1f%%)",
                  overall["correct"], overall["n"], 100.0 * overall["correct"] / overall["n"])
     for row in summary["by_lead_day"]:
         if row["n"]:
@@ -109,10 +107,8 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
 
 
 def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SNAPSHOT_PATH):
-    """各地点について、now以降で最も近い時刻の予測に使われた特徴量の値をJSONで保存する。
-    station_detail.htmlで「この予測にどの数値が使われたか」を表示するために使う
-    (SHAP等の本格的な説明可能性の仕組みは導入せず、まずは生の入力値をそのまま見せる)。
-    """
+    """各地点について、now以降で最も近い時刻の予測に使われた特徴量の値をJSONで保存する
+    (station_detail.htmlで「この予測にどの数値が使われたか」を表示するため)。"""
     payload = {}
     for station, df in feature_snapshots.items():
         future = df[df["datetime"] >= now_naive]
@@ -123,22 +119,15 @@ def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SN
         features = {
             col: (None if pd.isna(row[col]) else round(float(row[col]), 3))
             for col in df.columns
-            if col not in (
-                "datetime", "predicted_code", "predicted_fog_prob",
-                "predicted_code2", "predicted_code2_prob",
-            )
+            if col not in ("datetime", "predicted_fog", "predicted_fog_prob")
         }
-        code2 = row.get("predicted_code2")
         payload[station] = {
             "target_datetime": row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
             "features": features,
-            "predicted_code": int(row["predicted_code"]),
-            "predicted_code2": (None if pd.isna(code2) else int(code2)),
+            "predicted_fog": int(row["predicted_fog"]),
             "predicted_fog_prob": round(float(row["predicted_fog_prob"]), 4),
-            "predicted_code2_prob": round(float(row.get("predicted_code2_prob", 0.0)), 4),
             "fog_threshold": info.get("fog_threshold"),
             "model_type": info.get("model_type", ""),
-            "blend_weight": info.get("blend_weight"),
         }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,11 +142,9 @@ def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SN
         log.warning("Failed to save feature snapshot: %s", e)
 
 
-def record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df, secondary_prob_df, models):
-    """今回の予測を答え合わせ用に記録する（観測時間帯のみ）。副コード(2コード同時観測、
-    2026-09対応)が予測されていれば、encode_phenom_codesで主コードとパックした1つの値を
-    predicted_codeに格納する(prediction_log.pyのスキーマ変更不要。単一コードのみの
-    予測は従来通りそのままの値になる)。"""
+def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
+    """今回の予測を答え合わせ用に記録する（観測時間帯のみ）。predicted_codeには二値の
+    予測(1=川霧あり、0=川霧なし)を入れる(prediction_log.pyのスキーマ説明参照)。"""
     run_at_dt = datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
     rows = []
     n_past = 0
@@ -165,32 +152,20 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df
     obs_mask = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)
     sub_pred = pred_df[obs_mask]
     sub_prob = prob_df[obs_mask]
-    sub_secondary = secondary_pred_df[obs_mask]
     for col in models.keys():
         if col not in sub_pred.columns:
             continue
         model_type = models[col].get("model_type", "")
-        for dt, code, prob, code2 in zip(
-            sub_pred["datetime"], sub_pred[col], sub_prob[col], sub_secondary[col],
-        ):
+        for dt, pred, prob in zip(sub_pred["datetime"], sub_pred[col], sub_prob[col]):
             n_total += 1
             lead_hours = (dt.to_pydatetime() - run_at_dt).total_seconds() / 3600.0
             if lead_hours < 0:
                 n_past += 1
                 continue
-            codes = [int(code)] if code2 is None else [int(code), int(code2)]
-            try:
-                packed = encode_phenom_codes(codes)
-            except PhenomCodeError:
-                # predict_secondary_codesが家族グループ制約を守っている限り通常は
-                # 起こらないが、念のためのフォールバック(主コードのみで記録する)。
-                log.warning("Invalid predicted code combination %s for %s; storing primary code only", codes, col)
-                packed = int(code)
-            rows.append((col, dt.strftime("%Y-%m-%d %H:%M:%S"), lead_hours, packed, float(prob), model_type))
+            rows.append((col, dt.strftime("%Y-%m-%d %H:%M:%S"), lead_hours, int(pred), float(prob), model_type))
     if n_total and n_past / n_total > 0.5:
         # 予報時刻がJSTのnaive値である前提が崩れる(API仕様変更でタイムゾーンがズレる等)と、
-        # ほぼ全行がlead_hours<0で捨てられ「0件記録」という分かりにくい結果になる。
-        # 原因調査の手がかりとして、その兆候(半数以上が過去扱い)を明示的に警告する。
+        # ほぼ全行がlead_hours<0で捨てられ「0件記録」という分かりにくい結果になるため警告する。
         log.warning(
             "%d/%d forecast row(s) were treated as being in the past (lead_hours < 0); "
             "the forecast timestamps may not be JST as expected",
@@ -203,7 +178,7 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                       help="学習・予測・答え合わせは実行するが、DB更新とファイル出力は行わない")
+                        help="学習・予測・答え合わせは実行するが、DB更新とファイル出力は行わない")
     parser.add_argument("--forecast-days", type=int, default=FORECAST_DAYS)
     args = parser.parse_args()
 
@@ -228,25 +203,21 @@ def main():
 
     verify_pending_predictions(conn, phenom_df, station_names, now_naive)
 
-    models, calib_data_by_station = fog_model.train_location_models(
+    prev_state = fog_model.load_model_state()
+    models = fog_model.train_shared_model(
         main_df, phenom_df, station_names, lat, lon,
-        camera_coords=camera_coords, weather_conn=weather_conn,
+        camera_coords=camera_coords, weather_conn=weather_conn, prev_state=prev_state,
     )
     if not models:
-        log.warning("No models could be trained (not enough data yet); skipping forecast/graphs")
+        log.warning("No model could be trained (not enough data yet); skipping forecast/graphs")
         return
 
-    rolled_back = fog_model.apply_regression_guard(models)
+    rolled_back = fog_model.apply_regression_guard(models, prev_state=prev_state)
     if rolled_back:
         log.warning("Rolled back to previous model due to regression: %s", ", ".join(rolled_back))
-    # 較正モデルの学習・しきい値の較正後空間への変換は、ロールバック判定の後に行う
-    # (ロールバックされた地点は今回の候補パイプの確率を較正学習に混ぜない。
-    # fog_model.finalize_fog_calibrationのdocstring参照。2026-09-13の監査で指摘された、
-    # 較正とロールバックの順序バグの修正)。
-    fog_calibrator = fog_model.finalize_fog_calibration(models, calib_data_by_station, rolled_back)
     if not args.dry_run:
         fog_model.save_model_state(models)
-        fog_model.save_fog_calibrator(fog_calibrator)
+        fog_model.remove_legacy_calibrator()
 
     try:
         forecast_raw = fog_model.fetch_forecast_range(lat, lon, args.forecast_days)
@@ -256,11 +227,8 @@ def main():
     log.info("Fetched forecast: %d hour(s), %s - %s",
              len(forecast_raw), forecast_raw["datetime"].min(), forecast_raw["datetime"].max())
 
-    # Open-MeteoにはtimezoneとしてAsia/Tokyoを明示指定しているが(fog_model.fetch_forecast_range)、
-    # API仕様変更等でUTC等に戻った場合、9時間ズレたままlead_hoursが計算され静かに記録されて
-    # しまう。Open-Meteoは常に「今日のローカル日付の00:00」から返す仕様のため、時刻ではなく
-    # 日付だけを見て確認する(時刻で見ると、真夜中以外に実行するたびに「nowから離れている」
-    # 判定になってしまい、正常時でも毎回誤検知してしまうため)。
+    # Open-Meteoは常に「今日のローカル日付の00:00」から返す仕様のため、日付だけを見て
+    # タイムゾーンがAsia/Tokyoのままか確認する(UTCに戻ると9時間ズレたまま記録されてしまう)。
     first_forecast_date = forecast_raw["datetime"].min().to_pydatetime().date()
     if first_forecast_date not in (now_naive.date(), now_naive.date() - timedelta(days=1)):
         log.warning(
@@ -276,11 +244,18 @@ def main():
         log.warning("Per-station forecast fetch failed, falling back to the shared forecast: %s", e)
         forecast_by_station = {}
 
-    pred_df, prob_df, secondary_pred_df, secondary_prob_df, feature_snapshots = fog_model.build_location_forecast_codes(
+    pred_df, prob_df, feature_snapshots = fog_model.build_location_forecast(
         models, forecast_raw, lat, lon,
         forecast_by_station=forecast_by_station, camera_coords=camera_coords,
-        calibrator=fog_calibrator,
     )
+    # 「川霧あり」と予測された件数を日ごとに残す(しきい値・予報の入力が想定通りかの確認用)。
+    obs_hours = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)
+    station_cols = [c for c in pred_df.columns if c != "datetime"]
+    obs = pred_df[obs_hours]
+    per_day = obs.groupby(obs["datetime"].dt.strftime("%m/%d"))[station_cols].sum().sum(axis=1)
+    log.info("Forecast: %d station-hour(s) in observation hours, %d predicted as river fog (by day: %s)",
+             len(obs) * len(station_cols), int(per_day.sum()),
+             ", ".join(f"{d}:{int(n)}" for d, n in per_day.items()))
 
     if not args.dry_run:
         _save_feature_snapshot(feature_snapshots, models, now_naive)
@@ -308,14 +283,12 @@ def main():
                 station_names=region_stations, file_suffix=file_suffix, label_suffix=f"（{region_label}）",
             )
         fog_graphs.export_prediction_csv(pred_df, prob_df, models, str(out_dir), run_date_str=run_date_str)
-        # グラフの出力形式(.html=Plotly / .png=旧matplotlib)をログに残しておく。
-        # デプロイのタイミングによっては、その日のcron実行が新旧どちらのfog_graphs.pyで
-        # 動いたのか実行後に見分けづらいため(2026-09-14、Plotly移行の本番反映確認時に
-        # このログが無く判断に迷ったことを踏まえて追加)。
+        # グラフの出力形式(.html=Plotly / .png=旧matplotlib)をログに残しておく
+        # (デプロイのタイミングによって新旧どちらで動いたか見分けられるようにするため)。
         chart_format = sample_chart_path.rsplit(".", 1)[-1] if sample_chart_path else "?"
         log.info("Saved graphs/CSV to %s (chart format: .%s)", out_dir, chart_format)
 
-        record_new_predictions(conn, run_at_str, pred_df, prob_df, secondary_pred_df, secondary_prob_df, models)
+        record_new_predictions(conn, run_at_str, pred_df, prob_df, models)
         conn.commit()
 
     weather_conn.close()
@@ -328,7 +301,6 @@ if __name__ == "__main__":
     except Exception as e:
         log.exception("predict.py terminated abnormally")
         # 日次の再学習・予報生成が丸ごと失敗すると、翌日の予測が更新されないまま
-        # 古い状態で表示され続けてしまう。ログだけでは気づきにくいため、collect.pyの
-        # 障害通知と同じsend_alertで即座にプッシュ通知する。
+        # 古い状態で表示され続けてしまう。ログだけでは気づきにくいため即座にプッシュ通知する。
         send_alert(f"predict.py が異常終了しました: {e}", source="predict.py")
         sys.exit(1)
