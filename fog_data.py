@@ -11,11 +11,12 @@ common.pyの固定列レイアウトは、SQLiteへの初回移行(weather_store
 xlsxエクスポート時にのみ引き続き前提とする。
 """
 import csv
+import sqlite3
 import threading
 
 import pandas as pd
 
-from common import CAMERAS_CSV, WEATHER_DB_PATH
+from common import BASE_DIR, CAMERAS_CSV, WEATHER_DB_PATH
 import weather_store
 from fog_features import (
     COL_DEWPOINT as F_DEWPOINT,
@@ -104,3 +105,51 @@ def _load_river_fog_data_uncached(db_path, cameras_csv):
     ):
         main_df[col] = pd.to_numeric(main_df[col], errors="coerce")
     return main_df, phenom_df, station_names
+
+
+USERS_DB_PATH = BASE_DIR / "data" / "users.db"
+
+
+def load_phenomena_corrections(db_path=USERS_DB_PATH):
+    """人による現象コードの訂正(users.dbのphenomena_corrections。地点ページ・画像ページでの
+    直接訂正と、観測報告の確認で確定した訂正)を {(日時文字列, 地点名): 訂正後のコード} で返す。
+    訂正はweather.dbの値を書き換えずに別に記録している(元の判定と訂正の履歴を分けて持つ
+    ため)ので、学習・答え合わせではこれをapply_phenomena_correctionsで重ねて使う。
+    2026-10-04まで、どこからも読まれておらず、訂正が学習・答え合わせに反映されていなかった。
+    DBが無い/読めない場合は空dict。"""
+    if not db_path.exists():
+        return {}
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30) as conn:
+            rows = conn.execute(
+                "SELECT target_datetime, station_name, corrected_code FROM phenomena_corrections"
+            ).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {(dt, station): int(code) for dt, station, code in rows if code is not None}
+
+
+def apply_phenomena_corrections(phenom_df, corrections):
+    """phenom_df(datetime + 地点名ごとの現象コード)に訂正を重ねたコピーと、実際に値が
+    変わった件数を返す。phenom_dfに無い日時・地点の訂正は無視する。"""
+    if not corrections:
+        return phenom_df, 0
+    out = phenom_df.copy()
+    dt_strs = out["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    row_by_dt = {dt: i for i, dt in zip(out.index, dt_strs)}
+    changed = 0
+    for (dt, station), code in corrections.items():
+        i = row_by_dt.get(dt)
+        if i is None or station not in out.columns:
+            continue
+        current = out.at[i, station]
+        try:
+            same = current is not None and current == current and int(float(current)) == code
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            if out[station].dtype != object:
+                out[station] = out[station].astype(object)
+            out.at[i, station] = code
+            changed += 1
+    return out, changed

@@ -50,6 +50,7 @@ import requests
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, log_loss
 
 from common import BASE_DIR, JST, request_with_dns_fallback
+import fog_data
 import station_weather
 import fog_tree_viz
 
@@ -337,9 +338,15 @@ def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coor
       frame: weather_features + __y(川霧なら1) + __datetime + __station
       station_coords: {地点名: (緯度, 経度)}(座標が無い地点は代表地点)
     """
+    # 人による訂正(users.dbのphenomena_corrections)をラベルに反映する。訂正済みのラベルは
+    # 人が確認したものなので、Geminiの確信度がlowでも学習から除外しない。
+    corrections = fog_data.load_phenomena_corrections()
+    phenom_df, n_corrected = fog_data.apply_phenomena_corrections(phenom_df, corrections)
+    if n_corrected:
+        log.info("Applied %d human/confirmed correction(s) to training labels", n_corrected)
     targets = build_location_class_targets(phenom_df, phenom_cols)
 
-    low_confidence = load_low_confidence_set()
+    low_confidence = load_low_confidence_set() - set(corrections)
     if low_confidence:
         dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
         excluded_total = 0

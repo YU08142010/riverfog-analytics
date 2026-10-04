@@ -71,8 +71,10 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
         log.info("No pending predictions to verify")
         return
 
+    # 実測は人による訂正(users.dbのphenomena_corrections)を反映した値で答え合わせする。
     # phenom_dfに同一datetimeの行が重複しているとSeriesのlocがスカラーを返さなくなるため
     # drop_duplicatesしてから引く。
+    phenom_df, _ = fog_data.apply_phenomena_corrections(phenom_df, fog_data.load_phenomena_corrections())
     deduped = phenom_df.drop_duplicates(subset="datetime").set_index("datetime")
     actual_by_station = {name: deduped[name].map(encode_phenomena_cell) for name in station_names}
 
@@ -94,6 +96,10 @@ def verify_pending_predictions(conn, phenom_df, station_names, now_naive):
     if results:
         prediction_log.verify_predictions(conn, verified_at, results)
     log.info("Verified %d prediction(s); %d still have no actual data yet", len(results), n_no_data)
+    # 答え合わせの後に人が訂正した実測も、記録済みの答え合わせに反映する。
+    n_fixed = prediction_log.apply_actual_corrections(conn, fog_data.load_phenomena_corrections())
+    if n_fixed:
+        log.info("Updated %d verified prediction(s) with corrected actual codes", n_fixed)
 
     summary = prediction_log.accuracy_summary(conn)
     overall = summary["overall"]

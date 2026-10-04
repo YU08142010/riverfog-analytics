@@ -3895,6 +3895,19 @@ def observations_dates():
     )
 
 
+def _num_or_none(value):
+    """表示用: 数値ならfloat、欠測(None/NaN/NaT)ならNone。iterrows()の行は日時列と
+    混在したobject型になり、欠測がNaNではなくNaTになることがある。テンプレートの
+    "%.1f"|formatはNaTを受け付けず、観測データの日別ページがエラーになっていた
+    (2026-08-28〜10-02に19回)ため、ここで正規化する。"""
+    if value is None or value != value:  # NaNもNaTも自分自身と等しくならない
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @app.route("/observations/<date>")
 def observations_date(date):
     date = _validate_date(date)
@@ -3922,10 +3935,10 @@ def observations_date(date):
                 cells.append({"label": label, "color": color, "text_color": text_color})
         rows.append({
             "time": dt.strftime("%H:%M"),
-            "temp": main_row.get("気温(℃)"),
-            "humidity": main_row.get("相対湿度(％)"),
-            "precip": main_row.get("降水量(mm)"),
-            "visibility": main_row.get("視程(km)"),
+            "temp": _num_or_none(main_row.get("気温(℃)")),
+            "humidity": _num_or_none(main_row.get("相対湿度(％)")),
+            "precip": _num_or_none(main_row.get("降水量(mm)")),
+            "visibility": _num_or_none(main_row.get("視程(km)")),
             "cells": cells,
         })
 

@@ -252,3 +252,19 @@ def delete_verified_before(conn, before_dt_str):
             (before_dt_str,),
         )
         return cur.rowcount
+
+
+def apply_actual_corrections(conn, corrections):
+    """答え合わせ済みの予測の実測(actual_code)を、人による訂正後の値に揃える。
+    corrections: {(日時文字列, 地点名): 訂正後のコード}(fog_data.load_phenomena_corrections)。
+    戻り値: 書き換えた行数。"""
+    if not corrections:
+        return 0
+    with conn:
+        before = conn.total_changes
+        conn.executemany(
+            """UPDATE predictions SET actual_code = ?
+               WHERE station = ? AND target_datetime = ? AND actual_code IS NOT NULL AND actual_code != ?""",
+            [(code, station, dt, code) for (dt, station), code in corrections.items()],
+        )
+        return conn.total_changes - before
