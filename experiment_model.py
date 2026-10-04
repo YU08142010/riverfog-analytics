@@ -512,7 +512,8 @@ def production_comparison(chrono_keys, v4_p, v4_thr, v2_p=None):
     try:
         df = pd.read_sql(
             "SELECT station, target_datetime, lead_hours, predicted_code, predicted_fog_prob, actual_code "
-            "FROM predictions WHERE actual_code IS NOT NULL AND lead_hours >= 0 AND target_datetime >= ?",
+            "FROM predictions WHERE actual_code IS NOT NULL AND lead_hours >= 0 AND target_datetime >= ? "
+            "AND model_type NOT LIKE '%[再予測]'",
             conn, params=(CHRONO_SPLIT.strftime("%Y-%m-%d %H:%M:%S"),),
         )
     finally:

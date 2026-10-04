@@ -76,6 +76,7 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 | `chat_log.py` | AIチャット機能のログ。 |
 | `common.py` | 共通定数(`BASE_DIR`, `CAMERAS_CSV`, `DATA_XLSX`, `JST` など)。 |
 | `predict.py` / `backfill_*.py` / `station_weather.py` | バッチ処理系スクリプト。 |
+| `hindcast_lightgbm.py` | 旧モデルが予測していた過去の日時を、現行モデルで「当時の条件」(前日19:30までのデータ・当時の予報)で予測し直して`predictions.db`に追加する(`model_type`に`[再予測]`)。分析ページ等の精度は現行モデルの行だけを集計する(`prediction_log.CURRENT_MODEL_LIKE`)。何度実行しても重複しない。 |
 | `web_templates/` | Jinja テンプレート(57ファイル)。`base.html` が共通レイアウト・ナビ・サイト独自モーダル・右クリックメニュー基盤を持つ。 |
 | `web_static/` | `style.css`, `shared.js`, `favicon.svg`。 |
 | `cameras.csv` | 地点名とカメラIDの対応表(緯度経度は保持していない)。 |

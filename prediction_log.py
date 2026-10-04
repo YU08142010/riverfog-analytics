@@ -47,6 +47,13 @@ def _fog_sql(col):
 
 _CORRECT_SQL = f"CASE WHEN {_fog_sql('predicted_code')} = {_fog_sql('actual_code')} THEN 1 ELSE 0 END"
 
+# 精度の集計の対象にするモデル(model_typeのLIKEパターン)。現行モデル(全地点共通の二値
+# LightGBM)の本番の予測と、旧モデルが予測していた過去の日時を現行モデルで予測し直した行
+# (model_typeに"[再予測]"が付く。hindcast_lightgbm.py)が該当する。旧モデルの行は「当時実際に
+# どう予測したか」の記録としてDBに残すが、同じ日時に新旧の予測が並ぶため集計からは外す。
+# model_like=Noneを渡すと全モデルの行を集計する。
+CURRENT_MODEL_LIKE = "LightGBM(二値%"
+
 
 def connect(db_path):
     # predict.py(日次)とWebの両方が書き込みうるため、busy_timeoutで書き込み中の
@@ -94,7 +101,7 @@ def verify_predictions(conn, verified_at, results):
         )
 
 
-def accuracy_summary(conn, since=None):
+def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
     """答え合わせ済みの予測について、全体・地点別・リードタイム別の的中率
     (「川霧かどうか」が一致した割合)を返す。"""
     where = "WHERE actual_code IS NOT NULL"
@@ -102,6 +109,9 @@ def accuracy_summary(conn, since=None):
     if since:
         where += " AND verified_at >= ?"
         params = (since,)
+    if model_like:
+        where += " AND model_type LIKE ?"
+        params = params + (model_like,)
 
     overall = conn.execute(
         f"""SELECT COUNT(*), SUM({_CORRECT_SQL})
@@ -128,7 +138,7 @@ def accuracy_summary(conn, since=None):
     }
 
 
-def accuracy_trend(conn, station=None):
+def accuracy_trend(conn, station=None, model_like=CURRENT_MODEL_LIKE):
     """target_datetimeの日付ごとの的中率(「川霧かどうか」の一致率)の推移を返す。
     stationを指定すればその地点のみ。
     戻り値: [{"date": "YYYY-MM-DD", "n": int, "correct": int}, ...]（日付昇順）
@@ -138,6 +148,9 @@ def accuracy_trend(conn, station=None):
     if station:
         where += " AND station = ?"
         params = (station,)
+    if model_like:
+        where += " AND model_type LIKE ?"
+        params = params + (model_like,)
 
     rows = conn.execute(
         f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
@@ -148,7 +161,7 @@ def accuracy_trend(conn, station=None):
     return [{"date": d, "n": n, "correct": c} for d, n, c in rows]
 
 
-def fog_pair_counts(conn, since=None, station=None):
+def fog_pair_counts(conn, since=None, station=None, model_like=CURRENT_MODEL_LIKE):
     """答え合わせ済みの(station, 予測コード, 実際のコード)の組み合わせごとの件数を返す。
     混同行列・地点/地域別のprecision/recall/F1・川霧クラスの見逃し/空振り集計など、
     分析ページの各種指標をこの1つの集計結果から使い回す（個別に似たクエリを何度も
@@ -156,6 +169,9 @@ def fog_pair_counts(conn, since=None, station=None):
     """
     where = ["actual_code IS NOT NULL"]
     params = []
+    if model_like:
+        where.append("model_type LIKE ?")
+        params.append(model_like)
     if since:
         where.append("verified_at >= ?")
         params.append(since)
@@ -171,7 +187,7 @@ def fog_pair_counts(conn, since=None, station=None):
     return [{"station": s, "predicted_code": p, "actual_code": a, "n": n} for s, p, a, n in rows]
 
 
-def fog_prob_bucket_counts(conn, since=None, station=None):
+def fog_prob_bucket_counts(conn, since=None, station=None, model_like=CURRENT_MODEL_LIKE):
     """答え合わせ済みかつpredicted_fog_probが記録されている予測を、確率を0.01刻みに
     丸めた上で件数を集計する。しきい値を変えた場合のprecision/recall/F1を後から
     計算するための元データ（生の行を全部返すとレコード数が多い場合に重いため、
@@ -182,6 +198,9 @@ def fog_prob_bucket_counts(conn, since=None, station=None):
     """
     where = ["actual_code IS NOT NULL", "predicted_fog_prob IS NOT NULL"]
     params = []
+    if model_like:
+        where.append("model_type LIKE ?")
+        params.append(model_like)
     if since:
         where.append("verified_at >= ?")
         params.append(since)

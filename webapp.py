@@ -3443,7 +3443,8 @@ def _accuracy_by_weather_safe():
         try:
             rows = conn.execute(
                 "SELECT target_datetime, predicted_code, actual_code FROM predictions "
-                "WHERE actual_code IS NOT NULL"
+                "WHERE actual_code IS NOT NULL AND model_type LIKE ?",
+                (prediction_log.CURRENT_MODEL_LIKE,),
             ).fetchall()
         finally:
             conn.close()
