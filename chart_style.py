@@ -192,3 +192,99 @@ DARK_POST_SCRIPT = """
     "surface": SURFACE_LIGHT, "surface_dark": SURFACE_DARK,
     "seq_dark": str(SEQ_DARK).replace("'", '"'),
 }
+
+
+# 予報グラフのHTMLをサイトから配信するとき(webapp.predictions_file)に</body>の直前へ差し込む。
+# DARK_POST_SCRIPTはグラフを書き出した時点のファイルにしか入らず、それ以前に作られたファイル
+# (背景が透明で文字が濃い紺#2a3f5fのまま)はダークモードで文字が読めなかった。配信時に差し込めば
+# 過去の日付のファイルにも効く。また、親ページでテーマを切り替えるとlocalStorageのstorage
+# イベントがiframe側にも届くので、その時に読み込み直して新しいテーマにする。
+# 何度当てても同じ結果になる(系列色はライトの色だけをダークの色へ置き換える)ため、
+# DARK_POST_SCRIPT入りの新しいファイルに重ねても問題ない。
+IFRAME_THEME_SCRIPT = """<script>
+(function() {
+  function currentTheme() {
+    var t = null;
+    try { t = localStorage.getItem('theme'); } catch (e) {}
+    if (t !== 'dark' && t !== 'light') {
+      t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return t;
+  }
+  var theme = currentTheme();
+  window.addEventListener('storage', function(e) {
+    if (e.key === 'theme' && currentTheme() !== theme) { location.reload(); }
+  });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onChange = function() { if (currentTheme() !== theme) { location.reload(); } };
+    if (mq.addEventListener) { mq.addEventListener('change', onChange); } else if (mq.addListener) { mq.addListener(onChange); }
+  }
+  document.documentElement.style.colorScheme = theme;
+  document.body.style.margin = '0';
+  document.body.style.background = 'transparent';
+  if (theme !== 'dark') { return; }
+  var L = %(light)s, D = %(dark)s;
+  var DARK_INKS = ['#2a3f5f', '#1d1d1f', '#444', '#444444', '#000', '#000000', 'black', '#333', '#333333', '#5c6370', '#52514e'];
+  function isDarkInk(c) { return !c || DARK_INKS.indexOf(String(c).toLowerCase()) >= 0; }
+  function apply(el) {
+    if (el.__rfThemed) { return; }
+    el.__rfThemed = true;
+    var patch = {'font.color': '#e6e8ee', 'title.font.color': '#f2f2f5', 'legend.font.color': '#e6e8ee',
+                 'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)',
+                 'hoverlabel.bgcolor': 'rgba(40,42,52,0.92)', 'hoverlabel.font.color': '#f2f2f5'};
+    Object.keys(el.layout).forEach(function(k) {
+      if (!/^[xy]axis\\d*$/.test(k)) { return; }
+      patch[k + '.gridcolor'] = 'rgba(255,255,255,0.08)';
+      patch[k + '.zerolinecolor'] = 'rgba(255,255,255,0.25)';
+      patch[k + '.linecolor'] = 'rgba(255,255,255,0.25)';
+      patch[k + '.tickfont.color'] = '#a1a6b2';
+      patch[k + '.title.font.color'] = '#c3c7d0';
+    });
+    (el.layout.annotations || []).forEach(function(a, i) {
+      if (isDarkInk(a.font && a.font.color)) { patch['annotations[' + i + '].font.color'] = '#c3c7d0'; }
+      if (a.bgcolor && /^(#fff|#ffffff|white|rgba\\(255, ?255, ?255)/i.test(a.bgcolor)) { patch['annotations[' + i + '].bgcolor'] = 'rgba(30,32,39,0.85)'; }
+    });
+    (el.layout.shapes || []).forEach(function(sh, i) {
+      if (sh.line && isDarkInk(sh.line.color) && sh.line.color) { patch['shapes[' + i + '].line.color'] = '#a1a6b2'; }
+    });
+    Plotly.relayout(el, patch);
+    el.data.forEach(function(t, i) {
+      var u = {};
+      var lc = t.line && t.line.color, mc = t.marker && t.marker.color;
+      if (typeof lc === 'string' && L.indexOf(lc) >= 0) { u['line.color'] = D[L.indexOf(lc)]; }
+      if (typeof mc === 'string' && L.indexOf(mc) >= 0) { u['marker.color'] = D[L.indexOf(mc)]; }
+      if (t.marker && t.marker.line && (t.marker.line.color === '%(surface)s' || t.marker.line.color === 'white')) { u['marker.line.color'] = '%(surface_dark)s'; }
+      if (t.type === 'heatmap') {
+        u['colorscale'] = [%(seq_dark)s];
+        u['colorbar.tickfont.color'] = '#a1a6b2';
+        u['colorbar.title.font.color'] = '#c3c7d0';
+      }
+      if (t.textfont && isDarkInk(t.textfont.color) && t.textfont.color) { u['textfont.color'] = '#e6e8ee'; }
+      if (Object.keys(u).length) { Plotly.restyle(el, u, [i]); }
+    });
+  }
+  function run(n) {
+    if (!window.Plotly) { if (n < 100) { setTimeout(function() { run(n + 1); }, 100); } return; }
+    var waiting = false;
+    document.querySelectorAll('.plotly-graph-div').forEach(function(el) {
+      if (el.layout && el.data) { apply(el); } else { waiting = true; }
+    });
+    if (waiting && n < 100) { setTimeout(function() { run(n + 1); }, 100); }
+  }
+  run(0);
+})();
+</script>""" % {
+    "light": str(SERIES_LIGHT).replace("'", '"'),
+    "dark": str(SERIES_DARK).replace("'", '"'),
+    "surface": SURFACE_LIGHT, "surface_dark": SURFACE_DARK,
+    "seq_dark": str(SEQ_DARK).replace("'", '"'),
+}
+
+
+def inject_iframe_theme(html):
+    """予報グラフのHTML文字列に、テーマ合わせのスクリプト(IFRAME_THEME_SCRIPT)を差し込む。"""
+    i = html.lower().rfind("</body>")
+    if i < 0:
+        return html + IFRAME_THEME_SCRIPT
+    return html[:i] + IFRAME_THEME_SCRIPT + html[i:]

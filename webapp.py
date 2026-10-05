@@ -4222,6 +4222,18 @@ def predictions_date(date):
 @app.route("/predictions/<date>/file/<path:filename>")
 def predictions_file(date, filename):
     date = _validate_date(date)
+    if filename.lower().endswith(".html"):
+        # 予報グラフのHTMLは、サイトのダーク/ライト設定に合わせるスクリプトを差し込んで返す
+        # (chart_style.IFRAME_THEME_SCRIPT。過去の日付のファイルにも効くよう配信時に行う)。
+        from werkzeug.security import safe_join
+        path = safe_join(str(PRED_DIR / date), filename)
+        if path is None or not os.path.isfile(path):
+            abort(404)
+        with open(path, encoding="utf-8") as f:
+            html = chart_style.inject_iframe_theme(f.read())
+        resp = Response(html, mimetype="text/html")
+        resp.headers["Cache-Control"] = "private, max-age=300"
+        return resp
     return send_from_directory(PRED_DIR / date, filename)
 
 
