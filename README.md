@@ -81,6 +81,8 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 
 **運用メモ(2026-10-05)**: ラベルの判定し直し(relabel_without_weather_hint.py)はcrontabの@rebootと30分ごとのflock付き起動で、サーバーが再起動しても続きから再開する(夜ごとの判定数は`.nights.json`、完了すると`.done`)。的中率の見出しは翌日の予測(発表から24時間先まで)に限り、再予測の件数も示す(`prediction_log.accuracy_summary`の`next_day`)。レンズが曇りやすい4地点(cameras.csvの「レンズ曇り」)は全体霧と判定されやすいため画面に注意書きを出す(学習には使う。外すとかえって精度が下がる)。学習に使う「地点の実測」の気象はOpen-Meteoのモデル値で、本物の地上観測ではない(予報との風速の相関0.93。`data/experiments/sun_lens_wind_check.json`)。
 
+**気候値との混合(2026-10-05〜)**: 川霧の確率は「(1-w)×LightGBM + w×地点×時刻の過去の発生率」(`BinaryFogModel.fog_probability`。混ぜる前は`raw_probability`)。wは検証期間(予報入力)でloglossが最小になる値で、しきい値は混ぜた後の確率で選ぶ(`global_metrics["climatology_weight"]`、混ぜない場合の成績は`model_unblended`)。学習は実測、予測は予報が入力のため確率が自信過剰になる分を和らげる。直近6週を2週×3でずらした評価でloglossが有意に改善しAPは同等だった(`data/experiments/model_improvement_check2.json`)。同じ評価で効果が無かった・悪化した案(水温の代わりの7日平均気温との差、夜の冷え込み、地点×時刻の発生率の特徴量化、予報値での学習、乱数違いの平均、単調制約、ロジスティック/isotonic補正)の結果は`data/experiments/model_improvement_check.json`と`model_improvement_check2.json`。
+
 **特徴量と重要度**: 露点温度は「気温 = 露点温度 + 気温露点差」で完全に重複するため特徴量から外している(`fog_model.EXCLUDED_FEATURES`。外しても精度は誤差の範囲、`data/experiments/feature_selection_check.json`)。分析ページの特徴量重要度は、学習時に評価期間(予報入力)で求めたSHAP値の絶対値の平均の割合(`global_metrics["importance"]`)で、まとまり(`FEATURE_GROUPS`)ごとの合計も示す。gainは似た特徴量に偏って配られるため使わない(検証の経緯は`data/experiments/feature_importance_check.json`)。
 
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。

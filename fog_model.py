@@ -175,6 +175,16 @@ FOG_THRESHOLD_GRID = tuple(round(t, 2) for t in np.arange(0.02, 0.91, 0.01))
 DEFAULT_FOG_THRESHOLD = 0.05
 MIN_POSITIVES_FOR_THRESHOLD = 10
 
+# --- 気候値との混合 ----------------------------------------------------------------------
+# モデルの確率を、地点×時刻ごとの過去の発生率(気候値)と (1-w)*モデル + w*気候値 で混ぜる。
+# 学習は実測の気象、予測は予報を入力にするため、予報の誤差の分だけモデルの確率は自信過剰に
+# なる(評価期間の予報入力で、0.3〜0.5と出した時の実際の発生率は約0.23、0.5以上でも約0.42)。
+# 重みwは検証期間(予報入力)でloglossが最小になる値。直近6週を2週×3でずらして確かめた評価で、
+# loglossが 0.1248→0.1193(差の95%区間 -0.011〜-0.001)、Brierも改善し、APは変わらなかった
+# (data/experiments/model_improvement_check2.json)。同じ評価で、直前の期間で決めた
+# ロジスティック補正・単調補正(isotonic)は季節で発生率が変わる分を追えずかえって悪化した。
+CLIMATOLOGY_WEIGHT_GRID = tuple(round(w, 2) for w in np.arange(0.0, 1.0001, 0.05))
+
 # 地点ごとの過去の川霧発生率(学習期間の実測から計算)。少数サンプルは全体平均へ平滑化する。
 STATION_FOG_RATE_FEATURE = "地点別川霧発生率"
 STATION_RATE_SMOOTHING = 20
@@ -213,7 +223,8 @@ class BinaryFogModel:
     model_type = MODEL_TYPE_LABEL
     classes_ = np.array([0, 1])
 
-    def __init__(self, model, base_features, station_rates, global_rate, threshold, n_estimators, params):
+    def __init__(self, model, base_features, station_rates, global_rate, threshold, n_estimators, params,
+                 station_hour_rates=None, climatology_weight=0.0):
         self.model = model
         self.base_features = list(base_features)
         self.station_rates = dict(station_rates)
@@ -221,6 +232,10 @@ class BinaryFogModel:
         self.threshold = float(threshold)
         self.n_estimators = int(n_estimators)
         self.params = dict(params)
+        # 気候値との混合(CLIMATOLOGY_WEIGHT_GRIDの説明参照)。以前に保存したモデルには無いため、
+        # 読み込んだ時はgetattrで「混ぜない」として扱う。
+        self.station_hour_rates = dict(station_hour_rates or {})
+        self.climatology_weight = float(climatology_weight)
 
     @property
     def features(self):
@@ -237,11 +252,33 @@ class BinaryFogModel:
             X[STATION_FOG_RATE_FEATURE] = [self.station_rate(s) for s in stations]
         return X
 
-    def fog_probability(self, X, stations):
-        """川霧である確率(0〜1)。stationsは地点名1つ、または行ごとの地点名の配列。"""
+    def climatology(self, X, stations):
+        """各行の地点×時刻の過去の発生率。時刻は特徴量の時_sin/時_cosから戻す。"""
+        n = len(X)
+        names = [stations] * n if isinstance(stations, str) else list(stations)
+        if "時_sin" in X.columns and "時_cos" in X.columns:
+            ang = np.arctan2(X["時_sin"].to_numpy(dtype="float64"), X["時_cos"].to_numpy(dtype="float64"))
+            hours = np.rint(ang / (2 * np.pi) * 24).astype(int) % 24
+        else:
+            hours = [None] * n
+        rates = getattr(self, "station_hour_rates", None) or {}
+        return np.array([rates.get((s, int(h)) if h is not None else None, self.station_rate(s))
+                         for s, h in zip(names, hours)], dtype="float64")
+
+    def raw_probability(self, X, stations):
+        """気候値と混ぜる前の、LightGBMそのものの確率。"""
         if len(X) == 0:
             return np.zeros(0)
         return np.asarray(self.model.predict_proba(self._with_rate(X, stations))[:, 1], dtype="float64")
+
+    def fog_probability(self, X, stations):
+        """川霧である確率(0〜1)。stationsは地点名1つ、または行ごとの地点名の配列。
+        LightGBMの確率を気候値と混ぜたもの(climatology_weightが0なら混ぜない)。"""
+        p = self.raw_probability(X, stations)
+        w = float(getattr(self, "climatology_weight", 0.0) or 0.0)
+        if w <= 0 or len(p) == 0:
+            return p
+        return (1.0 - w) * p + w * self.climatology(X, stations)
 
     def predict(self, X, stations):
         """二値化した予測(1=川霧あり、0=川霧なし)。"""
@@ -453,21 +490,32 @@ def _station_rates(frame):
     return rates, global_rate
 
 
-def _climatology_probs(fit_frame, eval_frame):
-    """基準(気候値): 学習期間の「地点×時刻」ごとの川霧発生率をそのまま確率とみなす。
-    件数の少ない組み合わせはその地点の発生率へ平滑化する。"""
+def _station_hour_rates(fit_frame):
+    """学習期間の「地点×時刻」ごとの川霧発生率 {(地点, 時): 率}。件数の少ない組み合わせは
+    その地点の発生率へ平滑化する。"""
     rates, global_rate = _station_rates(fit_frame)
     g = (fit_frame.assign(__hour=fit_frame["__datetime"].dt.hour)
          .groupby(["__station", "__hour"])["__y"].agg(["sum", "count"]))
     m = STATION_RATE_SMOOTHING
-    out = np.empty(len(eval_frame))
-    for i, key in enumerate(zip(eval_frame["__station"], eval_frame["__datetime"].dt.hour)):
-        base = rates.get(key[0], global_rate)
-        if key in g.index:
-            out[i] = (g.loc[key, "sum"] + m * base) / (g.loc[key, "count"] + m)
-        else:
-            out[i] = base
-    return out
+    return {(s, int(h)): float((r["sum"] + m * rates.get(s, global_rate)) / (r["count"] + m))
+            for (s, h), r in g.iterrows()}
+
+
+def _climatology_probs(fit_frame, eval_frame):
+    """基準(気候値): 学習期間の「地点×時刻」ごとの川霧発生率をそのまま確率とみなす
+    (組み合わせが無ければその地点の発生率)。"""
+    rates, global_rate = _station_rates(fit_frame)
+    sh = _station_hour_rates(fit_frame)
+    return np.array([sh.get((s, int(h)), rates.get(s, global_rate))
+                     for s, h in zip(eval_frame["__station"], eval_frame["__datetime"].dt.hour)], dtype="float64")
+
+
+def _best_climatology_weight(y, p_model, p_clim):
+    """(1-w)*モデル + w*気候値 のloglossが最小になるw。"""
+    y = np.asarray(y)
+    losses = [log_loss(y, np.clip((1 - w) * p_model + w * p_clim, 1e-6, 1 - 1e-6), labels=[0, 1])
+              for w in CLIMATOLOGY_WEIGHT_GRID]
+    return float(CLIMATOLOGY_WEIGHT_GRID[int(np.argmin(losses))])
 
 
 def _fit_lgbm(X, y, params, n_estimators, eval_set=None):
@@ -588,8 +636,19 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     use_forecast = len(val_fc) > 0 and int(val_fc["__y"].sum()) >= MIN_POSITIVES_FOR_THRESHOLD
     thr_rows = val_fc if use_forecast else val
     thr_y = thr_rows["__y"].to_numpy()
-    thr_p = inner_model.predict_proba(
+    thr_p_raw = inner_model.predict_proba(
         _features_with_rate(thr_rows, weather_features, inner_rates, inner_global))[:, 1]
+    # 気候値との混合の重み(同じ検証期間・同じ入力で、loglossが最小になる値)。しきい値は混ぜた後の確率で選ぶ。
+    clim_val = _climatology_probs(inner, thr_rows)
+    prev_weight = _previous_climatology_weight(prev_state)
+    if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
+        clim_weight = _best_climatology_weight(thr_y, thr_p_raw, clim_val)
+        weight_source = "validation logloss min"
+    else:
+        clim_weight = prev_weight if prev_weight is not None else 0.0
+        weight_source = "previous model" if prev_weight is not None else "none (too few fog rows)"
+    thr_p = (1 - clim_weight) * thr_p_raw + clim_weight * clim_val
+    log.info("Climatology blend weight=%.2f [%s]", clim_weight, weight_source)
     prev_threshold = _previous_shared_threshold(prev_state)
     if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
         threshold, thr_f1 = _best_threshold(thr_y, thr_p)
@@ -611,15 +670,16 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     eval_input = "forecast" if len(test_fc) > 0 else "observed"
     eval_rows = test_fc if eval_input == "forecast" else test.reset_index(drop=True)
     y_test = eval_rows["__y"].to_numpy()
-    p_test = (eval_model.predict_proba(_features_with_rate(eval_rows, weather_features, rates, global_rate))[:, 1]
-              if len(eval_rows) else np.zeros(0))
+    p_test_raw = (eval_model.predict_proba(_features_with_rate(eval_rows, weather_features, rates, global_rate))[:, 1]
+                  if len(eval_rows) else np.zeros(0))
+    clim_test = _climatology_probs(train, eval_rows) if len(eval_rows) else np.zeros(0)
+    p_test = (1 - clim_weight) * p_test_raw + clim_weight * clim_test
     pred_test = (p_test >= threshold).astype(int)
     overall = binary_metrics(y_test, pred_test, p_test)
+    unblended = binary_metrics(y_test, (p_test_raw >= threshold).astype(int), p_test_raw) if len(y_test) else {}
     # 基準(気候値)も同じ行・同じ決め方(検証期間でF1最大)のしきい値で採点する
-    clim_val = _climatology_probs(inner, thr_rows)
     clim_threshold = (_best_threshold(thr_y, clim_val)[0]
                       if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD else threshold)
-    clim_test = _climatology_probs(train, eval_rows) if len(eval_rows) else np.zeros(0)
     climatology = binary_metrics(y_test, (clim_test >= clim_threshold).astype(int), clim_test)
     guard = _guard_against_climatology(y_test, p_test, clim_test)
     log.info(
@@ -636,7 +696,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     n_final = max(50, int(round(chosen["best_iteration"] * REFIT_ESTIMATOR_SCALE)))
     final = _fit_lgbm(_features_with_rate(frame, weather_features, all_rates, all_global),
                       frame["__y"].to_numpy(), params, n_final)
-    model = BinaryFogModel(final, weather_features, all_rates, all_global, threshold, n_final, params)
+    model = BinaryFogModel(final, weather_features, all_rates, all_global, threshold, n_final, params,
+                           station_hour_rates=_station_hour_rates(frame), climatology_weight=clim_weight)
 
     importance = _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input)
 
@@ -644,6 +705,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
         "importance": importance,
         "model": overall, "climatology": {**climatology, "threshold": clim_threshold},
         "input": eval_input, "threshold": threshold, "threshold_source": threshold_source,
+        "climatology_weight": clim_weight, "climatology_weight_source": weight_source,
+        "model_unblended": {k: unblended.get(k) for k in ("ap", "brier", "logloss", "f1") if k in unblended},
         "params": params, "n_estimators": n_final, "guard": guard,
         "n_train": len(frame), "n_train_fog": int(frame["__y"].sum()),
         "train_start": str(frame["__datetime"].min()), "train_end": str(data_end),
@@ -704,6 +767,14 @@ def _shared_info(state):
         if isinstance(info.get("pipe"), BinaryFogModel):
             return info
     return None
+
+
+def _previous_climatology_weight(prev_state):
+    info = _shared_info(prev_state)
+    if not info:
+        return None
+    w = getattr(info.get("pipe"), "climatology_weight", None)
+    return float(w) if w is not None else None
 
 
 def _previous_shared_threshold(prev_state):

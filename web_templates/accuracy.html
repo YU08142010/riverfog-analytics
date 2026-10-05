@@ -181,6 +181,11 @@
     {% if global_metrics %}<br>評価期間: {{ global_metrics.test_start[:16] }} 〜 {{ global_metrics.test_end[:16] }}
     、入力: {{ "予報値" if global_metrics.input == "forecast" else "実測値" }}
     (学習データ {{ global_metrics.n_train }}件、うち川霧 {{ global_metrics.n_train_fog }}件)
+    {% if global_metrics.climatology_weight is defined and global_metrics.climatology_weight is not none %}
+    <br>確率は、モデルの値を地点×時刻ごとのふだんの出やすさ(気候値)と混ぜて出している
+    (気候値の割合 {{ "%.0f"|format(global_metrics.climatology_weight * 100) }}%。検証期間で確率の誤差が最小になる割合)。
+    予報の誤差の分だけモデルの確率が自信過剰になるのを和らげるため。
+    {% endif %}
     {% endif %}{% endif %}
 </p>
 
