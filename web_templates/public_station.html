@@ -22,11 +22,15 @@
 @media (max-width: 760px) { .pf-two { grid-template-columns: minmax(0, 1fr); } }
 </style>
 {% endblock %}
+{% block body_background %}{% with wx = weather_scene(name, station.now.code if station and station.now else None) %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
 <a class="pf-back" href="{{ url_for('public_forecast') }}">← 全地点の出やすさに戻る</a>
-<div class="pf-station-head">
-    <h1>{{ name }}</h1>
-    <p class="pf-muted" style="margin:0 0 1rem;">{{ region or "" }}{% if official_url %} ・ <a href="{{ official_url }}" target="_blank" rel="noopener">この地点の河川カメラ(国土交通省「川の防災情報」)</a>{% endif %}</p>
+<div class="wx-hero">
+    <div class="wx-hero-name">{{ name }}</div>
+    {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
+    <div class="wx-hero-cond">{{ station.now.label if station and station.now else "観測なし" }}</div>
+    <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} の観測{% endif %}</div>
+    {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
 </div>
 
 <div class="pf-card">

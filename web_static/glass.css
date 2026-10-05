@@ -1,0 +1,328 @@
+/* ==========================================================================
+   macOS風(Liquid Glass / 磨りガラス)の見た目(2026-10-05)。
+   style.css(style.min.css)の後に読み込み、色・角丸・影などを上書きするだけの層。
+   レイアウトや各ページのHTMLは変えないので、このファイルの<link>を外せば元の見た目に戻る。
+
+   方針(Apple「Liquid Glass」と一般的なglassmorphismの指針から):
+   - 背景に淡い色の「壁紙」を敷き、その上に半透明+背景ぼかし(backdrop-filter)の面を重ねる。
+     ガラスは背景が透けて初めてそれらしく見えるため、無地の背景では効果が出ない。
+   - ガラスにするのはヘッダー・カード・サイドバー・ダイアログ・通知など「浮いている面」だけ。
+     表の固定列などは中身が重なって読めなくなるので不透明のまま(--color-surfaceは不透明)。
+   - 面の上端に1pxの白いハイライト(inset shadow)を入れると、色付きフィルムではなくガラスに見える。
+   - 文字の読みやすさを優先し、ガラスの不透明度は高め(明るい表示で約70%)にする。
+   - 「透明度を下げる」設定の利用者・backdrop-filter非対応のブラウザでは不透明な面にする。
+   ========================================================================== */
+
+:root {
+    --color-primary: #0a64d2;
+    --color-primary-dark: #0751ad;
+    --color-primary-light: rgba(10, 100, 210, 0.09);
+    --color-primary-lighter: rgba(10, 100, 210, 0.18);
+    --color-bg: rgba(120, 130, 150, 0.09);
+    --color-surface: #ffffff;
+    --color-border: rgba(30, 40, 60, 0.10);
+    --color-text: #1d1d1f;
+    --color-text-muted: #5c6370;
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+
+    --glass-bg: rgba(255, 255, 255, 0.70);
+    --glass-bg-strong: rgba(255, 255, 255, 0.84);
+    --glass-bar: rgba(250, 251, 253, 0.66);
+    --glass-edge: rgba(255, 255, 255, 0.75);
+    --glass-hairline: rgba(20, 30, 50, 0.08);
+    --glass-filter: saturate(180%) blur(22px);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 0.5px var(--glass-hairline),
+                    0 8px 28px rgba(30, 50, 90, 0.08);
+    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px var(--glass-hairline),
+                          0 14px 36px rgba(30, 50, 90, 0.13);
+    --shadow-card: var(--glass-shadow);
+    --shadow-card-hover: var(--glass-shadow-hover);
+    --control-bg: rgba(118, 118, 128, 0.12);
+    --control-active: #ffffff;
+    --button-bg: #0a64d2;
+    --button-bg-hover: #0751ad;
+    --focus-ring: 0 0 0 3.5px rgba(10, 100, 210, 0.32);
+    --wallpaper:
+        radial-gradient(1100px 700px at 8% -8%, rgba(120, 180, 255, 0.55), transparent 60%),
+        radial-gradient(900px 650px at 100% 0%, rgba(190, 160, 255, 0.40), transparent 60%),
+        radial-gradient(1000px 800px at 85% 100%, rgba(110, 215, 210, 0.38), transparent 62%),
+        radial-gradient(900px 700px at 0% 100%, rgba(255, 200, 170, 0.32), transparent 60%),
+        linear-gradient(180deg, #eef3f9 0%, #f4f2f8 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --color-primary: #4aa3ff;
+        --color-primary-dark: #7dbdff;
+        --color-primary-light: rgba(74, 163, 255, 0.14);
+        --color-primary-lighter: rgba(74, 163, 255, 0.26);
+        --color-bg: rgba(255, 255, 255, 0.06);
+        --color-surface: #1e2027;
+        --color-border: rgba(255, 255, 255, 0.10);
+        --color-text: #f2f2f5;
+        --color-text-muted: #a1a6b2;
+        --glass-bg: rgba(36, 38, 48, 0.62);
+        --glass-bg-strong: rgba(40, 42, 52, 0.85);
+        --glass-bar: rgba(28, 30, 38, 0.60);
+        --glass-edge: rgba(255, 255, 255, 0.10);
+        --glass-hairline: rgba(255, 255, 255, 0.09);
+        --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
+                        0 10px 30px rgba(0, 0, 0, 0.35);
+        --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 0 0 0.5px var(--glass-hairline),
+                              0 16px 40px rgba(0, 0, 0, 0.45);
+        --control-bg: rgba(118, 118, 128, 0.24);
+        --control-active: rgba(255, 255, 255, 0.16);
+        --button-bg: #0a6fe0;
+        --button-bg-hover: #2a85f0;
+        --focus-ring: 0 0 0 3.5px rgba(74, 163, 255, 0.40);
+        --wallpaper:
+            radial-gradient(1100px 700px at 8% -8%, rgba(40, 90, 200, 0.50), transparent 60%),
+            radial-gradient(900px 650px at 100% 0%, rgba(120, 60, 200, 0.38), transparent 60%),
+            radial-gradient(1000px 800px at 85% 100%, rgba(20, 130, 140, 0.34), transparent 62%),
+            radial-gradient(900px 700px at 0% 100%, rgba(160, 70, 90, 0.26), transparent 60%),
+            linear-gradient(180deg, #101218 0%, #14121c 100%);
+    }
+}
+:root[data-theme="dark"] {
+    --color-primary: #4aa3ff;
+    --color-primary-dark: #7dbdff;
+    --color-primary-light: rgba(74, 163, 255, 0.14);
+    --color-primary-lighter: rgba(74, 163, 255, 0.26);
+    --color-bg: rgba(255, 255, 255, 0.06);
+    --color-surface: #1e2027;
+    --color-border: rgba(255, 255, 255, 0.10);
+    --color-text: #f2f2f5;
+    --color-text-muted: #a1a6b2;
+    --glass-bg: rgba(36, 38, 48, 0.62);
+    --glass-bg-strong: rgba(40, 42, 52, 0.85);
+    --glass-bar: rgba(28, 30, 38, 0.60);
+    --glass-edge: rgba(255, 255, 255, 0.10);
+    --glass-hairline: rgba(255, 255, 255, 0.09);
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
+                    0 10px 30px rgba(0, 0, 0, 0.35);
+    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 0 0 0.5px var(--glass-hairline),
+                          0 16px 40px rgba(0, 0, 0, 0.45);
+    --control-bg: rgba(118, 118, 128, 0.24);
+    --control-active: rgba(255, 255, 255, 0.16);
+    --button-bg: #0a6fe0;
+    --button-bg-hover: #2a85f0;
+    --focus-ring: 0 0 0 3.5px rgba(74, 163, 255, 0.40);
+    --wallpaper:
+        radial-gradient(1100px 700px at 8% -8%, rgba(40, 90, 200, 0.50), transparent 60%),
+        radial-gradient(900px 650px at 100% 0%, rgba(120, 60, 200, 0.38), transparent 60%),
+        radial-gradient(1000px 800px at 85% 100%, rgba(20, 130, 140, 0.34), transparent 62%),
+        radial-gradient(900px 700px at 0% 100%, rgba(160, 70, 90, 0.26), transparent 60%),
+        linear-gradient(180deg, #101218 0%, #14121c 100%);
+}
+
+/* ---- 文字と壁紙 ---------------------------------------------------------- */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+                 "Segoe UI Variable Text", "Yu Gothic UI", "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
+    background: transparent;
+    letter-spacing: 0.005em;
+}
+/* 壁紙はスクロールしても動かない固定の層にする(background-attachment:fixedはiOSで効かないため)。 */
+html { background: #eef3f9; }
+:root[data-theme="dark"] { background: #101218; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { background: #101218; } }
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--wallpaper);
+    pointer-events: none;
+}
+h1, h2, h3 { letter-spacing: 0.01em; }
+
+/* ---- ガラスの面 ------------------------------------------------------------ */
+header,
+.card,
+.sidebar-panel,
+.notif-panel,
+.modal-dialog,
+.auth-card,
+.pf-header,
+.pf-card {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow);
+}
+.card { border-radius: var(--radius-lg); transition: box-shadow 0.2s ease; }
+.card h2 { border-left: none; padding-left: 0; font-weight: 650; font-size: 1.08rem; }
+.sidebar-panel { border-radius: var(--radius-lg); }
+.notif-panel, .modal-dialog { background: var(--glass-bg-strong); border-radius: var(--radius-lg); }
+
+/* ---- ヘッダー(ツールバー) -------------------------------------------------- */
+header {
+    background: var(--glass-bar);
+    color: var(--color-text);
+    border: none;
+    border-bottom: 0.5px solid var(--glass-hairline);
+    border-radius: 0;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 4px 18px rgba(20, 30, 60, 0.06);
+}
+header h1 { color: var(--color-text); font-weight: 700; }
+header nav { scrollbar-color: var(--glass-hairline) transparent; }
+header nav::-webkit-scrollbar-thumb { background: var(--glass-hairline); }
+header nav a { color: var(--color-text-muted); border-radius: 999px; padding: 0.42rem 0.8rem; }
+header nav a:hover { background: var(--control-bg); color: var(--color-text); }
+header nav a.active {
+    background: var(--control-active);
+    color: var(--color-text);
+    box-shadow: 0 0 0 0.5px var(--glass-hairline), 0 1px 3px rgba(0, 0, 0, 0.10);
+}
+header .theme-toggle, header .notif-bell, header .nav-toggle {
+    background: var(--control-bg);
+    color: var(--color-text);
+    border-radius: 999px;
+}
+header .theme-toggle:hover, header .notif-bell:hover, header .nav-toggle:hover { background: var(--color-primary-lighter); }
+/* base.htmlのインラインstyle(白文字の前提)を上書きする。 */
+header > a[href*="changelog"] { color: var(--color-text-muted) !important; }
+header .header-user, header .header-user a { color: var(--color-text) !important; }
+header .header-user span[style*="border-radius:50%"] { background: var(--control-bg) !important; }
+
+/* ---- ページ内タブ: macOSのセグメントコントロール風 ------------------------- */
+.page-tabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px;
+    border: none;
+    border-radius: 11px;
+    background: var(--control-bg);
+}
+.page-tabs a {
+    border: none;
+    margin: 0;
+    border-radius: 8px;
+    padding: 0.38rem 0.95rem;
+    font-weight: 550;
+    color: var(--color-text-muted);
+}
+.page-tabs a.active {
+    background: var(--control-active);
+    color: var(--color-text);
+    box-shadow: 0 0 0 0.5px var(--glass-hairline), 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- サイドバーの項目 ------------------------------------------------------- */
+.sidebar-list a { border-radius: 8px; }
+.sidebar-list a:hover { background: var(--control-bg); }
+.sidebar-list a.active { background: var(--button-bg); color: #fff; }
+.sidebar-search { background: var(--control-bg); }
+
+/* ---- ボタン ------------------------------------------------------------------ */
+a.button, button.button, label.button {
+    background: var(--button-bg);
+    border-radius: 9px;
+    font-weight: 550;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(10, 100, 210, 0.18);
+}
+a.button:hover, button.button:hover, label.button:hover {
+    background: var(--button-bg-hover);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 4px rgba(0, 0, 0, 0.14), 0 4px 14px rgba(10, 100, 210, 0.26);
+}
+.button.cancel { background: var(--control-bg); color: var(--color-text); box-shadow: 0 0 0 0.5px var(--glass-hairline); }
+.button.cancel:hover { background: var(--color-primary-lighter); color: var(--color-text); }
+
+/* ---- 入力欄 ------------------------------------------------------------------ */
+input[type="text"], input[type="email"], input[type="password"], input[type="search"],
+input[type="number"], input[type="date"], input[type="tel"], input[type="url"], textarea, select {
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    background-color: var(--glass-bg-strong);
+    color: var(--color-text);
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+}
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+
+/* ---- 表 ---------------------------------------------------------------------- */
+table.obs-table th, table.obs-table td { border-color: var(--color-border); }
+table.obs-table th { background: var(--color-bg); color: var(--color-text-muted); font-weight: 600; }
+table.obs-table tbody tr:nth-child(even) { background: rgba(120, 130, 150, 0.05); }
+table.obs-table tbody tr:hover { background: var(--color-primary-light); }
+.table-region-divider td, .table-region-divider { background: var(--color-bg); }
+
+/* ---- ダイアログ・通知 ------------------------------------------------------- */
+.modal-overlay {
+    background: rgba(10, 14, 22, 0.28);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+}
+.toast {
+    background: rgba(30, 32, 40, 0.78);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+/* ---- ログイン画面 ------------------------------------------------------------ */
+.auth-page { background: transparent; }
+.auth-card { background: var(--glass-bg); border-radius: 22px; padding: 2.2rem 2rem; }
+.auth-title { color: var(--color-text); font-weight: 700; }
+.auth-theme-toggle {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-edge);
+    border-radius: 999px;
+    color: var(--color-text);
+}
+
+/* ---- 公開ページ(public_base.html) ----------------------------------------- */
+.pf-header {
+    background: var(--glass-bar);
+    color: var(--color-text);
+    border: none;
+    border-bottom: 0.5px solid var(--glass-hairline);
+    border-radius: 0;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 4px 18px rgba(20, 30, 60, 0.06);
+}
+.pf-brand, .pf-brand strong { color: var(--color-text); }
+.pf-brand span { color: var(--color-text-muted); opacity: 1; }
+.pf-nav a { color: var(--color-text-muted); }
+.pf-nav a:hover, .pf-nav a.active { background: var(--control-bg); color: var(--color-text); }
+.pf-nav a.pf-login { background: var(--button-bg); color: #fff; border: none; }
+.pf-nav a.pf-login:hover { background: var(--button-bg-hover); color: #fff; }
+.pf-theme { color: var(--color-text-muted); }
+.pf-card { border-radius: var(--radius-lg); }
+.pf-day {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow);
+}
+.pf-day[aria-pressed="true"] { border-color: var(--color-primary); box-shadow: var(--glass-shadow), 0 0 0 2px var(--color-primary); }
+.pf-table .pf-name { background: var(--color-surface); }
+.pf-hero h1 { font-size: 1.9rem; font-weight: 750; letter-spacing: 0.01em; }
+
+/* ---- 透明度を下げる設定・非対応ブラウザでは不透明に ------------------------ */
+@media (prefers-reduced-transparency: reduce) {
+    header, .card, .sidebar-panel, .notif-panel, .modal-dialog, .auth-card, .pf-header, .pf-card, .pf-day, .toast {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        background: var(--color-surface);
+    }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    header, .card, .sidebar-panel, .notif-panel, .modal-dialog, .auth-card, .pf-header, .pf-card, .pf-day {
+        background: var(--color-surface);
+    }
+}

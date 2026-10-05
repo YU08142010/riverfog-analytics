@@ -9,7 +9,17 @@
 </ul>
 {% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block body_background %}{% with wx = weather_scene(name, current.code if current else None) %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
+{% if current %}
+{% set w = station_weather_latest %}
+<div class="wx-hero">
+    <div class="wx-hero-name">{{ name }}</div>
+    {% if w and w.temp is not none and w.temp == w.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(w.temp) }}°</div>{% endif %}
+    <div class="wx-hero-cond">{{ current.label }}</div>
+    <div class="wx-hero-sub">{{ observations_datetime.strftime("%m/%d %H:%M") }} の観測{% if w and w.humidity is not none and w.humidity == w.humidity %} ・ 湿度 {{ "%.0f"|format(w.humidity) }}%{% endif %}</div>
+</div>
+{% endif %}
 <div class="card">
     <h2>{{ name }}</h2>
 

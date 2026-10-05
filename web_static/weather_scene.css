@@ -1,0 +1,214 @@
+/* ==========================================================================
+   地点ページの背景演出(Appleの「天気」アプリ風、2026-10-05)。
+   その地点の最新の観測(現象コード)と、地点の日の出・日の入りから決めた時間帯に応じて、
+   空の色と、流れる霧・雲・雨を背景に描く。CSSだけで描画し(画像・ライブラリ不要)、
+   ページ本文の後ろ(z-index:-1、position:fixed)に置くので、本文の操作には影響しない。
+   _weather_scene.html が .wx-scene に以下のクラスを付ける:
+     時間帯 wx-night / wx-dawn / wx-day / wx-dusk
+     種類   wx-clear / wx-riverfog / wx-fog / wx-cloud / wx-rain
+     濃さ   wx-lv1〜wx-lv3
+   ========================================================================== */
+.wx-scene {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    background: linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 55%, var(--wx-sky-bottom) 100%);
+    --wx-fog: 255, 255, 255;
+    --wx-fog-alpha: 0;
+    --wx-haze-alpha: 0;
+    --wx-cloud-alpha: 0;
+}
+
+/* ---- 時間帯ごとの空 ------------------------------------------------------- */
+.wx-day   { --wx-sky-top: #3f8ee0; --wx-sky-mid: #8cc0ef; --wx-sky-bottom: #d9ecfa; --wx-glow: 255, 248, 220; }
+.wx-dawn  { --wx-sky-top: #48609e; --wx-sky-mid: #d99a9a; --wx-sky-bottom: #f6d2a8; --wx-glow: 255, 205, 150; }
+.wx-dusk  { --wx-sky-top: #2e3f7a; --wx-sky-mid: #b4708c; --wx-sky-bottom: #f0a878; --wx-glow: 255, 170, 120; }
+.wx-night { --wx-sky-top: #070b1d; --wx-sky-mid: #142046; --wx-sky-bottom: #26355f; --wx-glow: 190, 210, 255; --wx-fog: 190, 200, 225; }
+
+/* 霧・曇り・雨のときは空をくすませる(霧が濃いほど白っぽく、雨は灰色に)。 */
+.wx-fog.wx-day, .wx-riverfog.wx-lv3.wx-day { --wx-sky-top: #8fa5ba; --wx-sky-mid: #c5d2dd; --wx-sky-bottom: #e8edf1; }
+.wx-cloud.wx-day { --wx-sky-top: #6f8fae; --wx-sky-mid: #aec2d4; --wx-sky-bottom: #dfe7ee; }
+.wx-rain.wx-day  { --wx-sky-top: #56677a; --wx-sky-mid: #8c9aa8; --wx-sky-bottom: #b9c3cc; }
+.wx-fog.wx-dawn, .wx-fog.wx-dusk, .wx-rain.wx-dawn, .wx-rain.wx-dusk { --wx-sky-top: #4d5874; --wx-sky-mid: #9a95a6; --wx-sky-bottom: #cdc4c0; }
+.wx-rain.wx-night, .wx-fog.wx-night { --wx-sky-top: #0c1020; --wx-sky-mid: #1b2338; --wx-sky-bottom: #2c3550; }
+
+/* 種類と濃さ → 霧・もや・雲の濃さ */
+.wx-riverfog.wx-lv1 { --wx-fog-alpha: 0.55; }
+.wx-riverfog.wx-lv2 { --wx-fog-alpha: 0.80; --wx-haze-alpha: 0.15; }
+.wx-riverfog.wx-lv3 { --wx-fog-alpha: 0.95; --wx-haze-alpha: 0.35; }
+.wx-fog.wx-lv1 { --wx-fog-alpha: 0.45; --wx-haze-alpha: 0.30; }
+.wx-fog.wx-lv2 { --wx-fog-alpha: 0.70; --wx-haze-alpha: 0.50; }
+.wx-fog.wx-lv3 { --wx-fog-alpha: 0.90; --wx-haze-alpha: 0.70; }
+.wx-cloud.wx-lv1 { --wx-cloud-alpha: 0.55; }
+.wx-cloud.wx-lv2 { --wx-cloud-alpha: 0.85; --wx-haze-alpha: 0.10; }
+.wx-rain { --wx-cloud-alpha: 0.75; --wx-haze-alpha: 0.20; }
+.wx-rain.wx-lv1 { --wx-fog-alpha: 0.30; }
+.wx-clear { --wx-cloud-alpha: 0.25; }
+
+/* ---- 太陽・月の光 ---------------------------------------------------------- */
+.wx-glow {
+    position: absolute;
+    width: 70vmax;
+    height: 70vmax;
+    right: -18vmax;
+    top: -30vmax;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(var(--wx-glow), 0.85) 0%, rgba(var(--wx-glow), 0.25) 18%, transparent 55%);
+    opacity: 0.9;
+}
+.wx-dawn .wx-glow, .wx-dusk .wx-glow { top: auto; bottom: -38vmax; right: -10vmax; }
+.wx-night .wx-glow { opacity: 0.35; width: 40vmax; height: 40vmax; right: 6vmax; top: -14vmax; }
+.wx-fog .wx-glow, .wx-rain .wx-glow { opacity: 0.25; }
+
+/* ---- 星(夜・晴れのとき) ---------------------------------------------------- */
+.wx-stars {
+    position: absolute;
+    inset: 0 0 35% 0;
+    opacity: 0;
+    background-image:
+        radial-gradient(1.2px 1.2px at 12% 18%, #fff, transparent),
+        radial-gradient(1px 1px at 28% 42%, #fff, transparent),
+        radial-gradient(1.4px 1.4px at 46% 12%, #fff, transparent),
+        radial-gradient(1px 1px at 63% 33%, #fff, transparent),
+        radial-gradient(1.3px 1.3px at 78% 8%, #fff, transparent),
+        radial-gradient(1px 1px at 88% 46%, #fff, transparent),
+        radial-gradient(1.1px 1.1px at 36% 66%, #fff, transparent),
+        radial-gradient(1px 1px at 7% 58%, #fff, transparent);
+    background-size: 520px 420px;
+}
+.wx-night.wx-clear .wx-stars, .wx-night.wx-riverfog .wx-stars { opacity: 0.8; animation: wxTwinkle 6s ease-in-out infinite alternate; }
+
+/* ---- 雲(上空を流れる) -------------------------------------------------------- */
+.wx-cloud-band {
+    position: absolute;
+    left: -30%;
+    width: 160%;
+    height: 34vh;
+    background:
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.9), transparent) 10% 50% / 38% 70% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.75), transparent) 45% 30% / 45% 80% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.85), transparent) 80% 60% / 40% 70% no-repeat;
+    filter: blur(18px);
+    opacity: var(--wx-cloud-alpha);
+    will-change: transform;
+}
+.wx-cloud-1 { top: -4vh; animation: wxDrift 90s linear infinite; }
+.wx-cloud-2 { top: 14vh; animation: wxDrift 130s linear infinite reverse; opacity: calc(var(--wx-cloud-alpha) * 0.7); }
+
+/* ---- 全体のもや ---------------------------------------------------------------- */
+.wx-haze {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(var(--wx-fog), 0.55), rgba(var(--wx-fog), 0.85));
+    opacity: var(--wx-haze-alpha);
+    animation: wxBreathe 14s ease-in-out infinite alternate;
+}
+
+/* ---- 霧の帯(川霧は画面の下の方=川面に、全体霧は画面全体に流れる) ----------- */
+.wx-fogbank {
+    position: absolute;
+    left: -40%;
+    width: 180%;
+    height: 32vh;
+    background:
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.95), rgba(var(--wx-fog), 0)) 0% 50% / 34% 100% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.85), rgba(var(--wx-fog), 0)) 30% 40% / 40% 90% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.95), rgba(var(--wx-fog), 0)) 62% 60% / 36% 100% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.85), rgba(var(--wx-fog), 0)) 95% 45% / 38% 90% no-repeat;
+    filter: blur(20px);
+    opacity: var(--wx-fog-alpha);
+    will-change: transform;
+}
+.wx-fogbank-1 { top: 64vh; animation: wxDrift 70s ease-in-out infinite alternate; }
+.wx-fogbank-2 { top: 44vh; animation: wxDrift 95s ease-in-out infinite alternate-reverse; opacity: calc(var(--wx-fog-alpha) * 0.8); }
+.wx-fogbank-3 { top: 25vh; animation: wxDrift 120s ease-in-out infinite alternate; opacity: calc(var(--wx-fog-alpha) * 0.55); }
+.wx-fogbank-4 { top: 8vh; animation: wxDrift 150s ease-in-out infinite alternate-reverse; opacity: 0; }
+.wx-fogbank-5 { top: -8vh; animation: wxDrift 110s ease-in-out infinite alternate; opacity: 0; }
+/* 全体霧は上空まで霧の帯が広がる */
+.wx-fog .wx-fogbank-3 { opacity: calc(var(--wx-fog-alpha) * 0.85); }
+.wx-fog .wx-fogbank-4 { opacity: calc(var(--wx-fog-alpha) * 0.75); }
+.wx-fog .wx-fogbank-5 { opacity: calc(var(--wx-fog-alpha) * 0.6); }
+/* 川霧は下の方に溜まるので、上の帯は弱くする */
+.wx-riverfog.wx-lv1 .wx-fogbank-3 { opacity: calc(var(--wx-fog-alpha) * 0.35); }
+
+/* ---- 雨 -------------------------------------------------------------------------- */
+.wx-rainfall {
+    position: absolute;
+    inset: -20% 0 0 0;
+    opacity: 0;
+    background-image:
+        repeating-linear-gradient(102deg, transparent 0 22px, rgba(255, 255, 255, 0.28) 22px 23px, transparent 23px 47px),
+        repeating-linear-gradient(98deg, transparent 0 37px, rgba(255, 255, 255, 0.18) 37px 38px, transparent 38px 71px);
+    background-size: 100% 160px, 100% 220px;
+    animation: wxRain 0.55s linear infinite;
+}
+.wx-rain .wx-rainfall { opacity: 0.55; }
+.wx-rain.wx-lv1 .wx-rainfall { opacity: 0.3; animation-duration: 0.8s; }
+
+@keyframes wxDrift {
+    0% { transform: translateX(-6%); }
+    100% { transform: translateX(6%); }
+}
+@keyframes wxBreathe {
+    0% { opacity: calc(var(--wx-haze-alpha) * 0.85); }
+    100% { opacity: var(--wx-haze-alpha); }
+}
+@keyframes wxTwinkle {
+    0% { opacity: 0.5; }
+    100% { opacity: 0.9; }
+}
+@keyframes wxRain {
+    0% { background-position: 0 0, 0 0; }
+    100% { background-position: -30px 160px, -40px 220px; }
+}
+
+/* 情景の名前(左下の小さな表示) */
+.wx-caption {
+    position: fixed;
+    left: 16px;
+    bottom: 14px;
+    z-index: 0;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+}
+.wx-day.wx-clear ~ .wx-caption, .wx-day.wx-fog ~ .wx-caption { color: rgba(20, 30, 45, 0.7); text-shadow: none; }
+
+@media (prefers-reduced-motion: reduce) {
+    .wx-scene *, .wx-scene { animation: none !important; }
+}
+
+/* ---- 上部の見出し(天気アプリ風: 地点名・大きな気温・現在の状況) ------------- */
+.wx-hero {
+    text-align: center;
+    color: #fff;
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.28);
+    padding: 1.6rem 1rem 2.4rem;
+}
+.wx-hero-name { font-size: 1.6rem; font-weight: 600; letter-spacing: 0.02em; }
+.wx-hero-temp { font-size: clamp(4rem, 12vw, 6.2rem); font-weight: 200; line-height: 1.05; margin: 0.1rem 0; }
+.wx-hero-cond { font-size: 1.3rem; font-weight: 600; }
+.wx-hero-sub { font-size: 0.88rem; opacity: 0.9; margin-top: 0.3rem; }
+
+/* 背景を見せるため、地点ページのカードはふだんより透けさせる。 */
+.wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card {
+    background: rgba(255, 255, 255, 0.52);
+}
+:root[data-theme="dark"] .wx-scene ~ main .card,
+:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.74); }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .wx-scene ~ main .card,
+    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.74); }
+}
+.wx-scene ~ main .breadcrumb, .wx-scene ~ main .breadcrumb a, .wx-scene ~ main .pf-back {
+    color: #fff;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+@media (prefers-reduced-transparency: reduce) {
+    .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card { background: var(--color-surface); }
+}

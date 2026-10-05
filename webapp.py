@@ -4704,6 +4704,62 @@ def observation_report_dismiss(report_id):
     return _finish("observation_reports", "却下しました。")
 
 
+# 地点ページの背景演出(_weather_scene.html / web_static/weather_scene.css)。Appleの「天気」アプリの
+# ように、その地点の最新の観測(現象コード)と時間帯に応じて、背景に空の色と流れる霧・雲・雨を描く。
+WX_PHASE_LABELS = {"night": "夜", "dawn": "朝", "day": "日中", "dusk": "夕方"}
+
+
+def _weather_scene(name, code):
+    """背景演出の種類を決める。戻り値: {"phase", "kind", "level", "caption"}。
+    phase: 地点の日の出・日の入り(fog_features.sun_times_hours)から現在の時間帯を決める。
+    kind/level: 現象コードから(川霧1〜3→riverfog、全体霧4〜6→fog、層雲7〜8→cloud、霧雨・雨→rain)。"""
+    now = now_jst_naive()
+    hour = now.hour + now.minute / 60.0
+    info = CAMERA_INFO.get(name, {})
+    lat, lon = info.get("lat"), info.get("lon")
+    sunrise, sunset = (5.5, 17.5)
+    if lat is not None and lon is not None:
+        try:
+            sunrise, sunset = fog_features.sun_times_hours(now, lat, lon)
+        except Exception:
+            pass
+    if hour < sunrise - 0.6 or hour > sunset + 0.6:
+        phase = "night"
+    elif hour < sunrise + 1.0:
+        phase = "dawn"
+    elif hour > sunset - 1.0:
+        phase = "dusk"
+    else:
+        phase = "day"
+    try:
+        code = int(code) if code is not None and code == code else None
+    except (TypeError, ValueError):
+        code = None
+    if code in (1, 2, 3):
+        kind, level = "riverfog", code
+    elif code in (4, 5, 6):
+        kind, level = "fog", code - 3
+    elif code in (7, 8):
+        kind, level = "cloud", code - 6
+    elif code in (9, 10):
+        kind, level = "rain", code - 8
+    else:
+        kind, level = "clear", 1
+    if code is None:
+        label = "観測なし"
+    elif code == 0:
+        label = "現象なし"
+    else:
+        label = PHENOM_LABELS.get(code, "")
+    return {"phase": phase, "kind": kind, "level": level,
+            "caption": f"最新の観測「{label}」・{WX_PHASE_LABELS[phase]}"}
+
+
+@app.context_processor
+def _inject_weather_scene():
+    return {"weather_scene": _weather_scene}
+
+
 @app.route("/stations/<name>")
 def station_detail(name):
     name = _validate_station(name)
@@ -5281,7 +5337,7 @@ def _build_public_forecast():
             "lat": info.get("lat"),
             "lon": info.get("lon"),
             "days": day_levels,
-            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES} if obs else None,
+            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES, "code": obs.get("code")} if obs else None,
         })
 
     stale = True
@@ -5406,6 +5462,15 @@ def _public_station_stats_safe():
     return cached
 
 
+def _public_station_weather(name):
+    """公開の地点ページの見出しに出す、その地点の最新の気温・湿度(地点固有の値が無ければNone)。"""
+    try:
+        return _latest_station_weather(name, None)
+    except Exception as e:
+        log.warning("Public page: failed to load station weather for %s: %s", name, e)
+        return None
+
+
 @app.route("/forecast/station/<name>")
 def public_station(name):
     if name not in STATION_NAMES:
@@ -5419,6 +5484,7 @@ def public_station(name):
         region=STATION_REGION.get(name),
         stats=(stats or {}).get("stations", {}).get(name),
         official_url=_river_go_jp_map_url(cam_id) if cam_id else None, min_n=PUBLIC_STATS_MIN_N,
+        weather=_public_station_weather(name),
     )
 
 

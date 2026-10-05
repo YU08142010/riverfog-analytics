@@ -135,9 +135,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
     .pf-nav { margin-left: 0; width: 100%; }
 }
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 {% block extra_head %}{% endblock %}
 </head>
 <body>
+{% block body_background %}{% endblock %}
 <header class="pf-header">
     <div class="pf-header-inner">
         <a class="pf-brand" href="{{ url_for('public_forecast') }}">
