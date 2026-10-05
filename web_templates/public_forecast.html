@@ -42,6 +42,7 @@
     <h1>きょう、川霧はどこに出そう?</h1>
     <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点について、日中(日の出〜日の入り)の1時間ごとに、川霧の出やすさを3段階で示します。</p>
 </section>
+<p class="pf-muted" style="margin:0.4rem 0 0;">{% if data.run_at %}予測の計算: {{ data.run_at[:16] }}(毎晩更新){% endif %}{% if data.observed_at %} / 最新の観測: {{ data.observed_at }}(毎時更新){% endif %}</p>
 {% if data.stale %}
 <div class="pf-notice" role="status">予測の更新が止まっているため、表示が古い可能性があります{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
 {% endif %}
@@ -98,6 +99,8 @@
              : lv === 2 ? css.getPropertyValue("--pf-lv2").trim()
              : lv === 1 ? css.getPropertyValue("--pf-lv1").trim() : "#9aa5af";
     }
+    var STATION_URL = {{ url_for("public_station", name="__NAME__")|tojson }};
+    function stationUrl(name) { return STATION_URL.replace("__NAME__", encodeURIComponent(name)); }
     function el(tag, cls, text) {
         var e = document.createElement(tag);
         if (cls) { e.className = cls; }
@@ -137,7 +140,8 @@
         high.forEach(function(s) {
             var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] === 3; })
                 .map(Number).sort(function(a, b) { return a - b; });
-            var chip = el("span", "pf-chip pf-lv3", s.name + " " + hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : ""));
+            var chip = el("a", "pf-chip pf-lv3", s.name + " " + hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : ""));
+            chip.href = stationUrl(s.name);
             chips.appendChild(chip);
         });
         document.getElementById("pf-none").hidden = high.length > 0;
@@ -149,6 +153,9 @@
             box.appendChild(el("strong", null, item.station.name));
             box.appendChild(el("div", null, day.label + ": " + (lv ? levels[lv].label : "データなし")));
             if (dayIdx === 0 && item.station.now) { box.appendChild(el("div", null, "いま: " + item.station.now.label)); }
+            var link = el("a", null, "この地点の詳細");
+            link.href = stationUrl(item.station.name);
+            box.appendChild(link);
             item.marker.bindPopup(box);
             if (lv === 3) { item.marker.bringToFront(); }
         });
@@ -171,7 +178,10 @@
                 lastRegion = s.region;
             }
             var row = el("tr");
-            row.appendChild(el("td", "pf-name", s.name));
+            var nameCell = el("td", "pf-name"), a = el("a", null, s.name);
+            a.href = stationUrl(s.name);
+            nameCell.appendChild(a);
+            row.appendChild(nameCell);
             if (dayIdx === 0) {
                 var now = el("td", "pf-now" + (s.now && s.now.fog ? " pf-lv3" : ""), s.now ? s.now.label : "-");
                 row.appendChild(now);

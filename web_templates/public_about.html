@@ -22,6 +22,18 @@
     <p class="pf-muted">気象庁の天気予報とは別のもので、まだ研究の途中の情報です。</p>
 </div>
 
+{% if stats %}
+<div class="pf-card">
+    <h2>研究の規模</h2>
+    <div class="pf-stats">
+        <div class="pf-stat"><div class="v">{{ stats.stations|length }}</div><div class="k">観測している地点</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_n) }}</div><div class="k">日中にカメラで判定した回数(地点×時刻)</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_fog) }}</div><div class="k">そのうち川霧が出ていた回数</div></div>
+        <div class="pf-stat"><div class="v" style="font-size:1.05rem;">{{ stats.period_start }}<br>〜{{ stats.period_end }}</div><div class="k">記録の期間(地点によって始まりが異なります)</div></div>
+    </div>
+</div>
+{% endif %}
+
 <div class="pf-card">
     <h2>仕組み</h2>
     <ol class="pf-steps">

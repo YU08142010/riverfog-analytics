@@ -1,0 +1,105 @@
+{% extends "public_base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block extra_head %}
+<style>
+.pf-back { font-size: 0.85rem; text-decoration: none; }
+.pf-station-head h1 { font-size: 1.45rem; margin: 0.3rem 0 0.1rem; }
+.pf-days-table { border-collapse: separate; border-spacing: 2px; width: 100%; font-size: 0.82rem; }
+.pf-days-table th { color: var(--pf-muted); font-weight: 600; text-align: center; padding: 0.2rem; white-space: nowrap; }
+.pf-days-table th.pf-dl { text-align: left; color: var(--pf-text); padding-right: 0.6rem; }
+.pf-days-table td { text-align: center; border-radius: 4px; min-width: 1.9rem; height: 1.9rem; font-size: 0.75rem; }
+.pf-table-wrap { overflow-x: auto; }
+.pf-now-box { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; }
+.pf-now-label { font-size: 1.3rem; font-weight: 700; }
+.pf-bars { display: flex; align-items: flex-end; gap: 4px; height: 150px; margin-top: 0.8rem; }
+.pf-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+.pf-bar span.v { font-size: 0.68rem; color: var(--pf-muted); margin-bottom: 2px; white-space: nowrap; }
+.pf-bar i { display: block; width: 100%; background: var(--pf-lv3); border-radius: 3px 3px 0 0; min-height: 1px; }
+.pf-bar i.none { background: transparent; border-bottom: 1px dashed var(--pf-border); }
+.pf-bar-labels { display: flex; gap: 4px; }
+.pf-bar-labels span { flex: 1; text-align: center; font-size: 0.72rem; color: var(--pf-muted); min-width: 0; }
+.pf-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+@media (max-width: 760px) { .pf-two { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}
+{% block content %}
+<a class="pf-back" href="{{ url_for('public_forecast') }}">← 全地点の出やすさに戻る</a>
+<div class="pf-station-head">
+    <h1>{{ name }}</h1>
+    <p class="pf-muted" style="margin:0 0 1rem;">{{ region or "" }}{% if official_url %} ・ <a href="{{ official_url }}" target="_blank" rel="noopener">この地点の河川カメラ(国土交通省「川の防災情報」)</a>{% endif %}</p>
+</div>
+
+<div class="pf-card">
+    <h2>3日間の出やすさ</h2>
+    {% if station %}
+    <div class="pf-table-wrap">
+    <table class="pf-days-table">
+        <thead><tr><th></th>{% for h in range(5, 19) %}<th>{{ h }}時</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for d in data.days %}
+        {% set hours = station.days[loop.index0].hours %}
+        <tr>
+            <th class="pf-dl">{{ d.label }}<br><span class="pf-muted" style="font-weight:400;">{{ d.date_label }}</span></th>
+            {% for h in range(5, 19) %}
+            {% set lv = hours.get(h, 0) %}
+            <td class="pf-lv{{ lv }}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間・データなし' }}">{{ levels[lv].short if lv >= 2 else "" }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="pf-muted" style="margin-bottom:0;">高 = {{ levels[3].label }}、中 = {{ levels[2].label }}、色の薄いマス = {{ levels[1].label }}、空欄 = 夜間(対象外)。{% if data.run_at %}{{ data.run_at[:16] }} 時点の計算です。{% endif %}</p>
+    {% else %}
+    <p>この地点の予測は現在ありません。</p>
+    {% endif %}
+</div>
+
+{% if station and station.now and data.observed_at %}
+<div class="pf-card">
+    <h2>いまの様子(観測)</h2>
+    <div class="pf-now-box">
+        <span class="pf-now-label">{{ station.now.label }}</span>
+        <span class="pf-muted">{{ data.observed_at }} のカメラ画像をAIで判定した結果です(誤判定が含まれることがあります)。</span>
+    </div>
+</div>
+{% endif %}
+
+{% macro bars(items, unit) %}
+{% set ns = namespace(mx=0) %}
+{% for it in items %}{% if it.rate is not none and it.rate > ns.mx %}{% set ns.mx = it.rate %}{% endif %}{% endfor %}
+<div class="pf-bars" role="img" aria-label="{{ unit }}ごとの川霧の割合">
+    {% for it in items %}
+    <div class="pf-bar" title="{{ it.key }}{{ unit }}: {{ '%.1f%%'|format(it.rate * 100) if it.rate is not none else 'データ不足' }}(判定{{ it.n }}件)">
+        {% if it.rate is not none %}
+        <span class="v">{{ '%.0f'|format(it.rate * 100) if it.rate >= 0.1 else '%.1f'|format(it.rate * 100) }}</span>
+        <i style="height: {{ (it.rate / ns.mx * 100) if ns.mx > 0 else 0 }}%;"></i>
+        {% else %}
+        <span class="v">-</span><i class="none"></i>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+<div class="pf-bar-labels">{% for it in items %}<span>{{ it.key }}</span>{% endfor %}</div>
+{% endmacro %}
+
+<div class="pf-card">
+    <h2>これまでの傾向</h2>
+    {% if stats and stats.n %}
+    <p style="margin-top:0;">日中にカメラで判定した <b>{{ "{:,}".format(stats.n) }}</b> 回のうち、川霧が出ていたのは <b>{{ "{:,}".format(stats.n_fog) }}</b> 回(<b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)です。</p>
+    <div class="pf-two">
+        <div>
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">月別(%)</h3>
+            {{ bars(stats.by_month, "月") }}
+        </div>
+        <div>
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">時刻別(%)</h3>
+            {{ bars(stats.by_hour, "時") }}
+        </div>
+    </div>
+    <p class="pf-muted" style="margin-bottom:0;">数字はその月・時刻に川霧が出ていた割合(%)です。判定が{{ min_n }}回未満の月・時刻は「-」にしています。2026年8月より前は、別の方法で集めて目視で確認した記録です。</p>
+    {% else %}
+    <p class="pf-muted">集計を準備中です。しばらくしてから再度ご覧ください。</p>
+    {% endif %}
+</div>
+{% endblock %}

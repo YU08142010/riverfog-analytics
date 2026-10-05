@@ -55,6 +55,7 @@ import announcements
 import users
 import fog_data
 import fog_model
+import fog_features
 from fog_features import is_daylight as fog_features_is_daylight
 import fog_tree_viz
 import weather_store
@@ -5326,6 +5327,101 @@ def _public_forecast_safe():
     return data
 
 
+PUBLIC_STATS_CACHE_SECONDS = 6 * 3600
+PUBLIC_STATS_MIN_N = 30            # 月別・時刻別の割合を出すのに必要な判定件数(少ないと割合がぶれるため)
+_public_stats_cache = {"data": None, "at": 0.0}
+_public_stats_cache_lock = threading.Lock()
+
+
+def _build_public_station_stats():
+    """地点ごとの過去の川霧の出やすさ(月別・時刻別、日中のみ・人による訂正込み)と、研究の規模の集計。"""
+    _main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+    phenom_df, _n = fog_data.apply_phenomena_corrections(phenom_df, fog_data.load_phenomena_corrections())
+    dts = phenom_df["datetime"].reset_index(drop=True)
+    months = dts.dt.month.to_numpy()
+    hours = dts.dt.hour.to_numpy()
+    fog_codes = set(SUMMARY_FOG_CODES)
+    stations, total_n, total_fog = {}, 0, 0
+    for name in station_names:
+        info = CAMERA_INFO.get(name, {})
+        lat, lon = info.get("lat"), info.get("lon")
+        if lat is None or lon is None:
+            continue
+        raw = phenom_df[name].reset_index(drop=True)
+        mapping = {v: fog_features.primary_phenom_code(encode_phenomena_cell(v)) for v in raw.dropna().unique()}
+        primary = raw.map(mapping).to_numpy(dtype="float64")
+        valid = ~np.isnan(primary) & fog_features.daylight_mask(dts, lat, lon)
+        is_fog = np.isin(primary, list(fog_codes)) & valid
+        n, n_fog = int(valid.sum()), int(is_fog.sum())
+        total_n += n
+        total_fog += n_fog
+
+        def rates(keys, key_values):
+            out = []
+            for k in key_values:
+                sel = valid & (keys == k)
+                cnt = int(sel.sum())
+                out.append({"key": k, "n": cnt,
+                            "rate": round(float(is_fog[sel].sum()) / cnt, 4) if cnt >= PUBLIC_STATS_MIN_N else None})
+            return out
+
+        stations[name] = {
+            "n": n, "n_fog": n_fog, "rate": round(n_fog / n, 4) if n else None,
+            "by_month": rates(months, list(range(1, 13))),
+            "by_hour": rates(hours, list(range(5, 19))),
+        }
+    return {
+        "stations": stations,
+        "total_n": total_n,
+        "total_fog": total_fog,
+        "period_start": dts.min().strftime("%Y/%m/%d") if len(dts) else None,
+        "period_end": dts.max().strftime("%Y/%m/%d") if len(dts) else None,
+    }
+
+
+def _refresh_public_station_stats():
+    try:
+        data = _build_public_station_stats()
+    except Exception as e:
+        log.warning("Failed to build public station stats: %s", e)
+        data = None
+    with _public_stats_cache_lock:
+        if data is not None:
+            _public_stats_cache["data"] = data
+            _public_stats_cache["at"] = time.monotonic()
+        _public_stats_cache["building"] = False
+
+
+def _public_station_stats_safe():
+    """集計には20秒ほどかかるため、閲覧者を待たせないよう裏で作り直し、それまでは前回の
+    集計(初回はNone=「準備中」表示)を返す。"""
+    now = time.monotonic()
+    with _public_stats_cache_lock:
+        cached = _public_stats_cache["data"]
+        fresh = cached is not None and now - _public_stats_cache["at"] < PUBLIC_STATS_CACHE_SECONDS
+        if fresh or _public_stats_cache.get("building"):
+            return cached
+        _public_stats_cache["building"] = True
+    threading.Thread(target=_refresh_public_station_stats, daemon=True).start()
+    return cached
+
+
+@app.route("/forecast/station/<name>")
+def public_station(name):
+    if name not in STATION_NAMES:
+        abort(404)
+    data = _public_forecast_safe()
+    station = next((s for s in (data or {}).get("stations", []) if s["name"] == name), None)
+    stats = _public_station_stats_safe()
+    cam_id = CAMERA_INFO.get(name, {}).get("cam_id")
+    return render_template(
+        "public_station.html", data=data, station=station, levels=PUBLIC_LEVELS, name=name,
+        region=STATION_REGION.get(name),
+        stats=(stats or {}).get("stations", {}).get(name),
+        official_url=_river_go_jp_map_url(cam_id) if cam_id else None, min_n=PUBLIC_STATS_MIN_N,
+    )
+
+
 @app.after_request
 def _public_noindex(response):
     if request.path.startswith(PUBLIC_PREFIX):
@@ -5342,7 +5438,8 @@ def public_forecast():
 @app.route("/forecast/about")
 def public_about():
     data = _public_forecast_safe()
-    return render_template("public_about.html", data=data, levels=PUBLIC_LEVELS, mid_ratio=PUBLIC_MID_RATIO)
+    return render_template("public_about.html", data=data, levels=PUBLIC_LEVELS, mid_ratio=PUBLIC_MID_RATIO,
+                           stats=_public_station_stats_safe())
 
 
 @app.route("/login", methods=["GET", "POST"])
