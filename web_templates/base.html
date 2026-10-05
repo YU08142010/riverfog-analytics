@@ -7,6 +7,13 @@
 <title>{% block title %}川霧観測・予測{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<meta name="theme-color" content="#1b4a66">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="川霧">
 <link rel="stylesheet" href="{{ url_for('static', filename='fonts/fonts.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 <script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
@@ -456,6 +463,11 @@ function chartThemeLayoutPatch(el, theme) {
         "plot_bgcolor": "rgba(0,0,0,0)",
         "font.color": pal.fg,
         "legend.font.color": pal.fg,
+        "font.family": "Inter, 'Zen Kaku Gothic New', -apple-system, 'Hiragino Sans', sans-serif",
+        "hoverlabel.font.family": "Inter, 'Zen Kaku Gothic New', -apple-system, 'Hiragino Sans', sans-serif",
+        "hoverlabel.bordercolor": "rgba(0,0,0,0)",
+        "hoverlabel.bgcolor": theme === "dark" ? "rgba(40,42,52,0.92)" : "rgba(255,255,255,0.95)",
+        "hoverlabel.font.color": pal.fg,
     };
     var layout = (el && el.layout) || {};
     Object.keys(layout).forEach(function(key) {
@@ -483,6 +495,23 @@ function applyChartTheme(el, theme) {
     }
 }
 
+// グラフの見た目をサイトのデザイン(glass.css)に合わせる。棒グラフは角を丸め、
+// 以前の既定色(濃紺#1a5276)で描かれた系列は新しい青にする(データの意味は変えない)。
+function polishChart(el) {
+    if (!window.Plotly || !el.data) { return; }
+    var hasBar = el.data.some(function(t) { return t.type === "bar"; });
+    if (hasBar) { Plotly.relayout(el, {"barcornerradius": 6}); }
+    el.data.forEach(function(t, i) {
+        var c = t.marker && t.marker.color;
+        if (typeof c === "string" && c.toLowerCase() === "#1a5276") {
+            Plotly.restyle(el, {"marker.color": "#0a64d2"}, [i]);
+        }
+        if (t.line && typeof t.line.color === "string" && t.line.color.toLowerCase() === "#1a5276") {
+            Plotly.restyle(el, {"line.color": "#0a64d2"}, [i]);
+        }
+    });
+}
+
 function mountPlotlyChart(el) {
     var url = el.dataset.chartUrl;
     if (!url || !window.Plotly) { return; }
@@ -503,6 +532,7 @@ function mountPlotlyChart(el) {
         })
         .then(function() {
             applyChartTheme(el, currentChartTheme());
+            try { polishChart(el); } catch (e) { console.warn("polishChart failed", e); }
             window.PLOTLY_CHARTS.push(el);
             stop();
         })

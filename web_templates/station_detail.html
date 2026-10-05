@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
+{% from "_wx_icon.html" import wx_icon %}
 {% block title %}{{ name }}{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -16,8 +17,24 @@
 <div class="wx-hero">
     <div class="wx-hero-name">{{ name }}</div>
     {% if w and w.temp is not none and w.temp == w.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(w.temp) }}°</div>{% endif %}
-    <div class="wx-hero-cond">{{ current.label }}</div>
+    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, current.code)) }}{{ current.label }}</div>
     <div class="wx-hero-sub">{{ observations_datetime.strftime("%m/%d %H:%M") }} の観測{% if w and w.humidity is not none and w.humidity == w.humidity %} ・ 湿度 {{ "%.0f"|format(w.humidity) }}%{% endif %}</div>
+</div>
+{% endif %}
+{% if hourly %}
+<div class="card">
+    <h2>時間ごとの川霧の出やすさ</h2>
+    <div class="wx-hourly" role="list" aria-label="時間ごとの川霧の出やすさ">
+        {% for h in hourly %}
+        {% if h.day %}<span class="wx-hour-day">{{ h.day }}</span>{% endif %}
+        <div class="wx-hour{{ ' now' if h.now }}" role="listitem" title="{{ h.label }}: {{ {3: '出やすい', 2: 'やや出やすい', 1: '出にくい'}[h.level] }}">
+            <b>{{ h.label }}</b>
+            <span class="lvdot lv{{ h.level }}">{{ h.short }}</span>
+            <small>{{ {3: '出やすい', 2: 'やや', 1: '-'}[h.level] }}</small>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="muted" style="margin:0.3rem 0 0;">高=出やすい・中=やや出やすい・低=出にくい(公開ページと同じ3段階)。夜間は対象外です。</p>
 </div>
 {% endif %}
 <div class="card">

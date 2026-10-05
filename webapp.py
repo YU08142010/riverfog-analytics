@@ -4928,6 +4928,29 @@ def _inject_weather_scene():
     return {"weather_scene": _weather_scene}
 
 
+def _station_hourly(name):
+    """地点ページの「時間ごとの出やすさ」の帯(天気アプリ風)。今日の残りと明日の日中の各時刻。
+    戻り値: [{"day": "今日"/"明日" (日の変わり目のみ), "label": "今"/"6時", "level", "short", "now"}, ...]"""
+    data = _public_forecast_safe() or {}
+    station = next((s for s in data.get("stations", []) if s["name"] == name), None)
+    if not station:
+        return []
+    now = now_jst_naive()
+    out = []
+    for di, day in enumerate(data.get("days", [])[:2]):
+        hours = station["days"][di]["hours"]
+        first = True
+        for h in sorted(hours):
+            if di == 0 and h < now.hour:
+                continue
+            lv = hours[h]
+            is_now = di == 0 and h == now.hour
+            out.append({"day": day["label"] if first else None, "label": "今" if is_now else f"{h}時",
+                        "level": lv, "short": PUBLIC_LEVELS[lv]["short"], "now": is_now})
+            first = False
+    return out
+
+
 @app.route("/stations/<name>")
 def station_detail(name):
     name = _validate_station(name)
@@ -4990,6 +5013,7 @@ def station_detail(name):
         can_correct=_can_correct_station(session.get("role"), name),
         phenom_labels=PHENOM_LABELS,
         phenom_style=PHENOM_STYLE,
+        hourly=_station_hourly(name),
     )
 
 

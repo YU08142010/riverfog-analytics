@@ -159,6 +159,7 @@
             box.appendChild(link);
             item.marker.bindPopup(box);
             if (lv === 3) { item.marker.bringToFront(); }
+            if (item.marker._path) { item.marker._path.classList.toggle("pf-marker-high", lv === 3); }
         });
 
         var table = document.getElementById("pf-table");

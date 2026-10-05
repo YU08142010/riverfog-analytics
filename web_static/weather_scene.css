@@ -362,3 +362,51 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
 .wx-card.wx-day.wx-fog, .wx-card.wx-day.wx-cloud, .wx-card.wx-day.wx-riverfog.wx-lv3 { color: #1b2633; text-shadow: 0 1px 6px rgba(255, 255, 255, 0.5); }
 .wx-card.wx-day.wx-fog .wx-card-today i, .wx-card.wx-day.wx-cloud .wx-card-today i { box-shadow: 0 0 0 1px rgba(27, 38, 51, 0.4); }
 @media (prefers-reduced-motion: reduce) { .wx-card::before, .wx-card::after { animation: none; } }
+/* ==========================================================================
+   動く天気アイコン(_wx_icon.html)
+   ========================================================================== */
+.wxi { display: inline-block; vertical-align: -0.35em; overflow: visible; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.wxi-sun circle { fill: #ffd166; stroke: #ffb703; }
+.wxi-rays { stroke: #ffb703; }
+.wxi-sun { transform-origin: 16px 16px; animation: wxiSpin 18s linear infinite; }
+.wxi-sunsmall { fill: #ffd166; stroke: #ffb703; stroke-width: 1.6; }
+.wxi-moon { fill: #f4f1de; stroke: #e9e3c0; stroke-width: 1.2; animation: wxiGlow 4s ease-in-out infinite alternate; }
+.wxi-star { fill: #fff; stroke: none; animation: wxiTwinkle 2.4s ease-in-out infinite alternate; }
+.wxi-star2 { animation-delay: 1.2s; }
+.wxi-fogline { stroke-width: 2.6; opacity: 0.95; animation: wxiFog 3.6s ease-in-out infinite alternate; }
+.wxi-f2 { animation-delay: -1.2s; opacity: 0.8; }
+.wxi-f3 { animation-delay: -2.4s; opacity: 0.65; }
+.wxi-f4 { animation-delay: -0.6s; opacity: 0.7; }
+.wxi-cloud { fill: rgba(255, 255, 255, 0.92); stroke: rgba(255, 255, 255, 0.95); stroke-width: 1.4; animation: wxiFloat 5s ease-in-out infinite alternate; }
+.wxi-drop { stroke: #8ecbff; stroke-width: 2; animation: wxiRain 0.9s linear infinite; }
+.wxi-d2 { animation-delay: -0.3s; }
+.wxi-d3 { animation-delay: -0.6s; }
+@keyframes wxiSpin { to { transform: rotate(360deg); } }
+@keyframes wxiGlow { from { filter: drop-shadow(0 0 0 rgba(255, 255, 220, 0)); } to { filter: drop-shadow(0 0 3px rgba(255, 255, 220, 0.9)); } }
+@keyframes wxiTwinkle { from { opacity: 0.3; } to { opacity: 1; } }
+@keyframes wxiFog { from { transform: translateX(-2.5px); } to { transform: translateX(2.5px); } }
+@keyframes wxiFloat { from { transform: translateY(-0.8px); } to { transform: translateY(0.8px); } }
+@keyframes wxiRain { from { transform: translateY(-3px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(4px); opacity: 0; } }
+.wx-card-cond .wxi { margin-right: 0.3rem; }
+.wx-hero-cond .wxi { margin-right: 0.4rem; vertical-align: -0.4em; }
+@media (prefers-reduced-motion: reduce) { .wxi * { animation: none !important; } }
+
+/* ==========================================================================
+   時間ごとの出やすさの帯(天気アプリの「1時間ごとの予報」風、地点ページ)
+   ========================================================================== */
+.wx-hourly { display: flex; gap: 0.35rem; overflow-x: auto; padding: 0.3rem 0.1rem 0.6rem; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.wx-hour {
+    flex: 0 0 auto; width: 3.9rem; scroll-snap-align: start;
+    display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+    padding: 0.55rem 0.2rem 0.6rem; border-radius: 14px;
+    background: var(--color-bg); font-size: 0.8rem;
+}
+.wx-hour.now { background: var(--button-bg); color: #fff; }
+.wx-hour b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.wx-hour .lvdot { width: 1.6rem; height: 1.6rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; }
+.wx-hour .lv3 { background: #1f5f8b; color: #fff; box-shadow: 0 0 12px rgba(31, 95, 139, 0.55); }
+.wx-hour .lv2 { background: #8fbcd8; color: #0f2a3d; }
+.wx-hour .lv1 { background: rgba(120, 130, 150, 0.18); color: var(--color-text-muted); }
+.wx-hour.now .lv1 { color: #fff; background: rgba(255, 255, 255, 0.25); }
+.wx-hour small { font-size: 0.68rem; opacity: 0.85; }
+.wx-hour-day { flex: 0 0 auto; align-self: center; writing-mode: vertical-rl; font-size: 0.72rem; font-weight: 700; color: var(--color-text-muted); padding: 0 0.1rem; }
