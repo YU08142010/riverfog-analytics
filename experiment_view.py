@@ -11,6 +11,11 @@ from pathlib import Path
 
 import plotly.graph_objects as go
 import plotly.io as pio
+import chart_style
+
+
+def _to_json(fig):
+    return pio.to_json(chart_style.style_figure(fig))
 from flask import Response, render_template
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -93,7 +98,7 @@ def _layout(title, height=380, **kw):
 
 
 def _empty(title, msg="データがありません"):
-    return pio.to_json(go.Figure(layout=_layout(title, annotations=[
+    return _to_json(go.Figure(layout=_layout(title, annotations=[
         {"text": msg, "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False}])))
 
 
@@ -116,7 +121,7 @@ def chart_variants(res):
     fig.update_layout(**_layout("方式ごとのPR-AUCと川霧F1(高いほど良い)", height=420, barmode="group",
                                 yaxis={"title": {"text": "スコア"}, "rangemode": "tozero"},
                                 legend={"orientation": "h", "y": -0.28, "font": {"size": 10}}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_pr(res):
@@ -145,7 +150,7 @@ def chart_pr(res):
     fig.update_layout(**_layout(f"適合率-再現率曲線(評価期間 {block['window'][0]}〜{block['window'][1]})", height=400,
                                 xaxis={"title": {"text": "再現率(Recall)"}, "range": [0, 1]},
                                 yaxis={"title": {"text": "適合率(Precision)"}, "range": [0, 1]}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_reliability(res):
@@ -169,7 +174,7 @@ def chart_reliability(res):
     fig.update_layout(**_layout("較正曲線(予測した確率と、実際の川霧の発生率)", height=380,
                                 xaxis={"title": {"text": "予測確率(各ビンの平均)"}, "range": [0, mx]},
                                 yaxis={"title": {"text": "実際の発生率"}, "range": [0, mx]}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_months(res):
@@ -189,7 +194,7 @@ def chart_months(res):
     fig.update_layout(**_layout("月別のPR-AUC(その月を除いて学習)", height=360, barmode="group",
                                 yaxis={"title": {"text": "PR-AUC / 発生率"}, "rangemode": "tozero"},
                                 legend={"orientation": "h", "y": -0.25}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_hours(res):
@@ -200,7 +205,7 @@ def chart_hours(res):
     hours = sorted(int(h) for h in v4.keys())
     get = lambda h, k: v4[str(h)][k] if str(h) in v4 else v4[h][k]  # noqa: E731
     fig = make_subplots_hours(hours, get)
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def make_subplots_hours(hours, get):
@@ -233,7 +238,7 @@ def chart_importance(res):
     fig.update_layout(**_layout("特徴量の重要度(その特徴量をシャッフルしたときのPR-AUCの低下)", height=460,
                                 xaxis={"title": {"text": "PR-AUCの低下(大きいほど重要)"}},
                                 margin={"t": 48, "r": 20, "b": 50, "l": 130}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_cond(res):
@@ -256,7 +261,7 @@ def chart_cond(res):
                                 xaxis={"title": {"text": "満たした条件の数(気温・露点差・風速・時間帯)"}},
                                 yaxis={"title": {"text": "川霧の発生率(%)"}, "rangemode": "tozero"},
                                 legend={"orientation": "h", "y": -0.28}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_importance_cond(res):
@@ -269,7 +274,7 @@ def chart_importance_cond(res):
     fig.update_layout(**_layout("特徴量の重要度(V4+条件指標、赤が条件指標)", height=460,
                                 xaxis={"title": {"text": "PR-AUCの低下(大きいほど重要)"}},
                                 margin={"t": 48, "r": 20, "b": 50, "l": 130}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 CHARTS = {
@@ -311,7 +316,7 @@ def chart_label_conf(audit, _eval):
     fig.update_layout(**_layout("Geminiの確信度別: 人間に訂正された割合", height=360,
                                 yaxis={"title": {"text": "%"}, "range": [0, 105]},
                                 legend={"orientation": "h", "y": -0.25}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_label_flow(audit, _eval):
@@ -324,7 +329,7 @@ def chart_label_flow(audit, _eval):
     fig.update_layout(**_layout("人間による訂正の内訳(行=Geminiの判定、列=人間の訂正後)", height=420,
                                 xaxis={"title": {"text": "訂正後のコード(人間)"}, "type": "category"},
                                 yaxis={"title": {"text": "元のコード(Gemini)"}, "type": "category", "autorange": "reversed"}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_label_hours(audit, _eval):
@@ -338,7 +343,7 @@ def chart_label_hours(audit, _eval):
     fig.update_layout(**_layout("時刻別: 人間が確認・訂正した件数", height=340, barmode="overlay",
                                 xaxis={"title": {"text": "時刻(JST)"}, "dtick": 1}, yaxis={"title": {"text": "件数"}},
                                 legend={"orientation": "h", "y": -0.28}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_label_groups(audit, _eval):
@@ -350,7 +355,7 @@ def chart_label_groups(audit, _eval):
         fig.add_trace(go.Bar(x=[r["group"] for r in rows], y=[r[c] for r in rows], name=CONF_LABELS[c], marker={"color": CONF_COLORS[c]}))
     fig.update_layout(**_layout("Geminiの判定した現象ごとの確信度(2026-08-25以降の全ラベル)", height=360, barmode="stack",
                                 yaxis={"title": {"text": "件数"}}, legend={"orientation": "h", "y": -0.25}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 def chart_label_models(_audit, ev):
@@ -366,7 +371,7 @@ def chart_label_models(_audit, ev):
         fig.add_trace(go.Bar(x=names, y=ys, name=label, marker={"color": color}, text=[_fmt(y, 2) for y in ys], textposition="outside"))
     fig.update_layout(**_layout("人間が確認した画像でのGemini設定の比較", height=430, barmode="group",
                                 yaxis={"range": [0, 1.1]}, legend={"orientation": "h", "y": -0.35}))
-    return pio.to_json(fig)
+    return _to_json(fig)
 
 
 LABEL_CHARTS = {

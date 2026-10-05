@@ -35,6 +35,7 @@ from fog_features import (
     encode_phenomena_cell,
 )
 from fog_model import DEFAULT_FOG_THRESHOLD, binary_label
+import chart_style as cs
 
 # 予報の帯(二値の予測)の色。「川霧あり」は実測の帯の「川霧」(コード2)と同じ色にそろえる。
 BINARY_FOG_COLOR = PHENOM_COLORS[2]
@@ -118,33 +119,33 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
     )
 
     fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_TEMP], mode="lines",
-                              line={"color": "#e74c3c", "width": 1.4}, name="気温(℃)[実測]"), row=1, col=1)
+                              line={"color": cs.ORANGE, "width": 2}, name="気温(℃)[実測]"), row=1, col=1)
     fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_DEWPOINT], mode="lines",
-                              line={"color": "#16a085", "width": 1.4}, name="露点温度(℃)[実測]"), row=1, col=1)
+                              line={"color": cs.AQUA, "width": 2}, name="露点温度(℃)[実測]"), row=1, col=1)
     fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_TEMP], mode="lines",
-                              line={"color": "#e74c3c", "width": 1.6, "dash": "dash"},
+                              line={"color": cs.ORANGE, "width": 2, "dash": "dash"},
                               name="気温(℃)[予報]"), row=1, col=1)
     fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_DEWPOINT], mode="lines",
-                              line={"color": "#16a085", "width": 1.6, "dash": "dash"},
+                              line={"color": cs.AQUA, "width": 2, "dash": "dash"},
                               name="露点温度(℃)[予報]"), row=1, col=1)
 
     fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_HUMIDITY], mode="lines",
-                              line={"color": "#8e44ad", "width": 1.0}, opacity=0.7,
+                              line={"color": cs.YELLOW, "width": 2},
                               name="相対湿度(％)[実測]"), row=2, col=1)
     fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_HUMIDITY], mode="lines",
-                              line={"color": "#8e44ad", "width": 1.3, "dash": "dash"},
+                              line={"color": cs.YELLOW, "width": 2, "dash": "dash"},
                               name="相対湿度(％)[予報]"), row=2, col=1)
 
     if probs is not None:
         fig.add_trace(go.Scatter(
             x=forecast_raw["datetime"], y=probs, mode="lines", fill="tozeroy",
-            line={"color": "#1a5276", "width": 1.6}, fillcolor="rgba(41,128,185,0.3)",
+            line={"color": cs.BLUE, "width": 2},
             name="川霧(1〜3)の予測確率",
         ), row=3, col=1)
         fig.add_trace(go.Scatter(
             x=[forecast_raw["datetime"].min(), forecast_raw["datetime"].max()],
             y=[threshold_pct, threshold_pct], mode="lines",
-            line={"color": "#c0392b", "width": 1.2, "dash": "dash"},
+            line={"color": cs.INK_SECONDARY, "width": 1.5, "dash": "dash"},
             name=f"川霧と判定するしきい値({threshold_pct:.0f}%)",
         ), row=3, col=1)
 
@@ -152,9 +153,9 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         fig.add_trace(_phenom_code_bar(hist_phenom["datetime"], hist_codes, "実測"), row=4, col=1)
     fig.add_trace(_binary_forecast_bar(forecast_raw["datetime"], pred_codes), row=4, col=1)
 
-    fig.add_vrect(x0=fc_start, x1=fc_end, fillcolor="gray", opacity=0.08, line_width=0,
+    fig.add_vrect(x0=fc_start, x1=fc_end, fillcolor="rgb(120,130,150)", opacity=0.10, line_width=0,
                   row="all", col="all")
-    fig.add_vline(x=fc_start, line_dash="dot", line_color="dimgray", line_width=1.5,
+    fig.add_vline(x=fc_start, line_dash="dot", line_color="rgb(120,130,150)", line_width=1.5,
                   row="all", col="all")
 
     fig.update_yaxes(title_text="気温・露点温度(℃)", row=1, col=1)
@@ -181,9 +182,10 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
     )
 
     out_path = os.path.join(out_dir, f"{col}_予測_{run_date_str}.html")
+    cs.style_figure(fig, remap=False)
     fig.write_html(
         out_path, include_plotlyjs=PLOTLY_JS_URL, full_html=True,
-        config={"responsive": True, "displaylogo": False},
+        config={"responsive": True, "displaylogo": False}, post_script=cs.DARK_POST_SCRIPT,
     )
     return out_path
 
@@ -243,17 +245,17 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
     )
 
     fig.add_trace(go.Bar(
-        x=date_labels, y=count_pct, marker_color="#3498db", name="川霧が予測された地点数",
+        x=date_labels, y=count_pct, marker_color=cs.BLUE, name="川霧が予測された地点数",
         customdata=counts, hovertemplate=f"%{{x}}: %{{customdata}}地点(全{n_total}中)<extra></extra>",
     ), row=1, col=1)
     if prob_df is not None and not all(np.isnan(mean_probs)):
         fig.add_trace(go.Scatter(
-            x=date_labels, y=mean_probs, mode="lines+markers", line={"color": "#c0392b", "width": 1.4},
+            x=date_labels, y=mean_probs, mode="lines+markers", line={"color": cs.ORANGE, "width": 2},
             marker={"size": 6}, name="川霧確率の平均(全地点・全時刻)",
         ), row=1, col=1)
 
     fig.add_trace(go.Heatmap(
-        z=heat, x=date_labels, y=fog_cols, colorscale="YlOrRd", zmin=0, zmax=100,
+        z=heat, x=date_labels, y=fog_cols, colorscale=cs.SEQ_LIGHT, zmin=0, zmax=100,
         hovertemplate="地点: %{y}<br>日付: %{x}<br>確率(最大): %{z:.0f}%<extra></extra>",
         colorbar={"title": {"text": "川霧確率<br>の最大(％)"}},
     ), row=2, col=1)
@@ -271,9 +273,10 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
     )
 
     out_path = os.path.join(out_dir, f"全地点サマリー{file_suffix}_{run_date_str}.html")
+    cs.style_figure(fig, remap=False)
     fig.write_html(
         out_path, include_plotlyjs=PLOTLY_JS_URL, full_html=True,
-        config={"responsive": True, "displaylogo": False},
+        config={"responsive": True, "displaylogo": False}, post_script=cs.DARK_POST_SCRIPT,
     )
     return out_path
 

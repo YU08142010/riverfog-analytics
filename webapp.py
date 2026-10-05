@@ -55,6 +55,7 @@ import announcements
 import users
 import fog_data
 import fog_model
+import chart_style
 import fog_features
 from fog_features import is_daylight as fog_features_is_daylight
 import fog_tree_viz
@@ -567,6 +568,11 @@ app.config["MAX_CONTENT_LENGTH"] = 2560 * 1024 * 1024  # 2.5GB
 # iframeとして埋め込んでいたが、ttydをループバック限定にしnginx配下の同一オリジン
 # (/admin/terminal-ws/)でプロキシする方式に変更したため、frame-srcを別途許可する
 # 必要が無くなった(2026-09-13の監査で指摘、admin_terminal()参照)。
+def _chart_json(fig):
+    """グラフをJSONにする。サイト共通の見た目(chart_style.style_figure)を通してから変換する。"""
+    return pio.to_json(chart_style.style_figure(fig))
+
+
 _SECURITY_HEADERS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data: https://*.tile.openstreetmap.org; "
@@ -1402,8 +1408,9 @@ def _chart_theme():
 # 片方だけ配色を変えるとPDFとWebでグラフの見た目がずれていく懸念があったため、
 # 単一の定義に統一した(2026-09-14)。
 _CHART_THEME_PALETTE = {
-    "light": {"fg": "#1c2733", "grid": "#c7d0da"},
-    "dark": {"fg": "#e6edf3", "grid": "#3a4552"},
+    # グリッドは控えめな細線(chart_style参照)。matplotlib(PDFレポート)でも使うため16進数で指定する。
+    "light": {"fg": "#1d1d1f", "grid": "#e3e6ec"},
+    "dark": {"fg": "#e6e8ee", "grid": "#2c3038"},
 }
 
 
@@ -1510,7 +1517,7 @@ def _render_line_chart_plotly(dates, rates, title):
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 # 気象条件別の川霧発生グラフの2群比較色。dataviz skillの検証済みパレットの
@@ -1555,7 +1562,7 @@ def _render_weather_fog_boxplot_plotly(main_df, phenom_df, station_name):
             }],
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         )
-        return pio.to_json(fig)
+        return _chart_json(fig)
 
     subplot_titles = [label for _, label in _WEATHER_FOG_BOXPLOT_FEATURES]
     fig = make_subplots(rows=2, cols=2, subplot_titles=subplot_titles,
@@ -1582,7 +1589,7 @@ def _render_weather_fog_boxplot_plotly(main_df, phenom_df, station_name):
         margin={"t": 90, "r": 20, "b": 40, "l": 50},
         height=560,
     )
-    return pio.to_json(fig)
+    return _chart_json(fig)
 
 
 # 気象条件ごとの川霧発生時ヒストグラムのビン幅(気温は2℃刻みなど、項目ごとに固定)。
@@ -1663,7 +1670,7 @@ def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names):
             }],
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         )
-        return pio.to_json(fig)
+        return _chart_json(fig)
 
     subplot_titles = [f"{label}(n={len(values_by_col[col])})" for col, label, _ in _RIVER_FOG_HISTOGRAM_FEATURES]
     fig = make_subplots(rows=3, cols=3, subplot_titles=subplot_titles,
@@ -1701,7 +1708,7 @@ def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names):
         margin={"t": 90, "r": 20, "b": 20, "l": 50},
         height=780,
     )
-    return pio.to_json(fig)
+    return _chart_json(fig)
 
 
 # 1日分の観測値推移グラフの項目(列名, 表示ラベル, 色, プロット種別)。
@@ -1730,7 +1737,7 @@ def _render_weather_timeseries_plotly(day_main, date_label):
             }],
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         )
-        return pio.to_json(fig)
+        return _chart_json(fig)
 
     x = day_main["datetime"]
     subplot_titles = [label for _, label, _, _ in _WEATHER_TIMESERIES_ITEMS]
@@ -1755,7 +1762,7 @@ def _render_weather_timeseries_plotly(day_main, date_label):
         margin={"t": 90, "r": 20, "b": 20, "l": 50},
         height=560,
     )
-    return pio.to_json(fig)
+    return _chart_json(fig)
 
 
 def _accuracy_trend_safe(station=None):
@@ -1881,7 +1888,7 @@ def _render_metrics_trend_plotly(trend, title="学習時のモデル精度推移
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _is_valid_number(v):
@@ -1924,7 +1931,7 @@ def _render_model_compare_plotly(state):
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _render_feature_importance_png(importance, top_n=15):
@@ -1980,7 +1987,7 @@ def _render_feature_importance_plotly(importance, top_n=15, title="特徴量の�
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算)"):
@@ -2040,7 +2047,7 @@ def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地�
             "plot_bgcolor": "rgba(0,0,0,0)",
             "annotations": annotations,
         }
-        return pio.to_json(go.Figure(data=data, layout=layout))
+        return _chart_json(go.Figure(data=data, layout=layout))
 
     label_texts = [c if isinstance(c, str) else PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
     vmax = matrix.max() if matrix.size else 0
@@ -2066,7 +2073,7 @@ def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地�
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _render_lead_time_chart_png(by_lead_day):
@@ -2122,7 +2129,7 @@ def _render_lead_time_chart_plotly(by_lead_day):
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _render_region_compare_chart_png(region_summary):
@@ -2191,7 +2198,7 @@ def _render_region_compare_chart_plotly(region_summary):
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
@@ -2274,7 +2281,7 @@ def _render_threshold_sweep_plotly(sweep, current_threshold=None, title="しき�
         "plot_bgcolor": "rgba(0,0,0,0)",
         "annotations": annotations,
     }
-    return pio.to_json(go.Figure(data=data, layout=layout))
+    return _chart_json(go.Figure(data=data, layout=layout))
 
 
 def _draw_tree_on_plotly(fig, col, root, max_display_depth, is_rf):
@@ -2368,7 +2375,7 @@ def _render_tree_depth_diagram_plotly(extracted, station_name):
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             margin={"t": 60, "r": 20, "b": 20, "l": 20},
         )
-        return pio.to_json(fig)
+        return _chart_json(fig)
 
     subplot_titles = []
     for kind in kinds:
@@ -2396,7 +2403,7 @@ def _render_tree_depth_diagram_plotly(extracted, station_name):
         margin={"t": 100, "r": 20, "b": 20, "l": 20},
         height=520,
     )
-    return pio.to_json(fig)
+    return _chart_json(fig)
 
 
 def _low_accuracy_stations(state, n=5):
