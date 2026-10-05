@@ -33,6 +33,57 @@
 .pf-table td.pf-now.pf-lv3 { color: var(--pf-lv3-text); font-weight: 600; }
 .pf-table .pf-name { position: sticky; left: 0; background: var(--pf-surface); z-index: 1; }
 .pf-region { font-weight: 700; padding-top: 0.7rem !important; color: var(--pf-text) !important; text-align: left !important; }
+
+/* 「出にくい」(予測はある)と「夜間・データなし」(予測が無い)を見分けられるように、
+   出にくいは薄い面+細い縁、夜間は何も描かない。ダークで面が背景に溶けていたのを直す。 */
+.pf-table td.pf-cell.pf-lv1 { background: var(--pf-lv1); box-shadow: inset 0 0 0 1px var(--pf-lv1-edge, transparent); }
+:root { --pf-lv1-edge: rgba(31, 95, 139, 0.10); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --pf-lv1: rgba(150, 180, 205, 0.05); --pf-lv1-edge: rgba(150, 180, 205, 0.09); } }
+:root[data-theme="dark"] { --pf-lv1: rgba(150, 180, 205, 0.05); --pf-lv1-edge: rgba(150, 180, 205, 0.09); }
+
+/* 見出しの答え: 選んだ日の見込みを1文で言い切り、その下に出やすい順の地点を時刻の帯つきで並べる */
+.pf-answer { font-size: 1.12rem; line-height: 1.6; margin: 0.1rem 0 0.9rem; text-wrap: pretty; }
+.pf-answer strong { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.01em; }
+.pf-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
+.pf-rank li a {
+    display: grid; grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center;
+    padding: 0.4rem 0.5rem; border-radius: 8px; color: var(--pf-text); text-decoration: none;
+}
+.pf-rank li a:hover, .pf-rank li a:focus-visible { background: color-mix(in srgb, var(--pf-primary) 10%, transparent); }
+.pf-rank-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-rank-when { font-size: 0.8rem; color: var(--pf-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pf-ribbon { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 2px; height: 0.8rem; }
+.pf-ribbon i { border-radius: 2px; background: var(--pf-lv1); box-shadow: inset 0 0 0 1px var(--pf-lv1-edge); }
+.pf-ribbon i.pf-lv2 { background: var(--pf-lv2); box-shadow: none; }
+.pf-ribbon i.pf-lv3 { background: var(--pf-lv3); box-shadow: none; }
+.pf-ribbon i.pf-lv0 { background: transparent; box-shadow: none; }
+.pf-ribbon-axis { display: grid; grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; padding: 0 0.5rem; font-size: 0.7rem; color: var(--pf-muted); }
+.pf-ribbon-axis span { display: flex; justify-content: space-between; }
+.pf-ribbon-axis[hidden] { display: none; }
+.pf-ribbon-axis b { font-weight: 500; }
+@media (max-width: 520px) {
+    .pf-rank li a, .pf-ribbon-axis { grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr); }
+    .pf-rank-when, .pf-ribbon-axis > span:last-child { display: none; }
+}
+.pf-more { margin: 0.6rem 0 0; font-size: 0.85rem; }
+
+/* 時間ごとの表: 地点名の列に川の線を引き、地点を川沿いの点として並べる(只見川・会津の順は上流→下流の並び) */
+.pf-table td.pf-name { position: sticky; padding-left: 1.35rem; }
+.pf-table td.pf-name::before {
+    content: ""; position: absolute; left: 0.5rem; top: -2px; bottom: -2px; width: 2px;
+    background: color-mix(in srgb, var(--pf-primary) 35%, transparent);
+}
+.pf-table td.pf-name::after {
+    content: ""; position: absolute; left: calc(0.5rem - 3px); top: 50%; width: 8px; height: 8px; margin-top: -4px;
+    border-radius: 50%; background: var(--pf-surface); box-shadow: 0 0 0 2px color-mix(in srgb, var(--pf-primary) 55%, transparent);
+}
+.pf-table tr.pf-max3 td.pf-name::after { background: var(--pf-lv3); box-shadow: 0 0 0 2px var(--pf-lv3); }
+.pf-table tr.pf-max2 td.pf-name::after { background: var(--pf-lv2); box-shadow: 0 0 0 2px var(--pf-lv2); }
+.pf-table td.pf-name a { color: var(--pf-text); text-decoration: none; }
+.pf-table td.pf-name a:hover, .pf-table td.pf-name a:focus-visible { text-decoration: underline; color: var(--pf-primary); }
+.pf-table tbody tr:hover td.pf-cell { outline: 1px solid color-mix(in srgb, var(--pf-primary) 30%, transparent); }
+.pf-table thead th { position: sticky; top: 0; }
+.pf-ended { padding: 0.8rem 0.2rem; color: var(--pf-muted); font-size: 0.88rem; }
 </style>
 {% endblock %}
 {% block content %}
@@ -40,7 +91,7 @@
 <div class="pf-card"><p>ただいま情報を準備できていません。しばらくしてから再度お越しください。</p></div>
 {% else %}
 <section class="pf-hero">
-    <h1>きょう、川霧はどこに出そう?</h1>
+    <h1 id="pf-headline">きょう、川霧はどこに出そう?</h1>
     <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点について、日中(日の出〜日の入り)の1時間ごとに、川霧の出やすさを3段階で示します。</p>
 </section>
 <p class="pf-muted" style="margin:0.4rem 0 0;">{% if data.run_at %}予測の計算: {{ data.run_at[:16] }}(毎晩更新){% endif %}{% if data.observed_at %} / 最新の観測: {{ data.observed_at }}(毎時更新){% endif %}</p>
@@ -59,11 +110,12 @@
 <div class="pf-grid">
     <div class="pf-card">
         <h2 id="pf-summary-title">出やすい地点</h2>
-        <div><span class="pf-summary-count" id="pf-count-high">-</span> 地点 <span class="pf-muted" id="pf-count-mid"></span></div>
-        <div class="pf-chips" id="pf-chips"></div>
-        <p class="pf-muted" id="pf-none" hidden>この日は「出やすい」地点はありません。</p>
+        <p class="pf-answer" id="pf-answer" aria-live="polite"></p>
+        <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
+        <ol class="pf-rank" id="pf-rank"></ol>
+        <p class="pf-more" id="pf-more" hidden></p>
         {% if data.observed_at %}
-        <p class="pf-muted" style="margin-top:0.9rem;">「いま」の列は {{ data.observed_at }} のカメラ画像をAIで判定した結果です(予測ではなく観測。川霧と判定された地点を色付けしています)。</p>
+        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「いま」の列は {{ data.observed_at }} のカメラ画像をAIで判定した結果です(予測ではなく観測。川霧と判定された地点を色付けしています)。</p>
         {% endif %}
     </div>
     <div class="pf-card">
@@ -129,23 +181,97 @@
         if (bounds.length) { map.fitBounds(bounds, {padding: [20, 20]}); } else { map.setView([37.35, 139.32], 10); }
     }
 
+    var HEADLINE_DAY = ["きょう", "あした", "あさって"];
+    var RANK_LIMIT = 6;
+    function hasHours(dayIdx) {
+        return data.stations.some(function(s) { return Object.keys(s.days[dayIdx].hours).length > 0; });
+    }
+    // 地点がその段階以上になる時刻の範囲(「6〜8時」)。
+    function hourSpan(s, dayIdx, minLv) {
+        var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] >= minLv; })
+            .map(Number).sort(function(a, b) { return a - b; });
+        if (!hrs.length) { return ""; }
+        return hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : "ごろ");
+    }
+    // 出やすい順: 最大の段階 → その段階の時間数 → やや出やすい以上の時間数 → 早い時刻
+    function rankStations(dayIdx) {
+        function score(s) {
+            var h = s.days[dayIdx].hours, n3 = 0, n2 = 0, first = 99;
+            Object.keys(h).forEach(function(k) {
+                if (h[k] === 3) { n3++; }
+                if (h[k] >= 2) { n2++; first = Math.min(first, Number(k)); }
+            });
+            return [s.days[dayIdx].max, n3, n2, -first];
+        }
+        return data.stations.filter(function(s) { return s.days[dayIdx].max >= 2; })
+            .map(function(s) { return {s: s, k: score(s)}; })
+            .sort(function(a, b) {
+                for (var i = 0; i < a.k.length; i++) { if (a.k[i] !== b.k[i]) { return b.k[i] - a.k[i]; } }
+                return 0;
+            })
+            .map(function(x) { return x.s; });
+    }
+    function ribbon(s, dayIdx) {
+        var r = el("span", "pf-ribbon");
+        HOURS.forEach(function(h) {
+            var lv = s.days[dayIdx].hours[h] || 0;
+            var i = el("i", "pf-lv" + lv);
+            r.appendChild(i);
+        });
+        r.setAttribute("aria-hidden", "true");
+        return r;
+    }
+
+    function renderSummary(dayIdx) {
+        var day = data.days[dayIdx];
+        var word = HEADLINE_DAY[dayIdx] || day.label;
+        document.getElementById("pf-headline").textContent = word + "、川霧はどこに出そう?";
+        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")の見込み";
+        var ranked = rankStations(dayIdx);
+        var high = ranked.filter(function(s) { return s.days[dayIdx].max === 3; });
+        var mid = ranked.length - high.length;
+        var answer = document.getElementById("pf-answer");
+        answer.textContent = "";
+        if (!hasHours(dayIdx)) {
+            answer.textContent = dayIdx === 0
+                ? "きょうの日中の予測は終わりました。あしたの見込みを見てください。"
+                : "この日の予測はまだありません。";
+        } else if (high.length) {
+            answer.appendChild(document.createTextNode("出やすいのは "));
+            answer.appendChild(el("strong", null, high.length + "地点"));
+            answer.appendChild(document.createTextNode(mid ? "。ほかに" + mid + "地点がやや出やすい見込みです。" : "です。"));
+        } else if (mid) {
+            answer.appendChild(document.createTextNode("「出やすい」地点はありません。やや出やすいのは "));
+            answer.appendChild(el("strong", null, mid + "地点"));
+            answer.appendChild(document.createTextNode(" です。"));
+        } else {
+            answer.textContent = "どの地点も川霧は出にくい見込みです。";
+        }
+        var list = document.getElementById("pf-rank");
+        list.textContent = "";
+        ranked.slice(0, RANK_LIMIT).forEach(function(s) {
+            var lv = s.days[dayIdx].max;
+            var a = el("a");
+            a.href = stationUrl(s.name);
+            a.setAttribute("aria-label", s.name + ": " + levels[lv].label + " " + hourSpan(s, dayIdx, lv));
+            a.appendChild(el("span", "pf-rank-name", s.name));
+            a.appendChild(ribbon(s, dayIdx));
+            a.appendChild(el("span", "pf-rank-when", hourSpan(s, dayIdx, lv)));
+            var li = el("li");
+            li.appendChild(a);
+            list.appendChild(li);
+        });
+        document.getElementById("pf-ribbon-axis").hidden = ranked.length === 0;
+        var more = document.getElementById("pf-more");
+        more.hidden = ranked.length <= RANK_LIMIT;
+        more.textContent = "ほか" + (ranked.length - RANK_LIMIT) + "地点は下の表にあります。";
+    }
+
     function render(dayIdx) {
         var day = data.days[dayIdx];
-        var high = data.stations.filter(function(s) { return s.days[dayIdx].max === 3; });
-        var mid = data.stations.filter(function(s) { return s.days[dayIdx].max === 2; });
-        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")に出やすい地点";
-        document.getElementById("pf-count-high").textContent = high.length;
-        document.getElementById("pf-count-mid").textContent = "(やや出やすい: " + mid.length + "地点)";
-        var chips = document.getElementById("pf-chips");
-        chips.textContent = "";
-        high.forEach(function(s) {
-            var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] === 3; })
-                .map(Number).sort(function(a, b) { return a - b; });
-            var chip = el("a", "pf-chip pf-lv3", s.name + " " + hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : ""));
-            chip.href = stationUrl(s.name);
-            chips.appendChild(chip);
-        });
-        document.getElementById("pf-none").hidden = high.length > 0;
+        renderSummary(dayIdx);
+        var nowNote = document.getElementById("pf-now-note");
+        if (nowNote) { nowNote.hidden = dayIdx !== 0; }
 
         markers.forEach(function(item) {
             var lv = item.station.days[dayIdx].max;
@@ -179,7 +305,7 @@
                 tbody.appendChild(rr);
                 lastRegion = s.region;
             }
-            var row = el("tr");
+            var row = el("tr", "pf-max" + s.days[dayIdx].max);
             var nameCell = el("td", "pf-name"), a = el("a", null, s.name);
             a.href = stationUrl(s.name);
             nameCell.appendChild(a);
@@ -206,7 +332,12 @@
             render(Number(btn.getAttribute("data-day")));
         });
     });
-    render(0);
+    // 夜の更新後は、きょうの日中の予測がもう残っていない。その時は最初から「明日」を開く。
+    var startDay = (!hasHours(0) && data.days.length > 1 && hasHours(1)) ? 1 : 0;
+    Array.prototype.forEach.call(buttons, function(b) {
+        b.setAttribute("aria-pressed", Number(b.getAttribute("data-day")) === startDay ? "true" : "false");
+    });
+    render(startDay);
 })();
 </script>
 {% endif %}
