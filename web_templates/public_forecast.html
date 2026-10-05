@@ -144,9 +144,50 @@
 .pf-hour[aria-pressed="true"] i { transform: translateY(-3px); box-shadow: 0 0 0 2px var(--pf-surface), 0 0 0 4px var(--pf-primary); }
 .pf-table th.pf-col-sel { color: var(--pf-primary); box-shadow: inset 0 -2px 0 var(--pf-primary); }
 .pf-table td.pf-col-sel { outline: 1px solid var(--pf-primary); outline-offset: -1px; }
+/* 表の絞り込み(全地点/「中」以上のみ) */
+.pf-table-head { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: baseline; justify-content: space-between; }
+.pf-table-head h2 { margin-bottom: 0.3rem; }
+.pf-seg { display: inline-flex; border: 1px solid var(--pf-border); border-radius: 999px; padding: 2px; gap: 2px; }
+.pf-seg button {
+    font: inherit; font-size: 0.82rem; border: 0; background: none; color: var(--pf-muted); cursor: pointer;
+    border-radius: 999px; padding: 0.25rem 0.8rem; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.pf-seg button[aria-pressed="true"] { background: var(--pf-primary); color: #fff; font-weight: 600; }
+.pf-seg button:focus-visible { outline: 2px solid var(--pf-primary); outline-offset: 2px; }
+.pf-table-empty td { padding: 1rem 0.4rem; color: var(--pf-muted); text-align: left; }
+
+/* 地図と表の連動: 行(またはランキング)に乗せると地図の点に輪が付き、点から表の行へ移動すると行が光る */
+.pf-mk.pf-hl { z-index: 2000 !important; }
+.pf-mk.pf-hl .pf-dot { transform: scale(1.9); box-shadow: 0 0 0 3px var(--pf-surface), 0 0 0 6px var(--pf-primary); }
+.pf-table tbody tr.pf-row-hl td.pf-name { color: var(--pf-primary); }
+.pf-table tbody tr.pf-row-hl td.pf-name a { color: var(--pf-primary); }
+.pf-table tbody tr.pf-row-flash td { animation: pf-row-flash 1.6s ease-out; }
+@keyframes pf-row-flash { 0%, 30% { background-color: color-mix(in srgb, var(--pf-primary) 35%, transparent); } }
+.pf-popup-actions { display: flex; gap: 0.7rem; margin-top: 0.35rem; align-items: center; }
+.pf-popup-actions button { font: inherit; font-size: 0.85em; border: 0; background: none; padding: 0; color: #0078a8; cursor: pointer; text-decoration: underline; }
+
+/* 予測と観測の照合 */
+.pf-verify-days { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.8rem; }
+.pf-verify-days button {
+    font: inherit; font-size: 0.82rem; border: 1px solid var(--pf-border); background: var(--pf-surface); color: var(--pf-text);
+    border-radius: 8px; padding: 0.3rem 0.7rem; cursor: pointer; text-align: left; line-height: 1.3;
+}
+.pf-verify-days button small { display: block; color: var(--pf-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.pf-verify-days button[aria-pressed="true"] { border-color: var(--pf-primary); box-shadow: inset 0 0 0 1px var(--pf-primary); }
+.pf-verify-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.9rem; }
+.pf-verify-stats div { border: 1px solid var(--pf-border); border-radius: 8px; padding: 0.45rem 0.7rem; }
+.pf-verify-stats b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.pf-verify-stats span { font-size: 0.78rem; color: var(--pf-muted); }
+.pf-vk { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; vertical-align: -0.25rem; margin-right: 0.3rem; }
+.pf-v-hit { background: var(--pf-lv3); color: var(--pf-lv3-text); }
+.pf-v-fa { background: transparent; color: var(--pf-lv3); box-shadow: inset 0 0 0 2px var(--pf-lv3); }
+.pf-v-miss { background: repeating-linear-gradient(135deg, #c98a2b 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 2px #c98a2b; color: transparent; }
+.pf-table td.pf-v-hit, .pf-table td.pf-v-fa, .pf-table td.pf-v-miss { font-weight: 700; }
+.pf-verify-note { font-size: 0.82rem; color: var(--pf-muted); margin: 0.6rem 0 0; }
+
 @media (prefers-reduced-motion: reduce) {
     .pf-mk .pf-fog, .pf-mk .pf-dot, .pf-hour i { transition: none; }
-    .pf-mk[data-lv="3"] .pf-fog, .pf-map-clock.pf-tick b { animation: none; }
+    .pf-mk[data-lv="3"] .pf-fog, .pf-map-clock.pf-tick b, .pf-table tbody tr.pf-row-flash td { animation: none; }
 }
 </style>
 {% endblock %}
@@ -205,13 +246,38 @@
     </div>
 </div>
 
-<div class="pf-card">
-    <h2>時刻別の発生可能性</h2>
-    <p class="pf-muted" style="margin-top:0;">色が濃いほど発生可能性が高い。空欄は夜間であり、カメラによる判定ができないため予測対象外とした。<a href="{{ url_for('public_about') }}">3段階の判定基準</a></p>
+<div class="pf-card" id="pf-table-card">
+    <div class="pf-table-head">
+        <h2>時刻別の発生可能性</h2>
+        <div class="pf-seg" role="group" aria-label="表に表示する地点">
+            <button type="button" id="pf-filter-all" aria-pressed="false">全地点</button>
+            <button type="button" id="pf-filter-mid" aria-pressed="true">「中」以上のみ</button>
+        </div>
+    </div>
+    <p class="pf-muted" style="margin-top:0;">色が濃いほど発生可能性が高い。空欄は夜間であり、カメラによる判定ができないため予測対象外とした。地点名に重ねると地図上の位置を示す。<a href="{{ url_for('public_about') }}">3段階の判定基準</a></p>
     <div class="pf-table-wrap">
         <table class="pf-table" id="pf-table"></table>
     </div>
 </div>
+
+{% if data.verification %}
+<div class="pf-card" id="pf-verify">
+    <h2>予測と観測の照合</h2>
+    <p class="pf-muted" style="margin-top:0;">前日夜に計算した予測(発生可能性「高」)と、当日のカメラ画像のAI判定(観測)を地点・時刻ごとに照合した結果である。照合は毎日の予測計算時に更新される。</p>
+    <div class="pf-verify-days" id="pf-verify-days" role="group" aria-label="照合する日"></div>
+    <p class="pf-answer" id="pf-verify-answer" style="font-size:1rem; margin-bottom:0.4rem;"></p>
+    <div class="pf-verify-stats" id="pf-verify-stats"></div>
+    <div class="pf-legend" style="margin:0 0 0.6rem;">
+        <span><i class="pf-vk pf-v-hit" style="width:1.25rem;height:1.25rem;border:0;">○</i>的中(「高」と予測し、発生)</span>
+        <span><i class="pf-vk pf-v-fa" style="width:1.25rem;height:1.25rem;border:0;">×</i>空振り(「高」と予測し、非発生)</span>
+        <span><i class="pf-vk pf-v-miss" style="width:1.25rem;height:1.25rem;border:0;"></i>見逃し(「高」と予測せず、発生)</span>
+    </div>
+    <div class="pf-table-wrap">
+        <table class="pf-table" id="pf-verify-table"></table>
+    </div>
+    <p class="pf-verify-note">表には的中・空振り・見逃しのいずれかがあった地点のみを示す。観測はAIによる自動判定であり、誤判定を含む場合がある。1日分の照合件数は少なく、精度の評価には<a href="{{ url_for('public_about') }}">研究の概要</a>に示す長期間の検証結果を参照されたい。</p>
+</div>
+{% endif %}
 <script id="pf-data" type="application/json">{{ data|tojson }}</script>
 <script id="pf-levels" type="application/json">{{ levels|tojson }}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -250,6 +316,33 @@
             markers.push({station: s, marker: m});
         });
         if (bounds.length) { map.fitBounds(bounds, {padding: [20, 20]}); } else { map.setView([37.35, 139.32], 10); }
+    }
+    var markerByName = {};
+    markers.forEach(function(item) { markerByName[item.station.name] = item.marker; });
+
+    // 地図と表の連動: 地点名(表の行・ランキング)に重ねる/フォーカスすると、地図の点に輪を付ける
+    function highlightStation(name, on) {
+        var m = markerByName[name], node = m && m.getElement();
+        if (node) { node.classList.toggle("pf-hl", on); }
+        var row = document.querySelector('#pf-table tr[data-station="' + CSS.escape(name) + '"]');
+        if (row) { row.classList.toggle("pf-row-hl", on); }
+    }
+    function linkToMap(node, name) {
+        node.addEventListener("mouseenter", function() { highlightStation(name, true); });
+        node.addEventListener("mouseleave", function() { highlightStation(name, false); });
+        node.addEventListener("focusin", function() { highlightStation(name, true); });
+        node.addEventListener("focusout", function() { highlightStation(name, false); });
+    }
+    // 地図の点から、表の該当行へ移動して行を光らせる(絞り込みで隠れていれば全地点表示に戻す)
+    function goToRow(name) {
+        var sel = '#pf-table tr[data-station="' + CSS.escape(name) + '"]';
+        if (!document.querySelector(sel)) { setFilter(false); }
+        var row = document.querySelector(sel);
+        if (!row) { return; }
+        row.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center"});
+        row.classList.remove("pf-row-flash"); void row.offsetWidth; row.classList.add("pf-row-flash");
+        var a = row.querySelector("a");
+        if (a) { a.focus({preventScroll: true}); }
     }
 
     var HEADLINE_DAY = ["本日", "明日", "明後日"];
@@ -328,6 +421,7 @@
             a.appendChild(el("span", "pf-rank-name", s.name));
             a.appendChild(ribbon(s, dayIdx));
             a.appendChild(el("span", "pf-rank-when", hourSpan(s, dayIdx, lv)));
+            linkToMap(a, s.name);
             var li = el("li");
             li.appendChild(a);
             list.appendChild(li);
@@ -389,12 +483,21 @@
             box.appendChild(el("strong", null, item.station.name));
             box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間(対象外)")));
             if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現況(観測): " + item.station.now.label)); }
+            var actions = el("div", "pf-popup-actions");
             var link = el("a", null, "地点の詳細");
             link.href = stationUrl(item.station.name);
-            box.appendChild(link);
+            var toRow = el("button", null, "表の該当行へ");
+            toRow.type = "button";
+            toRow.addEventListener("click", function() { item.marker.closePopup(); goToRow(item.station.name); });
+            actions.appendChild(link);
+            actions.appendChild(toRow);
+            box.appendChild(actions);
             if (item.marker.getPopup()) { item.marker.setPopupContent(box); } else { item.marker.bindPopup(box); }
         });
-        // 下の表でも選んだ時刻の列に印を付ける
+        markColumns();
+    }
+    // 下の表でも選んだ時刻の列に印を付ける
+    function markColumns() {
         Array.prototype.forEach.call(document.querySelectorAll("#pf-table [data-hour]"), function(td) {
             td.classList.toggle("pf-col-sel", Number(td.getAttribute("data-hour")) === curHour);
         });
@@ -447,7 +550,34 @@
         curDay = dayIdx;
         playBtn.disabled = !hasHours(dayIdx);
         buildHours();
+        renderTable(dayIdx);
+        paintMap();
+    }
 
+    // 表の絞り込み: 既定は「中」以上(と、本日なら現況で川霧ありの地点)のみ。選択は閲覧者のブラウザに保存する。
+    var FILTER_KEY = "pf-table-filter";
+    var midOnly = true;
+    try { midOnly = localStorage.getItem(FILTER_KEY) !== "all"; } catch (e) { /* 保存できない環境では既定のまま */ }
+    var filterAllBtn = document.getElementById("pf-filter-all");
+    var filterMidBtn = document.getElementById("pf-filter-mid");
+    function rowVisible(s, dayIdx) {
+        return !midOnly || s.days[dayIdx].max >= 2 || (dayIdx === 0 && s.now && s.now.fog);
+    }
+    function setFilter(on) {
+        midOnly = on;
+        try { localStorage.setItem(FILTER_KEY, on ? "mid" : "all"); } catch (e) { /* 同上 */ }
+        renderTable(curDay);
+        markColumns();
+    }
+    filterAllBtn.addEventListener("click", function() { setFilter(false); });
+    filterMidBtn.addEventListener("click", function() { setFilter(true); });
+
+    function renderTable(dayIdx) {
+        var nMid = data.stations.filter(function(s) { return s.days[dayIdx].max >= 2 || (dayIdx === 0 && s.now && s.now.fog); }).length;
+        filterAllBtn.textContent = "全地点(" + data.stations.length + ")";
+        filterMidBtn.textContent = "「中」以上のみ(" + nMid + ")";
+        filterAllBtn.setAttribute("aria-pressed", midOnly ? "false" : "true");
+        filterMidBtn.setAttribute("aria-pressed", midOnly ? "true" : "false");
         var table = document.getElementById("pf-table");
         table.textContent = "";
         var thead = el("thead"), tr = el("tr");
@@ -456,8 +586,10 @@
         HOURS.forEach(function(h) { var th = el("th", null, h + "時"); th.setAttribute("data-hour", h); tr.appendChild(th); });
         thead.appendChild(tr);
         table.appendChild(thead);
-        var tbody = el("tbody"), lastRegion = null;
+        var tbody = el("tbody"), lastRegion = null, shown = 0;
         data.stations.forEach(function(s) {
+            if (!rowVisible(s, dayIdx)) { return; }
+            shown++;
             if (s.region !== lastRegion) {
                 var rr = el("tr"), rc = el("th", "pf-region", s.region);
                 rc.colSpan = HOURS.length + (dayIdx === 0 ? 2 : 1);
@@ -466,6 +598,8 @@
                 lastRegion = s.region;
             }
             var row = el("tr", "pf-max" + s.days[dayIdx].max);
+            row.setAttribute("data-station", s.name);
+            linkToMap(row, s.name);
             var nameCell = el("td", "pf-name"), a = el("a", null, s.name);
             a.href = stationUrl(s.name);
             nameCell.appendChild(a);
@@ -483,9 +617,90 @@
             });
             tbody.appendChild(row);
         });
+        if (!shown) {
+            var er = el("tr", "pf-table-empty");
+            var ec = el("td", null, "この日、発生可能性「中」以上の地点はない。「全地点」で全" + data.stations.length + "地点を表示できる。");
+            ec.colSpan = HOURS.length + (dayIdx === 0 ? 2 : 1);
+            er.appendChild(ec);
+            tbody.appendChild(er);
+        }
         table.appendChild(tbody);
-        paintMap();
     }
+
+    // 予測と観測の照合: 日を選ぶと、その日の的中・空振り・見逃しを地点×時刻で示す
+    var VERIFY_MARK = {hit: "○", fa: "×", miss: ""};
+    var VERIFY_LABEL = {hit: "的中", fa: "空振り", miss: "見逃し"};
+    function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "-"; }
+    function renderVerification(idx) {
+        var list = data.verification || [];
+        var v = list[idx];
+        if (!v) { return; }
+        Array.prototype.forEach.call(document.getElementById("pf-verify-days").children, function(b, i) {
+            b.setAttribute("aria-pressed", i === idx ? "true" : "false");
+        });
+        var c = v.counts;
+        document.getElementById("pf-verify-answer").textContent =
+            v.date_label + "の予測(" + v.run_at + " 計算)を観測と照合した。照合件数 " + v.n.toLocaleString() + " 件(地点×時刻)のうち、的中 " +
+            c.hit + " 件、空振り " + c.fa + " 件、見逃し " + c.miss + " 件である。";
+        var stats = document.getElementById("pf-verify-stats");
+        stats.textContent = "";
+        [["的中", c.hit], ["空振り", c.fa], ["見逃し", c.miss],
+         ["適合率", pct(c.hit, c.hit + c.fa)], ["再現率", pct(c.hit, c.hit + c.miss)]].forEach(function(p) {
+            var d = el("div");
+            d.appendChild(el("b", null, String(p[1])));
+            d.appendChild(el("span", null, p[0]));
+            stats.appendChild(d);
+        });
+        var table = document.getElementById("pf-verify-table");
+        table.textContent = "";
+        if (!v.stations.length) {
+            table.appendChild(el("tbody")).appendChild(el("tr", "pf-table-empty")).appendChild(
+                el("td", null, "この日は全地点・全時刻で「高」の予測も川霧の観測もなかった。"));
+            return;
+        }
+        var thead = el("thead"), tr = el("tr");
+        tr.appendChild(el("th", "pf-name", "地点"));
+        HOURS.forEach(function(h) { tr.appendChild(el("th", null, h + "時")); });
+        thead.appendChild(tr);
+        table.appendChild(thead);
+        var tbody = el("tbody"), lastRegion = null;
+        v.stations.forEach(function(s) {
+            if (s.region !== lastRegion) {
+                var rr = el("tr"), rc = el("th", "pf-region", s.region);
+                rc.colSpan = HOURS.length + 1;
+                rr.appendChild(rc);
+                tbody.appendChild(rr);
+                lastRegion = s.region;
+            }
+            var row = el("tr");
+            var nameCell = el("td", "pf-name"), a = el("a", null, s.name);
+            a.href = stationUrl(s.name);
+            nameCell.appendChild(a);
+            row.appendChild(nameCell);
+            HOURS.forEach(function(h) {
+                var k = s.hours[h];
+                var cell = el("td", "pf-cell" + (k ? " pf-v-" + k : ""), k ? VERIFY_MARK[k] : "");
+                if (k) { cell.title = s.name + " " + h + "時: " + VERIFY_LABEL[k]; }
+                row.appendChild(cell);
+            });
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+    }
+    (function setupVerification() {
+        var list = data.verification || [];
+        var box = document.getElementById("pf-verify-days");
+        if (!box || !list.length) { return; }
+        list.forEach(function(v, i) {
+            var b = el("button");
+            b.type = "button";
+            b.appendChild(document.createTextNode(v.date_label));
+            b.appendChild(el("small", null, "的中" + v.counts.hit + " 空振り" + v.counts.fa + " 見逃し" + v.counts.miss));
+            b.addEventListener("click", function() { renderVerification(i); });
+            box.appendChild(b);
+        });
+        renderVerification(list.length - 1);
+    })();
 
     var buttons = document.querySelectorAll(".pf-day");
     Array.prototype.forEach.call(buttons, function(btn) {

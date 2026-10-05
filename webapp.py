@@ -5537,7 +5537,7 @@ def _build_public_forecast():
     start = days[0].strftime("%Y-%m-%d 00:00:00")
     end = days[-1].strftime("%Y-%m-%d 23:59:59")
 
-    rows, run_at = [], None
+    rows, run_at, verification = [], None, []
     if DB_PATH.exists():
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
@@ -5552,6 +5552,10 @@ def _build_public_forecast():
                        WHERE run_at = ? AND target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1""",
                     (run_at, start, end),
                 ).fetchall()
+            try:
+                verification = _build_public_verification(conn, today)
+            except Exception as e:
+                log.warning("Public page: failed to build verification: %s", e)
         finally:
             conn.close()
 
@@ -5603,6 +5607,7 @@ def _build_public_forecast():
                   "date_label": f"{d.month}/{d.day}({weekdays[d.weekday()]})"} for i, d in enumerate(days)],
         "stations": stations,
         "run_at": run_at,
+        "verification": verification,
         "stale": stale,
         "observed_at": observations["datetime"].strftime("%Y/%m/%d %H:%M") if observations else None,
         "metrics": {
@@ -5612,6 +5617,58 @@ def _build_public_forecast():
             "n_train": metrics.get("n_train"),
         },
     }
+
+
+PUBLIC_VERIFY_DAYS = 7             # 予測と観測の照合を出す直近の日数
+
+
+def _code_is_fog(code):
+    """実測の現象コード(2コード同時観測はパック値)が川霧かどうか。prediction_log._fog_sqlと同じ判定。"""
+    if code is None:
+        return None
+    code = int(code)
+    return (code // 100 if code > 10 else code) in SUMMARY_FOG_CODES
+
+
+def _build_public_verification(conn, today):
+    """直近の日ごとに、前日夜の本番の予測(その日0時より前で最新のrun)と、カメラ画像のAI判定(観測)を
+    照合する。「高」(=しきい値以上、predicted_code=1)を予測あり、川霧コードを観測ありとし、
+    地点×時刻ごとに 的中(hit)・空振り(fa)・見逃し(miss) を数える。照合できる行が無い日は出さない。"""
+    out = []
+    for back in range(PUBLIC_VERIFY_DAYS, 0, -1):
+        d = today - timedelta(days=back)
+        day_start = d.strftime("%Y-%m-%d 00:00:00")
+        run_at = conn.execute(
+            """SELECT MAX(run_at) FROM predictions WHERE model_type LIKE ? AND model_type NOT LIKE '%[再予測]'
+               AND run_at < ? AND target_datetime BETWEEN ? AND ?""",
+            (prediction_log.CURRENT_MODEL_LIKE, day_start, day_start, d.strftime("%Y-%m-%d 23:59:59")),
+        ).fetchone()[0]
+        if not run_at:
+            continue
+        rows = conn.execute(
+            """SELECT station, target_datetime, predicted_code, actual_code FROM predictions
+               WHERE run_at = ? AND target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1
+               AND actual_code IS NOT NULL""",
+            (run_at, day_start, d.strftime("%Y-%m-%d 23:59:59")),
+        ).fetchall()
+        if not rows:
+            continue
+        counts = {"hit": 0, "fa": 0, "miss": 0, "cn": 0}
+        cells = {}
+        for station, target_dt, pred, actual in rows:
+            p_fog, a_fog = int(pred or 0) == 1, _code_is_fog(actual)
+            kind = "hit" if p_fog and a_fog else "fa" if p_fog else "miss" if a_fog else "cn"
+            counts[kind] += 1
+            if kind != "cn":
+                cells.setdefault(station, {})[int(target_dt[11:13])] = kind
+        stations = [{"name": n, "region": STATION_REGION.get(n) or "その他", "hours": cells[n]}
+                    for n in STATION_NAMES if n in cells]
+        weekdays = "月火水木金土日"
+        out.append({
+            "date": d.strftime("%Y-%m-%d"), "date_label": f"{d.month}/{d.day}({weekdays[d.weekday()]})",
+            "run_at": run_at[:16], "n": len(rows), "counts": counts, "stations": stations,
+        })
+    return out
 
 
 def _public_forecast_safe():
