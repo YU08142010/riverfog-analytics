@@ -84,6 +84,29 @@
 .pf-table tbody tr:hover td.pf-cell { outline: 1px solid color-mix(in srgb, var(--pf-primary) 30%, transparent); }
 .pf-table thead th { position: sticky; top: 0; }
 .pf-ended { padding: 0.8rem 0.2rem; color: var(--pf-muted); font-size: 0.88rem; }
+
+/* 地図の時刻スライダー: 「1日の最大」と1時間ごとを切り替え、つまみを動かすと地図の色がその時刻の予測になる */
+.pf-time { margin-top: 0.7rem; display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.4rem 0.6rem; align-items: center; }
+.pf-time-btn {
+    border: 1px solid var(--pf-border); background: var(--pf-surface); color: var(--pf-text); font: inherit; font-size: 0.82rem;
+    border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; white-space: nowrap;
+}
+.pf-time-btn[aria-pressed="true"] { border-color: var(--pf-primary); box-shadow: inset 0 0 0 1px var(--pf-primary); }
+.pf-time-btn:disabled { opacity: 0.45; cursor: default; }
+.pf-time-btn:focus-visible, #pf-hour:focus-visible { outline: 2px solid var(--pf-primary); outline-offset: 2px; }
+.pf-time-label { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pf-time-label small { font-weight: 400; color: var(--pf-muted); margin-left: 0.4rem; }
+.pf-time-track { grid-column: 1 / -1; }
+#pf-hour { width: 100%; margin: 0; accent-color: var(--pf-primary); }
+#pf-hour.pf-off { opacity: 0.55; }
+.pf-time-ticks { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 2px; margin-top: 0.15rem; }
+.pf-time-ticks i { height: 0.35rem; border-radius: 2px; background: var(--pf-lv1); }
+.pf-time-ticks i.pf-lv2 { background: var(--pf-lv2); }
+.pf-time-ticks i.pf-lv3 { background: var(--pf-lv3); }
+.pf-time-ticks i.pf-lv0 { background: transparent; }
+.pf-time-axis { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--pf-muted); }
+.pf-table th.pf-col-sel { color: var(--pf-primary); box-shadow: inset 0 -2px 0 var(--pf-primary); }
+.pf-table td.pf-col-sel { outline: 1px solid var(--pf-primary); outline-offset: -1px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -121,6 +144,16 @@
     <div class="pf-card">
         <h2>地図</h2>
         <div id="pf-map" role="img" aria-label="地点ごとの川霧の出やすさの地図(詳細は下の表を参照)"></div>
+        <div class="pf-time" id="pf-time">
+            <button type="button" class="pf-time-btn" id="pf-time-all" aria-pressed="true">1日の最大</button>
+            <button type="button" class="pf-time-btn" id="pf-time-play" aria-label="5時から18時まで順に再生">▶ 再生</button>
+            <span class="pf-time-label" id="pf-time-label" aria-live="polite"></span>
+            <div class="pf-time-track">
+                <input type="range" id="pf-hour" min="5" max="18" step="1" value="7" aria-label="地図に表示する時刻">
+                <div class="pf-time-ticks" id="pf-time-ticks" aria-hidden="true"></div>
+                <div class="pf-time-axis" aria-hidden="true"><span>5時</span><span>12時</span><span>18時</span></div>
+            </div>
+        </div>
         <div class="pf-legend">
             <span><i class="pf-lv3"></i>{{ levels[3].label }}</span>
             <span><i class="pf-lv2"></i>{{ levels[2].label }}</span>
@@ -267,33 +300,117 @@
         more.textContent = "ほか" + (ranked.length - RANK_LIMIT) + "地点は下の表にあります。";
     }
 
+    // 地図の時刻: null なら「1日の最大」、数値ならその時刻の予測で塗る。
+    var curDay = 0, curHour = null, playTimer = null;
+    var hourInput = document.getElementById("pf-hour");
+    var allBtn = document.getElementById("pf-time-all");
+    var playBtn = document.getElementById("pf-time-play");
+    function stationLevel(s, dayIdx, hour) {
+        return hour === null ? s.days[dayIdx].max : (s.days[dayIdx].hours[hour] || 0);
+    }
+    function paintMap() {
+        var day = data.days[curDay];
+        var when = curHour === null ? day.label + "(1日の最大)" : day.label + " " + curHour + "時";
+        var label = document.getElementById("pf-time-label");
+        label.textContent = curHour === null ? "1日の最大" : curHour + "時";
+        if (curHour !== null) {
+            var n = data.stations.filter(function(s) { return stationLevel(s, curDay, curHour) >= 2; }).length;
+            var any = data.stations.some(function(s) { return stationLevel(s, curDay, curHour) > 0; });
+            label.appendChild(el("small", null, !any ? "夜間・データなし" : n ? "やや出やすい以上 " + n + "地点" : "どこも出にくい"));
+        }
+        allBtn.setAttribute("aria-pressed", curHour === null ? "true" : "false");
+        hourInput.classList.toggle("pf-off", curHour === null);
+        hourInput.setAttribute("aria-valuetext", curHour === null ? "1日の最大を表示中" : curHour + "時");
+        mapDiv.setAttribute("aria-label", "地点ごとの川霧の出やすさの地図(" + when + "。詳細は下の表を参照)");
+        markers.forEach(function(item) {
+            var lv = stationLevel(item.station, curDay, curHour);
+            item.marker.setStyle({
+                // 出にくいは薄い灰、夜間・データなしは中抜き。出やすい地点の点だけが目に入るようにする
+                fillColor: lv === 1 ? "#8796a3" : lvColor(lv), fillOpacity: lv >= 2 ? 0.95 : lv === 1 ? 0.4 : 0,
+                radius: lv === 3 ? 10 : 7, weight: lv === 3 ? 2.5 : 1.5
+            });
+            var box = el("div");
+            box.appendChild(el("strong", null, item.station.name));
+            box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間・データなし")));
+            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "いま: " + item.station.now.label)); }
+            var link = el("a", null, "この地点の詳細");
+            link.href = stationUrl(item.station.name);
+            box.appendChild(link);
+            if (item.marker.getPopup()) { item.marker.setPopupContent(box); } else { item.marker.bindPopup(box); }
+            if (lv === 3) { item.marker.bringToFront(); }
+            if (item.marker._path) { item.marker._path.classList.toggle("pf-marker-high", lv === 3); }
+        });
+        // 下の表でも選んだ時刻の列に印を付ける
+        Array.prototype.forEach.call(document.querySelectorAll("#pf-table [data-hour]"), function(c) {
+            c.classList.toggle("pf-col-sel", Number(c.getAttribute("data-hour")) === curHour);
+        });
+    }
+    // スライダーの下の目盛り: その時刻にどこかの地点が達する一番高い段階
+    function paintTicks() {
+        var ticks = document.getElementById("pf-time-ticks");
+        ticks.textContent = "";
+        HOURS.forEach(function(h) {
+            var top = 0;
+            data.stations.forEach(function(s) { top = Math.max(top, s.days[curDay].hours[h] || 0); });
+            ticks.appendChild(el("i", "pf-lv" + top));
+        });
+    }
+    // 1時間ごとに切り替えた時の最初の時刻: きょうなら今の時刻、それ以外は出やすい地点が一番多い時刻
+    function defaultHour(dayIdx) {
+        if (dayIdx === 0) {
+            var nowH = new Date().getHours();
+            if (nowH >= 5 && nowH <= 18) { return nowH; }
+        }
+        var best = HOURS[0], bestN = -1;
+        HOURS.forEach(function(h) {
+            var n = data.stations.reduce(function(acc, s) { return acc + ((s.days[dayIdx].hours[h] || 0) >= 2 ? 1 : 0); }, 0);
+            if (n > bestN) { best = h; bestN = n; }
+        });
+        return best;
+    }
+    function stopPlay() {
+        if (playTimer) { clearInterval(playTimer); playTimer = null; }
+        playBtn.textContent = "▶ 再生";
+        playBtn.setAttribute("aria-label", "5時から18時まで順に再生");
+    }
+    function setHour(h) {
+        curHour = h;
+        if (h !== null) { hourInput.value = h; }
+        paintMap();
+    }
+    hourInput.addEventListener("input", function() { stopPlay(); setHour(Number(hourInput.value)); });
+    // つまみを押しただけ(値が変わらない)でも1時間ごとの表示に切り替える
+    hourInput.addEventListener("pointerdown", function() { if (curHour === null) { stopPlay(); setHour(Number(hourInput.value)); } });
+    allBtn.addEventListener("click", function() { stopPlay(); setHour(null); });
+    playBtn.addEventListener("click", function() {
+        if (playTimer) { stopPlay(); return; }
+        var h = (curHour === null || curHour >= 18) ? 5 : curHour + 1;
+        setHour(h);
+        playBtn.textContent = "■ 停止";
+        playBtn.setAttribute("aria-label", "再生を止める");
+        playTimer = setInterval(function() {
+            if (curHour >= 18) { stopPlay(); return; }
+            setHour(curHour + 1);
+        }, 900);
+    });
+    if (!map) { document.getElementById("pf-time").hidden = true; }
+
     function render(dayIdx) {
         var day = data.days[dayIdx];
         renderSummary(dayIdx);
         var nowNote = document.getElementById("pf-now-note");
         if (nowNote) { nowNote.hidden = dayIdx !== 0; }
-
-        markers.forEach(function(item) {
-            var lv = item.station.days[dayIdx].max;
-            item.marker.setStyle({fillColor: lvColor(lv), radius: lv === 3 ? 10 : 7, weight: lv === 3 ? 2.5 : 1.5});
-            var box = el("div");
-            box.appendChild(el("strong", null, item.station.name));
-            box.appendChild(el("div", null, day.label + ": " + (lv ? levels[lv].label : "データなし")));
-            if (dayIdx === 0 && item.station.now) { box.appendChild(el("div", null, "いま: " + item.station.now.label)); }
-            var link = el("a", null, "この地点の詳細");
-            link.href = stationUrl(item.station.name);
-            box.appendChild(link);
-            item.marker.bindPopup(box);
-            if (lv === 3) { item.marker.bringToFront(); }
-            if (item.marker._path) { item.marker._path.classList.toggle("pf-marker-high", lv === 3); }
-        });
+        stopPlay();
+        curDay = dayIdx;
+        playBtn.disabled = !hasHours(dayIdx);
+        paintTicks();
 
         var table = document.getElementById("pf-table");
         table.textContent = "";
         var thead = el("thead"), tr = el("tr");
         tr.appendChild(el("th", "pf-name", "地点"));
         if (dayIdx === 0) { tr.appendChild(el("th", null, "いま")); }
-        HOURS.forEach(function(h) { tr.appendChild(el("th", null, h + "時")); });
+        HOURS.forEach(function(h) { var th = el("th", null, h + "時"); th.setAttribute("data-hour", h); tr.appendChild(th); });
         thead.appendChild(tr);
         table.appendChild(thead);
         var tbody = el("tbody"), lastRegion = null;
@@ -318,11 +435,13 @@
                 var lv = s.days[dayIdx].hours[h] || 0;
                 var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levels[lv].short : "");
                 c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間・データなし");
+                c.setAttribute("data-hour", h);
                 row.appendChild(c);
             });
             tbody.appendChild(row);
         });
         table.appendChild(tbody);
+        paintMap();
     }
 
     var buttons = document.querySelectorAll(".pf-day");
@@ -337,6 +456,7 @@
     Array.prototype.forEach.call(buttons, function(b) {
         b.setAttribute("aria-pressed", Number(b.getAttribute("data-day")) === startDay ? "true" : "false");
     });
+    hourInput.value = defaultHour(startDay);
     render(startDay);
 })();
 </script>
