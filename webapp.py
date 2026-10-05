@@ -1950,7 +1950,7 @@ def _render_feature_importance_png(importance, top_n=15):
     return buf.getvalue()
 
 
-def _render_feature_importance_plotly(importance, top_n=15):
+def _render_feature_importance_plotly(importance, top_n=15, title="特徴量の重要度(上位)", xlabel="重要度(割合)"):
     """_render_feature_importance_pngのPlotly版(2026-09-14)。matplotlib版は
     件数に応じてfigsizeの高さを変えていたが、Plotly版はlayout.heightをpx単位で
     同様に可変にする(件数が多いほど縦に伸ばし、ラベルが詰まらないようにする)。"""
@@ -1971,8 +1971,8 @@ def _render_feature_importance_plotly(importance, top_n=15):
         )]
     height = max(320, int(35 * max(len(top), 1)) + 90)
     layout = {
-        "title": {"text": "特徴量の重要度(上位)", "font": {"size": 14}},
-        "xaxis": {"title": {"text": "重要度(gainの割合)"}},
+        "title": {"text": title, "font": {"size": 14}},
+        "xaxis": {"title": {"text": xlabel}},
         "yaxis": {},
         "height": height,
         "margin": {"t": 48, "r": 40, "b": 40, "l": 160},
@@ -5294,9 +5294,26 @@ def accuracy_feature_importance_chart():
     def render():
         state = fog_model.load_model_state()
         importance = fog_model.compute_feature_importance(state)
-        return _render_feature_importance_plotly(importance)
+        return _render_feature_importance_plotly(importance, xlabel=_importance_xlabel(state))
 
     data = _cached_chart_json("accuracy_feature_importance_chart", [fog_model.MODEL_STATE_PATH], render)
+    return Response(data, mimetype="application/json")
+
+
+def _importance_xlabel(state):
+    if fog_model.feature_importance_method(state) == fog_model.IMPORTANCE_METHOD_SHAP:
+        return "予測への寄与の割合(SHAP・評価期間の予報入力)"
+    return "重要度(gainの割合・学習データ)"
+
+
+@app.route("/accuracy/feature_group_importance_chart.json")
+def accuracy_feature_group_importance_chart():
+    def render():
+        state = fog_model.load_model_state()
+        groups = fog_model.compute_feature_group_importance(state)
+        return _render_feature_importance_plotly(groups, title="まとまりごとの重要度", xlabel=_importance_xlabel(state))
+
+    data = _cached_chart_json("accuracy_feature_group_importance_chart", [fog_model.MODEL_STATE_PATH], render)
     return Response(data, mimetype="application/json")
 
 

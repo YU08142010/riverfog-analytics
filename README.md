@@ -79,6 +79,8 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 | `hindcast_lightgbm.py` | 旧モデルが予測していた過去の日時を、現行モデルで「当時の条件」(前日19:30までのデータ・当時の予報)で予測し直して`predictions.db`に追加する(`model_type`に`[再予測]`)。分析ページ等の精度は現行モデルの行だけを集計する(`prediction_log.CURRENT_MODEL_LIKE`)。何度実行しても重複しない。 |
 | `relabel_without_weather_hint.py` | 2026-08-30〜10-02の現象ラベル(Geminiに気象のヒントを渡して判定していた期間)を、保存済み画像からヒントなしで判定し直す一回限りのスクリプト。変更前後は`data/experiments/relabel_without_weather_hint.csv`、進捗は同名の`.progress.json`。止まっても再実行で続きから再開し、完了後に予測DBの実測と再予測を更新する。 |
 
+**特徴量と重要度**: 露点温度は「気温 = 露点温度 + 気温露点差」で完全に重複するため特徴量から外している(`fog_model.EXCLUDED_FEATURES`。外しても精度は誤差の範囲、`data/experiments/feature_selection_check.json`)。分析ページの特徴量重要度は、学習時に評価期間(予報入力)で求めたSHAP値の絶対値の平均の割合(`global_metrics["importance"]`)で、まとまり(`FEATURE_GROUPS`)ごとの合計も示す。gainは似た特徴量に偏って配られるため使わない(検証の経緯は`data/experiments/feature_importance_check.json`)。
+
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。
 
 **見た目**: `web_static/glass.css`(macOS風の磨りガラス。base.html・base_auth.html・public_base.htmlでstyle.cssの後に読み込み、色・角丸・影だけを上書きする。外せば元の見た目に戻る)。地点ページ(研究用・公開とも)は`_weather_scene.html`+`web_static/weather_scene.css`で、最新の観測(現象コード)と地点の日の出・日の入りから決めた時間帯に応じた空と、流れる霧・雲・雨を背景に描く(`webapp._weather_scene`)。動きは`web_static/weather_scene.js`(Canvas。霧のかたまり・雲・雨・星を流し、マウスとスクロールで層ごとにずらして奥行きを出す。JSが無い場合はCSSの霧の帯で代用)。ダッシュボードと公開ページのトップも、全地点の最新の観測から決めた代表の状況(`_overview_weather_scene`)で同じ背景を出す。ボタン等の押したときの反応(押すと縮んでばねのように戻る・押した位置から広がる波紋・触れると光が横切る・ページ移動のなめらかな切り替え)は`glass.css`の「動き」の節と`web_static/ui_motion.js`。書体は英数字がInter・日本語がZen Kaku Gothic New(どちらもSIL OFL)で、CSPによりフォントは同一オリジンからしか読めないため`web_static/fonts/`に置いて自前配信している(`fonts.css`。Google Fontsの文字範囲ごとの分割ファイルのため、ブラウザはページで使う文字を含む分だけ読み込む)。

@@ -127,7 +127,24 @@ MIN_TRAIN_POSITIVES = 30
 MIN_ROWS_PER_STATION = 3
 
 # 使わない特徴量(モジュールのdocstring参照)。
-EXCLUDED_FEATURES = ("月",)
+# 露点温度(2026-10-05〜): 気温 = 露点温度 + 気温露点差 が常に成り立つ(完全に重複している)ため、
+# 3つとも入れると、気温の効き目が露点温度などに分散して特徴量重要度で気温が低く見えていた
+# (実験の結論「気温が重要」と食い違って見える原因)。外しても精度は誤差の範囲で変わらない
+# (評価期間・予報入力でAP 0.165→0.168、logloss 0.095→0.091。data/experiments/feature_selection_check.json)。
+EXCLUDED_FEATURES = ("月", "露点温度(℃)")
+
+# 特徴量重要度を表示するときのまとまり。似た情報を持つ特徴量は寄与を分け合うため、
+# まとまりごとの合計も示す(compute_feature_group_importance)。
+FEATURE_GROUPS = (
+    ("気温", ("気温(℃)", "気温変化_1h", "気温変化_3h")),
+    ("湿り(湿度・気温露点差)", ("相対湿度(％)", "気温露点差", "露点温度(℃)")),
+    ("風", ("風速(m/s)", "風速平均_3h", "風向_sin", "風向_cos")),
+    ("時刻・日の出", ("時_sin", "時_cos", "日の出まで残り時間")),
+    ("日射・日照", ("日射量(MJ/m2)", "日照時間(時間)")),
+    ("降水", ("降水量(mm)", "降水量_24h合計")),
+    ("地点(ふだんの出やすさ)", ("地点別川霧発生率",)),
+)
+IMPORTANCE_METHOD_SHAP = "shap_test_forecast"
 
 # --- LightGBM ------------------------------------------------------------------------
 # 基本値は仮検証(experiment_model.py)で検証済みの設定。class_weightは使わない
@@ -618,7 +635,10 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
                       frame["__y"].to_numpy(), params, n_final)
     model = BinaryFogModel(final, weather_features, all_rates, all_global, threshold, n_final, params)
 
+    importance = _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input)
+
     global_metrics = {
+        "importance": importance,
         "model": overall, "climatology": {**climatology, "threshold": clim_threshold},
         "input": eval_input, "threshold": threshold, "threshold_source": threshold_source,
         "params": params, "n_estimators": n_final, "guard": guard,
@@ -971,12 +991,68 @@ def shared_global_metrics(state):
     return info.get("global_metrics") if info else None
 
 
+def _group_of(feature):
+    for group, members in FEATURE_GROUPS:
+        if feature in members:
+            return group
+    return "その他"
+
+
+def _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input):
+    """評価期間(学習に使っていない直近の期間。本番と同じ予報値を入力)での、各特徴量の予測への
+    寄与の大きさ(SHAP値の絶対値の平均。LightGBMのpred_contrib)の割合と、まとまりごとの合計。
+    gain(学習時に分岐で損失をどれだけ減らしたか)は学習データ上の値で、似た特徴量があると
+    どれか1つに偏って配られるため、表示にはこちらを使う。計算できなければNone。"""
+    if eval_rows is None or len(eval_rows) == 0:
+        return None
+    try:
+        X = _features_with_rate(eval_rows, weather_features, rates, global_rate)
+        contrib = eval_model.booster_.predict(X, pred_contrib=True)[:, :-1]
+        mean_abs = np.abs(contrib).mean(axis=0)
+        total = float(mean_abs.sum()) or 1.0
+        features = sorted(((f, float(v) / total) for f, v in zip(X.columns, mean_abs)), key=lambda x: x[1], reverse=True)
+        groups = {}
+        for f, v in features:
+            groups[_group_of(f)] = groups.get(_group_of(f), 0.0) + v
+        return {
+            "method": IMPORTANCE_METHOD_SHAP, "input": eval_input, "n_rows": int(len(X)),
+            "features": features,
+            "groups": sorted(groups.items(), key=lambda x: x[1], reverse=True),
+        }
+    except Exception as e:
+        log.warning("Failed to compute SHAP importance: %s", e)
+        return None
+
+
+def feature_importance_method(state):
+    """表示中の重要度の求め方("shap_test_forecast" か "gain")。"""
+    info = _shared_info(state)
+    imp = ((info or {}).get("global_metrics") or {}).get("importance")
+    return imp["method"] if imp else "gain"
+
+
+def compute_feature_group_importance(state):
+    """まとまり(FEATURE_GROUPS)ごとの重要度の合計。戻り値: [(まとまり名, 割合), ...] 降順。"""
+    info = _shared_info(state)
+    imp = ((info or {}).get("global_metrics") or {}).get("importance")
+    if imp:
+        return list(imp["groups"])
+    groups = {}
+    for f, v in compute_feature_importance(state):
+        groups[_group_of(f)] = groups.get(_group_of(f), 0.0) + v
+    return sorted(groups.items(), key=lambda x: x[1], reverse=True)
+
+
 def compute_feature_importance(state):
-    """採用中のモデルの特徴量重要度(分岐による損失の改善量=gainの割合)。
+    """採用中のモデルの特徴量重要度。学習時に評価期間(予報入力)で求めたSHAPの割合があればそれを、
+    無ければ(2026-10-05より前に学習したモデル)分岐による損失の改善量=gainの割合を返す。
     戻り値: [(特徴量名, 割合), ...] 降順。計算できなければ空リスト。"""
     info = _shared_info(state)
     if info is None:
         return []
+    imp = (info.get("global_metrics") or {}).get("importance")
+    if imp:
+        return list(imp["features"])
     model = info["pipe"]
     try:
         gains = model.model.booster_.feature_importance(importance_type="gain")

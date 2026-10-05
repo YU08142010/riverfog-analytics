@@ -204,8 +204,16 @@
 
 <div class="card">
     <h2>特徴量の重要度</h2>
-    <p class="muted">どの特徴量が川霧の予測に効いているか(採用中のLightGBMで、各特徴量による分岐が損失をどれだけ減らしたか(gain)の割合)。</p>
-    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(全地点)" data-chart-url="{{ url_for('accuracy_feature_importance_chart') }}"></div></div>
+    <p class="muted">どの特徴量が川霧の予測に効いているか。評価期間(学習に使っていない直近の期間)に本番と同じ予報値を入れたときの、
+    各特徴量の予測への寄与の大きさ(SHAP値の絶対値の平均)の割合です。</p>
+    <p class="muted">似た情報を持つ特徴量(例: 湿度と気温露点差)は寄与を分け合うため、1つ1つの値だけでは効き目を小さく見積もりがちです。
+    まとまりごとの合計(左)とあわせて見てください。なお「地点(ふだんの出やすさ)」が大きいのは、地点ごとの出やすさの差が大きいためで、
+    気象の効き目はその差を除いた残りの部分で測られています。露点温度は、気温と気温露点差から計算できる(完全に重複する)ため、
+    2026-10-05から特徴量から外しています。</p>
+    <div class="grid-2" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1rem;">
+        <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="まとまりごとの重要度グラフ" data-chart-url="{{ url_for('accuracy_feature_group_importance_chart') }}"></div></div>
+        <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="特徴量の重要度グラフ(全地点)" data-chart-url="{{ url_for('accuracy_feature_importance_chart') }}"></div></div>
+    </div>
 </div>
 
 {% if model_rows %}
