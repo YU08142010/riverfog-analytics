@@ -1,0 +1,201 @@
+{% extends "public_base.html" %}
+{% block title %}川霧の出やすさ{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+.pf-hero h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
+.pf-hero p { margin: 0; }
+.pf-days { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
+.pf-day {
+    border: 1px solid var(--pf-border); background: var(--pf-surface); color: var(--pf-text);
+    border-radius: var(--pf-radius); padding: 0.5rem 1rem; cursor: pointer; font: inherit;
+    display: flex; flex-direction: column; align-items: flex-start; min-width: 7.5rem;
+}
+.pf-day small { color: var(--pf-muted); font-size: 0.78rem; }
+.pf-day[aria-pressed="true"] { border-color: var(--pf-primary); box-shadow: inset 0 0 0 1px var(--pf-primary); }
+.pf-day b { font-size: 1.05rem; }
+@media (max-width: 600px) { .pf-days { flex-wrap: nowrap; } .pf-day { flex: 1; min-width: 0; padding: 0.45rem 0.6rem; } }
+.pf-summary-count { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+.pf-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.pf-chip { border-radius: 999px; padding: 0.15rem 0.7rem; font-size: 0.85rem; text-decoration: none; }
+.pf-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+@media (max-width: 860px) { .pf-grid { grid-template-columns: minmax(0, 1fr); } }
+#pf-map { height: 420px; border-radius: 8px; overflow: hidden; }
+.pf-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.82rem; margin-top: 0.6rem; align-items: center; }
+.pf-legend i { display: inline-block; width: 0.95rem; height: 0.95rem; border-radius: 3px; vertical-align: -2px; margin-right: 0.25rem; border: 1px solid var(--pf-border); }
+.pf-table-wrap { overflow-x: auto; }
+.pf-table { border-collapse: separate; border-spacing: 2px; width: 100%; font-size: 0.82rem; }
+.pf-table th { font-weight: 600; color: var(--pf-muted); text-align: center; padding: 0.2rem; white-space: nowrap; }
+.pf-table th.pf-name, .pf-table td.pf-name { text-align: left; white-space: nowrap; padding-right: 0.6rem; color: var(--pf-text); }
+.pf-table td.pf-cell { text-align: center; border-radius: 4px; min-width: 1.9rem; height: 1.7rem; font-size: 0.75rem; }
+.pf-table td.pf-now { white-space: nowrap; font-size: 0.75rem; padding: 0 0.4rem; border-radius: 4px; text-align: center; color: var(--pf-muted); }
+.pf-table td.pf-now.pf-lv3 { color: var(--pf-lv3-text); font-weight: 600; }
+.pf-table .pf-name { position: sticky; left: 0; background: var(--pf-surface); z-index: 1; }
+.pf-region { font-weight: 700; padding-top: 0.7rem !important; color: var(--pf-text) !important; text-align: left !important; }
+</style>
+{% endblock %}
+{% block content %}
+{% if not data %}
+<div class="pf-card"><p>ただいま情報を準備できていません。しばらくしてから再度お越しください。</p></div>
+{% else %}
+<section class="pf-hero">
+    <h1>きょう、川霧はどこに出そう?</h1>
+    <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点について、日中(日の出〜日の入り)の1時間ごとに、川霧の出やすさを3段階で示します。</p>
+</section>
+{% if data.stale %}
+<div class="pf-notice" role="status">予測の更新が止まっているため、表示が古い可能性があります{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
+{% endif %}
+
+<div class="pf-days" role="group" aria-label="日付の切り替え">
+    {% for d in data.days %}
+    <button type="button" class="pf-day" data-day="{{ loop.index0 }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">
+        <b>{{ d.label }}</b><small>{{ d.date_label }}</small>
+    </button>
+    {% endfor %}
+</div>
+
+<div class="pf-grid">
+    <div class="pf-card">
+        <h2 id="pf-summary-title">出やすい地点</h2>
+        <div><span class="pf-summary-count" id="pf-count-high">-</span> 地点 <span class="pf-muted" id="pf-count-mid"></span></div>
+        <div class="pf-chips" id="pf-chips"></div>
+        <p class="pf-muted" id="pf-none" hidden>この日は「出やすい」地点はありません。</p>
+        {% if data.observed_at %}
+        <p class="pf-muted" style="margin-top:0.9rem;">「いま」の列は {{ data.observed_at }} のカメラ画像をAIで判定した結果です(予測ではなく観測。川霧と判定された地点を色付けしています)。</p>
+        {% endif %}
+    </div>
+    <div class="pf-card">
+        <h2>地図</h2>
+        <div id="pf-map" role="img" aria-label="地点ごとの川霧の出やすさの地図(詳細は下の表を参照)"></div>
+        <div class="pf-legend">
+            <span><i class="pf-lv3"></i>{{ levels[3].label }}</span>
+            <span><i class="pf-lv2"></i>{{ levels[2].label }}</span>
+            <span><i class="pf-lv1"></i>{{ levels[1].label }}</span>
+            <span><i class="pf-lv0"></i>夜間・データなし</span>
+        </div>
+    </div>
+</div>
+
+<div class="pf-card">
+    <h2>時間ごとの出やすさ</h2>
+    <p class="pf-muted" style="margin-top:0;">色が濃いほど川霧が出やすい予測です。空欄は夜間(暗くて判定できないため対象外)です。<a href="{{ url_for('public_about') }}">段階の決め方</a></p>
+    <div class="pf-table-wrap">
+        <table class="pf-table" id="pf-table"></table>
+    </div>
+</div>
+<script id="pf-data" type="application/json">{{ data|tojson }}</script>
+<script id="pf-levels" type="application/json">{{ levels|tojson }}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function() {
+    var data = JSON.parse(document.getElementById("pf-data").textContent);
+    var levels = JSON.parse(document.getElementById("pf-levels").textContent);
+    var HOURS = [];
+    for (var h = 5; h <= 18; h++) { HOURS.push(h); }
+    var css = getComputedStyle(document.documentElement);
+    function lvColor(lv) {
+        return lv === 3 ? css.getPropertyValue("--pf-lv3").trim()
+             : lv === 2 ? css.getPropertyValue("--pf-lv2").trim()
+             : lv === 1 ? css.getPropertyValue("--pf-lv1").trim() : "#9aa5af";
+    }
+    function el(tag, cls, text) {
+        var e = document.createElement(tag);
+        if (cls) { e.className = cls; }
+        if (text !== undefined && text !== null) { e.textContent = text; }
+        return e;
+    }
+
+    var map = null, markers = [];
+    var mapDiv = document.getElementById("pf-map");
+    if (typeof L === "undefined") {
+        mapDiv.textContent = "地図を読み込めませんでした。下の表をご覧ください。";
+    } else {
+        map = L.map(mapDiv, {scrollWheelZoom: false});
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"
+        }).addTo(map);
+        var bounds = [];
+        data.stations.forEach(function(s) {
+            if (s.lat === null || s.lon === null) { return; }
+            bounds.push([s.lat, s.lon]);
+            var m = L.circleMarker([s.lat, s.lon], {radius: 7, weight: 1.5, color: "#2c3e50", fillOpacity: 0.9});
+            m.addTo(map);
+            markers.push({station: s, marker: m});
+        });
+        if (bounds.length) { map.fitBounds(bounds, {padding: [20, 20]}); } else { map.setView([37.35, 139.32], 10); }
+    }
+
+    function render(dayIdx) {
+        var day = data.days[dayIdx];
+        var high = data.stations.filter(function(s) { return s.days[dayIdx].max === 3; });
+        var mid = data.stations.filter(function(s) { return s.days[dayIdx].max === 2; });
+        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")に出やすい地点";
+        document.getElementById("pf-count-high").textContent = high.length;
+        document.getElementById("pf-count-mid").textContent = "(やや出やすい: " + mid.length + "地点)";
+        var chips = document.getElementById("pf-chips");
+        chips.textContent = "";
+        high.forEach(function(s) {
+            var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] === 3; })
+                .map(Number).sort(function(a, b) { return a - b; });
+            var chip = el("span", "pf-chip pf-lv3", s.name + " " + hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : ""));
+            chips.appendChild(chip);
+        });
+        document.getElementById("pf-none").hidden = high.length > 0;
+
+        markers.forEach(function(item) {
+            var lv = item.station.days[dayIdx].max;
+            item.marker.setStyle({fillColor: lvColor(lv), radius: lv === 3 ? 10 : 7, weight: lv === 3 ? 2.5 : 1.5});
+            var box = el("div");
+            box.appendChild(el("strong", null, item.station.name));
+            box.appendChild(el("div", null, day.label + ": " + (lv ? levels[lv].label : "データなし")));
+            if (dayIdx === 0 && item.station.now) { box.appendChild(el("div", null, "いま: " + item.station.now.label)); }
+            item.marker.bindPopup(box);
+            if (lv === 3) { item.marker.bringToFront(); }
+        });
+
+        var table = document.getElementById("pf-table");
+        table.textContent = "";
+        var thead = el("thead"), tr = el("tr");
+        tr.appendChild(el("th", "pf-name", "地点"));
+        if (dayIdx === 0) { tr.appendChild(el("th", null, "いま")); }
+        HOURS.forEach(function(h) { tr.appendChild(el("th", null, h + "時")); });
+        thead.appendChild(tr);
+        table.appendChild(thead);
+        var tbody = el("tbody"), lastRegion = null;
+        data.stations.forEach(function(s) {
+            if (s.region !== lastRegion) {
+                var rr = el("tr"), rc = el("th", "pf-region", s.region);
+                rc.colSpan = HOURS.length + (dayIdx === 0 ? 2 : 1);
+                rr.appendChild(rc);
+                tbody.appendChild(rr);
+                lastRegion = s.region;
+            }
+            var row = el("tr");
+            row.appendChild(el("td", "pf-name", s.name));
+            if (dayIdx === 0) {
+                var now = el("td", "pf-now" + (s.now && s.now.fog ? " pf-lv3" : ""), s.now ? s.now.label : "-");
+                row.appendChild(now);
+            }
+            HOURS.forEach(function(h) {
+                var lv = s.days[dayIdx].hours[h] || 0;
+                var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levels[lv].short : "");
+                c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間・データなし");
+                row.appendChild(c);
+            });
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+    }
+
+    var buttons = document.querySelectorAll(".pf-day");
+    Array.prototype.forEach.call(buttons, function(btn) {
+        btn.addEventListener("click", function() {
+            Array.prototype.forEach.call(buttons, function(b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+            render(Number(btn.getAttribute("data-day")));
+        });
+    });
+    render(0);
+})();
+</script>
+{% endif %}
+{% endblock %}

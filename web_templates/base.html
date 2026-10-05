@@ -49,6 +49,7 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
         <a href="{{ url_for('game_home') }}" class="{{ 'active' if request.path.startswith('/game') else '' }}">{{ icon("game") }}ゲーム</a>
         <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
         {% endif %}
+        <a href="{{ url_for('public_forecast') }}">{{ icon("stations") }}公開ページ</a>
         {% if session.get('role') == 'admin' and not is_funnel_request() %}
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
         {% endif %}

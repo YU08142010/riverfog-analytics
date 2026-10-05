@@ -80,6 +80,8 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 | `relabel_without_weather_hint.py` | 2026-08-30〜10-02の現象ラベル(Geminiに気象のヒントを渡して判定していた期間)を、保存済み画像からヒントなしで判定し直す一回限りのスクリプト。変更前後は`data/experiments/relabel_without_weather_hint.csv`、進捗は同名の`.progress.json`。止まっても再実行で続きから再開し、完了後に予測DBの実測と再予測を更新する。 |
 
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。
+
+**公開ページ**: `/forecast`(と`/forecast/about`)はログイン不要の一般向けページで、未ログインで`/`に来た人はここに転送される(研究用サイトには「関係者ログイン」から入る)。本番の最新予測を地点・日中の時刻ごとに3段階(しきい値以上=出やすい、しきい値の半分以上=やや出やすい、それ以外=出にくい)で今日〜明後日まで表示する(`webapp._build_public_forecast`)。カメラ画像・確率の値・利用者情報は出さず、noindex。気象業務法の予報業務許可との関係があるため「予報」ではなく研究用の試験情報として表示している。
 | `web_templates/` | Jinja テンプレート(57ファイル)。`base.html` が共通レイアウト・ナビ・サイト独自モーダル・右クリックメニュー基盤を持つ。 |
 | `web_static/` | `style.css`, `shared.js`, `favicon.svg`。 |
 | `cameras.csv` | 地点名とカメラIDの対応表(緯度経度は保持していない)。 |

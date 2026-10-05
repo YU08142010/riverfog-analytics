@@ -1,0 +1,81 @@
+{% extends "public_base.html" %}
+{% block title %}この情報について{% endblock %}
+{% block extra_head %}
+<style>
+.pf-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.8rem; }
+.pf-steps li { border: 1px solid var(--pf-border); border-radius: 10px; padding: 0.8rem 0.9rem; }
+.pf-steps b { display: block; color: var(--pf-primary); margin-bottom: 0.2rem; }
+.pf-levels { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.pf-levels td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--pf-border); vertical-align: top; }
+.pf-levels td:first-child { width: 8.5rem; white-space: nowrap; }
+.pf-badge { display: inline-block; border-radius: 999px; padding: 0.05rem 0.7rem; font-size: 0.85rem; }
+.pf-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.8rem; margin: 0.6rem 0; }
+.pf-stat { border: 1px solid var(--pf-border); border-radius: 10px; padding: 0.7rem 0.9rem; }
+.pf-stat .v { font-size: 1.5rem; font-weight: 700; }
+.pf-stat .k { font-size: 0.8rem; color: var(--pf-muted); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pf-card">
+    <h2>この情報について</h2>
+    <p>川の上に立ちこめる「川霧」が、いつ・どこで出やすいかを予測する研究の、試験的な計算結果を公開しています。只見川と会津地方の河川カメラの地点ごとに、日中の1時間ごと・3日先までの出やすさを示します。</p>
+    <p class="pf-muted">気象庁の天気予報とは別のもので、まだ研究の途中の情報です。</p>
+</div>
+
+<div class="pf-card">
+    <h2>仕組み</h2>
+    <ol class="pf-steps">
+        <li><b>1. 観測</b>国土交通省の河川カメラの画像を、毎時集めています。</li>
+        <li><b>2. 判定</b>画像をAI(Google Gemini)で判定し、川霧が出ているかを記録します。人の目で確認して直した記録も使います。</li>
+        <li><b>3. 学習</b>川霧の記録と、その時の気象(気温・湿度・風など)の関係を、機械学習(LightGBM)で学びます。</li>
+        <li><b>4. 予測</b>気象の予報値を入れて、地点・時刻ごとの川霧の確率を計算します。毎晩、新しいデータで学び直します。</li>
+    </ol>
+</div>
+
+<div class="pf-card">
+    <h2>3段階の決め方</h2>
+    <table class="pf-levels">
+        <tr><td><span class="pf-badge pf-lv3">{{ levels[3].label }}</span></td>
+            <td>モデルが「川霧あり」と判断する基準の確率を超えた時間帯です。基準は、過去の予報値で最もよく当たるように選んでいます{% if data and data.metrics.f1 is not none %}(現在の基準で、川霧ありと予測したときに実際に出た割合は約{{ (data.metrics.precision * 100)|round|int }}%){% endif %}。</td></tr>
+        <tr><td><span class="pf-badge pf-lv2">{{ levels[2].label }}</span></td>
+            <td>基準には届かないものの、基準の{{ (mid_ratio * 100)|int }}%以上の確率がある時間帯です。</td></tr>
+        <tr><td><span class="pf-badge pf-lv1">{{ levels[1].label }}</span></td>
+            <td>それ以外の時間帯です。</td></tr>
+        <tr><td>空欄</td>
+            <td>日の出前・日の入り後の時間帯です。暗くてカメラで判定できないため、予測の対象外にしています。</td></tr>
+    </table>
+</div>
+
+{% if data and data.metrics.f1 is not none %}
+<div class="pf-card">
+    <h2>どのくらい当たるか</h2>
+    <p class="pf-muted" style="margin-top:0;">学習に使っていない直近の期間({{ data.metrics.test_start }}〜{{ data.metrics.test_end }})について、実際の予報値を入れて確かめた結果です(日中のみ)。</p>
+    <div class="pf-stats">
+        <div class="pf-stat"><div class="v">{{ (data.metrics.precision * 100)|round|int }}%</div><div class="k">「出やすい」と予測したときに実際に出た割合</div></div>
+        <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">実際に出た川霧のうち、予測できていた割合</div></div>
+        <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">総合点(F1)<br>参考: 過去の出やすさの傾向だけで予測した場合 {{ "%.2f"|format(data.metrics.f1_climatology) }}</div></div>
+    </div>
+    <p class="pf-muted">川霧はめったに出ない現象(日中の約2%)のため、まだ外れることが多い段階です。過去の傾向だけを使う方法よりは良く当たることを確かめながら、改良を続けています。</p>
+</div>
+{% endif %}
+
+<div class="pf-card">
+    <h2>ご利用にあたって</h2>
+    <ul>
+        <li>研究のための試験的な情報です。予告なく内容の変更や公開の停止をすることがあります。</li>
+        <li>外れることも多いため、移動・撮影・観光などの判断は、気象庁の情報などとあわせて自己責任でお願いします。</li>
+        <li>「いま」の欄はカメラ画像をAIが判定した結果で、誤判定が含まれることがあります。</li>
+    </ul>
+</div>
+
+<div class="pf-card">
+    <h2>データの出典</h2>
+    <ul>
+        <li>気象の予報値・過去値: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)</li>
+        <li>過去の気象観測: 気象庁</li>
+        <li>河川カメラの画像: 国土交通省「川の防災情報」</li>
+        <li>地図: &copy; OpenStreetMap contributors</li>
+    </ul>
+    <p class="pf-muted">研究関係者の方は、右上の「関係者ログイン」から研究用サイトに入れます。</p>
+</div>
+{% endblock %}

@@ -681,7 +681,9 @@ def _inject_can_correct_station():
 # 競合しうるため止めておきたい(この非対称はバグではなく意図した挙動)。
 MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
-LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static")
+# /forecastは一般向けの公開ページ(_build_public_forecast参照)。
+PUBLIC_PREFIX = "/forecast"
+LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX)
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
 # 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
@@ -762,6 +764,9 @@ def _require_login():
         return None
     user_id = session.get("user_id")
     if not user_id:
+        # 未ログインでトップに来た人(外部の人)は、ログイン画面ではなく公開ページに案内する。
+        if request.path == "/":
+            return redirect(url_for("public_forecast"))
         return redirect(url_for("login", next=request.path))
     conn = _users_conn()
     try:
@@ -5187,6 +5192,159 @@ def changelog_page():
 # ============================================================================
 
 
+# ---------------------------------------------------------------------------
+# 一般向けの公開ページ(/forecast、ログイン不要)。研究外部の人(企業・地域の方など)に
+# 「今日・明日どこで川霧が出やすいか」を見せるための入口で、未ログインで"/"に来た人は
+# ここに案内する。ログインした人だけがその先の研究用サイト(ダッシュボード以降)に入れる。
+# 載せるのは地点ごとの「出やすさ」の段階と最新のAI判定の結果だけで、カメラ画像・確率の
+# 細かい値・利用者の情報などは出さない(画像は提供元の権利を確認できていないため)。
+# 気象業務法の予報業務許可との関係があるため、「予報」ではなく研究用の試験情報として扱い、
+# 検索エンジンにも載せない(noindex)。
+# ---------------------------------------------------------------------------
+PUBLIC_DAYS_AHEAD = 3              # 今日・明日・明後日
+PUBLIC_MID_RATIO = 0.5             # しきい値のこの割合以上なら「やや出やすい」
+PUBLIC_STALE_HOURS = 36            # 最新の予測がこれより古ければ「更新が止まっている」と表示
+PUBLIC_CACHE_SECONDS = 300
+PUBLIC_LEVELS = {
+    3: {"label": "出やすい", "short": "高"},
+    2: {"label": "やや出やすい", "short": "中"},
+    1: {"label": "出にくい", "short": "低"},
+}
+_public_forecast_cache = {"data": None, "at": 0.0}
+_public_forecast_cache_lock = threading.Lock()
+
+
+def _public_level(prob, threshold):
+    if prob is None or prob != prob or threshold is None:
+        return 0
+    if prob >= threshold:
+        return 3
+    if prob >= threshold * PUBLIC_MID_RATIO:
+        return 2
+    return 1
+
+
+def _build_public_forecast():
+    """公開ページ用のデータ(地点ごと・日ごと・時刻ごとの出やすさの段階)を組み立てる。"""
+    state = fog_model.load_model_state() or {}
+    today = now_jst_naive().date()
+    days = [today + timedelta(days=i) for i in range(PUBLIC_DAYS_AHEAD)]
+    start = days[0].strftime("%Y-%m-%d 00:00:00")
+    end = days[-1].strftime("%Y-%m-%d 23:59:59")
+
+    rows, run_at = [], None
+    if DB_PATH.exists():
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            # 再予測(過去分のやり直し)を除いた、本番の最新の予測だけを使う。
+            run_at = conn.execute(
+                "SELECT MAX(run_at) FROM predictions WHERE model_type LIKE ? AND model_type NOT LIKE '%[再予測]'",
+                (prediction_log.CURRENT_MODEL_LIKE,),
+            ).fetchone()[0]
+            if run_at:
+                rows = conn.execute(
+                    """SELECT station, target_datetime, predicted_fog_prob FROM predictions
+                       WHERE run_at = ? AND target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1""",
+                    (run_at, start, end),
+                ).fetchall()
+        finally:
+            conn.close()
+
+    by_station = {}
+    for station, target_dt, prob in rows:
+        info = state.get(station) or {}
+        level = _public_level(prob, info.get("fog_threshold"))
+        if level:
+            by_station.setdefault(station, {})[target_dt[:13]] = level
+
+    observations = None
+    try:
+        observations = _latest_observations()
+    except Exception as e:
+        log.warning("Public page: failed to load observations: %s", e)
+    obs_by_name = {s["name"]: s for s in observations["stations"]} if observations else {}
+
+    stations = []
+    for name in STATION_NAMES:
+        info = CAMERA_INFO.get(name, {})
+        levels = by_station.get(name, {})
+        day_levels = []
+        for d in days:
+            prefix = d.strftime("%Y-%m-%d")
+            hours = {int(k[11:13]): v for k, v in levels.items() if k.startswith(prefix)}
+            day_levels.append({"max": max(hours.values()) if hours else 0, "hours": hours})
+        obs = obs_by_name.get(name)
+        stations.append({
+            "name": name,
+            "region": STATION_REGION.get(name) or "その他",
+            "lat": info.get("lat"),
+            "lon": info.get("lon"),
+            "days": day_levels,
+            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES} if obs else None,
+        })
+
+    stale = True
+    if run_at:
+        try:
+            stale = now_jst_naive() - datetime.strptime(run_at[:19], "%Y-%m-%d %H:%M:%S") > timedelta(hours=PUBLIC_STALE_HOURS)
+        except ValueError:
+            pass
+    any_info = next(iter(state.values()), {}) if state else {}
+    metrics = (any_info.get("global_metrics") or {})
+    model_m, clim_m = metrics.get("model") or {}, metrics.get("climatology") or {}
+    weekdays = "月火水木金土日"
+    return {
+        "days": [{"date": d.strftime("%Y-%m-%d"), "label": ["今日", "明日", "明後日"][i] if i < 3 else d.strftime("%m/%d"),
+                  "date_label": f"{d.month}/{d.day}({weekdays[d.weekday()]})"} for i, d in enumerate(days)],
+        "stations": stations,
+        "run_at": run_at,
+        "stale": stale,
+        "observed_at": observations["datetime"].strftime("%Y/%m/%d %H:%M") if observations else None,
+        "metrics": {
+            "precision": model_m.get("precision"), "recall": model_m.get("recall"),
+            "f1": model_m.get("f1"), "f1_climatology": clim_m.get("f1"),
+            "test_start": (metrics.get("test_start") or "")[:10], "test_end": (metrics.get("test_end") or "")[:10],
+            "n_train": metrics.get("n_train"),
+        },
+    }
+
+
+def _public_forecast_safe():
+    now = time.monotonic()
+    with _public_forecast_cache_lock:
+        cached = _public_forecast_cache["data"]
+        if cached is not None and now - _public_forecast_cache["at"] < PUBLIC_CACHE_SECONDS:
+            return cached
+    try:
+        data = _build_public_forecast()
+    except Exception as e:
+        log.warning("Failed to build public forecast: %s", e)
+        return cached
+    with _public_forecast_cache_lock:
+        _public_forecast_cache["data"] = data
+        _public_forecast_cache["at"] = now
+    return data
+
+
+@app.after_request
+def _public_noindex(response):
+    if request.path.startswith(PUBLIC_PREFIX):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+@app.route("/forecast")
+def public_forecast():
+    data = _public_forecast_safe()
+    return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS)
+
+
+@app.route("/forecast/about")
+def public_about():
+    data = _public_forecast_safe()
+    return render_template("public_about.html", data=data, levels=PUBLIC_LEVELS, mid_ratio=PUBLIC_MID_RATIO)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_path = request.values.get("next") or url_for("dashboard")
@@ -5275,7 +5433,7 @@ def logout():
         finally:
             conn.close()
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("public_forecast"))
 
 
 def _avatar_path(user_id):

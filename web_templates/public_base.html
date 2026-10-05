@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}川霧の出やすさ{% endblock %} - 川霧の出やすさ情報(試験公開)</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<script>
+(function() {
+    try {
+        var saved = localStorage.getItem("theme");
+        if (saved === "light" || saved === "dark") {
+            document.documentElement.setAttribute("data-theme", saved);
+        }
+    } catch (e) {}
+})();
+</script>
+<style>
+:root {
+    --pf-bg: #f3f6f8;
+    --pf-surface: #ffffff;
+    --pf-border: #dbe3ea;
+    --pf-text: #1c2733;
+    --pf-muted: #5d6b78;
+    --pf-primary: #1a5276;
+    --pf-header-1: #123c58;
+    --pf-header-2: #2a6f97;
+    --pf-lv3: #1f5f8b;
+    --pf-lv3-text: #ffffff;
+    --pf-lv2: #8fbcd8;
+    --pf-lv2-text: #0f2a3d;
+    --pf-lv1: #e4ebf0;
+    --pf-lv1-text: #5d6b78;
+    --pf-lv0: transparent;
+    --pf-warn-bg: #fdf2e3;
+    --pf-warn: #8a5a0b;
+    --pf-radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --pf-bg: #11181e;
+        --pf-surface: #1a232b;
+        --pf-border: #2c3944;
+        --pf-text: #e6edf3;
+        --pf-muted: #97a6b4;
+        --pf-primary: #7fb3dc;
+        --pf-header-1: #0d2433;
+        --pf-header-2: #1b4a66;
+        --pf-lv3: #5ea3d6;
+        --pf-lv3-text: #0b1a24;
+        --pf-lv2: #2f5f80;
+        --pf-lv2-text: #e6edf3;
+        --pf-lv1: #24313b;
+        --pf-lv1-text: #97a6b4;
+        --pf-warn-bg: #3a2f1c;
+        --pf-warn: #e9bd75;
+    }
+}
+:root[data-theme="dark"] {
+    --pf-bg: #11181e;
+    --pf-surface: #1a232b;
+    --pf-border: #2c3944;
+    --pf-text: #e6edf3;
+    --pf-muted: #97a6b4;
+    --pf-primary: #7fb3dc;
+    --pf-header-1: #0d2433;
+    --pf-header-2: #1b4a66;
+    --pf-lv3: #5ea3d6;
+    --pf-lv3-text: #0b1a24;
+    --pf-lv2: #2f5f80;
+    --pf-lv2-text: #e6edf3;
+    --pf-lv1: #24313b;
+    --pf-lv1-text: #97a6b4;
+    --pf-warn-bg: #3a2f1c;
+    --pf-warn: #e9bd75;
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    background: var(--pf-bg);
+    color: var(--pf-text);
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Meiryo", sans-serif;
+    line-height: 1.65;
+}
+a { color: var(--pf-primary); }
+.pf-header {
+    background: linear-gradient(120deg, var(--pf-header-1), var(--pf-header-2));
+    color: #fff;
+    padding: 0.9rem 16px;
+}
+.pf-header-inner {
+    max-width: 1100px; margin: 0 auto;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+}
+.pf-brand { color: #fff; text-decoration: none; display: flex; flex-direction: column; }
+.pf-brand strong { font-size: 1.2rem; letter-spacing: 0.04em; }
+.pf-brand span { font-size: 0.75rem; opacity: 0.85; }
+.pf-nav { margin-left: auto; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.pf-nav a {
+    color: #fff; text-decoration: none; font-size: 0.9rem;
+    padding: 0.35rem 0.75rem; border-radius: 999px;
+}
+.pf-nav a:hover, .pf-nav a.active { background: rgba(255, 255, 255, 0.16); }
+.pf-nav a.pf-login { border: 1px solid rgba(255, 255, 255, 0.6); }
+.pf-theme { background: none; border: 0; color: #fff; font-size: 0.8rem; cursor: pointer; opacity: 0.8; padding: 0.35rem; }
+main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
+.pf-card {
+    background: var(--pf-surface);
+    border: 1px solid var(--pf-border);
+    border-radius: var(--pf-radius);
+    padding: 1.1rem 1.2rem;
+    margin-bottom: 1rem;
+}
+.pf-card h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+.pf-muted { color: var(--pf-muted); font-size: 0.85rem; }
+.pf-notice {
+    background: var(--pf-warn-bg); color: var(--pf-warn);
+    border-radius: var(--pf-radius); padding: 0.7rem 1rem; font-size: 0.85rem; margin-bottom: 1rem;
+}
+.pf-lv3 { background: var(--pf-lv3); color: var(--pf-lv3-text); }
+.pf-lv2 { background: var(--pf-lv2); color: var(--pf-lv2-text); }
+.pf-lv1 { background: var(--pf-lv1); color: var(--pf-lv1-text); }
+.pf-lv0 { background: var(--pf-lv0); }
+.pf-footer {
+    max-width: 1100px; margin: 0 auto; padding: 0 16px 2rem;
+    font-size: 0.78rem; color: var(--pf-muted);
+}
+.pf-footer p { margin: 0.25rem 0; }
+@media (max-width: 600px) {
+    .pf-nav { margin-left: 0; width: 100%; }
+}
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<header class="pf-header">
+    <div class="pf-header-inner">
+        <a class="pf-brand" href="{{ url_for('public_forecast') }}">
+            <strong>川霧の出やすさ情報</strong>
+            <span>只見川・会津の川霧 研究用の試験公開</span>
+        </a>
+        <nav class="pf-nav">
+            <a href="{{ url_for('public_forecast') }}" class="{{ 'active' if request.path == url_for('public_forecast') else '' }}">出やすさ</a>
+            <a href="{{ url_for('public_about') }}" class="{{ 'active' if request.path == url_for('public_about') else '' }}">この情報について</a>
+            {% if session.get('user_id') %}
+            <a href="{{ url_for('dashboard') }}" class="pf-login">研究サイトへ</a>
+            {% else %}
+            <a href="{{ url_for('login') }}" class="pf-login">関係者ログイン</a>
+            {% endif %}
+            <button type="button" class="pf-theme" id="pf-theme-btn">ダーク/ライト</button>
+        </nav>
+    </div>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer class="pf-footer">
+    <p>このページは研究で作っている川霧の予測モデルの試験的な計算結果で、気象庁の予報ではありません。外れることも多いため、移動や撮影などの判断は自己責任でお願いします。</p>
+    <p>気象データ: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)・気象庁 / 河川カメラ: 国土交通省「川の防災情報」 / 地図: &copy; OpenStreetMap contributors</p>
+</footer>
+<script>
+(function() {
+    var btn = document.getElementById("pf-theme-btn");
+    if (!btn) { return; }
+    btn.addEventListener("click", function() {
+        var root = document.documentElement;
+        var current = root.getAttribute("data-theme");
+        if (!current) {
+            current = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        var next = current === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("theme", next); } catch (e) {}
+    });
+})();
+</script>
+</body>
+</html>
