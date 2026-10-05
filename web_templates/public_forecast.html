@@ -101,7 +101,7 @@
 .pf-mk { background: none; border: 0; }
 .pf-mk .pf-fog {
     position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; margin: -48px 0 0 -48px; border-radius: 50%;
-    background: radial-gradient(circle, color-mix(in srgb, var(--pf-lv3) 55%, white) 0%, transparent 68%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--pf-lv3) 35%, white) 0%, transparent 68%);
     opacity: 0; transform: scale(0.2); transition: opacity 0.6s ease, transform 0.6s ease;
 }
 .pf-mk .pf-dot {
@@ -220,7 +220,7 @@
         <ol class="pf-rank" id="pf-rank"></ol>
         <p class="pf-more" id="pf-more" hidden></p>
         {% if data.observed_at %}
-        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「現況」列は {{ data.observed_at }} 時点の河川カメラ画像をAIで判定した観測値であり、予測値ではない。川霧ありと判定された地点を着色している。</p>
+        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「現況」列は {{ data.observed_at }} 時点の河川カメラ画像をAIで判定した観測値であり、予測値ではない。川霧ありと判定された地点を着色している。最新時刻の画像を取得できなかった地点は、直近3時間以内の観測を時刻付きで示す。</p>
         {% endif %}
     </div>
     <div class="pf-card">
@@ -289,6 +289,8 @@
     for (var h = 5; h <= 18; h++) { HOURS.push(h); }
     var STATION_URL = {{ url_for("public_station", name="__NAME__")|tojson }};
     function stationUrl(name) { return STATION_URL.replace("__NAME__", encodeURIComponent(name)); }
+    // 現況のラベル。最新時刻に画像を取得できず、少し前の観測で補った地点は時刻を添える
+    function nowLabel(now) { return now.label + (now.at !== null && now.at !== undefined ? "(" + now.at + "時)" : ""); }
     function el(tag, cls, text) {
         var e = document.createElement(tag);
         if (cls) { e.className = cls; }
@@ -482,7 +484,7 @@
             var box = el("div");
             box.appendChild(el("strong", null, item.station.name));
             box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間(対象外)")));
-            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現況(観測): " + item.station.now.label)); }
+            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現況(観測): " + nowLabel(item.station.now))); }
             var actions = el("div", "pf-popup-actions");
             var link = el("a", null, "地点の詳細");
             link.href = stationUrl(item.station.name);
@@ -605,7 +607,7 @@
             nameCell.appendChild(a);
             row.appendChild(nameCell);
             if (dayIdx === 0) {
-                var now = el("td", "pf-now" + (s.now && s.now.fog ? " pf-lv3" : ""), s.now ? s.now.label : "-");
+                var now = el("td", "pf-now" + (s.now && s.now.fog ? " pf-lv3" : ""), s.now ? nowLabel(s.now) : "-");
                 row.appendChild(now);
             }
             HOURS.forEach(function(h) {

@@ -29,7 +29,7 @@
 <div class="wx-hero">
     <div class="wx-hero-name">{{ name }}</div>
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
-    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}</div>
+    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}{% if station and station.now and station.now.at is not none %}({{ station.now.at }}時){% endif %}</div>
     <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} 観測{% endif %}</div>
     {% if name in lens_haze_stations %}<div class="wx-hero-sub">※本地点のカメラはレンズが曇りやすく、現況の判定は参考値である</div>{% endif %}
     {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
@@ -65,7 +65,7 @@
 <div class="pf-card">
     <h2>現況(観測)</h2>
     <div class="pf-now-box">
-        <span class="pf-now-label">{{ station.now.label }}</span>
+        <span class="pf-now-label">{{ station.now.label }}{% if station.now.at is not none %}<small style="font-size:0.8rem; font-weight:400;">({{ station.now.at }}時の観測)</small>{% endif %}</span>
         <span class="pf-muted">{{ data.observed_at }} 時点のカメラ画像をAIで判定した結果(誤判定を含む場合がある)。</span>
     </div>
 </div>

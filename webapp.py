@@ -5529,6 +5529,46 @@ def _public_level(prob, threshold):
     return 1
 
 
+PUBLIC_NOW_FALLBACK_HOURS = 3      # 「現況」で最新時刻が欠けた地点を、この時間以内の観測で補う
+
+
+def _public_now_by_station(observations):
+    """公開ページの「現況」用に、地点ごとの最新の観測を返す。最新時刻だけ画像を取得できなかった地点
+    (カメラ配信元への一時的な通信障害で、その時刻の数十地点が空欄になることがある)は、直近
+    PUBLIC_NOW_FALLBACK_HOURS時間以内のその地点の最新の観測で補い、その時刻(at、時)を付ける。"""
+    if not observations:
+        return {}
+    out, missing = {}, []
+    for s in observations["stations"]:
+        if s.get("code") is None:
+            missing.append(s["name"])
+        else:
+            out[s["name"]] = dict(s, at=None)
+    if not missing:
+        return out
+    try:
+        _main_df, phenom_df, _names = fog_data.load_river_fog_data()
+    except Exception as e:
+        log.warning("Public page: failed to load observations for fallback: %s", e)
+        return out
+    last = observations["datetime"]
+    recent = phenom_df[(phenom_df["datetime"] < last)
+                       & (phenom_df["datetime"] >= last - timedelta(hours=PUBLIC_NOW_FALLBACK_HOURS))]
+    recent = recent.sort_values("datetime", ascending=False)
+    for name in missing:
+        if name not in recent.columns:
+            continue
+        for dt, value in zip(recent["datetime"], recent[name]):
+            raw = encode_phenomena_cell(value)
+            primary, secondary = decode_phenom_value(raw)
+            if primary is None:
+                continue
+            label, _bg, _fg = _phenom_label_color(raw)
+            out[name] = {"name": name, "label": label, "code": primary, "code2": secondary, "at": int(dt.hour)}
+            break
+    return out
+
+
 def _build_public_forecast():
     """公開ページ用のデータ(地点ごと・日ごと・時刻ごとの出やすさの段階)を組み立てる。"""
     state = fog_model.load_model_state() or {}
@@ -5571,7 +5611,7 @@ def _build_public_forecast():
         observations = _latest_observations()
     except Exception as e:
         log.warning("Public page: failed to load observations: %s", e)
-    obs_by_name = {s["name"]: s for s in observations["stations"]} if observations else {}
+    obs_by_name = _public_now_by_station(observations)
 
     stations = []
     for name in STATION_NAMES:
@@ -5589,7 +5629,8 @@ def _build_public_forecast():
             "lat": info.get("lat"),
             "lon": info.get("lon"),
             "days": day_levels,
-            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES, "code": obs.get("code")} if obs else None,
+            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES, "code": obs.get("code"),
+                    "at": obs.get("at")} if obs else None,
         })
 
     stale = True
