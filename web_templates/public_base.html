@@ -136,6 +136,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 }
 </style>
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
+<script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
 {% block extra_head %}{% endblock %}
 </head>
 <body>

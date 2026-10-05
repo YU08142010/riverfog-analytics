@@ -326,3 +326,108 @@ table.obs-table tbody tr:hover { background: var(--color-primary-light); }
         background: var(--color-surface);
     }
 }
+
+/* ==========================================================================
+   動き(ボタンを押したとき等の反応、2026-10-05)。ui_motion.jsと組で使う。
+   ========================================================================== */
+:root { --spring: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1); }
+
+/* 押すと少し縮み、離すとばねのように戻る */
+a.button, button.button, label.button, header nav a, .page-tabs a, .sidebar-list a,
+.theme-toggle, .notif-bell, .nav-toggle, .pf-day, .pf-nav a, .pf-chip, .wx-hero-stat, .copy-btn {
+    transition: transform 0.35s var(--spring), background-color 0.2s ease, color 0.2s ease,
+                box-shadow 0.25s ease, border-color 0.2s ease;
+}
+a.button:active, button.button:active, label.button:active, .theme-toggle:active, .notif-bell:active,
+.nav-toggle:active, .pf-nav a:active, .copy-btn:active {
+    transform: scale(0.94);
+    transition-duration: 0.08s;
+}
+header nav a:active, .page-tabs a:active, .sidebar-list a:active, .pf-chip:active { transform: scale(0.96); transition-duration: 0.08s; }
+.pf-day:active, .wx-hero-stat:active { transform: scale(0.97); transition-duration: 0.08s; }
+
+/* ボタンは触れると少し浮き、表面を光が横切る(ガラスの反射) */
+a.button, button.button, label.button { position: relative; overflow: hidden; }
+a.button::after, button.button::after, label.button::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+    transform: skewX(-18deg) translateX(0);
+    opacity: 0;
+    pointer-events: none;
+}
+a.button:hover::after, button.button:hover::after, label.button:hover::after {
+    opacity: 1;
+    transform: skewX(-18deg) translateX(420%);
+    transition: transform 0.75s var(--ease-out), opacity 0.2s ease;
+}
+a.button:hover, button.button:hover, label.button:hover { transform: translateY(-1px); }
+button.button:disabled::after { display: none; }
+.pf-day:hover, .wx-hero-stat:hover { transform: translateY(-2px); }
+.pf-chip { display: inline-block; }
+.pf-chip:hover { transform: translateY(-1px) scale(1.03); }
+
+/* 選択中のタブ・ナビは、切り替わったときにふわっと現れる */
+header nav a.active, .page-tabs a.active, .pf-day[aria-pressed="true"] { animation: uiPop 0.45s var(--spring); }
+@keyframes uiPop {
+    0% { transform: scale(0.92); }
+    100% { transform: scale(1); }
+}
+
+/* 押した位置から広がる波紋 */
+.ui-ripple-clip {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 0;
+}
+.ui-ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.25) 40%, transparent 70%);
+    transform: scale(0);
+    opacity: 1;
+    animation: uiRipple 0.65s var(--ease-out) forwards;
+}
+header nav a .ui-ripple, .page-tabs a .ui-ripple, .sidebar-list a .ui-ripple, .pf-nav a .ui-ripple,
+.theme-toggle .ui-ripple, .notif-bell .ui-ripple, .pf-day .ui-ripple, .copy-btn .ui-ripple {
+    background: radial-gradient(circle, rgba(10, 100, 210, 0.28) 0%, rgba(10, 100, 210, 0.12) 40%, transparent 70%);
+}
+@keyframes uiRipple {
+    to { transform: scale(1); opacity: 0; }
+}
+
+/* 入力欄はフォーカスしたときに枠の光がふわっと広がる */
+input:focus, textarea:focus, select:focus { transition: box-shadow 0.25s var(--ease-out), border-color 0.2s ease; }
+
+/* ダーク/ライト切替の瞬間だけ、色の変化をなめらかに */
+.ui-theme-anim, .ui-theme-anim *, .ui-theme-anim *::before, .ui-theme-anim *::after {
+    transition: background-color 0.5s ease, color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease !important;
+}
+
+/* ページを移動するときに、前後のページをなめらかに切り替える(対応ブラウザのみ。ヘッダーは固定) */
+@view-transition { navigation: auto; }
+header, .pf-header { view-transition-name: site-header; }
+::view-transition-old(root) { animation: uiPageOut 0.22s ease both; }
+::view-transition-new(root) { animation: uiPageIn 0.32s var(--ease-out) both; }
+@keyframes uiPageOut { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes uiPageIn { from { opacity: 0; transform: translateY(8px); } }
+
+/* 動きを減らす設定の利用者には、これらの動きを付けない */
+@media (prefers-reduced-motion: reduce) {
+    a.button, button.button, label.button, header nav a, .page-tabs a, .sidebar-list a, .theme-toggle,
+    .notif-bell, .nav-toggle, .pf-day, .pf-nav a, .pf-chip, .wx-hero-stat, .copy-btn {
+        transition: none;
+        transform: none !important;
+        animation: none !important;
+    }
+    a.button::after, button.button::after, label.button::after { display: none; }
+    @view-transition { navigation: none; }
+    ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}

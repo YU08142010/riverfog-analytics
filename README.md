@@ -81,7 +81,7 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。
 
-**見た目**: `web_static/glass.css`(macOS風の磨りガラス。base.html・base_auth.html・public_base.htmlでstyle.cssの後に読み込み、色・角丸・影だけを上書きする。外せば元の見た目に戻る)。地点ページ(研究用・公開とも)は`_weather_scene.html`+`web_static/weather_scene.css`で、最新の観測(現象コード)と地点の日の出・日の入りから決めた時間帯に応じた空と、流れる霧・雲・雨を背景に描く(`webapp._weather_scene`)。動きは`web_static/weather_scene.js`(Canvas。霧のかたまり・雲・雨・星を流し、マウスとスクロールで層ごとにずらして奥行きを出す。JSが無い場合はCSSの霧の帯で代用)。ダッシュボードと公開ページのトップも、全地点の最新の観測から決めた代表の状況(`_overview_weather_scene`)で同じ背景を出す。
+**見た目**: `web_static/glass.css`(macOS風の磨りガラス。base.html・base_auth.html・public_base.htmlでstyle.cssの後に読み込み、色・角丸・影だけを上書きする。外せば元の見た目に戻る)。地点ページ(研究用・公開とも)は`_weather_scene.html`+`web_static/weather_scene.css`で、最新の観測(現象コード)と地点の日の出・日の入りから決めた時間帯に応じた空と、流れる霧・雲・雨を背景に描く(`webapp._weather_scene`)。動きは`web_static/weather_scene.js`(Canvas。霧のかたまり・雲・雨・星を流し、マウスとスクロールで層ごとにずらして奥行きを出す。JSが無い場合はCSSの霧の帯で代用)。ダッシュボードと公開ページのトップも、全地点の最新の観測から決めた代表の状況(`_overview_weather_scene`)で同じ背景を出す。ボタン等の押したときの反応(押すと縮んでばねのように戻る・押した位置から広がる波紋・触れると光が横切る・ページ移動のなめらかな切り替え)は`glass.css`の「動き」の節と`web_static/ui_motion.js`。
 
 **公開ページ**: `/forecast`(と`/forecast/about`)はログイン不要の一般向けページで、未ログインで`/`に来た人はここに転送される(研究用サイトには「関係者ログイン」から入る)。本番の最新予測を地点・日中の時刻ごとに3段階(しきい値以上=出やすい、しきい値の半分以上=やや出やすい、それ以外=出にくい)で今日〜明後日まで表示する(`webapp._build_public_forecast`)。地点ページ`/forecast/station/<地点名>`では、その地点の3日分と、過去の月別・時刻別の川霧の割合(日中・訂正込み、`_build_public_station_stats`。集計に約20秒かかるため裏で作り直し6時間キャッシュ)を示す。カメラ画像・確率の値・利用者情報は出さず、noindex。気象業務法の予報業務許可との関係があるため「予報」ではなく研究用の試験情報として表示している。
 | `web_templates/` | Jinja テンプレート(57ファイル)。`base.html` が共通レイアウト・ナビ・サイト独自モーダル・右クリックメニュー基盤を持つ。 |
