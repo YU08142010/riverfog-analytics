@@ -58,6 +58,7 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
         <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
         {% endif %}
     </nav>
+    <button type="button" class="spotlight-trigger" data-spotlight-open aria-label="検索(Ctrl+K)" title="検索(Ctrl+K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>検索</span><kbd>Ctrl K</kbd></button>
     <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
     <div class="notif-bell-wrap">
         <button type="button" class="notif-bell" id="notif-bell-btn" aria-label="通知" aria-expanded="false">
@@ -749,5 +750,7 @@ document.addEventListener("submit", function(e) {
 })();
 </script>
 {% endif %}
+<script id="spotlight-data" type="application/json">{{ spotlight_items()|tojson }}</script>
+<script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
 </html>

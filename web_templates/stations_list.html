@@ -3,6 +3,7 @@
 {% from "_page_tabs.html" import page_tabs %}
 {% block title %}地点別{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='weather_scene.css') }}?v={{ app_version|default('') }}">{% endblock %}
 {% block content %}
 {{ page_tabs([
     {"label": "一覧", "url": url_for('stations_list'), "active": request.path.startswith('/stations')},
@@ -18,9 +19,18 @@
     {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
     {% if region_names %}
     <h3 class="station-grid-region-label">{{ region_label }}({{ region_names|length }}地点)</h3>
-    <ul class="tile-list station-tiles-region">
+    <ul class="wx-cards station-tiles-region">
         {% for name in region_names %}
-        <li data-name="{{ name }}"><a href="{{ url_for('station_detail', name=name) }}">{{ name }}</a></li>
+        {% set c = station_cards[name] %}
+        <li data-name="{{ name }}">
+            <a class="wx-card wx-{{ c.wx.phase }} wx-{{ c.wx.kind }} wx-lv{{ c.wx.level }}" href="{{ url_for('station_detail', name=name) }}">
+                <span class="wx-card-name">{{ name }}</span>
+                <span class="wx-card-temp">{% if c.temp is not none and c.temp == c.temp %}{{ "%.0f"|format(c.temp) }}°{% endif %}</span>
+                <span class="wx-card-region">{{ region_label }}{% if observed_at %} ・ {{ observed_at[6:] }}{% endif %}</span>
+                <span class="wx-card-cond">{{ c.label if c.label not in ("-", "") else "観測なし" }}</span>
+                <span class="wx-card-today lv{{ c.today_level }}"><i></i>{% if c.today_label %}今日の川霧: {{ c.today_label }}{% if c.high_hours %}({{ c.high_hours }}){% endif %}{% else %}今日の予測なし{% endif %}</span>
+            </a>
+        </li>
         {% endfor %}
     </ul>
     {% endif %}

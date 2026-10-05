@@ -310,3 +310,55 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
     background: rgba(255, 255, 255, 0.45);
     border-color: rgba(255, 255, 255, 0.7);
 }
+/* ==========================================================================
+   地点一覧のカード(天気アプリの都市リスト風、stations_list.html)
+   ========================================================================== */
+.wx-cards { list-style: none; margin: 0 0 1.2rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.85rem; }
+.wx-card {
+    --wx-fog: 255, 255, 255; --wx-fog-alpha: 0; --wx-haze-alpha: 0; --wx-cloud-alpha: 0;
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.15rem 0.6rem;
+    min-height: 118px;
+    padding: 0.85rem 1rem 0.8rem;
+    border-radius: 20px;
+    overflow: hidden;
+    color: #fff;
+    text-decoration: none;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
+    background: linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 75%, var(--wx-sky-bottom) 140%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 6px 18px rgba(20, 30, 60, 0.14);
+    transition: transform 0.35s var(--spring, ease), box-shadow 0.25s ease;
+    isolation: isolate;
+}
+.wx-card:hover { transform: translateY(-3px) scale(1.01); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 14px 30px rgba(20, 30, 60, 0.22); }
+.wx-card:active { transform: scale(0.97); transition-duration: 0.08s; }
+/* 霧・もや(カードの中をゆっくり流れる) */
+.wx-card::before, .wx-card::after {
+    content: "";
+    position: absolute;
+    left: -40%;
+    width: 180%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.95), transparent) 5% 60% / 40% 100% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.85), transparent) 45% 40% / 45% 90% no-repeat,
+        radial-gradient(closest-side, rgba(var(--wx-fog), 0.95), transparent) 85% 55% / 40% 100% no-repeat;
+    filter: blur(10px);
+}
+.wx-card::before { bottom: -18%; height: 70%; opacity: var(--wx-fog-alpha); animation: wxDrift 26s ease-in-out infinite alternate; }
+.wx-card::after { top: -30%; height: 80%; opacity: max(var(--wx-cloud-alpha), calc(var(--wx-haze-alpha) * 0.8)); animation: wxDrift 38s ease-in-out infinite alternate-reverse; }
+.wx-card-name { font-size: 1.12rem; font-weight: 700; letter-spacing: 0.03em; font-feature-settings: "palt" 1; align-self: start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wx-card-region { font-size: 0.75rem; opacity: 0.88; margin-top: 0.05rem; }
+.wx-card-temp { grid-row: 1 / span 2; grid-column: 2; font-family: "Inter", var(--font-ui, sans-serif); font-size: 2.7rem; font-weight: 250; line-height: 1; letter-spacing: -0.03em; }
+.wx-card-cond { grid-column: 1 / -1; align-self: end; font-size: 0.86rem; font-weight: 600; margin-top: 0.6rem; }
+.wx-card-today { grid-column: 1 / -1; font-size: 0.76rem; opacity: 0.95; display: flex; align-items: center; gap: 0.35rem; }
+.wx-card-today i { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: rgba(255, 255, 255, 0.45); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.wx-card-today.lv3 i { background: #ffd166; box-shadow: 0 0 10px #ffd166; }
+.wx-card-today.lv2 i { background: #9fd3ff; }
+/* 霧・曇りで空が白っぽい日中のカードは濃い文字 */
+.wx-card.wx-day.wx-fog, .wx-card.wx-day.wx-cloud, .wx-card.wx-day.wx-riverfog.wx-lv3 { color: #1b2633; text-shadow: 0 1px 6px rgba(255, 255, 255, 0.5); }
+.wx-card.wx-day.wx-fog .wx-card-today i, .wx-card.wx-day.wx-cloud .wx-card-today i { box-shadow: 0 0 0 1px rgba(27, 38, 51, 0.4); }
+@media (prefers-reduced-motion: reduce) { .wx-card::before, .wx-card::after { animation: none; } }

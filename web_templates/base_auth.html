@@ -22,6 +22,7 @@
 </script>
 </head>
 <body class="auth-body">
+{% with wx = overview_weather_scene().wx %}{% include "_weather_scene.html" %}{% endwith %}
 <button type="button" class="theme-toggle auth-theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
 <div class="auth-page">
     <div class="fog-layer" aria-hidden="true">
@@ -29,7 +30,9 @@
         <div class="fog-band fog-band-2"></div>
         <div class="fog-band fog-band-3"></div>
     </div>
+    {% block auth_top %}{% endblock %}
     <div class="auth-card">
+        <div class="lock-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 9h12M6 13h14M3 17h11M9 5h8"/></svg></div>
         <h1 class="auth-title">川霧観測・予測</h1>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}

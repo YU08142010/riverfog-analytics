@@ -4198,15 +4198,122 @@ def predictions_file(date, filename):
     return send_from_directory(PRED_DIR / date, filename)
 
 
+# --- Spotlight風の検索(Ctrl+K / ⌘K、web_static/spotlight.js) -------------------------------
+# 検索の候補(ページ・地点・管理画面・日付ページのURLの型)をbase.htmlにJSONで埋め込む。
+# 存在しないendpointが混ざっても壊れないよう、url_forに失敗したものは黙って除く。
+SPOTLIGHT_PAGES = (
+    ("ダッシュボード", "dashboard", "ホーム トップ"),
+    ("地点一覧", "stations_list", "地点 一覧 カメラ"),
+    ("地点比較", "compare_stations", "比較"),
+    ("地図", "map_page", "マップ map"),
+    ("シミュレーター", "simulator_page", "シミュレーション 予測 試す"),
+    ("観測アーカイブ", "observations_dates", "観測データ 過去"),
+    ("カメラ画像", "images_dates", "画像 写真 カメラ"),
+    ("予測結果", "predictions_dates", "予報 予測グラフ"),
+    ("予測精度", "accuracy_page", "精度 的中率 F1 特徴量 重要度 分析"),
+    ("気象と川霧のグラフ", "weather_fog_graph_page", "分析 グラフ 気象"),
+    ("観測報告", "observation_reports", "報告 訂正"),
+    ("コミュニティ", "members_list", "メンバー 仲間 チャット"),
+    ("AIチャット", "chat_page", "AI チャット 質問 Gemini"),
+    ("ゲーム", "game_home", "ゲーム ショップ ポイント"),
+    ("意見箱", "feedback", "フィードバック 要望"),
+    ("更新履歴", "changelog_page", "バージョン 変更履歴"),
+    ("公開ページ(出やすさ)", "public_forecast", "公開 一般向け 出やすさ"),
+    ("この情報について(公開)", "public_about", "公開 説明 仕組み"),
+)
+SPOTLIGHT_ADMIN_PAGES = (
+    ("管理者トップ", "admin_home", "管理 ログ"),
+    ("エラー/警告", "admin_errors", "エラー 警告"),
+    ("サービス状態", "admin_status", "サービス 状態 稼働"),
+    ("モデル状況", "admin_models", "モデル 学習"),
+    ("カメラ稼働率", "admin_camera_health", "カメラ 稼働"),
+    ("Gemini状況", "admin_gemini", "Gemini AI 無料枠"),
+    ("精度レポート", "admin_accuracy_report", "精度 レポート"),
+    ("ディスク使用量", "admin_disk", "ディスク 容量"),
+    ("DB管理", "admin_db", "データベース DB"),
+    ("アカウント管理", "admin_accounts", "アカウント ユーザー 承認"),
+    ("設定", "admin_settings", "設定"),
+)
+SPOTLIGHT_DATE_RULES = (("観測データ", "/observations/<date>"), ("カメラ画像", "/images/<date>"), ("予測結果", "/predictions/<date>"))
+
+
+def _spotlight_items():
+    items = []
+
+    def add(label, endpoint, kind, keywords="", **values):
+        try:
+            items.append({"label": label, "href": url_for(endpoint, **values), "kind": kind, "keywords": keywords})
+        except Exception:
+            pass
+
+    for label, endpoint, keywords in SPOTLIGHT_PAGES:
+        add(label, endpoint, "page", keywords)
+    for name in STATION_NAMES:
+        add(name, "station_detail", "station", STATION_REGION.get(name) or "", name=name)
+    if session.get("role") == "admin" and not _is_funnel_request():
+        for label, endpoint, keywords in SPOTLIGHT_ADMIN_PAGES:
+            add(label, endpoint, "admin", keywords)
+    dates = []
+    for label, rule_text in SPOTLIGHT_DATE_RULES:
+        rule = next((r for r in app.url_map.iter_rules() if r.rule == rule_text), None)
+        if rule is not None:
+            try:
+                dates.append({"label": label, "href": url_for(rule.endpoint, date="0000-00-00")})
+            except Exception:
+                pass
+    return {"items": items, "dates": dates}
+
+
+@app.context_processor
+def _inject_spotlight():
+    return {"spotlight_items": _spotlight_items}
+
+
+def _station_card_data():
+    """地点一覧(天気アプリの都市リスト風)のカード用データ。"""
+    observations = None
+    try:
+        observations = _latest_observations()
+    except Exception as e:
+        log.warning("Station cards: failed to load observations: %s", e)
+    current_by_name = {s["name"]: s for s in observations["stations"]} if observations else {}
+    forecast = _public_forecast_safe() or {}
+    today_by_name = {s["name"]: s["days"][0] for s in forecast.get("stations", []) if s.get("days")}
+    temps = {}
+    try:
+        conn = station_weather.connect(STATION_WEATHER_DB_PATH)
+        try:
+            for name in STATION_NAMES:
+                row = station_weather.load_latest_station_weather(conn, name)
+                if row is not None and row["temperature"] is not None:
+                    temps[name] = row["temperature"]
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Station cards: failed to load station temperatures: %s", e)
+    cards = {}
+    for name in STATION_NAMES:
+        cur = current_by_name.get(name)
+        today = today_by_name.get(name) or {"max": 0, "hours": {}}
+        high_hours = sorted(h for h, lv in today["hours"].items() if lv == 3)
+        cards[name] = {
+            "wx": _weather_scene(name, cur["code"] if cur else None),
+            "label": cur["label"] if cur else "観測なし",
+            "temp": temps.get(name),
+            "today_level": today["max"],
+            "today_label": PUBLIC_LEVELS[today["max"]]["label"] if today["max"] else None,
+            "high_hours": (f"{high_hours[0]}時" + (f"〜{high_hours[-1]}時" if len(high_hours) > 1 else "")) if high_hours else None,
+        }
+    observed_at = observations["datetime"].strftime("%m/%d %H:%M") if observations else None
+    return cards, observed_at, current_by_name
+
+
 @app.route("/stations")
 def stations_list():
-    observations = _latest_observations()
-    current_by_name = {}
-    if observations:
-        current_by_name = {s["name"]: s for s in observations["stations"]}
+    cards, observed_at, current_by_name = _station_card_data()
     return render_template(
         "stations_list.html", station_names=STATION_NAMES, current_by_name=current_by_name,
-        station_region=STATION_REGION,
+        station_region=STATION_REGION, station_cards=cards, observed_at=observed_at,
     )
 
 

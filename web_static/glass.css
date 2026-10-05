@@ -471,3 +471,149 @@ header h1 { letter-spacing: 0.03em; }
 @media (min-width: 901px) {
     header nav { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); padding-right: 24px; }
 }
+
+/* ==========================================================================
+   Spotlight風の検索(spotlight.js)
+   ========================================================================== */
+.spotlight-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 16vh 16px 16px;
+    background: rgba(10, 14, 22, 0.18);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+.spotlight-overlay.open { opacity: 1; }
+.spotlight-overlay[hidden] { display: none; }
+.spotlight {
+    width: min(660px, 100%);
+    border-radius: 20px;
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: saturate(190%) blur(34px);
+    backdrop-filter: saturate(190%) blur(34px);
+    border: 1px solid var(--glass-edge);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 0 0.5px var(--glass-hairline), 0 30px 80px rgba(0, 0, 0, 0.30);
+    overflow: hidden;
+    transform: translateY(-8px) scale(0.97);
+    transition: transform 0.28s var(--spring, ease);
+}
+.spotlight-overlay.open .spotlight { transform: none; }
+.spotlight-bar { display: flex; align-items: center; gap: 0.7rem; padding: 0.95rem 1.1rem; }
+.spotlight-glass { width: 24px; height: 24px; flex: 0 0 auto; fill: none; stroke: var(--color-text-muted); stroke-width: 2; stroke-linecap: round; }
+.spotlight-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 1.35rem !important;
+    font-weight: 400;
+    color: var(--color-text);
+    padding: 0.1rem 0;
+    outline: none;
+}
+.spotlight-esc, .spotlight-foot kbd {
+    font-family: var(--font-ui, inherit);
+    font-size: 0.72rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 6px;
+    background: var(--control-bg);
+    color: var(--color-text-muted);
+    border: 0.5px solid var(--glass-hairline);
+}
+.spotlight-results {
+    list-style: none;
+    margin: 0;
+    padding: 0.35rem;
+    max-height: min(52vh, 440px);
+    overflow-y: auto;
+    border-top: 0.5px solid var(--glass-hairline);
+}
+.spotlight-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 11px;
+    cursor: pointer;
+    color: var(--color-text);
+}
+.spotlight-item.active { background: var(--button-bg); color: #fff; }
+.spotlight-icon {
+    width: 28px; height: 28px; flex: 0 0 auto; padding: 5px; border-radius: 8px;
+    fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+    background: linear-gradient(160deg, #5aa8ff, #0a64d2);
+}
+.spotlight-icon-page { background: linear-gradient(160deg, #a78bfa, #6d4ae0); }
+.spotlight-icon-admin { background: linear-gradient(160deg, #9aa3b2, #5b6472); }
+.spotlight-icon-date { background: linear-gradient(160deg, #ff9f6b, #e8583a); }
+.spotlight-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.98rem; }
+.spotlight-kind { font-size: 0.75rem; color: var(--color-text-muted); }
+.spotlight-item.active .spotlight-kind { color: rgba(255, 255, 255, 0.85); }
+.spotlight-empty { padding: 1rem; text-align: center; color: var(--color-text-muted); }
+.spotlight-foot {
+    display: flex; gap: 1.1rem; flex-wrap: wrap;
+    padding: 0.55rem 1.1rem; font-size: 0.75rem; color: var(--color-text-muted);
+    border-top: 0.5px solid var(--glass-hairline);
+}
+/* ヘッダーの検索ボタン */
+.spotlight-trigger {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    background: var(--control-bg); color: var(--color-text-muted);
+    border: none; border-radius: 999px; padding: 0.38rem 0.75rem; font-size: 0.8rem; cursor: pointer;
+}
+.spotlight-trigger:hover { background: var(--color-primary-lighter); color: var(--color-text); }
+.spotlight-trigger svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.spotlight-trigger kbd { font-family: var(--font-ui, inherit); font-size: 0.68rem; opacity: 0.8; }
+@media (max-width: 640px) { .spotlight-trigger kbd, .spotlight-foot { display: none; } .spotlight-overlay { padding-top: 10vh; } }
+
+/* ==========================================================================
+   ロック画面風のログイン(base_auth.html / login.html)
+   ========================================================================== */
+.wx-scene ~ .auth-page .fog-layer { display: none; }
+.auth-page { flex-direction: column; gap: 2.2rem; }
+.lock-clock { text-align: center; color: #fff; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.28); position: relative; z-index: 1; }
+.lock-date { font-size: 1.25rem; font-weight: 600; letter-spacing: 0.06em; opacity: 0.95; }
+.lock-time {
+    font-family: "Inter", var(--font-ui, sans-serif);
+    font-size: clamp(5rem, 16vw, 9.5rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.72));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 4px 22px rgba(0, 0, 0, 0.18));
+}
+.lock-sub { font-size: 0.92rem; opacity: 0.9; margin-top: 0.4rem; }
+.wx-day.wx-fog ~ .auth-page .lock-clock, .wx-day.wx-cloud ~ .auth-page .lock-clock { color: #1b2633; text-shadow: 0 1px 14px rgba(255, 255, 255, 0.6); }
+.wx-day.wx-fog ~ .auth-page .lock-time, .wx-day.wx-cloud ~ .auth-page .lock-time {
+    background: linear-gradient(180deg, rgba(27, 38, 51, 0.92), rgba(27, 38, 51, 0.65)); -webkit-background-clip: text; background-clip: text;
+}
+.wx-scene ~ .auth-page .auth-card {
+    max-width: 360px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.55);
+    -webkit-backdrop-filter: saturate(180%) blur(28px);
+    backdrop-filter: saturate(180%) blur(28px);
+    animation: lockCardIn 0.7s 0.15s var(--ease-out, ease) both;
+}
+:root[data-theme="dark"] .wx-scene ~ .auth-page .auth-card { background: rgba(30, 32, 42, 0.58); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wx-scene ~ .auth-page .auth-card { background: rgba(30, 32, 42, 0.58); } }
+.lock-clock { animation: lockClockIn 0.9s var(--ease-out, ease) both; }
+@keyframes lockClockIn { from { opacity: 0; transform: translateY(-14px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes lockCardIn { from { opacity: 0; transform: translateY(16px) scale(0.97); } to { opacity: 1; transform: none; } }
+.lock-avatar {
+    width: 64px; height: 64px; margin: -0.2rem auto 0.8rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, #6fb2ff, #0a64d2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 22px rgba(10, 100, 210, 0.35);
+}
+.lock-avatar svg { width: 34px; height: 34px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; }
+@media (prefers-reduced-motion: reduce) { .lock-clock, .wx-scene ~ .auth-page .auth-card { animation: none; } }.wx-scene ~ .auth-page .auth-card button.button { width: 100%; margin: 0.4rem 0 0; padding: 0.7rem 1rem; border-radius: 12px; }

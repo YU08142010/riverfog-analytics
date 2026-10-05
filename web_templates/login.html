@@ -1,5 +1,25 @@
 {% extends "base_auth.html" %}
 {% block title %}ログイン{% endblock %}
+{% block auth_top %}
+{% set ov = overview_weather_scene() %}
+<div class="lock-clock" aria-hidden="true">
+    <div class="lock-date" id="lock-date"></div>
+    <div class="lock-time" id="lock-time"></div>
+    <div class="lock-sub">只見川・会津 {% if ov.n_total %}いま川霧を観測中: {{ ov.n_riverfog }}地点{% if ov.observed_in_dark %}(日没後の判定・参考){% endif %}{% else %}川霧の観測・予測{% endif %}</div>
+</div>
+<script>
+(function() {
+    var W = "日月火水木金土";
+    function tick() {
+        var d = new Date();
+        document.getElementById("lock-date").textContent = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + W[d.getDay()] + "曜日";
+        document.getElementById("lock-time").textContent = d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2);
+    }
+    tick();
+    setInterval(tick, 1000);
+})();
+</script>
+{% endblock %}
 {% block content %}
     <h2 style="margin-top:0;">ログイン</h2>
     {% if error %}
