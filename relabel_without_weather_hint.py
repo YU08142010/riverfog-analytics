@@ -17,6 +17,8 @@
     止まっても(Geminiの無料枠の上限等)、再実行すれば続きから再開する。
   - 全時刻を終えたら、予測DBの答え合わせ(実測)を新しいラベルに揃え、再予測
     (hindcast_lightgbm.py --replace)をやり直す。
+  - 毎時の観測とGeminiの無料枠を共有しているため、観測をしていない夜間(RUN_WINDOW)だけ、
+    1晩あたりMAX_SLOTS_PER_NIGHT時刻分まで判定する(約540時刻分なので3晩ほどかかる)。
 
 実行: nohup .venv/bin/python relabel_without_weather_hint.py >> logs/relabel.log 2>&1 &
 """
@@ -43,6 +45,10 @@ IMAGE_DIR = BASE_DIR / "data" / "images"
 PAUSE_BETWEEN_HOURS_SEC = 20     # 無料枠の分あたりの上限を避けるための間隔
 RETRY_WAIT_SEC = 30 * 60         # 判定が丸ごと失敗した(上限に達した等)ときの待ち時間
 MAX_CONSECUTIVE_FAILURES = 16    # これだけ続けて失敗したら止める(約8時間)
+# 毎時の観測(collect.py、4〜19時)とGeminiのAPIキー・無料枠を共有しているため、観測の判定を
+# 妨げないよう、観測をしていない夜間だけ動かし、1晩あたりの判定数にも上限を設ける。
+RUN_WINDOW = ((19, 10), (3, 50))  # 19:10〜翌3:50
+MAX_SLOTS_PER_NIGHT = 200
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                     handlers=[logging.StreamHandler()])
@@ -71,6 +77,31 @@ def _slots(start, end):
             for hour_dir in sorted(p for p in day_dir.iterdir() if p.is_dir() and p.name.isdigit()):
                 yield day.strftime("%Y-%m-%d"), hour_dir.name
         day += timedelta(days=1)
+
+
+def _night_key(now):
+    """夜の区切り(19:10〜翌3:50を、始まった日付で1つの夜として数える)。"""
+    return (now - timedelta(hours=4)).strftime("%Y-%m-%d")
+
+
+def _in_run_window(now):
+    (sh, sm), (eh, em) = RUN_WINDOW
+    minutes = now.hour * 60 + now.minute
+    return minutes >= sh * 60 + sm or minutes < eh * 60 + em
+
+
+def _wait_for_window(slots_this_night):
+    """判定してよい時間帯・回数の範囲になるまで待つ。戻り値: 今夜これまでの判定数(夜が変わったら0)。"""
+    night, count = slots_this_night
+    while True:
+        now = datetime.now(JST)
+        if _night_key(now) != night:
+            night, count = _night_key(now), 0
+        if _in_run_window(now) and count < MAX_SLOTS_PER_NIGHT:
+            return night, count
+        log.info("Waiting for the night window (%02d:%02d-%02d:%02d, max %d slot(s)/night; done tonight: %d)",
+                 *RUN_WINDOW[0], *RUN_WINDOW[1], MAX_SLOTS_PER_NIGHT, count)
+        time.sleep(15 * 60)
 
 
 def _refresh_predictions():
@@ -122,8 +153,10 @@ def main():
     log.info("=== Relabel started: %d hour slot(s) remaining (%s - %s) ===", len(slots), START_DATE, END_DATE)
     is_new_log = not CHANGES_PATH.exists()
     failures = 0
+    night = (_night_key(datetime.now(JST)), 0)
     i = 0
     while i < len(slots):
+        night = _wait_for_window(night)
         date, hhmm = slots[i]
         run_time = datetime.strptime(f"{date} {hhmm}", "%Y-%m-%d %H%M").replace(tzinfo=JST)
         dt_str = run_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -176,6 +209,7 @@ def main():
         log.info("%s: %d station(s) re-judged, %d label(s) changed", dt_str, len(new), n_changed)
         done.add(f"{date} {hhmm}")
         _save_progress(done)
+        night = (night[0], night[1] + 1)
         i += 1
         time.sleep(PAUSE_BETWEEN_HOURS_SEC)
 
