@@ -3,7 +3,8 @@
    要素(.card等)の中に置くと、position:fixedがその要素基準になり画面全体に広がらないため。 #}
 {% if wx %}
 <link rel="stylesheet" href="{{ url_for('static', filename='weather_scene.css') }}?v={{ app_version|default('') }}">
-<div class="wx-scene wx-{{ wx.phase }} wx-{{ wx.kind }} wx-lv{{ wx.level }}" aria-hidden="true" title="{{ wx.caption }}">
+<div class="wx-scene wx-{{ wx.phase }} wx-{{ wx.kind }} wx-lv{{ wx.level }}" aria-hidden="true" title="{{ wx.caption }}" data-kind="{{ wx.kind }}" data-level="{{ wx.level }}" data-phase="{{ wx.phase }}">
+    <div class="wx-rays"></div>
     <div class="wx-glow"></div>
     <div class="wx-stars"></div>
     <div class="wx-cloud-band wx-cloud-1"></div>
@@ -16,4 +17,5 @@
     <div class="wx-fogbank wx-fogbank-1"></div>
     <div class="wx-rainfall"></div>
 </div>
+<script src="{{ url_for('static', filename='weather_scene.js') }}?v={{ app_version|default('') }}" defer></script>
 {% endif %}

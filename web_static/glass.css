@@ -16,8 +16,8 @@
 :root {
     --color-primary: #0a64d2;
     --color-primary-dark: #0751ad;
-    --color-primary-light: rgba(10, 100, 210, 0.09);
-    --color-primary-lighter: rgba(10, 100, 210, 0.18);
+    --color-primary-light: #e8f1fc;
+    --color-primary-lighter: #d2e4fa;
     --color-bg: rgba(120, 130, 150, 0.09);
     --color-surface: #ffffff;
     --color-border: rgba(30, 40, 60, 0.10);
@@ -56,8 +56,8 @@
     :root:not([data-theme="light"]) {
         --color-primary: #4aa3ff;
         --color-primary-dark: #7dbdff;
-        --color-primary-light: rgba(74, 163, 255, 0.14);
-        --color-primary-lighter: rgba(74, 163, 255, 0.26);
+        --color-primary-light: #1c2d42;
+        --color-primary-lighter: #23405f;
         --color-bg: rgba(255, 255, 255, 0.06);
         --color-surface: #1e2027;
         --color-border: rgba(255, 255, 255, 0.10);
@@ -88,8 +88,8 @@
 :root[data-theme="dark"] {
     --color-primary: #4aa3ff;
     --color-primary-dark: #7dbdff;
-    --color-primary-light: rgba(74, 163, 255, 0.14);
-    --color-primary-lighter: rgba(74, 163, 255, 0.26);
+    --color-primary-light: #1c2d42;
+    --color-primary-lighter: #23405f;
     --color-bg: rgba(255, 255, 255, 0.06);
     --color-surface: #1e2027;
     --color-border: rgba(255, 255, 255, 0.10);

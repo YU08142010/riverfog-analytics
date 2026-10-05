@@ -4755,6 +4755,67 @@ def _weather_scene(name, code):
             "caption": f"最新の観測「{label}」・{WX_PHASE_LABELS[phase]}"}
 
 
+_overview_scene_cache = {"data": None, "at": 0.0}
+OVERVIEW_SCENE_CACHE_SECONDS = 120
+
+
+def _observed_in_daylight(dt):
+    info = CAMERA_INFO.get(STATION_NAMES[0], {}) if STATION_NAMES else {}
+    if info.get("lat") is None or info.get("lon") is None:
+        return True
+    try:
+        return bool(fog_features_is_daylight(dt, info["lat"], info["lon"]))
+    except Exception:
+        return True
+
+
+def _overview_weather_scene():
+    """ダッシュボード・公開ページのトップの背景演出。全地点の最新の観測から代表の状況を決める
+    (どこかで川霧→川霧(最も濃いもの)、なければ全体霧、雨・霧雨が2割以上の地点→雨、それ以外は晴れ)。
+    戻り値: {"wx": _weather_sceneの結果, "n_riverfog", "n_fog", "n_total", "observed_at"}"""
+    now = time.monotonic()
+    cached = _overview_scene_cache["data"]
+    if cached is not None and now - _overview_scene_cache["at"] < OVERVIEW_SCENE_CACHE_SECONDS:
+        return cached
+    try:
+        obs = _latest_observations()
+    except Exception as e:
+        log.warning("Overview scene: failed to load observations: %s", e)
+        obs = None
+    codes = []
+    if obs:
+        for s in obs["stations"]:
+            c = s.get("code")
+            if c is not None and c == c:
+                codes.append(int(c))
+    river = [c for c in codes if c in (1, 2, 3)]
+    fog = [c for c in codes if c in (4, 5, 6)]
+    rain = [c for c in codes if c in (9, 10)]
+    if river:
+        code = max(river)
+    elif fog:
+        code = max(fog)
+    elif codes and len(rain) >= 0.2 * len(codes):
+        code = max(rain)
+    else:
+        code = 0 if codes else None
+    data = {
+        "wx": _weather_scene(STATION_NAMES[0] if STATION_NAMES else None, code),
+        "n_riverfog": len(river), "n_fog": len(fog), "n_total": len(codes),
+        "observed_at": obs["datetime"].strftime("%m/%d %H:%M") if obs else None,
+        # 日の出前・日の入り後の画像は暗く、判定は参考程度(学習・評価でも対象外にしている)。
+        "observed_in_dark": bool(obs) and not _observed_in_daylight(obs["datetime"]),
+    }
+    _overview_scene_cache["data"] = data
+    _overview_scene_cache["at"] = now
+    return data
+
+
+@app.context_processor
+def _inject_overview_weather_scene():
+    return {"overview_weather_scene": _overview_weather_scene}
+
+
 @app.context_processor
 def _inject_weather_scene():
     return {"weather_scene": _weather_scene}

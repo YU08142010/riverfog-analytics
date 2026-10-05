@@ -181,6 +181,7 @@
     .wx-scene *, .wx-scene { animation: none !important; }
 }
 
+
 /* ---- 上部の見出し(天気アプリ風: 地点名・大きな気温・現在の状況) ------------- */
 .wx-hero {
     text-align: center;
@@ -195,7 +196,7 @@
 
 /* 背景を見せるため、地点ページのカードはふだんより透けさせる。 */
 .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card {
-    background: rgba(255, 255, 255, 0.52);
+    background: rgba(255, 255, 255, 0.80);
 }
 :root[data-theme="dark"] .wx-scene ~ main .card,
 :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
@@ -211,4 +212,101 @@
 }
 @media (prefers-reduced-transparency: reduce) {
     .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card { background: var(--color-surface); }
+}
+/* ---- Canvasでの描画(weather_scene.js)が動いているとき ------------------------ */
+.wx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wx-js .wx-fogbank, .wx-js .wx-cloud-band, .wx-js .wx-rainfall, .wx-js .wx-stars { display: none; }
+
+/* 太陽・月の光はゆっくり脈打ち、マウスに合わせて少しずれる(--wx-mx/--wx-myはJSが更新)。 */
+.wx-glow {
+    animation: wxGlow 9s ease-in-out infinite alternate;
+    translate: calc(var(--wx-mx, 0) * -26px) calc(var(--wx-my, 0) * -18px);
+}
+@keyframes wxGlow {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
+}
+.wx-night .wx-glow { animation-duration: 14s; }
+
+/* 晴れ・薄曇りの日中は、光の筋がゆっくり回る */
+.wx-rays {
+    position: absolute;
+    width: 160vmax;
+    height: 160vmax;
+    right: -80vmax;
+    top: -80vmax;
+    opacity: 0;
+    background: repeating-conic-gradient(from 0deg, rgba(var(--wx-glow), 0.10) 0deg 4deg, transparent 4deg 13deg);
+    -webkit-mask-image: radial-gradient(circle, #000 0%, transparent 55%);
+    mask-image: radial-gradient(circle, #000 0%, transparent 55%);
+    animation: wxSpin 160s linear infinite;
+    translate: calc(var(--wx-mx, 0) * -14px) calc(var(--wx-my, 0) * -10px);
+}
+.wx-day.wx-clear .wx-rays, .wx-day.wx-cloud.wx-lv1 .wx-rays { opacity: 0.9; }
+.wx-dawn.wx-clear .wx-rays, .wx-dusk.wx-clear .wx-rays, .wx-dawn.wx-riverfog .wx-rays { opacity: 0.6; }
+@keyframes wxSpin { to { transform: rotate(360deg); } }
+
+/* 空の色そのものも、ごくゆっくり明るさが揺らぐ */
+.wx-scene::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.14), transparent 60%);
+    animation: wxSky 18s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+@keyframes wxSky {
+    0% { opacity: 0.2; transform: translateX(-4%); }
+    100% { opacity: 1; transform: translateX(4%); }
+}
+
+/* 見出しは少し浮かび上がるように表示 */
+.wx-hero { animation: wxHeroIn 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.wx-hero-temp { animation: wxHeroIn 1.1s 0.1s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes wxHeroIn {
+    0% { opacity: 0; transform: translateY(14px) scale(0.98); filter: blur(4px); }
+    100% { opacity: 1; transform: none; filter: none; }
+}
+.wx-hero-stats { display: flex; justify-content: center; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
+.wx-hero-stat {
+    min-width: 7.5rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.16);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+}
+.wx-hero-stat b { display: block; font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+.wx-hero-stat span { font-size: 0.78rem; opacity: 0.92; }
+a.wx-hero-stat { color: #fff; text-decoration: none; }
+a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
+.wx-scene ~ main .pf-hero h1, .wx-scene ~ main .pf-hero p, .wx-scene ~ main .pf-hero .pf-muted {
+    color: #fff;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
+}
+.wx-scene ~ main .pf-hero { text-align: center; padding: 1.2rem 0 0.6rem; }
+.wx-scene ~ main .pf-days { justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+    .wx-hero, .wx-hero-temp, .wx-scene::after, .wx-rays, .wx-glow { animation: none !important; }
+}
+/* 見出し周りの文字色。空が暗い・色が濃いときは白、霧や雲で空が白っぽい日中は濃い色にする。 */
+.wx-scene ~ main > p.pf-muted { color: rgba(255, 255, 255, 0.9); text-align: center; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3); }
+.wx-day.wx-fog ~ main .wx-hero, .wx-day.wx-riverfog.wx-lv3 ~ main .wx-hero, .wx-day.wx-cloud ~ main .wx-hero,
+.wx-day.wx-fog ~ main .pf-hero h1, .wx-day.wx-riverfog.wx-lv3 ~ main .pf-hero h1, .wx-day.wx-cloud ~ main .pf-hero h1,
+.wx-day.wx-fog ~ main .pf-hero p, .wx-day.wx-riverfog.wx-lv3 ~ main .pf-hero p, .wx-day.wx-cloud ~ main .pf-hero p,
+.wx-day.wx-fog ~ main > p.pf-muted, .wx-day.wx-riverfog.wx-lv3 ~ main > p.pf-muted, .wx-day.wx-cloud ~ main > p.pf-muted,
+.wx-day.wx-fog ~ main .breadcrumb a, .wx-day.wx-riverfog.wx-lv3 ~ main .breadcrumb a, .wx-day.wx-cloud ~ main .breadcrumb a,
+.wx-day.wx-fog ~ main .breadcrumb, .wx-day.wx-riverfog.wx-lv3 ~ main .breadcrumb, .wx-day.wx-cloud ~ main .breadcrumb,
+.wx-day.wx-fog ~ main .pf-back, .wx-day.wx-riverfog.wx-lv3 ~ main .pf-back, .wx-day.wx-cloud ~ main .pf-back {
+    color: #1b2633;
+    text-shadow: 0 1px 10px rgba(255, 255, 255, 0.6);
+}
+.wx-day.wx-fog ~ main .wx-hero a, .wx-day.wx-riverfog.wx-lv3 ~ main .wx-hero a, .wx-day.wx-cloud ~ main .wx-hero a { color: #1b2633 !important; }
+.wx-day.wx-fog ~ main .wx-hero-stat, .wx-day.wx-riverfog.wx-lv3 ~ main .wx-hero-stat, .wx-day.wx-cloud ~ main .wx-hero-stat {
+    background: rgba(255, 255, 255, 0.45);
+    border-color: rgba(255, 255, 255, 0.7);
 }

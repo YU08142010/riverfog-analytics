@@ -1,8 +1,25 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% block title %}ダッシュボード{% endblock %}
+{% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
 <div class="{{ dashboard_theme_class or '' }}">
+{% set ov = overview_weather_scene() %}
+<div class="wx-hero">
+    <div class="wx-hero-name">只見川・会津 いまの川霧</div>
+    {% if ov.n_total %}
+    <div class="wx-hero-temp">{{ ov.n_riverfog }}<span style="font-size:0.32em; font-weight:400;"> 地点</span></div>
+    <div class="wx-hero-cond">{{ "で川霧を観測中" if ov.n_riverfog else "川霧は観測されていません" }}</div>
+    <div class="wx-hero-sub">{{ ov.observed_at }} の観測 ・ {{ ov.n_total }}地点{% if ov.observed_in_dark %} ・ 日没後の暗い画像の判定のため参考{% endif %}</div>
+    {% else %}
+    <div class="wx-hero-cond">最新の観測がありません</div>
+    {% endif %}
+    <div class="wx-hero-stats">
+        <div class="wx-hero-stat"><b>{{ alerts|length }}</b><span>今後24時間の川霧予測</span></div>
+        <div class="wx-hero-stat"><b>{{ ov.n_fog }}</b><span>全体霧の地点</span></div>
+        <a class="wx-hero-stat" href="{{ url_for('public_forecast') }}"><b>3日</b><span>出やすさ(公開ページ)</span></a>
+    </div>
+</div>
 
 {% for ann in announcements_list %}
 <div class="card" style="border-left: 5px solid var(--color-primary); background: var(--color-primary-light);">
