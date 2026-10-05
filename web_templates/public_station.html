@@ -31,7 +31,7 @@
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
     <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}</div>
     <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} の観測{% endif %}</div>
-    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※このカメラはレンズが曇りやすく、「いま」の判定は参考です</div>{% endif %}
+    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※このカメラはレンズが曇りやすいため、「いま」の判定は参考程度にご覧ください</div>{% endif %}
     {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
 </div>
 
@@ -57,7 +57,7 @@
     </div>
     <p class="pf-muted" style="margin-bottom:0;">高 = {{ levels[3].label }}、中 = {{ levels[2].label }}、色の薄いマス = {{ levels[1].label }}、空欄 = 夜間(対象外)。{% if data.run_at %}{{ data.run_at[:16] }} 時点の計算です。{% endif %}</p>
     {% else %}
-    <p>この地点の予測は現在ありません。</p>
+    <p>この地点の予測は、現在ご用意できておりません。</p>
     {% endif %}
 </div>
 
@@ -66,7 +66,7 @@
     <h2>いまの様子(観測)</h2>
     <div class="pf-now-box">
         <span class="pf-now-label">{{ station.now.label }}</span>
-        <span class="pf-muted">{{ data.observed_at }} のカメラ画像をAIで判定した結果です(誤判定が含まれることがあります)。</span>
+        <span class="pf-muted">{{ data.observed_at }} のカメラ画像をAIで判定した結果です(誤判定が含まれる場合がございます)。</span>
     </div>
 </div>
 {% endif %}
@@ -103,9 +103,9 @@
             {{ bars(stats.by_hour, "時") }}
         </div>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">数字はその月・時刻に川霧が出ていた割合(%)です。判定が{{ min_n }}回未満の月・時刻は「-」にしています。2026年8月より前は、別の方法で集めて目視で確認した記録です。</p>
+    <p class="pf-muted" style="margin-bottom:0;">数字はその月・時刻に川霧が出ていた割合(%)です。判定が{{ min_n }}回未満の月・時刻は「-」と表示しております。2026年8月より前は、別の方法で収集し、目視で確認した記録となります。</p>
     {% else %}
-    <p class="pf-muted">集計を準備中です。しばらくしてから再度ご覧ください。</p>
+    <p class="pf-muted">ただいま集計を準備しております。恐れ入りますが、しばらく経ってから改めてご覧ください。</p>
     {% endif %}
 </div>
 {% endblock %}
