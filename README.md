@@ -79,6 +79,8 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 | `hindcast_lightgbm.py` | 旧モデルが予測していた過去の日時を、現行モデルで「当時の条件」(前日19:30までのデータ・当時の予報)で予測し直して`predictions.db`に追加する(`model_type`に`[再予測]`)。分析ページ等の精度は現行モデルの行だけを集計する(`prediction_log.CURRENT_MODEL_LIKE`)。何度実行しても重複しない。 |
 | `relabel_without_weather_hint.py` | 2026-08-30〜10-02の現象ラベル(Geminiに気象のヒントを渡して判定していた期間)を、保存済み画像からヒントなしで判定し直す一回限りのスクリプト。変更前後は`data/experiments/relabel_without_weather_hint.csv`、進捗は同名の`.progress.json`。止まっても再実行で続きから再開し、完了後に予測DBの実測と再予測を更新する。 |
 
+**運用メモ(2026-10-05)**: ラベルの判定し直し(relabel_without_weather_hint.py)はcrontabの@rebootと30分ごとのflock付き起動で、サーバーが再起動しても続きから再開する(夜ごとの判定数は`.nights.json`、完了すると`.done`)。的中率の見出しは翌日の予測(発表から24時間先まで)に限り、再予測の件数も示す(`prediction_log.accuracy_summary`の`next_day`)。レンズが曇りやすい4地点(cameras.csvの「レンズ曇り」)は全体霧と判定されやすいため画面に注意書きを出す(学習には使う。外すとかえって精度が下がる)。学習に使う「地点の実測」の気象はOpen-Meteoのモデル値で、本物の地上観測ではない(予報との風速の相関0.93。`data/experiments/sun_lens_wind_check.json`)。
+
 **特徴量と重要度**: 露点温度は「気温 = 露点温度 + 気温露点差」で完全に重複するため特徴量から外している(`fog_model.EXCLUDED_FEATURES`。外しても精度は誤差の範囲、`data/experiments/feature_selection_check.json`)。分析ページの特徴量重要度は、学習時に評価期間(予報入力)で求めたSHAP値の絶対値の平均の割合(`global_metrics["importance"]`)で、まとまり(`FEATURE_GROUPS`)ごとの合計も示す。gainは似た特徴量に偏って配られるため使わない(検証の経緯は`data/experiments/feature_importance_check.json`)。
 
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。

@@ -39,6 +39,9 @@
 {% endif %}
 <div class="card">
     <h2>{{ name }}</h2>
+    {% if name in lens_haze_stations %}
+    <p class="muted" style="margin-top:-0.4rem;">この地点のカメラはレンズがわずかに曇っていることが多く、画像全体がかすんで「全体霧」と判定されやすい地点です。全体霧の判定は参考としてご覧ください(川霧の判定・予測には大きな影響はありません)。</p>
+    {% endif %}
 
     {% if current %}
     <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>

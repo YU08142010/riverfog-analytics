@@ -20,7 +20,9 @@
   - 毎時の観測とGeminiの無料枠を共有しているため、観測をしていない夜間(RUN_WINDOW)だけ、
     1晩あたりMAX_SLOTS_PER_NIGHT時刻分まで判定する(約540時刻分なので3晩ほどかかる)。
 
-実行: nohup .venv/bin/python relabel_without_weather_hint.py >> logs/relabel.log 2>&1 &
+実行: crontab(@rebootと30分ごと)から flock 付きで起動する(サーバーが再起動しても自動で続きから再開し、
+二重には動かない)。全部終わると完了の印(.done)を残し、以後の起動は何もせずに終わる。
+  flock -n /tmp/rf_relabel.lock .venv/bin/python relabel_without_weather_hint.py >> logs/relabel.log 2>&1
 """
 import argparse
 import csv
@@ -41,6 +43,8 @@ END_DATE = "2026-10-02"
 OUT_DIR = BASE_DIR / "data" / "experiments"
 CHANGES_PATH = OUT_DIR / "relabel_without_weather_hint.csv"
 PROGRESS_PATH = OUT_DIR / "relabel_without_weather_hint.progress.json"
+NIGHTS_PATH = OUT_DIR / "relabel_without_weather_hint.nights.json"   # 夜ごとの判定数(再起動しても上限を守る)
+DONE_PATH = OUT_DIR / "relabel_without_weather_hint.done"
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PAUSE_BETWEEN_HOURS_SEC = 20     # 無料枠の分あたりの上限を避けるための間隔
 RETRY_WAIT_SEC = 30 * 60         # 判定が丸ごと失敗した(上限に達した等)ときの待ち時間
@@ -66,6 +70,24 @@ def _save_progress(done):
     tmp = PROGRESS_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps({"done": sorted(done)}, ensure_ascii=False), encoding="utf-8")
     tmp.replace(PROGRESS_PATH)
+
+
+def _night_count(night):
+    try:
+        return int(json.loads(NIGHTS_PATH.read_text(encoding="utf-8")).get(night, 0))
+    except Exception:
+        return 0
+
+
+def _save_night_count(night, count):
+    try:
+        data = json.loads(NIGHTS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    data[night] = count
+    tmp = NIGHTS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(NIGHTS_PATH)
 
 
 def _slots(start, end):
@@ -96,7 +118,8 @@ def _wait_for_window(slots_this_night):
     while True:
         now = datetime.now(JST)
         if _night_key(now) != night:
-            night, count = _night_key(now), 0
+            night = _night_key(now)
+            count = _night_count(night)
         if _in_run_window(now) and count < MAX_SLOTS_PER_NIGHT:
             return night, count
         log.info("Waiting for the night window (%02d:%02d-%02d:%02d, max %d slot(s)/night; done tonight: %d)",
@@ -141,6 +164,8 @@ def main():
     if args.refresh_only:
         _refresh_predictions()
         return 0
+    if DONE_PATH.exists():
+        return 0
 
     import collect
     import weather_store
@@ -153,7 +178,8 @@ def main():
     log.info("=== Relabel started: %d hour slot(s) remaining (%s - %s) ===", len(slots), START_DATE, END_DATE)
     is_new_log = not CHANGES_PATH.exists()
     failures = 0
-    night = (_night_key(datetime.now(JST)), 0)
+    first_night = _night_key(datetime.now(JST))
+    night = (first_night, _night_count(first_night))
     i = 0
     while i < len(slots):
         night = _wait_for_window(night)
@@ -210,11 +236,13 @@ def main():
         done.add(f"{date} {hhmm}")
         _save_progress(done)
         night = (night[0], night[1] + 1)
+        _save_night_count(*night)
         i += 1
         time.sleep(PAUSE_BETWEEN_HOURS_SEC)
 
     log.info("=== All hour slots re-judged; refreshing the prediction DB and re-predictions ===")
     _refresh_predictions()
+    DONE_PATH.write_text(datetime.now(JST).isoformat(), encoding="utf-8")
     log.info("=== Relabel finished ===")
     return 0
 

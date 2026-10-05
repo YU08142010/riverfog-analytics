@@ -209,21 +209,24 @@ def chart_hours(res):
 
 
 def make_subplots_hours(hours, get):
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=hours, y=[get(h, "fog_n") / max(get(h, "n"), 1) for h in hours], name="川霧の発生率",
-                         marker={"color": "#aed6f1"}, yaxis="y2", opacity=0.7))
+    """時刻別のF1・適合率・再現率(上段、0〜1)と川霧の発生率(下段)。単位の違う2つの量を1つの図の
+    左右2本の縦軸に重ねると、軸の合わせ方次第で見え方が変わり読み違えやすいため、上下2段に分ける。"""
+    from plotly.subplots import make_subplots
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.08)
     fig.add_trace(go.Scatter(x=hours, y=[get(h, "f1") for h in hours], name="川霧F1(二値 予報値→予報値)",
-                             mode="lines+markers", line={"color": COLORS["V4"]}))
+                             mode="lines+markers", line={"color": COLORS["V4"]}), row=1, col=1)
     fig.add_trace(go.Scatter(x=hours, y=[get(h, "recall") for h in hours], name="再現率", mode="lines",
-                             line={"color": "#27ae60", "dash": "dot"}))
+                             line={"color": "#27ae60", "dash": "dot"}), row=1, col=1)
     fig.add_trace(go.Scatter(x=hours, y=[get(h, "precision") for h in hours], name="適合率", mode="lines",
-                             line={"color": "#e67e22", "dash": "dot"}))
-    fig.update_layout(**_layout("時刻別の川霧F1と発生率", height=360,
-                                xaxis={"title": {"text": "時刻(JST)"}, "dtick": 1},
-                                yaxis={"title": {"text": "F1 / 適合率 / 再現率"}, "range": [0, 1]},
-                                yaxis2={"title": {"text": "発生率"}, "overlaying": "y", "side": "right", "showgrid": False,
-                                        "rangemode": "tozero"},
-                                legend={"orientation": "h", "y": -0.28}))
+                             line={"color": "#e67e22", "dash": "dot"}), row=1, col=1)
+    fig.add_trace(go.Bar(x=hours, y=[get(h, "fog_n") / max(get(h, "n"), 1) * 100 for h in hours], name="川霧の発生率(%)",
+                         marker={"color": "#aed6f1"}), row=2, col=1)
+    fig.update_layout(**_layout("時刻別の川霧F1と発生率", height=440,
+                                legend={"orientation": "h", "y": -0.18}))
+    fig.update_yaxes(title_text="F1 / 適合率 / 再現率", range=[0, 1], row=1, col=1)
+    fig.update_yaxes(title_text="発生率(%)", rangemode="tozero", row=2, col=1)
+    fig.update_xaxes(title_text="時刻(JST)", dtick=1, row=2, col=1)
+    fig.update_xaxes(dtick=1, row=1, col=1)
     return fig
 
 

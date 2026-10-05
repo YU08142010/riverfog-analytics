@@ -12,8 +12,13 @@
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点の的中率推移グラフ" data-chart-url="{{ url_for('accuracy_chart') }}"></div></div>
-    <p class="muted">累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
-        （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%）</p>
+    {% if summary.next_day and summary.next_day.n %}
+    <p class="muted">翌日の予測(発表から24時間先まで) {{ summary.next_day.correct }}/{{ summary.next_day.n }}
+        （的中率 {{ "%.1f"|format(100.0 * summary.next_day.correct / summary.next_day.n) }}%{% if summary.next_day.n_hindcast %}、うち再予測 {{ summary.next_day.n_hindcast }}件{% endif %}）</p>
+    {% endif %}
+    <p class="muted">全リードタイム込みの累計 {{ summary.overall.correct }}/{{ summary.overall.n }}
+        （的中率 {{ "%.1f"|format(100.0 * summary.overall.correct / summary.overall.n) }}%{% if summary.overall.n_hindcast %}、うち再予測 {{ summary.overall.n_hindcast }}件{% endif %}）。
+        先の日付ほど当たりにくいため、リードタイム別の表もあわせて見てください。</p>
     {% if overall_fog_stats and overall_fog_stats.precision is not none %}
     <p class="muted">
         川霧かどうか(川霧を陽性とした場合):

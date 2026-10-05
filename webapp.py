@@ -961,6 +961,26 @@ def _load_camera_info():
 CAMERA_INFO = _load_camera_info()
 
 
+def _load_lens_haze_stations():
+    """cameras.csvの「レンズ曇り」列が付いた地点(レンズ自体が常にわずかに曇っているカメラ)。
+    これらの地点は画像全体がかすみ、「全体霧」と判定されやすい(日中の全体霧の割合が他地点の約3%に
+    対して約27%)。川霧のラベルは隣接地点並みで、学習から外すとかえって精度が下がる
+    (data/experiments/sun_lens_wind_check.json)ため学習には使い、画面で注意書きを出す。"""
+    try:
+        with open(CAMERAS_CSV, encoding="utf-8") as f:
+            return {row["地点名"] for row in csv.DictReader(f) if (row.get("レンズ曇り") or "").strip()}
+    except Exception:
+        return set()
+
+
+LENS_HAZE_STATIONS = _load_lens_haze_stations()
+
+
+@app.context_processor
+def _inject_lens_haze():
+    return {"lens_haze_stations": LENS_HAZE_STATIONS}
+
+
 def _river_go_jp_map_url(cam_id):
     """川の防災情報(国交省 river.go.jp)の地点別地図URLを組み立てる。
     座標データが無いため独自の地図は描けないが、river.go.jpは各カメラIDに対応する

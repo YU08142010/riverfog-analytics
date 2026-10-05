@@ -31,6 +31,7 @@
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
     <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}</div>
     <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} の観測{% endif %}</div>
+    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※このカメラはレンズが曇りやすく、「いま」の判定は参考です</div>{% endif %}
     {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
 </div>
 

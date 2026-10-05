@@ -219,11 +219,11 @@ document.addEventListener("ajaxformsuccess", function(e) {
             <div class="stat-label">視程</div>
             <div class="stat-value">{{ "%.1f"|format(observations.visibility) if observations.visibility is not none else "-" }}<span class="stat-unit">km</span></div>
         </div>
-        {% if accuracy and accuracy.overall.n %}
+        {% if accuracy and accuracy.next_day and accuracy.next_day.n %}
         <div class="stat-card">
-            <div class="stat-label">予測的中率(累計)</div>
-            <div class="stat-value">{{ "%.0f"|format(100.0 * accuracy.overall.correct / accuracy.overall.n) }}<span class="stat-unit">%</span></div>
-            <div class="stat-sub">{{ accuracy.overall.correct }}/{{ accuracy.overall.n }}件</div>
+            <div class="stat-label">翌日予測の的中率</div>
+            <div class="stat-value">{{ "%.0f"|format(100.0 * accuracy.next_day.correct / accuracy.next_day.n) }}<span class="stat-unit">%</span></div>
+            <div class="stat-sub">{{ accuracy.next_day.correct }}/{{ accuracy.next_day.n }}件{% if accuracy.next_day.n_hindcast %}(うち再予測{{ accuracy.next_day.n_hindcast }}件){% endif %}</div>
         </div>
         {% endif %}
     </div>

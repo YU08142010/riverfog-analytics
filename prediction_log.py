@@ -150,6 +150,17 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
             FROM predictions {where}""", params,
     ).fetchone()
 
+    # 見出しの的中率は「翌日の予測」(発表から24時間先まで)に限る。全リードタイムを混ぜると、
+    # 先の日付ほど当たりにくい予測の割合(答え合わせが済んだ時期によって変わる)で値が動くため。
+    # 再予測(過去分のやり直し、[再予測])の件数も分けて返し、本番の予測と区別できるようにする。
+    next_day = conn.execute(
+        f"""SELECT COUNT(*), SUM({_CORRECT_SQL}), SUM(CASE WHEN model_type LIKE '%[再予測]' THEN 1 ELSE 0 END)
+            FROM predictions {where} AND lead_hours < 24""", params,
+    ).fetchone()
+    n_hindcast = conn.execute(
+        f"""SELECT COUNT(*) FROM predictions {where} AND model_type LIKE '%[再予測]'""", params,
+    ).fetchone()[0]
+
     by_lead_bucket = conn.execute(
         f"""SELECT CAST(lead_hours / 24 AS INTEGER) AS lead_day,
                    COUNT(*), SUM({_CORRECT_SQL})
@@ -164,7 +175,8 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
     ).fetchall()
 
     return {
-        "overall": {"n": overall[0] or 0, "correct": overall[1] or 0},
+        "overall": {"n": overall[0] or 0, "correct": overall[1] or 0, "n_hindcast": n_hindcast or 0},
+        "next_day": {"n": next_day[0] or 0, "correct": next_day[1] or 0, "n_hindcast": next_day[2] or 0},
         "by_lead_day": [{"lead_day": d, "n": n, "correct": c} for d, n, c in by_lead_bucket],
         "by_station": [{"station": s, "n": n, "correct": c} for s, n, c in by_station],
     }
