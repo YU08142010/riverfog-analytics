@@ -34,11 +34,12 @@ from fog_features import (
     SLASH_COLOR,
     encode_phenomena_cell,
 )
-from fog_model import BINARY_LABELS, DEFAULT_FOG_THRESHOLD
+from fog_model import DEFAULT_FOG_THRESHOLD, binary_label
 
 # 予報の帯(二値の予測)の色。「川霧あり」は実測の帯の「川霧」(コード2)と同じ色にそろえる。
 BINARY_FOG_COLOR = PHENOM_COLORS[2]
 BINARY_CLEAR_COLOR = "#d5d8dc"
+BINARY_NIGHT_COLOR = "#566573"
 
 
 def _phenom_name(code):
@@ -75,9 +76,10 @@ def _binary_forecast_bar(x, preds):
     preds = [int(p) for p in preds]
     return go.Bar(
         x=x, y=[1] * len(x), base=-0.5, width=_HOUR_MS * 0.9,
-        marker={"color": [BINARY_FOG_COLOR if p == 1 else BINARY_CLEAR_COLOR for p in preds],
+        marker={"color": [BINARY_FOG_COLOR if p == 1 else (BINARY_CLEAR_COLOR if p == 0 else BINARY_NIGHT_COLOR)
+                          for p in preds],
                 "line": {"width": 0}},
-        hovertext=[f"予報: {BINARY_LABELS[p]}" for p in preds], hoverinfo="text", showlegend=False,
+        hovertext=[f"予報: {binary_label(p)}" for p in preds], hoverinfo="text", showlegend=False,
     )
 
 
@@ -216,7 +218,8 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
         counts.append(sum(1 for col in fog_cols if (group[col].astype(int) == 1).any()))
         if prob_df is not None and fog_cols:
             mask = prob_dates == d
-            mean_probs.append(float(prob_df.loc[mask, fog_cols].to_numpy().mean() * 100.0) if mask.any()
+            vals = prob_df.loc[mask, fog_cols].to_numpy(dtype="float64")
+            mean_probs.append(float(np.nanmean(vals) * 100.0) if mask.any() and np.isfinite(vals).any()
                               else np.nan)
         else:
             mean_probs.append(np.nan)
@@ -287,7 +290,7 @@ def export_prediction_csv(pred_df, prob_df, models, out_dir, run_date_str=""):
         long_rows.append(pd.DataFrame({
             "日時": pred_df["datetime"].dt.strftime("%Y/%m/%d %H:%M"),
             "地点": col,
-            "川霧の予測": preds.map(lambda p: BINARY_LABELS[p]),
+            "川霧の予測": preds.map(binary_label),
             "川霧確率(%)": (probs * 100).round(1),
             "しきい値(%)": round(threshold * 100, 1),
         }))

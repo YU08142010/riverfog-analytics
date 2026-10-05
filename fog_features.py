@@ -248,6 +248,45 @@ def _sunrise_hour(ts, lat, lon):
     return solar_noon - hour_angle_deg / 15.0
 
 
+def sun_times_hours(ts, lat, lon):
+    """その日の日の出・日の入り時刻(JST、0時からの経過時間)。NOAAの計算式(均時差・大気差込み、
+    誤差は数分程度)。_sunrise_hour(特徴量用の簡易式)とは別に、時間帯の判定に使う。"""
+    import math
+    n = pd.Timestamp(ts).timetuple().tm_yday
+    g = 2 * math.pi / 365 * (n - 1)
+    eqtime = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                       - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    lat_rad = math.radians(lat)
+    cos_ha = (math.cos(math.radians(90.833)) / (math.cos(lat_rad) * math.cos(decl))
+              - math.tan(lat_rad) * math.tan(decl))
+    ha = math.degrees(math.acos(max(-1.0, min(1.0, cos_ha))))
+    noon_jst_min = 720 - 4 * lon - eqtime + 540
+    return (noon_jst_min - 4 * ha) / 60.0, (noon_jst_min + 4 * ha) / 60.0
+
+
+def is_daylight(dt, lat, lon):
+    """その時刻が日の出から日の入りまでの間か。カメラ画像から川霧を判定できるのはこの時間帯
+    だけ(日の出前・日の入り後の画像は暗く、川霧があっても「現象なし」と判定されやすい。
+    2026-09下旬の実測では4時台の川霧の割合が0.8%、6時台が4.6%だった)。"""
+    ts = pd.Timestamp(dt)
+    sunrise, sunset = sun_times_hours(ts, lat, lon)
+    hour = ts.hour + ts.minute / 60.0
+    return sunrise <= hour <= sunset
+
+
+def daylight_mask(datetimes, lat, lon):
+    """is_daylightの配列版(日ごとに1回だけ日の出・日の入りを計算する)。"""
+    dt = pd.to_datetime(pd.Series(datetimes)).reset_index(drop=True)
+    days = dt.dt.normalize()
+    times = {d: sun_times_hours(d, lat, lon) for d in days.unique()}
+    hours = (dt - days).dt.total_seconds().to_numpy() / 3600.0
+    sunrise = days.map(lambda d: times[d][0]).to_numpy(dtype="float64")
+    sunset = days.map(lambda d: times[d][1]).to_numpy(dtype="float64")
+    return (hours >= sunrise) & (hours <= sunset)
+
+
 def _add_sunrise_feature(df, lat, lon):
     """『日の出まで残り何時間か』（明け方以外は0）を特徴量として追加する。"""
     df = df.copy()

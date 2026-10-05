@@ -55,6 +55,7 @@ import announcements
 import users
 import fog_data
 import fog_model
+from fog_features import is_daylight as fog_features_is_daylight
 import fog_tree_viz
 import weather_store
 import prediction_log
@@ -3443,7 +3444,7 @@ def _accuracy_by_weather_safe():
         try:
             rows = conn.execute(
                 "SELECT target_datetime, predicted_code, actual_code FROM predictions "
-                "WHERE actual_code IS NOT NULL AND model_type LIKE ?",
+                "WHERE actual_code IS NOT NULL AND model_type LIKE ? AND COALESCE(daylight, 1) = 1",
                 (prediction_log.CURRENT_MODEL_LIKE,),
             ).fetchall()
         finally:
@@ -4338,10 +4339,11 @@ def simulator_page():
         dt = datetime.strptime(f"{date_str} {hour:02d}:00", "%Y-%m-%d %H:%M")
         weather = {field["col"]: values[field["key"]] for field in SIM_WEATHER_FIELDS}
         is_fog, fog_prob = fog_model.simulate_station(info, station, lat, lon, weather, dt)
+        is_daylight = fog_features_is_daylight(dt, lat, lon)
         # 「川霧あり」は観測の「川霧」(コード2)と同じ色で表示する。
         _, color, text_color = _phenom_label_color(2 if is_fog else 0)
         result = {
-            "label": fog_model.BINARY_LABELS[is_fog], "is_fog": bool(is_fog),
+            "label": fog_model.BINARY_LABELS[is_fog], "is_fog": bool(is_fog), "is_daylight": is_daylight,
             "color": color, "text_color": text_color,
             "fog_prob": fog_prob, "fog_threshold": info.get("fog_threshold"),
             "model_type": fog_model.normalize_model_type_label(info.get("model_type")),

@@ -30,7 +30,7 @@ import fog_data
 import fog_model as fm
 import prediction_log
 import station_weather
-from fog_features import prepare_features
+from fog_features import is_daylight, prepare_features
 
 DB_PATH = BASE_DIR / "data" / "predictions.db"
 HINDCAST_MODEL_TYPE = fm.MODEL_TYPE_LABEL + "[再予測]"
@@ -56,6 +56,8 @@ def _old_model_targets(conn):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="予測するがDBには書き込まない")
+    parser.add_argument("--replace", action="store_true",
+                        help="既存の再予測の行を消してから作り直す(ラベルを判定し直した後などに使う)")
     args = parser.parse_args()
     load_dotenv(BASE_DIR / ".env")
 
@@ -74,6 +76,11 @@ def main():
         return 0
     target_df = pd.DataFrame([(s, pd.Timestamp(t), a) for (s, t), a in targets.items()],
                              columns=["station", "datetime", "actual_code"])
+    # 日の出前・日の入り後は学習・評価・答え合わせの対象外なので予測し直さない。
+    coords_all = load_camera_coords()
+    lat0, lon0 = representative_coords()
+    keep = [is_daylight(dt, *coords_all.get(st, (lat0, lon0))) for st, dt in zip(target_df["station"], target_df["datetime"])]
+    target_df = target_df[keep].reset_index(drop=True)
     days = sorted(target_df["datetime"].dt.normalize().unique())
     log.info("%d old-model (station, datetime) target(s) over %d day(s): %s - %s",
              len(target_df), len(days), days[0].date(), days[-1].date())
@@ -161,6 +168,10 @@ def main():
         log.info("Dry run: nothing written" if args.dry_run else "Nothing to write")
         return 0
     verified_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    if args.replace:
+        with conn:
+            n_deleted = conn.execute("DELETE FROM predictions WHERE model_type = ?", (HINDCAST_MODEL_TYPE,)).rowcount
+        log.info("Deleted %d existing re-predicted row(s)", n_deleted)
     with conn:
         before = conn.total_changes
         conn.executemany(
@@ -171,6 +182,7 @@ def main():
             [r + (verified_at,) for r in records],
         )
         log.info("Inserted %d row(s) into %s", conn.total_changes - before, DB_PATH)
+    prediction_log.fill_daylight(conn, coords_all)
     return 0
 
 

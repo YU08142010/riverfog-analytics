@@ -94,6 +94,10 @@
             (しきい値 {{ "%.0f"|format(result.fog_threshold * 100) }}%以上で「川霧あり」と判定{{ " ・ しきい値を超えています" if result.is_fog else "" }})
         </span>
     </p>
+    {% if not result.is_daylight %}
+    <p class="muted">この時刻は日の出前または日の入り後です。暗い時間帯の画像は川霧を判定できないため
+    モデルの学習・評価に使っておらず、本番の予測も出していません(参考値)。</p>
+    {% endif %}
     <p class="muted">使用モデル: {{ result.model_type }}</p>
 </div>
 {% endif %}

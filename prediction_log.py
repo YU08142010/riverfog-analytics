@@ -51,7 +51,7 @@ _CORRECT_SQL = f"CASE WHEN {_fog_sql('predicted_code')} = {_fog_sql('actual_code
 # LightGBM)の本番の予測と、旧モデルが予測していた過去の日時を現行モデルで予測し直した行
 # (model_typeに"[再予測]"が付く。hindcast_lightgbm.py)が該当する。旧モデルの行は「当時実際に
 # どう予測したか」の記録としてDBに残すが、同じ日時に新旧の予測が並ぶため集計からは外す。
-# model_like=Noneを渡すと全モデルの行を集計する。
+# model_like=Noneを渡すと全モデルの行を集計する。日の出前・日の入り後(daylight=0)の行は常に除く。
 CURRENT_MODEL_LIKE = "LightGBM(二値%"
 
 
@@ -62,7 +62,38 @@ def connect(db_path):
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    # daylight: 対象時刻が日の出〜日の入りの間なら1、それ以外は0(NULLは未判定、fill_daylightで埋める)。
+    # 暗い時間帯の画像からは川霧を判定できないため、精度の集計からは外す(2026-10-05追加)。
+    if "daylight" not in {r[1] for r in conn.execute("PRAGMA table_info(predictions)")}:
+        conn.execute("ALTER TABLE predictions ADD COLUMN daylight INTEGER")
+        conn.commit()
     return conn
+
+
+def fill_daylight(conn, coords_by_station):
+    """daylightが未判定の行を埋める。coords_by_station: {地点名: (緯度, 経度)}
+    (座標の無い地点は全地点の座標の平均で判定する)。戻り値: 埋めた(地点, 時刻)の数。"""
+    from fog_features import is_daylight
+    pairs = conn.execute(
+        "SELECT DISTINCT station, target_datetime FROM predictions WHERE daylight IS NULL"
+    ).fetchall()
+    if not pairs:
+        return 0
+    if coords_by_station:
+        fallback = (sum(c[0] for c in coords_by_station.values()) / len(coords_by_station),
+                    sum(c[1] for c in coords_by_station.values()) / len(coords_by_station))
+    else:
+        fallback = (37.4, 139.6)
+    updates = [
+        (1 if is_daylight(dt, *coords_by_station.get(st, fallback)) else 0, st, dt)
+        for st, dt in pairs
+    ]
+    with conn:
+        conn.executemany(
+            "UPDATE predictions SET daylight = ? WHERE station = ? AND target_datetime = ? AND daylight IS NULL",
+            updates,
+        )
+    return len(updates)
 
 
 def record_predictions(conn, run_at, rows):
@@ -112,6 +143,7 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
     if model_like:
         where += " AND model_type LIKE ?"
         params = params + (model_like,)
+    where += " AND COALESCE(daylight, 1) = 1"
 
     overall = conn.execute(
         f"""SELECT COUNT(*), SUM({_CORRECT_SQL})
@@ -151,6 +183,7 @@ def accuracy_trend(conn, station=None, model_like=CURRENT_MODEL_LIKE):
     if model_like:
         where += " AND model_type LIKE ?"
         params = params + (model_like,)
+    where += " AND COALESCE(daylight, 1) = 1"
 
     rows = conn.execute(
         f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
@@ -172,6 +205,7 @@ def fog_pair_counts(conn, since=None, station=None, model_like=CURRENT_MODEL_LIK
     if model_like:
         where.append("model_type LIKE ?")
         params.append(model_like)
+    where.append("COALESCE(daylight, 1) = 1")
     if since:
         where.append("verified_at >= ?")
         params.append(since)
@@ -201,6 +235,7 @@ def fog_prob_bucket_counts(conn, since=None, station=None, model_like=CURRENT_MO
     if model_like:
         where.append("model_type LIKE ?")
         params.append(model_like)
+    where.append("COALESCE(daylight, 1) = 1")
     if since:
         where.append("verified_at >= ?")
         params.append(since)
@@ -227,7 +262,7 @@ def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
     rows = conn.execute(
         """SELECT station, target_datetime, predicted_code, predicted_fog_prob, run_at
            FROM predictions
-           WHERE target_datetime BETWEEN ? AND ?
+           WHERE target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1
            ORDER BY run_at DESC""",
         (from_dt_str, to_dt_str),
     ).fetchall()

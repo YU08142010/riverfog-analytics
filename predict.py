@@ -117,7 +117,7 @@ def _save_feature_snapshot(feature_snapshots, models, now_naive, path=FEATURE_SN
     (station_detail.htmlで「この予測にどの数値が使われたか」を表示するため)。"""
     payload = {}
     for station, df in feature_snapshots.items():
-        future = df[df["datetime"] >= now_naive]
+        future = df[(df["datetime"] >= now_naive) & (df["predicted_fog"] >= 0)]
         if future.empty:
             continue
         row = future.iloc[0]
@@ -163,6 +163,8 @@ def record_new_predictions(conn, run_at_str, pred_df, prob_df, models):
             continue
         model_type = models[col].get("model_type", "")
         for dt, pred, prob in zip(sub_pred["datetime"], sub_pred[col], sub_prob[col]):
+            if int(pred) == fog_model.NOT_PREDICTED:
+                continue  # 日の出前・日の入り後は予測しない(答え合わせもしない)
             n_total += 1
             lead_hours = (dt.to_pydatetime() - run_at_dt).total_seconds() / 3600.0
             if lead_hours < 0:
@@ -208,6 +210,9 @@ def main():
     conn = prediction_log.connect(":memory:" if args.dry_run else str(DB_PATH))
 
     verify_pending_predictions(conn, phenom_df, station_names, now_naive)
+    n_marked = prediction_log.fill_daylight(conn, camera_coords)
+    if n_marked:
+        log.info("Marked %d prediction row(s) as daytime/night-time", n_marked)
 
     prev_state = fog_model.load_model_state()
     models = fog_model.train_shared_model(
@@ -258,7 +263,7 @@ def main():
     obs_hours = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)
     station_cols = [c for c in pred_df.columns if c != "datetime"]
     obs = pred_df[obs_hours]
-    per_day = obs.groupby(obs["datetime"].dt.strftime("%m/%d"))[station_cols].sum().sum(axis=1)
+    per_day = (obs[station_cols] == 1).groupby(obs["datetime"].dt.strftime("%m/%d")).sum().sum(axis=1)
     log.info("Forecast: %d station-hour(s) in observation hours, %d predicted as river fog (by day: %s)",
              len(obs) * len(station_cols), int(per_day.sum()),
              ", ".join(f"{d}:{int(n)}" for d, n in per_day.items()))

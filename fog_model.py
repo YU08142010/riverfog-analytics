@@ -75,6 +75,7 @@ from fog_features import (
     COL_WIND_SPEED,
     SUMMARY_FOG_CODES,
     build_location_class_targets,
+    daylight_mask,
     prepare_features,
 )
 
@@ -82,6 +83,14 @@ log = logging.getLogger("fog_model")
 
 MODEL_TYPE_LABEL = "LightGBM(二値・全地点共通)"
 BINARY_LABELS = ("川霧なし", "川霧あり")
+# 日の出前・日の入り後は、学習・評価の対象外なので予測もしない(予測値の代わりにこの値を入れる)。
+NOT_PREDICTED = -1
+NOT_PREDICTED_LABEL = "夜間(予測対象外)"
+
+
+def binary_label(value):
+    """二値の予測値(1/0/NOT_PREDICTED)の表示名。"""
+    return {1: BINARY_LABELS[1], 0: BINARY_LABELS[0]}.get(int(value), NOT_PREDICTED_LABEL)
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 # 過去に実際に出されていた予報(各時刻の直近のモデル出力をつないだもの)。しきい値の選択と
@@ -291,6 +300,8 @@ def load_low_confidence_set(path=CONFIDENCE_LOG_PATH):
         return set()
     if "confidence" not in df.columns:
         return set()
+    # 判定し直した(relabel_without_weather_hint.py等)日時・地点は、最新の判定の確信度を使う。
+    df = df.drop_duplicates(subset=["datetime", "station"], keep="last")
     low = df[df["confidence"] == "low"]
     return set(zip(low["datetime"].astype(str), low["station"].astype(str)))
 
@@ -376,6 +387,7 @@ def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coor
 
     frames = []
     station_coords = {}
+    n_dark = 0
     for col in phenom_cols:
         coords = (camera_coords or {}).get(col)
         s_lat, s_lon = coords if coords else (lat, lon)
@@ -392,6 +404,10 @@ def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coor
             method="linear", limit=WEATHER_INTERPOLATE_LIMIT, limit_direction="both",
         )
         df = df.dropna(subset=[col, *weather_features])
+        # 日の出前・日の入り後の画像は暗く、川霧を判定できないため学習・評価に使わない。
+        daylight = daylight_mask(df["datetime"], s_lat, s_lon)
+        n_dark += int((~daylight).sum())
+        df = df[daylight]
         if df.empty:
             continue
         part = df[weather_features].copy()
@@ -400,6 +416,8 @@ def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coor
         part["__station"] = col
         frames.append(part)
 
+    if n_dark:
+        log.info("Excluded %d row(s) before sunrise / after sunset from training and evaluation", n_dark)
     if not frames:
         return pd.DataFrame(), weather_features, shared_medians, station_coords
     frame = pd.concat(frames, ignore_index=True).sort_values(["__datetime", "__station"]).reset_index(drop=True)
@@ -827,8 +845,8 @@ def build_location_forecast(models, forecast_raw, lat, lon, forecast_by_station=
     """予報データに対して地点ごとの川霧の二値予測と確率を計算する。
     地点別の予報があればそれを使い、欠けている時間だけ代表地点の予報で埋める。
     戻り値: (pred_df, prob_df, feature_snapshots)
-      pred_df: datetime + 地点ごとの列(1=川霧あり、0=川霧なし)
-      prob_df: datetime + 地点ごとの列(川霧である確率)
+      pred_df: datetime + 地点ごとの列(1=川霧あり、0=川霧なし、NOT_PREDICTED=夜間で対象外)
+      prob_df: datetime + 地点ごとの列(川霧である確率。夜間はNaN)
       feature_snapshots: {地点名: DataFrame(datetime, 各特徴量, predicted_fog, predicted_fog_prob)}
     """
     pred_df = pd.DataFrame({"datetime": forecast_raw["datetime"].values})
@@ -848,8 +866,10 @@ def build_location_forecast(models, forecast_raw, lat, lon, forecast_by_station=
             f_raw, f_lat, f_lon = forecast_raw, lat, lon
         df, X = _station_feature_frame(info, f_raw, f_lat, f_lon)
         model = info["pipe"]
-        probs = model.fog_probability(X, col)
-        preds = (probs >= model.threshold).astype(int)
+        # 日の出前・日の入り後は学習・評価の対象外(暗くて判定できない)なので予測しない。
+        daylight = daylight_mask(df["datetime"], f_lat, f_lon)
+        probs = np.where(daylight, model.fog_probability(X, col), np.nan)
+        preds = np.where(daylight, (probs >= model.threshold).astype(int), NOT_PREDICTED)
         pred_df[col] = preds
         prob_df[col] = probs
         snapshot = X.copy()
