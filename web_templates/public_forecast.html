@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% block title %}川霧の出やすさ{% endblock %}
+{% block title %}発生予測{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -152,15 +152,15 @@
 {% endblock %}
 {% block content %}
 {% if not data %}
-<div class="pf-card"><p>ただいま情報をご用意できておりません。恐れ入りますが、しばらく経ってから改めてお越しください。</p></div>
+<div class="pf-card"><p>予測データを現在表示できない。時間をおいて再度参照されたい。</p></div>
 {% else %}
 <section class="pf-hero">
-    <h1 id="pf-headline">きょう、川霧が出そうな場所はどこでしょうか</h1>
-    <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点について、日中(日の出〜日の入り)の1時間ごとに、川霧の出やすさを3段階でお示しします。</p>
+    <h1 id="pf-headline">本日の川霧発生予測</h1>
+    <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点を対象に、日中(日の出〜日の入り)の各時刻における川霧の発生可能性を3段階で示す。</p>
 </section>
-<p class="pf-muted" style="margin:0.4rem 0 0;">{% if data.run_at %}予測の計算: {{ data.run_at[:16] }}(毎晩更新){% endif %}{% if data.observed_at %} / 最新の観測: {{ data.observed_at }}(毎時更新){% endif %}</p>
+<p class="pf-muted" style="margin:0.4rem 0 0;">{% if data.run_at %}予測計算: {{ data.run_at[:16] }}(日次更新){% endif %}{% if data.observed_at %} / 最新観測: {{ data.observed_at }}(毎時更新){% endif %}</p>
 {% if data.stale %}
-<div class="pf-notice" role="status">予測の更新が止まっているため、表示が古い可能性があります{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
+<div class="pf-notice" role="status">予測の更新が停止しているため、表示内容が最新でない可能性がある{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
 {% endif %}
 
 <div class="pf-days" role="group" aria-label="日付の切り替え">
@@ -173,25 +173,25 @@
 
 <div class="pf-grid">
     <div class="pf-card">
-        <h2 id="pf-summary-title">出やすい地点</h2>
+        <h2 id="pf-summary-title">予測の概要</h2>
         <p class="pf-answer" id="pf-answer" aria-live="polite"></p>
         <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
         <ol class="pf-rank" id="pf-rank"></ol>
         <p class="pf-more" id="pf-more" hidden></p>
         {% if data.observed_at %}
-        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「いま」の列は {{ data.observed_at }} のカメラ画像をAIで判定した結果です(予測ではなく観測。川霧と判定された地点を色付けしております)。</p>
+        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「現況」列は {{ data.observed_at }} 時点の河川カメラ画像をAIで判定した観測値であり、予測値ではない。川霧ありと判定された地点を着色している。</p>
         {% endif %}
     </div>
     <div class="pf-card">
         <h2>地図</h2>
         <div class="pf-map-wrap">
-            <div id="pf-map" role="img" aria-label="地点ごとの川霧の出やすさの地図(詳細は下の表を参照)"></div>
+            <div id="pf-map" role="img" aria-label="地点別の川霧発生可能性の地図(詳細は下表を参照)"></div>
             <div class="pf-map-clock" id="pf-map-clock" aria-hidden="true"><b></b><small></small></div>
         </div>
         <div class="pf-time" id="pf-time">
             <div class="pf-time-head">
-                <button type="button" class="pf-time-btn pf-play" id="pf-time-play">▶ 朝から再生</button>
-                <button type="button" class="pf-time-btn" id="pf-time-all" aria-pressed="true">1日の最大</button>
+                <button type="button" class="pf-time-btn pf-play" id="pf-time-play">▶ 時系列で再生</button>
+                <button type="button" class="pf-time-btn" id="pf-time-all" aria-pressed="true">日最大</button>
             </div>
             <p class="pf-time-hint" id="pf-time-label" aria-live="polite"></p>
             <div class="pf-hours" id="pf-hours" role="group" aria-label="地図に表示する時刻"></div>
@@ -200,14 +200,14 @@
             <span><i class="pf-lv3"></i>{{ levels[3].label }}</span>
             <span><i class="pf-lv2"></i>{{ levels[2].label }}</span>
             <span><i class="pf-lv1"></i>{{ levels[1].label }}</span>
-            <span><i class="pf-lv0"></i>夜間・データなし</span>
+            <span><i class="pf-lv0"></i>夜間(対象外)</span>
         </div>
     </div>
 </div>
 
 <div class="pf-card">
-    <h2>時間ごとの出やすさ</h2>
-    <p class="pf-muted" style="margin-top:0;">色が濃いほど、川霧が出やすいという予測です。空欄は夜間です(暗くてカメラで判定できないため、対象外としております)。<a href="{{ url_for('public_about') }}">段階の決め方</a></p>
+    <h2>時刻別の発生可能性</h2>
+    <p class="pf-muted" style="margin-top:0;">色が濃いほど発生可能性が高い。空欄は夜間であり、カメラによる判定ができないため予測対象外とした。<a href="{{ url_for('public_about') }}">3段階の判定基準</a></p>
     <div class="pf-table-wrap">
         <table class="pf-table" id="pf-table"></table>
     </div>
@@ -233,7 +233,7 @@
     var map = null, markers = [];
     var mapDiv = document.getElementById("pf-map");
     if (typeof L === "undefined") {
-        mapDiv.textContent = "地図を読み込めませんでした。下の表をご覧ください。";
+        mapDiv.textContent = "地図を読み込めなかった。下表を参照されたい。";
     } else {
         map = L.map(mapDiv, {scrollWheelZoom: false});
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -252,7 +252,7 @@
         if (bounds.length) { map.fitBounds(bounds, {padding: [20, 20]}); } else { map.setView([37.35, 139.32], 10); }
     }
 
-    var HEADLINE_DAY = ["きょう", "あした", "あさって"];
+    var HEADLINE_DAY = ["本日", "明日", "明後日"];
     var RANK_LIMIT = 6;
     function hasHours(dayIdx) {
         return data.stations.some(function(s) { return Object.keys(s.days[dayIdx].hours).length > 0; });
@@ -262,7 +262,7 @@
         var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] >= minLv; })
             .map(Number).sort(function(a, b) { return a - b; });
         if (!hrs.length) { return ""; }
-        return hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : "ごろ");
+        return hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : "");
     }
     // 出やすい順: 最大の段階 → その段階の時間数 → やや出やすい以上の時間数 → 早い時刻
     function rankStations(dayIdx) {
@@ -296,8 +296,8 @@
     function renderSummary(dayIdx) {
         var day = data.days[dayIdx];
         var word = HEADLINE_DAY[dayIdx] || day.label;
-        document.getElementById("pf-headline").textContent = word + "、川霧が出そうな場所はどこでしょうか";
-        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")の見込み";
+        document.getElementById("pf-headline").textContent = word + "の川霧発生予測";
+        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")の予測概要";
         var ranked = rankStations(dayIdx);
         var high = ranked.filter(function(s) { return s.days[dayIdx].max === 3; });
         var mid = ranked.length - high.length;
@@ -305,18 +305,18 @@
         answer.textContent = "";
         if (!hasHours(dayIdx)) {
             answer.textContent = dayIdx === 0
-                ? "きょうの日中の予測はすでに終了しております。あしたの見込みをご覧ください。"
-                : "この日の予測はまだご用意できておりません。";
+                ? "本日の日中の予測対象時刻は終了した。明日以降の予測を参照されたい。"
+                : "この日の予測はまだ計算されていない。";
         } else if (high.length) {
-            answer.appendChild(document.createTextNode("川霧が出やすいと予測される地点は "));
+            answer.appendChild(document.createTextNode("発生可能性「高」は "));
             answer.appendChild(el("strong", null, high.length + "地点"));
-            answer.appendChild(document.createTextNode(mid ? " です。このほか、" + mid + "地点でやや出やすいと見込まれます。" : " です。"));
+            answer.appendChild(document.createTextNode((mid ? "、「中」は" + mid + "地点" : "") + "である(対象" + data.stations.length + "地点)。"));
         } else if (mid) {
-            answer.appendChild(document.createTextNode("「出やすい」と予測される地点はございません。やや出やすいと見込まれるのは "));
+            answer.appendChild(document.createTextNode("発生可能性「高」の地点はなく、「中」は "));
             answer.appendChild(el("strong", null, mid + "地点"));
-            answer.appendChild(document.createTextNode(" です。"));
+            answer.appendChild(document.createTextNode("である(対象" + data.stations.length + "地点)。"));
         } else {
-            answer.textContent = "いずれの地点も、川霧は出にくいと見込まれます。";
+            answer.textContent = "全地点で発生可能性は「低」である。";
         }
         var list = document.getElementById("pf-rank");
         list.textContent = "";
@@ -335,7 +335,7 @@
         document.getElementById("pf-ribbon-axis").hidden = ranked.length === 0;
         var more = document.getElementById("pf-more");
         more.hidden = ranked.length <= RANK_LIMIT;
-        more.textContent = "残りの" + (ranked.length - RANK_LIMIT) + "地点は、下の表でご確認いただけます。";
+        more.textContent = "残る" + (ranked.length - RANK_LIMIT) + "地点は下表を参照。";
     }
 
     // 地図の時刻: null なら「1日の最大」、数値ならその時刻の予測で塗る。
@@ -344,7 +344,7 @@
     var playBtn = document.getElementById("pf-time-play");
     var hoursBox = document.getElementById("pf-hours");
     var clock = document.getElementById("pf-map-clock");
-    var PLAY_LABEL = "▶ 朝から再生";
+    var PLAY_LABEL = "▶ 時系列で再生";
     function stationLevel(s, dayIdx, hour) {
         return hour === null ? s.days[dayIdx].max : (s.days[dayIdx].hours[hour] || 0);
     }
@@ -358,28 +358,28 @@
         return c;
     }
     function describe(c) {
-        if (!c.any) { return "夜間のため、予測はございません。"; }
-        if (!c[3] && !c[2]) { return "いずれの地点も、川霧は出にくいと見込まれます。"; }
+        if (!c.any) { return "夜間のため予測対象外。"; }
+        if (!c[3] && !c[2]) { return "全地点で発生可能性「低」。"; }
         var parts = [];
-        if (c[3]) { parts.push("出やすい地点が" + c[3] + "か所"); }
-        if (c[2]) { parts.push("やや出やすい地点が" + c[2] + "か所"); }
-        return parts.join("、") + "ございます。";
+        if (c[3]) { parts.push("「高」" + c[3] + "地点"); }
+        if (c[2]) { parts.push("「中」" + c[2] + "地点"); }
+        return "発生可能性" + parts.join("、") + "。";
     }
     function paintMap() {
         var day = data.days[curDay];
-        var when = curHour === null ? day.label + "(1日の最大)" : day.label + " " + curHour + "時";
+        var when = curHour === null ? day.label + "(日最大)" : day.label + " " + curHour + "時";
         var c = countAt(curDay, curHour);
         document.getElementById("pf-time-label").textContent = (curHour === null
-            ? "1日のうち最も出やすい段階を表示しています。下の時刻を押すと、その時刻の予測に切り替わります。"
-            : curHour + "時の予測を表示しています。" + describe(c));
-        clock.querySelector("b").textContent = curHour === null ? "1日の最大" : curHour + "時";
+            ? "各地点の日最大の発生可能性を表示中。時刻を選択すると、その時刻の予測に切り替わる。"
+            : curHour + "時の予測を表示中。" + describe(c));
+        clock.querySelector("b").textContent = curHour === null ? "日最大" : curHour + "時";
         clock.querySelector("small").textContent = day.label + "(" + day.date_label + ")";
         clock.classList.remove("pf-tick"); void clock.offsetWidth; clock.classList.add("pf-tick");
         allBtn.setAttribute("aria-pressed", curHour === null ? "true" : "false");
         Array.prototype.forEach.call(hoursBox.children, function(b) {
             b.setAttribute("aria-pressed", Number(b.getAttribute("data-hour")) === curHour ? "true" : "false");
         });
-        mapDiv.setAttribute("aria-label", "地点ごとの川霧の出やすさの地図(" + when + "。詳しくは下の表をご覧ください)");
+        mapDiv.setAttribute("aria-label", "地点別の川霧発生可能性の地図(" + when + "。詳細は下表を参照)");
         markers.forEach(function(item) {
             var lv = stationLevel(item.station, curDay, curHour);
             var node = item.marker.getElement();
@@ -387,9 +387,9 @@
             item.marker.setZIndexOffset(lv * 1000);
             var box = el("div");
             box.appendChild(el("strong", null, item.station.name));
-            box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間のため予測なし")));
-            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現在の観測: " + item.station.now.label)); }
-            var link = el("a", null, "この地点の詳細を見る");
+            box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間(対象外)")));
+            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現況(観測): " + item.station.now.label)); }
+            var link = el("a", null, "地点の詳細");
             link.href = stationUrl(item.station.name);
             box.appendChild(link);
             if (item.marker.getPopup()) { item.marker.setPopupContent(box); } else { item.marker.bindPopup(box); }
@@ -408,7 +408,7 @@
             var b = el("button", "pf-hour");
             b.type = "button";
             b.setAttribute("data-hour", h);
-            b.setAttribute("aria-label", h + "時の予測を地図に表示");
+            b.setAttribute("aria-label", h + "時の予測を表示");
             b.appendChild(el("i", "pf-lv" + top));
             b.appendChild(el("span", null, String(h)));
             b.addEventListener("click", function() { stopPlay(); setHour(h); });
@@ -418,7 +418,7 @@
     function stopPlay() {
         if (playTimer) { clearInterval(playTimer); playTimer = null; }
         playBtn.textContent = PLAY_LABEL;
-        playBtn.setAttribute("aria-label", "5時から18時まで、1時間ずつ順に表示します");
+        playBtn.setAttribute("aria-label", "5時から18時まで1時間ごとに順に表示");
     }
     function setHour(h) {
         curHour = h;
@@ -429,7 +429,7 @@
         if (playTimer) { stopPlay(); return; }
         setHour(HOURS[0]);
         playBtn.textContent = "■ 停止";
-        playBtn.setAttribute("aria-label", "再生を止めます");
+        playBtn.setAttribute("aria-label", "再生を停止");
         playTimer = setInterval(function() {
             if (curHour >= HOURS[HOURS.length - 1]) { stopPlay(); return; }
             setHour(curHour + 1);
@@ -452,7 +452,7 @@
         table.textContent = "";
         var thead = el("thead"), tr = el("tr");
         tr.appendChild(el("th", "pf-name", "地点"));
-        if (dayIdx === 0) { tr.appendChild(el("th", null, "いま")); }
+        if (dayIdx === 0) { tr.appendChild(el("th", null, "現況")); }
         HOURS.forEach(function(h) { var th = el("th", null, h + "時"); th.setAttribute("data-hour", h); tr.appendChild(th); });
         thead.appendChild(tr);
         table.appendChild(thead);
@@ -477,7 +477,7 @@
             HOURS.forEach(function(h) {
                 var lv = s.days[dayIdx].hours[h] || 0;
                 var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levels[lv].short : "");
-                c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間・データなし");
+                c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間(対象外)");
                 c.setAttribute("data-hour", h);
                 row.appendChild(c);
             });

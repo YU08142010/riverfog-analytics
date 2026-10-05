@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<meta name="description" content="只見川・会津地方の河川カメラ地点ごとに、今日から3日間の川霧の出やすさを示す研究用の試験公開ページです。">
+<meta name="description" content="只見川・会津地方の河川カメラ設置地点を対象に、3日先までの川霧の発生可能性を機械学習で予測する研究の試験公開ページ。">
 <meta property="og:type" content="website">
-<meta property="og:title" content="川霧の出やすさ情報(試験公開)">
-<meta property="og:description" content="只見川・会津地方の川霧が、いつ・どこで出やすいかを機械学習で予測する研究の試験公開です。">
-<title>{% block title %}川霧の出やすさ{% endblock %} - 川霧の出やすさ情報(試験公開)</title>
+<meta property="og:title" content="川霧発生予測(試験公開)">
+<meta property="og:description" content="只見川・会津地方における川霧の発生時刻・地点を機械学習で予測する研究の試験公開。">
+<title>{% block title %}発生予測{% endblock %} - 川霧発生予測(試験公開)</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <script>
 (function() {
@@ -152,12 +152,12 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 <header class="pf-header">
     <div class="pf-header-inner">
         <a class="pf-brand" href="{{ url_for('public_forecast') }}">
-            <strong>川霧の出やすさ情報</strong>
-            <span>只見川・会津の川霧 研究用の試験公開</span>
+            <strong>川霧発生予測</strong>
+            <span>只見川・会津地方 研究成果の試験公開</span>
         </a>
         <nav class="pf-nav">
-            <a href="{{ url_for('public_forecast') }}" class="{{ 'active' if request.path == url_for('public_forecast') else '' }}">出やすさ</a>
-            <a href="{{ url_for('public_about') }}" class="{{ 'active' if request.path == url_for('public_about') else '' }}">この情報について</a>
+            <a href="{{ url_for('public_forecast') }}" class="{{ 'active' if request.path == url_for('public_forecast') else '' }}">発生予測</a>
+            <a href="{{ url_for('public_about') }}" class="{{ 'active' if request.path == url_for('public_about') else '' }}">研究の概要</a>
             {% if session.get('user_id') %}
             <a href="{{ url_for('dashboard') }}" class="pf-login">研究サイトへ</a>
             {% else %}
@@ -171,7 +171,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 {% block content %}{% endblock %}
 </main>
 <footer class="pf-footer">
-    <p>このページでは、研究で開発中の川霧予測モデルによる試験的な計算結果を掲載しております。気象庁の予報ではございません。予測が外れることも多いため、移動や撮影などのご判断は、ご自身の責任でお願いいたします。</p>
+    <p>本ページは研究段階の川霧予測モデルによる試験的な計算結果であり、気象庁の予報ではない。予測には誤りが含まれるため、行動の判断に用いる場合は利用者の責任において判断されたい。</p>
     <p>気象データ: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)・気象庁 / 河川カメラ: 国土交通省「川の防災情報」 / 地図: &copy; OpenStreetMap contributors</p>
 </footer>
 <script>

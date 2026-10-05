@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% block title %}この情報について{% endblock %}
+{% block title %}研究の概要{% endblock %}
 {% block extra_head %}
 <style>
 .pf-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.8rem; }
@@ -17,66 +17,66 @@
 {% endblock %}
 {% block content %}
 <div class="pf-card">
-    <h2>この情報について</h2>
-    <p>川の上に立ちこめる「川霧」が、いつ・どこで出やすいかを予測する研究の、試験的な計算結果を公開しております。只見川と会津地方の河川カメラの地点ごとに、日中の1時間ごと・3日先までの出やすさをお示しします。</p>
-    <p class="pf-muted">気象庁の天気予報とは別のもので、現在も研究を進めている途中の情報です。</p>
+    <h2>研究の概要</h2>
+    <p>本研究は、河川上に発生する霧(川霧)の発生時刻・地点を、気象データと機械学習により予測することを目的とする。本ページでは、只見川および会津地方の河川カメラ設置地点を対象に、日中の各時刻について3日先までの発生可能性を試験的に公開している。</p>
+    <p class="pf-muted">本ページの内容は研究段階の予測モデルによる計算結果であり、気象庁の予報ではない。</p>
 </div>
 
 {% if stats %}
 <div class="pf-card">
-    <h2>研究の規模</h2>
+    <h2>データの規模</h2>
     <div class="pf-stats">
-        <div class="pf-stat"><div class="v">{{ stats.stations|length }}</div><div class="k">観測している地点</div></div>
-        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_n) }}</div><div class="k">日中にカメラで判定した回数(地点×時刻)</div></div>
-        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_fog) }}</div><div class="k">そのうち川霧が出ていた回数</div></div>
-        <div class="pf-stat"><div class="v" style="font-size:1.05rem;">{{ stats.period_start }}<br>〜{{ stats.period_end }}</div><div class="k">記録の期間(地点によって始まりが異なります)</div></div>
+        <div class="pf-stat"><div class="v">{{ stats.stations|length }}</div><div class="k">対象地点数</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_n) }}</div><div class="k">日中の判定件数(地点×時刻)</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_fog) }}</div><div class="k">うち川霧ありと判定された件数</div></div>
+        <div class="pf-stat"><div class="v" style="font-size:1.05rem;">{{ stats.period_start }}<br>〜{{ stats.period_end }}</div><div class="k">記録期間(開始時期は地点により異なる)</div></div>
     </div>
 </div>
 {% endif %}
 
 <div class="pf-card">
-    <h2>仕組み</h2>
+    <h2>手法</h2>
     <ol class="pf-steps">
-        <li><b>1. 観測</b>国土交通省の河川カメラの画像を、1時間ごとに収集しております。</li>
-        <li><b>2. 判定</b>画像をAI(Google Gemini)で判定し、川霧が出ているかを記録しております。人の目で確認・修正した記録も使用しております。</li>
-        <li><b>3. 学習</b>川霧の記録と、その時の気象(気温・湿度・風など)の関係を、機械学習(LightGBM)で学習させております。</li>
-        <li><b>4. 予測</b>気象の予報値を入れて、地点・時刻ごとの川霧の確率を計算しております。毎晩、新しいデータで学習し直しております。</li>
+        <li><b>1. 観測</b>国土交通省の河川カメラ画像を1時間ごとに収集する。</li>
+        <li><b>2. 判定</b>画像をマルチモーダルAI(Google Gemini)で判定し、川霧の有無を記録する。目視で確認・修正した記録も併用する。</li>
+        <li><b>3. 学習</b>川霧の有無と同時刻の気象要素(気温・湿度・風など)の関係を、勾配ブースティング決定木(LightGBM)により学習する。</li>
+        <li><b>4. 予測</b>気象予報値を入力し、地点・時刻ごとの川霧発生確率を算出する。モデルは毎日、最新のデータで再学習する。</li>
     </ol>
 </div>
 
 <div class="pf-card">
-    <h2>3段階の決め方</h2>
+    <h2>3段階の判定基準</h2>
     <table class="pf-levels">
         <tr><td><span class="pf-badge pf-lv3">{{ levels[3].label }}</span></td>
-            <td>モデルが「川霧あり」と判断する基準の確率を超えた時間帯です。基準は、過去の予報値で最もよく当たるように選んでおります{% if data and data.metrics.f1 is not none %}(現在の基準で、川霧ありと予測したときに実際に出た割合は約{{ (data.metrics.precision * 100)|round|int }}%){% endif %}。</td></tr>
+            <td>予測確率が判定閾値以上の時間帯。閾値は原則として、過去の予報値を入力とした検証データでF1値が最大となるよう決定している{% if data and data.metrics.f1 is not none %}(現行の閾値における適合率は約{{ (data.metrics.precision * 100)|round|int }}%){% endif %}。</td></tr>
         <tr><td><span class="pf-badge pf-lv2">{{ levels[2].label }}</span></td>
-            <td>基準には届かないものの、基準の{{ (mid_ratio * 100)|int }}%以上の確率がある時間帯です。</td></tr>
+            <td>予測確率が閾値未満かつ閾値の{{ (mid_ratio * 100)|int }}%以上の時間帯。</td></tr>
         <tr><td><span class="pf-badge pf-lv1">{{ levels[1].label }}</span></td>
-            <td>それ以外の時間帯です。</td></tr>
+            <td>上記以外の時間帯。</td></tr>
         <tr><td>空欄</td>
-            <td>日の出前・日の入り後の時間帯です。暗くてカメラで判定できないため、予測の対象外としております。</td></tr>
+            <td>日の出前・日の入り後の時間帯。カメラ画像による判定ができないため予測対象外とした。</td></tr>
     </table>
 </div>
 
 {% if data and data.metrics.f1 is not none %}
 <div class="pf-card">
-    <h2>どのくらい当たるか</h2>
-    <p class="pf-muted" style="margin-top:0;">学習に使っていない直近の期間({{ data.metrics.test_start }}〜{{ data.metrics.test_end }})について、実際の予報値を入れて確かめた結果です(日中のみ)。</p>
+    <h2>予測精度の検証</h2>
+    <p class="pf-muted" style="margin-top:0;">学習に用いていない直近期間({{ data.metrics.test_start }}〜{{ data.metrics.test_end }})について、実際の予報値を入力として評価した結果(日中のみ)。</p>
     <div class="pf-stats">
-        <div class="pf-stat"><div class="v">{{ (data.metrics.precision * 100)|round|int }}%</div><div class="k">「出やすい」と予測したときに実際に出た割合</div></div>
-        <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">実際に出た川霧のうち、予測できていた割合</div></div>
-        <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">総合点(F1)<br>参考: 過去の出やすさの傾向だけで予測した場合 {{ "%.2f"|format(data.metrics.f1_climatology) }}</div></div>
+        <div class="pf-stat"><div class="v">{{ (data.metrics.precision * 100)|round|int }}%</div><div class="k">適合率(「高」と予測した時刻のうち実際に発生した割合)</div></div>
+        <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">再現率(実際の発生のうち「高」と予測できた割合)</div></div>
+        <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">F1値<br>参考: 気候値(地点・時刻別の過去の発生率)による予測 {{ "%.2f"|format(data.metrics.f1_climatology) }}</div></div>
     </div>
-    <p class="pf-muted">川霧はめったに出ない現象(日中の約2%)のため、現時点では外れることも多い段階です。過去の傾向だけを使う方法よりも良く当たることを確認しながら、改良を続けております。</p>
+    <p class="pf-muted">川霧は日中の発生率が約2%と稀な現象であり、現段階の予測精度は限定的である。気候値による予測を上回ることを基準に、モデルの改良を継続している。</p>
 </div>
 {% endif %}
 
 <div class="pf-card">
-    <h2>ご利用にあたって</h2>
+    <h2>利用上の注意</h2>
     <ul>
-        <li>研究のための試験的な情報です。予告なく内容の変更や公開の停止を行う場合がございます。あらかじめご了承ください。</li>
-        <li>外れることも多いため、移動・撮影・観光などの判断は、気象庁の情報などとあわせて、ご自身の責任でお願いいたします。</li>
-        <li>「いま」の欄はカメラ画像をAIが判定した結果で、誤判定が含まれる場合がございます。</li>
+        <li>本ページは研究目的の試験公開であり、内容の変更や公開の停止を予告なく行うことがある。</li>
+        <li>予測には誤りが含まれる。移動・撮影・観光等の判断に用いる場合は、気象庁の情報等と併せ、利用者の責任において判断されたい。</li>
+        <li>「現況」欄はカメラ画像のAI判定による観測値であり、誤判定を含む場合がある。</li>
     </ul>
 </div>
 
@@ -88,6 +88,6 @@
         <li>河川カメラの画像: 国土交通省「川の防災情報」</li>
         <li>地図: &copy; OpenStreetMap contributors</li>
     </ul>
-    <p class="pf-muted">研究関係者の方は、右上の「関係者ログイン」から研究用サイトにお入りいただけます。</p>
+    <p class="pf-muted">研究関係者は、右上の「関係者ログイン」から研究用サイトを利用できる。</p>
 </div>
 {% endblock %}

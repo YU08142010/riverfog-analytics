@@ -5511,9 +5511,9 @@ PUBLIC_MID_RATIO = 0.5             # しきい値のこの割合以上なら「�
 PUBLIC_STALE_HOURS = 36            # 最新の予測がこれより古ければ「更新が止まっている」と表示
 PUBLIC_CACHE_SECONDS = 300
 PUBLIC_LEVELS = {
-    3: {"label": "出やすい", "short": "高"},
-    2: {"label": "やや出やすい", "short": "中"},
-    1: {"label": "出にくい", "short": "低"},
+    3: {"label": "発生可能性 高", "short": "高"},
+    2: {"label": "発生可能性 中", "short": "中"},
+    1: {"label": "発生可能性 低", "short": "低"},
 }
 _public_forecast_cache = {"data": None, "at": 0.0}
 _public_forecast_cache_lock = threading.Lock()

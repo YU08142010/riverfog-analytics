@@ -25,18 +25,18 @@
 {% endblock %}
 {% block body_background %}{% with wx = weather_scene(name, station.now.code if station and station.now else None) %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
-<a class="pf-back" href="{{ url_for('public_forecast') }}">← 全地点の出やすさに戻る</a>
+<a class="pf-back" href="{{ url_for('public_forecast') }}">← 全地点の予測に戻る</a>
 <div class="wx-hero">
     <div class="wx-hero-name">{{ name }}</div>
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
     <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}</div>
-    <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} の観測{% endif %}</div>
-    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※このカメラはレンズが曇りやすいため、「いま」の判定は参考程度にご覧ください</div>{% endif %}
+    <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} 観測{% endif %}</div>
+    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※本地点のカメラはレンズが曇りやすく、現況の判定は参考値である</div>{% endif %}
     {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
 </div>
 
 <div class="pf-card">
-    <h2>3日間の出やすさ</h2>
+    <h2>3日間の発生予測</h2>
     {% if station %}
     <div class="pf-table-wrap">
     <table class="pf-days-table">
@@ -48,25 +48,25 @@
             <th class="pf-dl">{{ d.label }}<br><span class="pf-muted" style="font-weight:400;">{{ d.date_label }}</span></th>
             {% for h in range(5, 19) %}
             {% set lv = hours.get(h, 0) %}
-            <td class="pf-lv{{ lv }}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間・データなし' }}">{{ levels[lv].short if lv >= 2 else "" }}</td>
+            <td class="pf-lv{{ lv }}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間(対象外)' }}">{{ levels[lv].short if lv >= 2 else "" }}</td>
             {% endfor %}
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">高 = {{ levels[3].label }}、中 = {{ levels[2].label }}、色の薄いマス = {{ levels[1].label }}、空欄 = 夜間(対象外)。{% if data.run_at %}{{ data.run_at[:16] }} 時点の計算です。{% endif %}</p>
+    <p class="pf-muted" style="margin-bottom:0;">高・中 = 発生可能性の段階(色の薄いマスは「低」)、空欄 = 夜間(対象外)。{% if data.run_at %}{{ data.run_at[:16] }} 時点の計算結果。{% endif %}</p>
     {% else %}
-    <p>この地点の予測は、現在ご用意できておりません。</p>
+    <p>本地点の予測は現在算出されていない。</p>
     {% endif %}
 </div>
 
 {% if station and station.now and data.observed_at %}
 <div class="pf-card">
-    <h2>いまの様子(観測)</h2>
+    <h2>現況(観測)</h2>
     <div class="pf-now-box">
         <span class="pf-now-label">{{ station.now.label }}</span>
-        <span class="pf-muted">{{ data.observed_at }} のカメラ画像をAIで判定した結果です(誤判定が含まれる場合がございます)。</span>
+        <span class="pf-muted">{{ data.observed_at }} 時点のカメラ画像をAIで判定した結果(誤判定を含む場合がある)。</span>
     </div>
 </div>
 {% endif %}
@@ -90,22 +90,22 @@
 {% endmacro %}
 
 <div class="pf-card">
-    <h2>これまでの傾向</h2>
+    <h2>過去の発生傾向</h2>
     {% if stats and stats.n %}
-    <p style="margin-top:0;">日中にカメラで判定した <b>{{ "{:,}".format(stats.n) }}</b> 回のうち、川霧が出ていたのは <b>{{ "{:,}".format(stats.n_fog) }}</b> 回(<b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)です。</p>
+    <p style="margin-top:0;">日中の判定 <b>{{ "{:,}".format(stats.n) }}</b> 件のうち、川霧ありは <b>{{ "{:,}".format(stats.n_fog) }}</b> 件(発生率 <b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)である。</p>
     <div class="pf-two">
         <div>
-            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">月別(%)</h3>
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">月別発生率(%)</h3>
             {{ bars(stats.by_month, "月") }}
         </div>
         <div>
-            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">時刻別(%)</h3>
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">時刻別発生率(%)</h3>
             {{ bars(stats.by_hour, "時") }}
         </div>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">数字はその月・時刻に川霧が出ていた割合(%)です。判定が{{ min_n }}回未満の月・時刻は「-」と表示しております。2026年8月より前は、別の方法で収集し、目視で確認した記録となります。</p>
+    <p class="pf-muted" style="margin-bottom:0;">数値は各月・各時刻の川霧発生率(%)。判定件数が{{ min_n }}件未満の区分は「-」とした。2026年8月以前は、別手法で収集し目視で確認した記録である。</p>
     {% else %}
-    <p class="pf-muted">ただいま集計を準備しております。恐れ入りますが、しばらく経ってから改めてご覧ください。</p>
+    <p class="pf-muted">集計は準備中である。</p>
     {% endif %}
 </div>
 {% endblock %}
