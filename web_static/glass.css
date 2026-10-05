@@ -431,3 +431,43 @@ header, .pf-header { view-transition-name: site-header; }
     @view-transition { navigation: none; }
     ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
 }
+/* ==========================================================================
+   文字(2026-10-05)。英数字はInter(AppleのSF Proに近い形)、日本語はZen Kaku Gothic New。
+   web_static/fonts/fonts.css(自前配信。CSPでフォントは同一オリジンのみ許可のため)で読み込む。
+   ========================================================================== */
+:root {
+    --font-ui: "Inter", "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+               "Segoe UI Variable Text", "Yu Gothic UI", "Noto Sans JP", sans-serif;
+}
+body, .pf-header, input, textarea, select, button {
+    font-family: var(--font-ui);
+    font-optical-sizing: auto;
+}
+body { font-weight: 400; letter-spacing: 0.01em; font-feature-settings: "cv11" 1; }
+/* 見出し・ナビは和文の字間を詰めて(palt)引き締める */
+h1, h2, h3, h4, header h1, header nav a, .page-tabs a, .card h2, .pf-card h2, .pf-brand strong,
+.wx-hero, .auth-title, .pf-hero h1 {
+    font-feature-settings: "palt" 1, "cv11" 1;
+    letter-spacing: 0.03em;
+}
+h1, h2, .card h2, .pf-card h2 { font-weight: 700; }
+header h1, .pf-brand strong { font-weight: 700; letter-spacing: 0.05em; }
+header nav a, .page-tabs a, .pf-nav a { font-weight: 500; }
+a.button, button.button, label.button { font-weight: 600; letter-spacing: 0.04em; }
+/* 数字は桁がそろうように(表・統計)、大きな数字は細く(天気アプリ風) */
+table, .stat-value, .pf-stat .v, .wx-hero-stat b { font-variant-numeric: tabular-nums; }
+.wx-hero-temp { font-family: "Inter", var(--font-ui); font-weight: 200; letter-spacing: -0.02em; }
+.wx-hero-name, .wx-hero-cond { font-weight: 700; }
+.pf-summary-count, .pf-stat .v { font-family: "Inter", var(--font-ui); font-weight: 300; letter-spacing: -0.01em; }
+.pf-hero h1 { font-weight: 700; }
+/* Plotlyのグラフの文字も同じ書体に */
+.js-plotly-plot .main-svg text { font-family: var(--font-ui) !important; }
+/* メニューは項目が多いので、字間を詰めて1行に収める */
+header nav a { letter-spacing: 0; padding: 0.4rem 0.55rem; font-size: 0.86rem; }
+header nav a .icon { margin-right: 0.22rem; }
+header .theme-toggle { font-size: 0.78rem; padding: 0.4rem 0.6rem; }
+header h1 { letter-spacing: 0.03em; }
+/* 画面幅に収まらないときは横スクロールになる。右端をふわっと消して、続きがあることを示す */
+@media (min-width: 901px) {
+    header nav { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); padding-right: 24px; }
+}
