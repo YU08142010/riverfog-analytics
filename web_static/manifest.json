@@ -1,10 +1,14 @@
 {
  "name": "川霧観測・予測",
  "short_name": "川霧",
- "description": "只見川・会津の川霧の観測と出やすさの予測(研究用)",
+ "description": "只見川・会津地方における川霧の観測と発生予測(研究用)",
  "start_url": "/",
  "scope": "/",
- "display": "standalone",
+ "display": "fullscreen",
+ "display_override": [
+  "fullscreen",
+  "standalone"
+ ],
  "background_color": "#101218",
  "theme_color": "#1b4a66",
  "lang": "ja",
