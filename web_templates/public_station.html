@@ -119,7 +119,8 @@
     if (typeof L === "undefined") { box.textContent = "地図を読み込めなかった。"; return; }
     var pos = [{{ lat }}, {{ lon }}];
     var map = L.map(box, {scrollWheelZoom: false, zoomControl: true}).setView(pos, 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+    L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {maxZoom: 18, minZoom: 5,
+        attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>'}).addTo(map);
     L.marker(pos, {icon: L.divIcon({className: "", html: '<span class="pf-st-pin" style="display:block"></span>', iconSize: [18, 18]}),
                    title: {{ name|tojson }}, keyboard: false}).addTo(map);
 })();

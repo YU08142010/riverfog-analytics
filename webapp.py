@@ -575,7 +575,8 @@ def _chart_json(fig):
 
 _SECURITY_HEADERS_CSP = (
     "default-src 'self'; "
-    "img-src 'self' data: https://*.tile.openstreetmap.org; "
+    # 公開ページの地図(2026-10-06〜)は国土地理院の淡色地図のタイル(cyberjapandata.gsi.go.jp)を使う。
+    "img-src 'self' data: https://*.tile.openstreetmap.org https://cyberjapandata.gsi.go.jp; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     "font-src 'self' https://cdnjs.cloudflare.com; "

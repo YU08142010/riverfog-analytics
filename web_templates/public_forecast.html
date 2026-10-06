@@ -43,7 +43,7 @@
 
 /* 見出しの答え: 選んだ日の見込みを1文で言い切り、その下に出やすい順の地点を時刻の帯つきで並べる */
 .pf-answer { font-size: 1.12rem; line-height: 1.6; margin: 0.1rem 0 0.9rem; text-wrap: pretty; }
-.pf-answer strong { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.01em; }
+.pf-answer strong { font-size: 2.1rem; font-weight: 700; letter-spacing: 0.01em; line-height: 1; vertical-align: -0.12em; }
 .pf-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
 .pf-rank li a {
     display: grid; grid-template-columns: 1.6rem minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center;
@@ -228,6 +228,39 @@
     .pf-day { transition: none; }
 }
 
+/* 見出しの後ろを流れる霧の層。今カメラで川霧を観測している地点が多いほど濃い(--mist、テンプレートで計算) */
+.pf-hero { position: relative; isolation: isolate; padding: 1.2rem 0 0.4rem; }
+.pf-hero-mist { position: absolute; inset: -1.5rem -16px -0.5rem; z-index: -1; overflow: hidden; pointer-events: none;
+    /* 縁がはっきりした四角に見えないよう、上下左右とも楕円形にぼかして消す */
+    -webkit-mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, #000 35%, transparent 100%);
+    mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, #000 35%, transparent 100%); }
+.pf-hero h1, .pf-hero p { text-shadow: 0 1px 2px rgba(15, 35, 55, 0.35), 0 0 18px rgba(15, 35, 55, 0.25); }
+.pf-hero-mist i { position: absolute; left: -30%; width: 160%; height: 70%; bottom: 0;
+    background: radial-gradient(ellipse 35% 55% at 25% 60%, rgba(255, 255, 255, 0.9), transparent 70%),
+                radial-gradient(ellipse 30% 50% at 70% 45%, rgba(255, 255, 255, 0.8), transparent 70%),
+                radial-gradient(ellipse 25% 40% at 50% 80%, rgba(255, 255, 255, 0.7), transparent 70%);
+    filter: blur(14px); opacity: var(--mist, 0.3); animation: pf-drift 40s ease-in-out infinite alternate; }
+.pf-hero-mist i:nth-child(2) { bottom: 20%; height: 55%; opacity: calc(var(--mist, 0.3) * 0.7); animation-duration: 56s; animation-direction: alternate-reverse; }
+.pf-hero-mist i:nth-child(3) { bottom: -15%; opacity: calc(var(--mist, 0.3) * 0.85); animation-duration: 72s; }
+@keyframes pf-drift { from { transform: translateX(-9%); } to { transform: translateX(9%); } }
+:root[data-theme="dark"] .pf-hero-mist i { filter: blur(16px) brightness(0.8); opacity: calc(var(--mist, 0.3) * 0.55); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pf-hero-mist i { filter: blur(16px) brightness(0.8); opacity: calc(var(--mist, 0.3) * 0.55); } }
+.pf-pill-fog { border-color: color-mix(in srgb, var(--pf-lv3) 50%, var(--pf-border)); }
+
+/* 概要の数字の下: 全地点を1つずつの点で並べ、全体のうちどれだけが「高」「中」かを一目で示す */
+.pf-dots { display: flex; flex-wrap: wrap; gap: 3px; margin: -0.3rem 0 1rem; max-width: 28rem; }
+.pf-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--pf-lv1); box-shadow: inset 0 0 0 1px var(--pf-lv1-edge); }
+.pf-dots i.pf-lv2 { background: var(--pf-lv2); box-shadow: none; }
+.pf-dots i.pf-lv3 { background: var(--pf-lv3); box-shadow: none; }
+.pf-dots i.pf-lv0 { background: transparent; }
+
+/* 切り替えた時に、変わった所がふわっと入れ替わる */
+.pf-swap { animation: pf-swap 0.38s ease-out; }
+@keyframes pf-swap { from { opacity: 0.2; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+    .pf-hero-mist i, .pf-swap { animation: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .pf-mk .pf-fog, .pf-mk .pf-dot, .pf-hour i { transition: none; }
     .pf-mk[data-lv="3"] .pf-fog, .pf-map-clock.pf-tick b, .pf-table tbody tr.pf-row-flash td { animation: none; }
@@ -238,11 +271,13 @@
 {% if not data %}
 <div class="pf-card"><p>予測データを現在表示できない。時間をおいて再度参照されたい。</p></div>
 {% else %}
-<section class="pf-hero">
+{% set fog_now = data.stations|selectattr("now")|map(attribute="now")|selectattr("fog")|list|length %}
+<section class="pf-hero" style="--mist: {{ [0.2 + 0.12 * fog_now, 0.6]|min }}">
+    <div class="pf-hero-mist" aria-hidden="true"><i></i><i></i><i></i></div>
     <h1 id="pf-headline">本日の川霧発生予測</h1>
     <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点を対象に、日中(日の出〜日の入り)の各時刻における川霧の発生可能性を3段階で示す。</p>
 </section>
-<div class="pf-meta">{% if data.run_at %}<span class="pf-pill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg>予測計算 {{ data.run_at[5:16]|replace("-", "/") }}<small>日次更新</small></span>{% endif %}{% if data.observed_at %}<span class="pf-pill"><span class="pf-live" aria-hidden="true"></span>最新観測 {{ data.observed_at[5:] }}<small>毎時更新</small></span>{% endif %}{% if data.nowcast %}<span class="pf-pill" title="本日の残りの時間(最大8時間先)は、毎時のカメラ観測を入力に加えて予測し直している"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>本日分は{{ data.nowcast.issued_at }}の観測で再計算</span>{% endif %}</div>
+<div class="pf-meta">{% if data.run_at %}<span class="pf-pill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg>予測計算 {{ data.run_at[5:16]|replace("-", "/") }}<small>日次更新</small></span>{% endif %}{% if data.observed_at %}<span class="pf-pill"><span class="pf-live" aria-hidden="true"></span>最新観測 {{ data.observed_at[5:] }}<small>毎時更新</small></span>{% endif %}{% if fog_now %}<span class="pf-pill pf-pill-fog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M3 14c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M5 19h14"/></svg>現在 川霧を観測中 {{ fog_now }}地点</span>{% endif %}{% if data.nowcast %}<span class="pf-pill" title="本日の残りの時間(最大8時間先)は、毎時のカメラ観測を入力に加えて予測し直している"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>本日分は{{ data.nowcast.issued_at }}の観測で再計算</span>{% endif %}</div>
 {% if data.stale %}
 <div class="pf-notice" role="status">予測の更新が停止しているため、表示内容が最新でない可能性がある{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
 {% endif %}
@@ -259,6 +294,7 @@
     <div class="pf-card">
         <h2 id="pf-summary-title">予測の概要</h2>
         <p class="pf-answer" id="pf-answer" aria-live="polite"></p>
+        <div class="pf-dots" id="pf-dots" aria-hidden="true"></div>
         <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
         <ol class="pf-rank" id="pf-rank"></ol>
         <p class="pf-more" id="pf-more" hidden></p>
@@ -347,8 +383,10 @@
         mapDiv.textContent = "地図を読み込めなかった。下表を参照されたい。";
     } else {
         map = L.map(mapDiv, {scrollWheelZoom: false});
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"
+        // 国土地理院の淡色地図: 色が控えめで、霧の点ともやが地図の色に埋もれない(ダーク時はglass.cssで反転)
+        L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+            maxZoom: 18, minZoom: 5,
+            attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>'
         }).addTo(map);
         var bounds = [];
         data.stations.forEach(function(s) {
@@ -477,6 +515,24 @@
         var more = document.getElementById("pf-more");
         more.hidden = ranked.length <= RANK_LIMIT;
         more.textContent = "残る" + (ranked.length - RANK_LIMIT) + "地点は下表を参照。";
+
+        // 全地点を、その日の最大の段階の高い順に1つずつの点で並べる
+        var dots = document.getElementById("pf-dots");
+        dots.textContent = "";
+        data.stations.map(function(s) { return s.days[dayIdx].max; })
+            .sort(function(a, b) { return b - a; })
+            .forEach(function(lv) { dots.appendChild(el("i", "pf-lv" + lv)); });
+        dots.hidden = !hasHours(dayIdx);
+    }
+    // 切り替えた時に、変わった所をふわっと入れ替える(初回の表示では動かさない)
+    var firstRender = true;
+    function swapAnim(ids) {
+        if (firstRender) { return; }
+        ids.forEach(function(id) {
+            var node = document.getElementById(id);
+            if (!node) { return; }
+            node.classList.remove("pf-swap"); void node.offsetWidth; node.classList.add("pf-swap");
+        });
     }
 
     // 地図の時刻: null なら「1日の最大」、数値ならその時刻の予測で塗る。
@@ -599,6 +655,7 @@
         buildHours();
         renderTable(dayIdx);
         paintMap();
+        swapAnim(["pf-answer", "pf-dots", "pf-rank", "pf-table"]);
     }
 
     // 表の絞り込み: 既定は「中」以上(と、本日なら現況で川霧ありの地点)のみ。選択は閲覧者のブラウザに保存する。
@@ -615,6 +672,7 @@
         try { localStorage.setItem(FILTER_KEY, on ? "mid" : "all"); } catch (e) { /* 同上 */ }
         renderTable(curDay);
         markColumns();
+        swapAnim(["pf-table"]);
     }
     filterAllBtn.addEventListener("click", function() { setFilter(false); });
     filterMidBtn.addEventListener("click", function() { setFilter(true); });
@@ -784,6 +842,7 @@
         b.setAttribute("aria-pressed", Number(b.getAttribute("data-day")) === startDay ? "true" : "false");
     });
     render(startDay);
+    firstRender = false;
 })();
 </script>
 {% endif %}
