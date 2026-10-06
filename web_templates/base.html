@@ -66,6 +66,19 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
         {% endif %}
     </nav>
     <button type="button" class="spotlight-trigger" data-spotlight-open aria-label="検索(Ctrl+K)" title="検索(Ctrl+K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>検索</span><kbd>Ctrl K</kbd></button>
+    {# 全画面表示(発表・展示でスクリーンに映す用)。見た目は通知ボタンと同じ。対応しない環境では出さない #}
+    <span class="notif-bell-wrap fs-wrap" id="fs-wrap" hidden>
+        <button type="button" class="notif-bell" id="fs-toggle-btn" aria-label="全画面で表示する" title="全画面で表示する" aria-pressed="false">
+            <svg class="fs-i-expand" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            <svg class="fs-i-shrink" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+        </button>
+    </span>
+    <style>
+    .fs-wrap[hidden] { display: none; }
+    #fs-toggle-btn .fs-i-shrink { display: none; }
+    #fs-toggle-btn[aria-pressed="true"] .fs-i-expand { display: none; }
+    #fs-toggle-btn[aria-pressed="true"] .fs-i-shrink { display: block; }
+    </style>
     <button type="button" class="theme-toggle" id="theme-toggle-btn">ダーク/ライト切替</button>
     <div class="notif-bell-wrap">
         <button type="button" class="notif-bell" id="notif-bell-btn" aria-label="通知" aria-expanded="false">
@@ -195,6 +208,36 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         if (document.body.contains(el)) { applyChartTheme(el, next); }
     });
 });
+
+// 全画面表示(公開ページのpublic_base.htmlと同じ動き)。Escキーかもう一度押すと戻る。
+// 対応しない環境(iPhoneのSafari等)ではボタンを出さない。
+(function() {
+    var wrap = document.getElementById("fs-wrap");
+    var btn = document.getElementById("fs-toggle-btn");
+    var root = document.documentElement;
+    if (!wrap || !btn || !(document.fullscreenEnabled || document.webkitFullscreenEnabled)) { return; }
+    wrap.hidden = false;
+    function current() { return document.fullscreenElement || document.webkitFullscreenElement; }
+    function sync() {
+        var on = !!current();
+        var label = on ? "全画面表示を終了する" : "全画面で表示する";
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        btn.setAttribute("aria-label", label);
+        btn.title = label;
+    }
+    btn.addEventListener("click", function() {
+        try {
+            if (current()) {
+                (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+            } else {
+                var p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
+                if (p && p.catch) { p.catch(function() {}); }
+            }
+        } catch (e) { /* 拒否された場合は何もしない */ }
+    });
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
+})();
 
 // ハンバーガーメニュー(狭い画面でナビを折りたたむ)。
 (function() {
