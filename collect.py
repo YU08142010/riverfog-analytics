@@ -1270,6 +1270,12 @@ def main():
 
     record_station_weather(run_time)
     generate_ai_summaries(cameras, phenom_by_name, weather, run_time)
+    # 今の観測を入れて、その日の残りの時間の予測を更新する(nowcast.py)。失敗しても収集は成功扱い。
+    try:
+        import nowcast
+        nowcast.run_nowcast()
+    except Exception:
+        log.exception("Nowcast update failed (the collection itself succeeded)")
     log.info("=== Collection finished ===")
 
 

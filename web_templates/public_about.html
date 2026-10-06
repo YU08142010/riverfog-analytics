@@ -4,7 +4,27 @@
 <style>
 .pf-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.8rem; }
 .pf-steps li { border: 1px solid var(--pf-border); border-radius: 10px; padding: 0.8rem 0.9rem; }
-.pf-steps b { display: block; color: var(--pf-primary); margin-bottom: 0.2rem; }
+.pf-steps b { display: flex; align-items: center; gap: 0.5rem; color: var(--pf-primary); margin-bottom: 0.35rem; }
+/* 手法の各段階: 番号の丸と、次の段階へ続く線(順番のある手順なので番号を付ける) */
+.pf-steps b i { font-style: normal; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+    background: var(--pf-lv3); color: var(--pf-lv3-text); font-size: 0.85rem; }
+.pf-steps li { position: relative; line-height: 1.7; }
+@media (min-width: 900px) {
+    .pf-steps li:not(:last-child)::after { content: ""; position: absolute; top: 1.6rem; right: -0.8rem; width: 0.8rem; height: 2px;
+        background: var(--pf-border); }
+}
+/* F1値の比較の棒 */
+.pf-compare { display: grid; gap: 0.45rem; margin: 0.4rem 0 0.8rem; max-width: 34rem; }
+.pf-compare-row { display: grid; grid-template-columns: 5rem minmax(0, 1fr) 3rem; gap: 0.6rem; align-items: center; font-size: 0.88rem; }
+.pf-compare-row i { display: block; height: 0.9rem; border-radius: 4px; width: var(--w); background: var(--pf-lv3);
+    animation: pf-grow 0.8s ease-out both; }
+.pf-compare-base i { background: var(--pf-lv2); }
+.pf-compare-row b { font-variant-numeric: tabular-nums; }
+.pf-compare small { color: var(--pf-muted); font-size: 0.75rem; }
+@keyframes pf-grow { from { width: 0; } }
+@media (prefers-reduced-motion: reduce) { .pf-compare-row i { animation: none; } }
+.pf-card > h2 { display: flex; align-items: center; gap: 0.5rem; }
+.pf-card > h2::before { content: ""; width: 4px; height: 1.05em; border-radius: 2px; background: linear-gradient(var(--pf-lv3), var(--pf-lv2)); }
 .pf-levels { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 .pf-levels td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--pf-border); vertical-align: top; }
 .pf-levels td:first-child { width: 8.5rem; white-space: nowrap; }
@@ -37,10 +57,10 @@
 <div class="pf-card">
     <h2>手法</h2>
     <ol class="pf-steps">
-        <li><b>1. 観測</b>国土交通省の河川カメラ画像を1時間ごとに収集する。</li>
-        <li><b>2. 判定</b>画像をマルチモーダルAI(Google Gemini)で判定し、川霧の有無を記録する。目視で確認・修正した記録も併用する。</li>
-        <li><b>3. 学習</b>川霧の有無と同時刻の気象要素(気温・湿度・風など)の関係を、勾配ブースティング決定木(LightGBM)により学習する。</li>
-        <li><b>4. 予測</b>気象予報値を入力し、地点・時刻ごとの川霧発生確率を算出する。モデルは毎日、最新のデータで再学習する。</li>
+        <li><b><i>1</i>観測</b>国土交通省の河川カメラ画像を1時間ごとに収集する。</li>
+        <li><b><i>2</i>判定</b>画像をマルチモーダルAI(Google Gemini)で判定し、川霧の有無を記録する。目視で確認・修正した記録も併用する。</li>
+        <li><b><i>3</i>学習</b>川霧の有無と同時刻の気象要素(気温・湿度・風など)の関係を、勾配ブースティング決定木(LightGBM)により学習する。</li>
+        <li><b><i>4</i>予測</b>気象予報値を入力し、地点・時刻ごとの川霧発生確率を算出する。モデルは毎日、最新のデータで再学習する。当日の残りの時間(最大8時間先)は、毎時のカメラ観測(各地点の直近の霧の有無と、全地点のうち霧の地点の割合)を入力に加えた別のモデルで予測し直す。</li>
     </ol>
 </div>
 
@@ -67,6 +87,14 @@
         <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">再現率(実際の発生のうち「高」と予測できた割合)</div></div>
         <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">F1値<br>参考: 気候値(地点・時刻別の過去の発生率)による予測 {{ "%.2f"|format(data.metrics.f1_climatology) }}</div></div>
     </div>
+    {% if data.metrics.f1_climatology is not none %}
+    {% set top = [data.metrics.f1, data.metrics.f1_climatology]|max %}
+    <div class="pf-compare" role="img" aria-label="F1値の比較: 本モデル {{ '%.2f'|format(data.metrics.f1) }}、気候値 {{ '%.2f'|format(data.metrics.f1_climatology) }}">
+        <div class="pf-compare-row"><span>本モデル</span><i style="--w: {{ (data.metrics.f1 / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1) }}</b></div>
+        <div class="pf-compare-row pf-compare-base"><span>気候値</span><i style="--w: {{ (data.metrics.f1_climatology / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1_climatology) }}</b></div>
+        <small>F1値(大きいほど良い)。気候値は地点・時刻別の過去の発生率だけを用いた予測。</small>
+    </div>
+    {% endif %}
     <p class="pf-muted">川霧は日中の発生率が約2%と稀な現象であり、現段階の予測精度は限定的である。気候値による予測を上回ることを基準に、モデルの改良を継続している。</p>
 </div>
 {% endif %}

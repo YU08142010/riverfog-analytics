@@ -5621,6 +5621,25 @@ def _build_public_forecast():
         if level:
             by_station.setdefault(station, {})[target_dt[:13]] = level
 
+    # 本日の残りの時間は、毎時の観測を入れて予測し直したナウキャスト(nowcast.py)があればそちらを使う
+    # (直前の観測で数時間先の当たり方が上がることを確かめてある。nowcast.pyのdocstring参照)。
+    nowcast_info = None
+    try:
+        import nowcast
+        nc = nowcast.load_latest(today)
+    except Exception as e:
+        log.warning("Public page: failed to load nowcast: %s", e)
+        nc = None
+    if nc and nc.get("threshold"):
+        prefix, n_hours = today.strftime("%Y-%m-%d"), 0
+        for station, hours in (nc.get("stations") or {}).items():
+            for hour, prob in hours.items():
+                level = _public_level(prob, nc["threshold"])
+                if level:
+                    by_station.setdefault(station, {})[f"{prefix} {int(hour):02d}"] = level
+                    n_hours += 1
+        nowcast_info = {"issued_at": nc["issued_at"][11:16], "n": n_hours}
+
     observations = None
     try:
         observations = _latest_observations()
@@ -5664,6 +5683,7 @@ def _build_public_forecast():
         "stations": stations,
         "run_at": run_at,
         "verification": verification,
+        "nowcast": nowcast_info,
         "stale": stale,
         "observed_at": observations["datetime"].strftime("%Y/%m/%d %H:%M") if observations else None,
         "metrics": {
@@ -5832,6 +5852,22 @@ def _public_station_weather(name):
         return None
 
 
+def _public_station_outlook(station, data):
+    """地点ページの見出しの下に出す、日ごとの見込みの1行(「本日 6〜7時に「高」」など)。"""
+    out = []
+    if not station or not data:
+        return out
+    for day, d in zip(data["days"], station["days"]):
+        top = d.get("max") or 0
+        if top < 2:
+            continue
+        hours = sorted(h for h, lv in d["hours"].items() if lv == top)
+        span = f"{hours[0]}時" + (f"〜{hours[-1]}時" if len(hours) > 1 else "")
+        out.append({"day": day["label"], "date": day["date_label"], "level": top,
+                    "short": PUBLIC_LEVELS[top]["short"], "span": span})
+    return out
+
+
 @app.route("/forecast/station/<name>")
 def public_station(name):
     if name not in STATION_NAMES:
@@ -5846,6 +5882,9 @@ def public_station(name):
         stats=(stats or {}).get("stations", {}).get(name),
         official_url=_river_go_jp_map_url(cam_id) if cam_id else None, min_n=PUBLIC_STATS_MIN_N,
         weather=_public_station_weather(name),
+        outlook=_public_station_outlook(station, data),
+        now_hour=now_jst_naive().hour, now_month=now_jst_naive().month,
+        lat=CAMERA_INFO.get(name, {}).get("lat"), lon=CAMERA_INFO.get(name, {}).get("lon"),
     )
 
 

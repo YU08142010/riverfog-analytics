@@ -46,7 +46,7 @@
 .pf-answer strong { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.01em; }
 .pf-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
 .pf-rank li a {
-    display: grid; grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center;
+    display: grid; grid-template-columns: 1.6rem minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center;
     padding: 0.4rem 0.5rem; border-radius: 8px; color: var(--pf-text); text-decoration: none;
 }
 .pf-rank li a:hover, .pf-rank li a:focus-visible { background: color-mix(in srgb, var(--pf-primary) 10%, transparent); }
@@ -57,12 +57,12 @@
 .pf-ribbon i.pf-lv2 { background: var(--pf-lv2); box-shadow: none; }
 .pf-ribbon i.pf-lv3 { background: var(--pf-lv3); box-shadow: none; }
 .pf-ribbon i.pf-lv0 { background: transparent; box-shadow: none; }
-.pf-ribbon-axis { display: grid; grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; padding: 0 0.5rem; font-size: 0.7rem; color: var(--pf-muted); }
+.pf-ribbon-axis { display: grid; grid-template-columns: 1.6rem minmax(6.5rem, 9rem) minmax(0, 1fr) auto; gap: 0.75rem; padding: 0 0.5rem; font-size: 0.7rem; color: var(--pf-muted); }
 .pf-ribbon-axis span { display: flex; justify-content: space-between; }
 .pf-ribbon-axis[hidden] { display: none; }
 .pf-ribbon-axis b { font-weight: 500; }
 @media (max-width: 520px) {
-    .pf-rank li a, .pf-ribbon-axis { grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr); }
+    .pf-rank li a, .pf-ribbon-axis { grid-template-columns: 1.6rem minmax(5.5rem, 7rem) minmax(0, 1fr); }
     .pf-rank-when, .pf-ribbon-axis > span:last-child { display: none; }
 }
 .pf-more { margin: 0.6rem 0 0; font-size: 0.85rem; }
@@ -175,7 +175,10 @@
 .pf-verify-days button small { display: block; color: var(--pf-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
 .pf-verify-days button[aria-pressed="true"] { border-color: var(--pf-primary); box-shadow: inset 0 0 0 1px var(--pf-primary); }
 .pf-verify-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.9rem; }
-.pf-verify-stats div { border: 1px solid var(--pf-border); border-radius: 8px; padding: 0.45rem 0.7rem; }
+.pf-verify-stats div { border: 1px solid var(--pf-border); border-radius: 8px; padding: 0.45rem 0.7rem; border-top: 3px solid var(--pf-border); }
+.pf-verify-stats div:nth-child(1) { border-top-color: var(--pf-lv3); }
+.pf-verify-stats div:nth-child(2) { border-top-color: color-mix(in srgb, var(--pf-lv3) 45%, transparent); }
+.pf-verify-stats div:nth-child(3) { border-top-color: #c98a2b; }
 .pf-verify-stats b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
 .pf-verify-stats span { font-size: 0.78rem; color: var(--pf-muted); }
 .pf-vk { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; vertical-align: -0.25rem; margin-right: 0.3rem; }
@@ -184,6 +187,46 @@
 .pf-v-miss { background: repeating-linear-gradient(135deg, #c98a2b 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 2px #c98a2b; color: transparent; }
 .pf-table td.pf-v-hit, .pf-table td.pf-v-fa, .pf-table td.pf-v-miss { font-weight: 700; }
 .pf-verify-note { font-size: 0.82rem; color: var(--pf-muted); margin: 0.6rem 0 0; }
+
+/* --- 仕上げ(2026-10-06) --- */
+/* 見出し: 説明文は1行の長さを抑える */
+.pf-hero { text-align: center; }
+.pf-hero h1 { font-size: clamp(1.45rem, 3.4vw, 2rem); letter-spacing: 0.02em; }
+.pf-hero p { max-width: 46em; margin: 0.35rem auto 0; text-wrap: balance; }
+/* 更新時刻のピル(観測は毎時更新なので、ゆっくり明滅する点を付ける) */
+.pf-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin: 0.8rem 0 0; }
+.pf-pill { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; padding: 0.3rem 0.75rem;
+    border-radius: 999px; background: color-mix(in srgb, var(--pf-surface) 78%, transparent); border: 1px solid var(--pf-border);
+    font-variant-numeric: tabular-nums; backdrop-filter: blur(8px); }
+.pf-pill small { color: var(--pf-muted); font-size: 0.72rem; }
+.pf-pill svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; opacity: 0.8; }
+.pf-live { width: 8px; height: 8px; border-radius: 50%; background: #2fa66a; animation: pf-live 2.4s ease-out infinite; }
+@keyframes pf-live { 0% { box-shadow: 0 0 0 0 rgba(47, 166, 106, 0.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(47, 166, 106, 0); } }
+/* 日付のタブ: その日に「高」「中」が何地点あるかを添える */
+.pf-days { justify-content: center; }
+.pf-day { position: relative; min-width: 8.5rem; transition: transform 0.15s, box-shadow 0.15s; }
+.pf-day:hover { transform: translateY(-1px); }
+.pf-day-badge { display: flex; gap: 0.3rem; margin-top: 0.3rem; font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.pf-day-badge span { border-radius: 999px; padding: 0 0.45rem; line-height: 1.5; }
+.pf-day-badge .pf-none { color: var(--pf-muted); padding: 0; }
+@media (max-width: 600px) { .pf-day { min-width: 0; } .pf-day-badge { flex-wrap: wrap; } }
+/* ランキングの段階バッジ */
+.pf-rank-lv { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 6px; font-size: 0.78rem; font-weight: 700; }
+/* 現在時刻の印(本日を表示している時) */
+.pf-ribbon i.pf-ribbon-now { position: relative; }
+.pf-ribbon i.pf-ribbon-now::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px;
+    border-radius: 50%; background: #2fa66a; }
+.pf-table th.pf-col-now { color: var(--pf-text); }
+.pf-table th.pf-col-now::after { content: "今"; display: block; font-size: 0.62rem; line-height: 1; color: #2fa66a; font-weight: 700; }
+.pf-table td.pf-col-now { box-shadow: inset 0 0 0 1px color-mix(in srgb, #2fa66a 70%, transparent); }
+/* カードの見出しの左に細いアクセント */
+.pf-card > h2, .pf-table-head h2 { display: flex; align-items: center; gap: 0.5rem; }
+.pf-card > h2::before, .pf-table-head h2::before { content: ""; width: 4px; height: 1.05em; border-radius: 2px;
+    background: linear-gradient(var(--pf-lv3), var(--pf-lv2)); }
+@media (prefers-reduced-motion: reduce) {
+    .pf-live { animation: none; }
+    .pf-day { transition: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
     .pf-mk .pf-fog, .pf-mk .pf-dot, .pf-hour i { transition: none; }
@@ -199,7 +242,7 @@
     <h1 id="pf-headline">本日の川霧発生予測</h1>
     <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点を対象に、日中(日の出〜日の入り)の各時刻における川霧の発生可能性を3段階で示す。</p>
 </section>
-<p class="pf-muted" style="margin:0.4rem 0 0;">{% if data.run_at %}予測計算: {{ data.run_at[:16] }}(日次更新){% endif %}{% if data.observed_at %} / 最新観測: {{ data.observed_at }}(毎時更新){% endif %}</p>
+<div class="pf-meta">{% if data.run_at %}<span class="pf-pill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg>予測計算 {{ data.run_at[5:16]|replace("-", "/") }}<small>日次更新</small></span>{% endif %}{% if data.observed_at %}<span class="pf-pill"><span class="pf-live" aria-hidden="true"></span>最新観測 {{ data.observed_at[5:] }}<small>毎時更新</small></span>{% endif %}{% if data.nowcast %}<span class="pf-pill" title="本日の残りの時間(最大8時間先)は、毎時のカメラ観測を入力に加えて予測し直している"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>本日分は{{ data.nowcast.issued_at }}の観測で再計算</span>{% endif %}</div>
 {% if data.stale %}
 <div class="pf-notice" role="status">予測の更新が停止しているため、表示内容が最新でない可能性がある{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
 {% endif %}
@@ -216,7 +259,7 @@
     <div class="pf-card">
         <h2 id="pf-summary-title">予測の概要</h2>
         <p class="pf-answer" id="pf-answer" aria-live="polite"></p>
-        <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
+        <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
         <ol class="pf-rank" id="pf-rank"></ol>
         <p class="pf-more" id="pf-more" hidden></p>
         {% if data.observed_at %}
@@ -348,6 +391,7 @@
     }
 
     var HEADLINE_DAY = ["本日", "明日", "明後日"];
+    var NOW_HOUR = new Date().getHours();  // 本日を表示している時に、今の時刻の列・帯に印を付ける
     var RANK_LIMIT = 6;
     function hasHours(dayIdx) {
         return data.stations.some(function(s) { return Object.keys(s.days[dayIdx].hours).length > 0; });
@@ -381,7 +425,7 @@
         var r = el("span", "pf-ribbon");
         HOURS.forEach(function(h) {
             var lv = s.days[dayIdx].hours[h] || 0;
-            var i = el("i", "pf-lv" + lv);
+            var i = el("i", "pf-lv" + lv + (dayIdx === 0 && h === NOW_HOUR ? " pf-ribbon-now" : ""));
             r.appendChild(i);
         });
         r.setAttribute("aria-hidden", "true");
@@ -420,6 +464,7 @@
             var a = el("a");
             a.href = stationUrl(s.name);
             a.setAttribute("aria-label", s.name + ": " + levels[lv].label + " " + hourSpan(s, dayIdx, lv));
+            a.appendChild(el("span", "pf-rank-lv pf-lv" + lv, levels[lv].short));
             a.appendChild(el("span", "pf-rank-name", s.name));
             a.appendChild(ribbon(s, dayIdx));
             a.appendChild(el("span", "pf-rank-when", hourSpan(s, dayIdx, lv)));
@@ -585,7 +630,11 @@
         var thead = el("thead"), tr = el("tr");
         tr.appendChild(el("th", "pf-name", "地点"));
         if (dayIdx === 0) { tr.appendChild(el("th", null, "現況")); }
-        HOURS.forEach(function(h) { var th = el("th", null, h + "時"); th.setAttribute("data-hour", h); tr.appendChild(th); });
+        HOURS.forEach(function(h) {
+            var th = el("th", dayIdx === 0 && h === NOW_HOUR ? "pf-col-now" : null, h + "時");
+            th.setAttribute("data-hour", h);
+            tr.appendChild(th);
+        });
         thead.appendChild(tr);
         table.appendChild(thead);
         var tbody = el("tbody"), lastRegion = null, shown = 0;
@@ -615,6 +664,7 @@
                 var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levels[lv].short : "");
                 c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間(対象外)");
                 c.setAttribute("data-hour", h);
+                if (dayIdx === 0 && h === NOW_HOUR) { c.classList.add("pf-col-now"); }
                 row.appendChild(c);
             });
             tbody.appendChild(row);
@@ -712,6 +762,23 @@
         });
     });
     // 夜の更新後は、きょうの日中の予測がもう残っていない。その時は最初から「明日」を開く。
+    // 日付のタブに、その日の「高」「中」の地点数を添える
+    Array.prototype.forEach.call(buttons, function(btn) {
+        var d = Number(btn.getAttribute("data-day"));
+        var n3 = 0, n2 = 0;
+        data.stations.forEach(function(s) { if (s.days[d].max === 3) { n3++; } else if (s.days[d].max === 2) { n2++; } });
+        var badge = el("span", "pf-day-badge");
+        if (!hasHours(d)) {
+            badge.appendChild(el("span", "pf-none", d === 0 ? "日中の予測は終了" : "予測なし"));
+        } else if (!n3 && !n2) {
+            badge.appendChild(el("span", "pf-none", "全地点「低」"));
+        } else {
+            if (n3) { badge.appendChild(el("span", "pf-lv3", "高 " + n3)); }
+            if (n2) { badge.appendChild(el("span", "pf-lv2", "中 " + n2)); }
+        }
+        btn.appendChild(badge);
+        btn.setAttribute("aria-label", data.days[d].label + " " + data.days[d].date_label + "、発生可能性「高」" + n3 + "地点、「中」" + n2 + "地点");
+    });
     var startDay = (!hasHours(0) && data.days.length > 1 && hasHours(1)) ? 1 : 0;
     Array.prototype.forEach.call(buttons, function(b) {
         b.setAttribute("aria-pressed", Number(b.getAttribute("data-day")) === startDay ? "true" : "false");

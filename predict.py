@@ -302,6 +302,14 @@ def main():
         record_new_predictions(conn, run_at_str, pred_df, prob_df, models)
         conn.commit()
 
+        # 当日の短時間予測(ナウキャスト、nowcast.py)のモデルを学習し直す。失敗しても本体の予測は済んでいる。
+        try:
+            import nowcast
+            nowcast.train_and_save(main_df, phenom_df, station_names, lat, lon,
+                                   camera_coords=camera_coords, weather_conn=weather_conn)
+        except Exception:
+            log.exception("Nowcast training failed (the daily forecast itself succeeded)")
+
     weather_conn.close()
     log.info("=== Predict run finished ===")
 
