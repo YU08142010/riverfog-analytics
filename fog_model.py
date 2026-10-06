@@ -215,6 +215,15 @@ REGRESSION_CONFIDENCE = 0.95
 REGRESSION_N_BOOTSTRAP = 500
 MIN_ROWS_FOR_REGRESSION_CHECK = 200
 
+# --- 方式の比較: RandomForest + XGBoost(確率の平均)との比較(_compare_rf_xgboost) --------------------
+# 2026-10-04まで使っていた方式の1つ(地点別の「RF+XGBoost」ブレンド)を、今の全地点共通の構成で学習し、
+# LightGBMと同じ手順(検証期間で木の本数・気候値の割合・しきい値、評価期間は予報入力)で採点して
+# F1値の差を記録する。本番に使うのはLightGBMのまま(比較の記録だけ。分析ページに表示)。
+HYBRID_RF_PARAMS = dict(n_estimators=300, min_samples_leaf=20, max_features="sqrt", n_jobs=2, random_state=0)
+HYBRID_XGB_PARAMS = dict(max_depth=4, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, reg_lambda=5.0,
+                         n_jobs=2, random_state=0, tree_method="hist", eval_metric="logloss")
+COMPARE_N_BOOTSTRAP = 500
+
 
 class BinaryFogModel:
     """全地点共通の二値(川霧あり/なし)LightGBMモデル。地点別川霧発生率は学習時の値を
@@ -701,8 +710,20 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
 
     importance = _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input)
 
+    # 方式の比較(RandomForest+XGBoost)。記録だけなので、失敗しても学習は続ける。
+    comparison = None
+    if len(eval_rows) and int(y_test.sum()):
+        try:
+            comparison = _compare_rf_xgboost(
+                inner, val, train, thr_rows, eval_rows, weather_features, inner_rates, inner_global,
+                rates, global_rate, clim_weight, y_test, pred_test, p_test, clim_test,
+            )
+        except Exception as e:
+            log.warning("RF+XGBoost comparison failed: %s", e)
+
     global_metrics = {
         "importance": importance,
+        "comparison": comparison,
         "model": overall, "climatology": {**climatology, "threshold": clim_threshold},
         "input": eval_input, "threshold": threshold, "threshold_source": threshold_source,
         "climatology_weight": clim_weight, "climatology_weight_source": weight_source,
@@ -743,6 +764,83 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
 
 def _fmt(v, digits=3):
     return "n/a" if v is None else f"{v:.{digits}f}"
+
+
+def _fit_rf_xgboost(X, y, n_xgb, eval_set=None):
+    """RandomForestとXGBoostを学習する(予測は2つの確率の平均、_rf_xgboost_proba)。"""
+    from sklearn.ensemble import RandomForestClassifier
+    from xgboost import XGBClassifier
+    rf = RandomForestClassifier(**HYBRID_RF_PARAMS).fit(X, y)
+    xgb = XGBClassifier(**HYBRID_XGB_PARAMS, n_estimators=n_xgb,
+                        early_stopping_rounds=EARLY_STOPPING_ROUNDS if eval_set is not None else None)
+    if eval_set is not None:
+        xgb.fit(X, y, eval_set=[eval_set], verbose=False)
+    else:
+        xgb.fit(X, y, verbose=False)
+    return rf, xgb
+
+
+def _rf_xgboost_proba(models, X):
+    rf, xgb = models
+    return (rf.predict_proba(X)[:, 1] + xgb.predict_proba(X)[:, 1]) / 2.0
+
+
+def _f1_from_pred(y, pred):
+    tp = int(((pred == 1) & (y == 1)).sum())
+    denom = 2 * tp + int(((pred == 1) & (y == 0)).sum()) + int(((pred == 0) & (y == 1)).sum())
+    return 2 * tp / denom if denom else 0.0
+
+
+def _compare_rf_xgboost(inner, val, train, thr_rows, eval_rows, weather_features, inner_rates, inner_global,
+                        rates, global_rate, lgbm_clim_weight, y_test, pred_lgbm, p_lgbm, clim_test):
+    """RandomForest+XGBoostを、LightGBMと同じ手順・同じ行で採点し、F1値の差(LightGBM − RF+XGBoost)と
+    評価期間の日単位ブートストラップによる95%区間を返す。"""
+    X = lambda rows, r, g: _features_with_rate(rows, weather_features, r, g)
+    # 1) 検証期間でXGBoostの木の本数を選ぶ(LightGBMと同じく実測入力・早期打ち切り)
+    _rf_i, xgb_i = _fit_rf_xgboost(X(inner, inner_rates, inner_global), inner["__y"].to_numpy(), MAX_ESTIMATORS,
+                                   eval_set=(X(val, inner_rates, inner_global), val["__y"].to_numpy()))
+    best = getattr(xgb_i, "best_iteration", None)
+    n_xgb = max(50, int(round(((best + 1) if best is not None else MAX_ESTIMATORS) * REFIT_ESTIMATOR_SCALE)))
+    # 2) 気候値の割合・しきい値: LightGBMと同じ検証期間の行・同じ入力で、F1最大
+    thr_y = thr_rows["__y"].to_numpy()
+    p_thr = _rf_xgboost_proba((_rf_i, xgb_i), X(thr_rows, inner_rates, inner_global))
+    clim_thr = _climatology_probs(inner, thr_rows)
+    if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
+        w = _best_climatology_weight(thr_y, p_thr, clim_thr)
+        threshold = _best_threshold(thr_y, (1 - w) * p_thr + w * clim_thr)[0]
+    else:
+        w, threshold = lgbm_clim_weight, DEFAULT_FOG_THRESHOLD
+    # 3) 評価: 「学習+検証」で学習し直し、評価期間を採点
+    models = _fit_rf_xgboost(X(train, rates, global_rate), train["__y"].to_numpy(), n_xgb)
+    p = (1 - w) * _rf_xgboost_proba(models, X(eval_rows, rates, global_rate)) + w * clim_test
+    pred = (p >= threshold).astype(int)
+    hybrid = binary_metrics(y_test, pred, p)
+    lgbm = binary_metrics(y_test, pred_lgbm, p_lgbm)
+    # 4) F1値の差の95%区間(評価期間の日を単位に復元抽出。同じ日の時刻・地点は互いに似ているため)
+    days = eval_rows["__datetime"].dt.normalize().to_numpy()
+    uniq = np.unique(days)
+    idx_by_day = [np.where(days == d)[0] for d in uniq]
+    rng = np.random.default_rng(0)
+    diffs = []
+    for _ in range(COMPARE_N_BOOTSTRAP):
+        pick = np.concatenate([idx_by_day[i] for i in rng.integers(0, len(uniq), size=len(uniq))])
+        yy = y_test[pick]
+        if yy.sum() == 0:
+            continue
+        diffs.append(_f1_from_pred(yy, pred_lgbm[pick]) - _f1_from_pred(yy, pred[pick]))
+    keys = ("f1", "precision", "recall", "ap", "brier", "n", "n_fog")
+    out = {
+        "lightgbm": {k: lgbm.get(k) for k in keys},
+        "rf_xgboost": {**{k: hybrid.get(k) for k in keys}, "threshold": threshold, "climatology_weight": w,
+                       "xgb_trees": n_xgb, "rf_trees": HYBRID_RF_PARAMS["n_estimators"]},
+        "f1_diff": (lgbm["f1"] - hybrid["f1"]) if lgbm.get("f1") is not None and hybrid.get("f1") is not None else None,
+        "f1_diff_ci": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))] if diffs else None,
+        "ap_diff": (lgbm["ap"] - hybrid["ap"]) if lgbm.get("ap") is not None and hybrid.get("ap") is not None else None,
+        "n_days": int(len(uniq)), "n_bootstrap": len(diffs),
+    }
+    log.info("Comparison on the test window: LightGBM F1=%s vs RF+XGBoost F1=%s (diff %s, 95%% CI %s)",
+             _fmt(out["lightgbm"]["f1"]), _fmt(out["rf_xgboost"]["f1"]), _fmt(out["f1_diff"]), out["f1_diff_ci"])
+    return out
 
 
 def _guard_against_climatology(y, p_model, p_clim):

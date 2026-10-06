@@ -85,6 +85,8 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 
 **当日の短時間予測(ナウキャスト、2026-10-06〜)**: `nowcast.py`。前日夜の予測とは別に、気象(予報)・地点別川霧発生率に、発表時刻の観測(その地点の今・1〜2時間前の霧、全地点のうち霧の地点の割合)と先行時間を加えた全地点共通のLightGBMを毎晩`predict.py`の最後に学習し(`data/models/nowcast_state.joblib`)、毎時の`collect.py`の最後にその日の残りの日中(最大8時間先)を予測し直す(`data/models/nowcast_latest.json`、答え合わせ用に`predictions.db`の`nowcasts`テーブル。本番の`predictions`・精度の集計には混ぜない)。公開ページは本日分にこれを使う(`_build_public_forecast`)。直近6週を2週×3でずらした評価(予報入力)でAP 0.202→0.260(差の95%区間+0.011〜+0.104)、先行1〜8時間のどれでも改善(`data/experiments/nowcast_and_source_check2.json`)。早期打ち切りで木が少なすぎると改善が消えるため最低300本。基本モデルの確率を観測でロジスティック補正する方式は悪化したため不採用。毎晩の評価期間で基本モデルよりAPが0.02以上悪ければ使わない(`GUARD_AP_MARGIN`)。同じ実験で予報の気象モデルも比べた: Open-Meteoの既定(best_match)は日本では`jma_seamless`と完全に同じ値で、GFSは悪く、ECMWF(0.25度、65地点中32地点しか格子が合わない)は有意差なしだったため、既定のままにしている。
 
+**方式の比較(2026-10-06〜)**: 毎晩の学習で、RandomForest+XGBoost(確率の平均。2026-10-04まで地点別モデルで使っていた方式の1つ)を今の全地点共通の構成・LightGBMと同じ手順(検証期間で木の本数・気候値の割合・しきい値、評価期間は予報入力)で学習・採点し、F1値の差(LightGBM − RF+XGBoost)と評価期間の日単位ブートストラップの95%区間を`global_metrics["comparison"]`に記録、分析ページ(accuracy)に表示する(`fog_model._compare_rf_xgboost`)。本番はLightGBMのまま。初回(2026-10-06、評価22日・川霧309件)はF1 0.252 対 0.230(差+0.022、95%区間-0.005〜+0.048で有意差なし)、APはRF+XGBoostが0.192対0.186とわずかに上。
+
 **特徴量と重要度**: 露点温度は「気温 = 露点温度 + 気温露点差」で完全に重複するため特徴量から外している(`fog_model.EXCLUDED_FEATURES`。外しても精度は誤差の範囲、`data/experiments/feature_selection_check.json`)。分析ページの特徴量重要度は、学習時に評価期間(予報入力)で求めたSHAP値の絶対値の平均の割合(`global_metrics["importance"]`)で、まとまり(`FEATURE_GROUPS`)ごとの合計も示す。gainは似た特徴量に偏って配られるため使わない(検証の経緯は`data/experiments/feature_importance_check.json`)。
 
 **時間帯の扱い**: 日の出前・日の入り後(`fog_features.is_daylight`)の画像は暗くて川霧を判定できないため、学習・評価・答え合わせ・予測の対象外(`predictions.daylight=0`、予報では`fog_model.NOT_PREDICTED`)。

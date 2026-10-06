@@ -206,6 +206,52 @@
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="モデル方式ごとの性能比較グラフ" data-chart-url="{{ url_for('accuracy_model_compare_chart') }}"></div></div>
 </div>
 
+{% set cmp = global_metrics.comparison if global_metrics and global_metrics.comparison else None %}
+<div class="card">
+    <h2>方式の比較: LightGBM と RandomForest+XGBoost</h2>
+    {% if cmp %}
+    <p class="muted">
+        採用中のLightGBMと、RandomForestとXGBoostの確率を平均する方式(RF+XGBoost)を、同じ学習データ・同じ手順
+        (検証期間で木の本数・気候値の割合・しきい値を決め、評価期間は予報値を入力)で学習し、同じ評価期間の行で採点しています。
+        毎日の再学習のたびに計算し直します。本番の予測に使うのはLightGBMです。
+    </p>
+    {% set d = cmp.f1_diff %}
+    <div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:baseline; margin:0.6rem 0 0.9rem;">
+        <div style="font-size:2rem; font-weight:700; font-variant-numeric:tabular-nums; color:{{ 'var(--accent, #1a5276)' if d is not none and d >= 0 else '#b5562b' }};">
+            {{ "%+.3f"|format(d) if d is not none else "-" }}
+        </div>
+        <div>
+            F1値の差(LightGBM − RF+XGBoost)
+            {% if cmp.f1_diff_ci %}<br><span class="muted">95%区間 {{ "%+.3f"|format(cmp.f1_diff_ci[0]) }} 〜 {{ "%+.3f"|format(cmp.f1_diff_ci[1]) }}
+            (評価期間{{ cmp.n_days }}日を単位にしたブートストラップ)。
+            {% if cmp.f1_diff_ci[0] > 0 %}LightGBMの方が有意に高い。{% elif cmp.f1_diff_ci[1] < 0 %}RF+XGBoostの方が有意に高い。{% else %}区間が0をまたぐため、差は有意ではない。{% endif %}</span>{% endif %}
+        </div>
+    </div>
+    <div class="table-scroll">
+    <table class="obs-table" style="width:100%; max-width:760px;">
+        <thead><tr><th>方式</th><th>F1</th><th>適合率</th><th>再現率</th><th>AP</th><th>Brier</th></tr></thead>
+        <tbody>
+        {% for label, m in [("LightGBM(採用中)", cmp.lightgbm), ("RandomForest+XGBoost", cmp.rf_xgboost)] %}
+        <tr>
+            <td>{{ label }}</td>
+            <td><b>{{ "%.3f"|format(m.f1) if m.f1 is not none else "-" }}</b></td>
+            <td>{{ "%.3f"|format(m.precision) if m.precision is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(m.recall) if m.recall is not none else "-" }}</td>
+            <td>{{ "%.3f"|format(m.ap) if m.ap is not none else "-" }}</td>
+            <td>{{ "%.4f"|format(m.brier) if m.brier is not none else "-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted" style="margin-bottom:0;">評価件数 {{ cmp.lightgbm.n }}件(うち川霧 {{ cmp.lightgbm.n_fog }}件)。
+    RF+XGBoostの設定: RandomForest {{ cmp.rf_xgboost.rf_trees }}本、XGBoost {{ cmp.rf_xgboost.xgb_trees }}本、
+    しきい値 {{ "%.0f"|format(cmp.rf_xgboost.threshold * 100) }}%、気候値の割合 {{ "%.0f"|format(cmp.rf_xgboost.climatology_weight * 100) }}%。</p>
+    {% else %}
+    <p class="muted">比較の結果はまだありません(次の再学習で計算されます)。</p>
+    {% endif %}
+</div>
+
 <div class="card">
     <h2>混同行列(全地点合算・学習時検証データ)</h2>
     <p class="muted">評価期間の実際(縦軸)と予測(横軸)を、川霧あり/なしで突き合わせた集計です。</p>
