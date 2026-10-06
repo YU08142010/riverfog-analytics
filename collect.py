@@ -52,6 +52,14 @@ FETCH_TIMEOUT = 10
 FETCH_WORKERS = 8
 FETCH_RETRIES = 2
 FETCH_RETRY_DELAY = 1.5
+# 取りこぼした地点の取り直し。カメラ配信元(cam.river.go.jp)への名前解決・接続が数十秒〜数分
+# だけ失敗し、その時刻の大半の地点が欠けることがある(2026-10-06 08:00は42/65地点)。地点ごとの
+# 即時リトライ(FETCH_RETRIES)は数秒おきなのでこうした障害を越えられず、欠けた時刻は後から
+# 取り直せない(配信元は最新画像しか出さない)。そこで1回目の取得の後、失敗した地点だけを
+# 間隔を空けて取り直す。数地点だけの失敗は個別のカメラの停止であることが多く、待っても
+# 戻らないため、REFETCH_MIN_FAILED地点以上失敗した時だけ行う(毎時の収集を無駄に遅らせない)。
+REFETCH_ROUND_DELAYS = (90, 240)   # 秒。1回目の取得の後、この間隔を空けて最大2回取り直す
+REFETCH_MIN_FAILED = 5
 
 GEMINI_TIMEOUT_MS = 30_000
 # Tailscale経由の名前解決が断続的に失敗することがあり(DNS一時障害)、クォータ切れとは
@@ -212,6 +220,27 @@ def fetch_all_images(cameras):
             name, cam_id, content = future.result()
             results[name] = content
     return results
+
+
+def refetch_failed_images(cameras, images_by_name, delays=REFETCH_ROUND_DELAYS, sleep=time.sleep):
+    """取得に失敗した地点(None)だけを、delaysの間隔を空けて取り直し、images_by_nameを更新する。
+    失敗がREFETCH_MIN_FAILED地点未満になった時点で打ち切る。取り直せた地点数を返す。"""
+    recovered_total = 0
+    for delay in delays:
+        failed = [(name, cam_id) for name, cam_id in cameras if not images_by_name.get(name)]
+        if len(failed) < REFETCH_MIN_FAILED:
+            break
+        log.warning("Image fetch failed for %d station(s); retrying them in %ds", len(failed), delay)
+        sleep(delay)
+        retried = fetch_all_images(failed)
+        recovered = 0
+        for name, content in retried.items():
+            if content:
+                images_by_name[name] = content
+                recovered += 1
+        recovered_total += recovered
+        log.info("Image refetch recovered %d / %d", recovered, len(failed))
+    return recovered_total
 
 
 def resize_image(raw_bytes):
@@ -1190,6 +1219,7 @@ def main():
     log.info("Target stations: %d", len(cameras))
 
     images_by_name = fetch_all_images(cameras)
+    refetch_failed_images(cameras, images_by_name)
     ok_count = sum(1 for v in images_by_name.values() if v)
     log.info("Image fetch succeeded: %d / %d", ok_count, len(cameras))
 

@@ -598,7 +598,22 @@ def _apply_security_headers(response):
         # 別タブや別セッションで装備を切り替えた後も「装着中」表示が古いままになりうる。
         # 必ず毎回サーバーから取り直させることでこのズレを防ぐ。
         response.headers["Cache-Control"] = "no-store"
+    if request.endpoint == "static":
+        # 静的ファイルはFlaskの既定(no-cache)だと、ページを開くたびにブラウザが全ファイルを
+        # 問い合わせ直す。日本語フォントは細かく分割された数十個のwoff2なので、1回の表示で
+        # 約90件の問い合わせが一度に来て、waitressの処理待ちが詰まっていた(「Task queue depth
+        # is 94」)。中身がまず変わらないフォント・外部ライブラリ・アイコンは30日、それ以外
+        # (自前のCSS/JS、manifest)は更新が反映されるまでの遅れを抑えて10分キャッシュさせる。
+        filename = (request.view_args or {}).get("filename", "")
+        long_lived = filename.startswith(STATIC_LONG_CACHE_DIRS)
+        response.headers["Cache-Control"] = (f"public, max-age={STATIC_LONG_CACHE_SECONDS}" if long_lived
+                                             else f"public, max-age={STATIC_SHORT_CACHE_SECONDS}")
     return response
+
+
+STATIC_LONG_CACHE_DIRS = ("fonts/", "vendor/", "icons/")
+STATIC_LONG_CACHE_SECONDS = 30 * 24 * 3600
+STATIC_SHORT_CACHE_SECONDS = 600
 
 try:
     STATION_NAMES = fog_data.load_station_names()
@@ -10877,7 +10892,11 @@ if __name__ == "__main__":
     # 情報として使う。
     log.info("Starting river-fog webapp on 127.0.0.1:8081 (behind nginx on :8080)")
     serve(
-        app, host="127.0.0.1", port=8081,
+        # threads: waitressの既定は4。公開URL(Tailscale Funnel)はnginxを通らず直接ここに来るため、
+        # 静的ファイルも含めた全リクエストを4本で捌くことになり、ページ表示の瞬間に処理待ちが
+        # 数十件たまっていた。処理の大半はファイル読み出し・DB読み出しの待ちなので、CPU数(4)より
+        # 多めにする。
+        app, host="127.0.0.1", port=8081, threads=12,
         trusted_proxy="127.0.0.1", trusted_proxy_count=1,
         trusted_proxy_headers={"x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"},
         clear_untrusted_proxy_headers=True,
