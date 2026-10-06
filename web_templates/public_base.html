@@ -154,6 +154,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
     color: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent); }
 .pf-theme:hover { background: color-mix(in srgb, currentColor 12%, transparent); opacity: 1; }
 .pf-theme svg { width: 18px; height: 18px; }
+/* 全画面ボタン(明暗の切り替えの隣)。全画面に対応しない環境(iPhoneのSafari等)では出さない */
+.pf-tools { display: inline-flex; gap: 0.35rem; align-items: center; }
+.pf-fs[hidden] { display: none; }
+.pf-fs .pf-i-shrink { display: none; }
+.pf-fs[aria-pressed="true"] .pf-i-expand { display: none; }
+.pf-fs[aria-pressed="true"] .pf-i-shrink { display: block; }
+/* 全画面の時は、ページの背景(空・霧)が画面の端まで続くようにする */
+:root:fullscreen, :root:fullscreen body { background: var(--pf-bg); }
+:root:-webkit-full-screen body { background: var(--pf-bg); }
 .pf-theme .pf-i-moon { display: none; }
 :root[data-theme="dark"] .pf-theme .pf-i-sun { display: none; }
 :root[data-theme="dark"] .pf-theme .pf-i-moon { display: block; }
@@ -167,7 +176,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
     .pf-nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 0.3rem; }
     .pf-nav::-webkit-scrollbar { display: none; }
     .pf-nav a { white-space: nowrap; font-size: 0.85rem; }
-    .pf-theme { position: absolute; right: 0; top: 2px; }
+    .pf-tools { position: absolute; right: 0; top: 2px; }
     .pf-brand-text span { display: none; }
 }
 /* フッター: 区切り線の下に、注意書きと出典を2段で */
@@ -211,10 +220,16 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
             {% else %}
             <a href="{{ url_for('login') }}" class="pf-login">関係者ログイン</a>
             {% endif %}
+            <span class="pf-tools">
+            <button type="button" class="pf-theme pf-fs" id="pf-fs-btn" aria-label="全画面で表示する" title="全画面で表示する" aria-pressed="false" hidden>
+                <svg class="pf-i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+                <svg class="pf-i-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+            </button>
             <button type="button" class="pf-theme" id="pf-theme-btn" aria-label="表示の明暗を切り替える" title="表示の明暗を切り替える">
                 <svg class="pf-i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
                 <svg class="pf-i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
             </button>
+            </span>
         </nav>
     </div>
 </header>
@@ -240,6 +255,35 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
         root.setAttribute("data-theme", next);
         try { localStorage.setItem("theme", next); } catch (e) {}
     });
+})();
+// ページ全体の全画面表示(発表や展示でスクリーンに映す用)。Escキーかもう一度押すと戻る。
+(function() {
+    var btn = document.getElementById("pf-fs-btn");
+    var root = document.documentElement;
+    var supported = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+    if (!btn || !supported) { return; }
+    btn.hidden = false;
+    function current() { return document.fullscreenElement || document.webkitFullscreenElement; }
+    function sync() {
+        var on = !!current();
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        var label = on ? "全画面表示を終了する" : "全画面で表示する";
+        btn.setAttribute("aria-label", label);
+        btn.title = label;
+    }
+    btn.addEventListener("click", function() {
+        try {
+            if (current()) {
+                (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+            } else {
+                var req = root.requestFullscreen || root.webkitRequestFullscreen;
+                var p = req.call(root);
+                if (p && p.catch) { p.catch(function() {}); }
+            }
+        } catch (e) { /* 拒否された場合は何もしない */ }
+    });
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
 })();
 </script>
 </body>

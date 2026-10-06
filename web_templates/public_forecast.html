@@ -234,7 +234,8 @@
     /* 縁がはっきりした四角に見えないよう、上下左右とも楕円形にぼかして消す */
     -webkit-mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, #000 35%, transparent 100%);
     mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, #000 35%, transparent 100%); }
-.pf-hero h1, .pf-hero p { text-shadow: 0 1px 2px rgba(15, 35, 55, 0.35), 0 0 18px rgba(15, 35, 55, 0.25); }
+/* 背景の空は天気で明るさが変わる(霧・曇りの日は白に近い)ため、白い文字の周りに濃いめの影を敷く */
+.pf-hero h1, .pf-hero p { text-shadow: 0 1px 3px rgba(15, 35, 55, 0.55), 0 0 22px rgba(15, 35, 55, 0.45); }
 .pf-hero-mist i { position: absolute; left: -30%; width: 160%; height: 70%; bottom: 0;
     background: radial-gradient(ellipse 35% 55% at 25% 60%, rgba(255, 255, 255, 0.9), transparent 70%),
                 radial-gradient(ellipse 30% 50% at 70% 45%, rgba(255, 255, 255, 0.8), transparent 70%),
