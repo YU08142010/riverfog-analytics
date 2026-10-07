@@ -83,7 +83,20 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 
 **気候値との混合(2026-10-05〜)**: 川霧の確率は「(1-w)×LightGBM + w×地点×時刻の過去の発生率」(`BinaryFogModel.fog_probability`。混ぜる前は`raw_probability`)。wは検証期間(予報入力)でloglossが最小になる値で、しきい値は混ぜた後の確率で選ぶ(`global_metrics["climatology_weight"]`、混ぜない場合の成績は`model_unblended`)。学習は実測、予測は予報が入力のため確率が自信過剰になる分を和らげる。直近6週を2週×3でずらした評価でloglossが有意に改善しAPは同等だった(`data/experiments/model_improvement_check2.json`)。同じ評価で効果が無かった・悪化した案(水温の代わりの7日平均気温との差、夜の冷え込み、地点×時刻の発生率の特徴量化、予報値での学習、乱数違いの平均、単調制約、ロジスティック/isotonic補正)の結果は`data/experiments/model_improvement_check.json`と`model_improvement_check2.json`。
 
-**当日の短時間予測(ナウキャスト、2026-10-06〜)**: `nowcast.py`。前日夜の予測とは別に、気象(予報)・地点別川霧発生率に、発表時刻の観測(その地点の今・1〜2時間前の霧、全地点のうち霧の地点の割合)と先行時間を加えた全地点共通のLightGBMを毎晩`predict.py`の最後に学習し(`data/models/nowcast_state.joblib`)、毎時の`collect.py`の最後にその日の残りの日中(最大8時間先)を予測し直す(`data/models/nowcast_latest.json`、答え合わせ用に`predictions.db`の`nowcasts`テーブル。本番の`predictions`・精度の集計には混ぜない)。公開ページは本日分にこれを使う(`_build_public_forecast`)。直近6週を2週×3でずらした評価(予報入力)でAP 0.202→0.260(差の95%区間+0.011〜+0.104)、先行1〜8時間のどれでも改善(`data/experiments/nowcast_and_source_check2.json`)。早期打ち切りで木が少なすぎると改善が消えるため最低300本。基本モデルの確率を観測でロジスティック補正する方式は悪化したため不採用。毎晩の評価期間で基本モデルよりAPが0.02以上悪ければ使わない(`GUARD_AP_MARGIN`)。同じ実験で予報の気象モデルも比べた: Open-Meteoの既定(best_match)は日本では`jma_seamless`と完全に同じ値で、GFSは悪く、ECMWF(0.25度、65地点中32地点しか格子が合わない)は有意差なしだったため、既定のままにしている。
+**当日の短時間予測(ナウキャスト、2026-10-06〜)**: `nowcast.py`。前日夜の予測とは別に、気象(予報)・地点別川霧発生率に、発表時刻の観測(その地点の今・1〜2時間前の霧、全地点のうち霧の地点の割合)と先行時間を加えた全地点共通のLightGBMを毎晩`predict.py`の最後に学習し(`data/models/nowcast_state.joblib`)、毎時の`collect.py`の最後にその日の残りの日中(最大8時間先)を予測し直す(`data/models/nowcast_latest.json`、答え合わせ用に`predictions.db`の`nowcasts`テーブル。本番の`predictions`・精度の集計には混ぜない)。公開ページは本日分にこれを使う(`_build_public_forecast`)。直近6週を2週×3でずらした評価(予報入力)でAP 0.202→0.260(差の95%区間+0.011〜+0.104)、先行1〜8時間のどれでも改善(`data/experiments/nowcast_and_source_check2.json`)。早期打ち切りで木が少なすぎると改善が消えるため最低300本。基本モデルの確率を観測でロジスティック補正する方式は悪化したため不採用。毎晩の評価期間で基本モデルよりAPが0.02以上悪ければ使わない(`GUARD_AP_MARGIN`)。同じ実験で予報の気象モデルも比べた: Open-Meteoの既定(best_match)は日本では`jma_seamless`と完全に同じ値で、GFSは悪く、ECMWF(0.25度)は有意差なしだった。ただしこの時は座標の照合(許容0.1度)で65地点中32地点がはじかれていた。許容差を格子に合わせて比べ直すと、ECMWFとの平均が有意に良かったため、2026-10-07から平均している(下記)。
+
+**地形・新しいデータの重み・気象モデルの平均(2026-10-07〜)**: 次の3つを本番に入れた。
+- 地点の地形: `標高`、`谷の深さ_1km`・`谷の深さ_3km`(周囲の東西南北4点の平均標高 − 地点の標高。国土地理院の標高API)、`地域_会津`。値は`data/station_terrain.json`に保存し、新しい地点は学習時に自動で取得する(`fog_model.load_station_terrain`)。モデルが地点ごとの値を持ち(`BinaryFogModel.station_static`)、予測時に地点名から引く。
+- 新しいデータの重み: 学習の基準時点から60日前の行の重みを半分にする(`RECENCY_HALF_LIFE_DAYS`)。30日では効かなかった。
+- 気象モデルの平均: 予報を入力にした確率を、既定(JMA)とECMWF(`ecmwf_ifs025`、15日先まで)のそれぞれで計算して平均する(`ENSEMBLE_MODELS`)。学習時もECMWFの過去の予報を取って、平均した確率で気候値の割合・しきい値を選ぶ。取得できなかった夜は平均しないモデルになり、本番も平均しない(`BinaryFogModel.ensemble_models`)。ECMWFは0.25度格子のため、座標の照合の許容差は0.2度(`ENSEMBLE_COORD_TOLERANCE_DEG`)。
+
+直近6週を2週×3でずらした評価(Open-Meteo Previous Runs APIの過去の予報を入力)で、3つ合わせてAP 0.222→0.280(差の95%区間+0.027〜+0.091)、loglossも有意に改善し、3期間すべてで改善した(`data/experiments/model_improvement_check3.json`・`model_improvement_check4.json`)。ECMWFとの平均は明日・3日後・7日後のどれでも有意に改善した。2026-10-07の試運転(評価期間9/16〜10/7、川霧291件)でも、変更前と比べてAP 0.180→0.197、F1 0.250→0.270、Brier 0.0184→0.0181。
+
+同じ評価で採らなかった案:
+- 前日の朝の川霧実績: APが変わらなかった。
+- 日長: 悪化した。
+- リードタイム別の気候値の割合: Previous Runs APIで1〜8日先を比べ、差が無かった(遠い日も確率はそれほど自信過剰ではなかった)。
+- 日単位(その日に川霧が出るか)のモデル: 1時間ごとのモデルの日最大よりAPが有意に低かった(0.52対0.58)。
 
 **方式の比較(2026-10-06〜)**: 毎晩の学習で、RandomForest+XGBoost(確率の平均。2026-10-04まで地点別モデルで使っていた方式の1つ)を今の全地点共通の構成・LightGBMと同じ手順(検証期間で木の本数・気候値の割合・しきい値、評価期間は予報入力)で学習・採点し、F1値の差(LightGBM − RF+XGBoost)と評価期間の日単位ブートストラップの95%区間を`global_metrics["comparison"]`に記録、分析ページ(accuracy)に表示する(`fog_model._compare_rf_xgboost`)。本番はLightGBMのまま。初回(2026-10-06、評価22日・川霧309件)はF1 0.252 対 0.230(差+0.022、95%区間-0.005〜+0.048で有意差なし)、APはRF+XGBoostが0.192対0.186とわずかに上。
 

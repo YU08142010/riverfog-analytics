@@ -30,6 +30,19 @@ historical-forecast-api)を取得し、しきい値の選択と精度の評価�
 ため(2026-10-04の比較で、予報と同じ条件にすると使わない場合と精度が変わらなかった)。
 「月」は学習データに無い月(10月以降など)で不安定になるため使わない(仮検証と同じ構成)。
 
+【2026-10-07の改良】(data/experiments/model_improvement_check3.json・check4.json。直近6週を2週×3でずらし、
+評価期間は過去に実際に出されていた予報を入力。3つ合わせてAP 0.222→0.280、差の95%区間 +0.027〜+0.091、
+loglossも有意に改善し、3期間すべてで改善した)
+  - 地点の地形(TERRAIN_FEATURES): 標高と「谷の深さ」(周囲1km・3kmの平均標高 − 地点の標高。国土地理院の
+    標高API)と地域(会津か)。地点の情報が発生率だけだと、川霧の実例が少ない地点・新しい地点は全体平均と
+    同じ扱いになっていた。単独でAP +0.025(区間 +0.011〜+0.035)。
+  - 新しいデータに重み(RECENCY_HALF_LIFE_DAYS): 学習データは2025年夏(9地点)・2026年春・2026年8月以降(64地点)
+    が混ざっており、季節も地点の構成も今と違う古い行の影響を減らす。60日が最もよく、30日では効かなかった。
+  - 気象モデルの平均(ENSEMBLE_MODELS): 予報を入力にした確率を、JMA(既定)とECMWFのそれぞれで計算して平均する。
+    明日・3日後・7日後のどれでもAPが有意に改善した。
+試して採らなかったもの(同じ評価): 前日の川霧実績(APが変わらない)、日長(悪化)、リードタイム別の
+気候値の割合(差が無い)、日単位(その日の朝に霧が出るか)のモデル(1時間ごとのモデルの日最大よりAPが低い)。
+
 【期間の分け方】(すべて時系列順。未来のデータで過去を学習しない)
   [ ........ 学習(inner) ........ | 検証 VALIDATION_WINDOW_DAYS日 | 評価 TEST_WINDOW_DAYS日 ]
   - 検証期間: ハイパーパラメータ・木の本数(early stopping)・しきい値の選択
@@ -37,7 +50,9 @@ historical-forecast-api)を取得し、しきい値の選択と精度の評価�
   - 本番用のモデル: 選んだ設定で全期間(評価期間も含む)を使って学習し直したもの
 """
 import csv
+import json
 import logging
+import math
 import shutil
 import time
 import warnings
@@ -49,7 +64,7 @@ import pandas as pd
 import requests
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, log_loss
 
-from common import BASE_DIR, JST, request_with_dns_fallback
+from common import BASE_DIR, JST, load_camera_regions, request_with_dns_fallback
 import fog_data
 import station_weather
 import fog_tree_viz
@@ -146,6 +161,7 @@ FEATURE_GROUPS = (
     ("日射・日照", ("日射量(MJ/m2)", "日照時間(時間)")),
     ("降水", ("降水量(mm)", "降水量_24h合計")),
     ("地点(ふだんの出やすさ)", ("地点別川霧発生率",)),
+    ("地点(地形)", ("標高", "谷の深さ_1km", "谷の深さ_3km", "地域_会津")),
 )
 IMPORTANCE_METHOD_SHAP = "shap_test_forecast"
 
@@ -188,6 +204,22 @@ CLIMATOLOGY_WEIGHT_GRID = tuple(round(w, 2) for w in np.arange(0.0, 1.0001, 0.05
 # 地点ごとの過去の川霧発生率(学習期間の実測から計算)。少数サンプルは全体平均へ平滑化する。
 STATION_FOG_RATE_FEATURE = "地点別川霧発生率"
 STATION_RATE_SMOOTHING = 20
+
+# 地点の地形(モジュールのdocstring参照)。値はSTATION_TERRAIN_PATHに保存し、無い地点(新しく追加した地点)
+# だけ国土地理院の標高APIから取得する。取得できなければNaN(LightGBMは欠測として扱う)。
+TERRAIN_FEATURES = ("標高", "谷の深さ_1km", "谷の深さ_3km", "地域_会津")
+STATION_TERRAIN_PATH = BASE_DIR / "data" / "station_terrain.json"
+GSI_ELEVATION_URL = "https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php"
+TERRAIN_RING_KM = (1.0, 3.0)
+
+# 新しいデータに重み: 学習の基準時点からd日前の行の重みを 0.5 ** (d / 半減期) にする。
+RECENCY_HALF_LIFE_DAYS = 60
+
+# 気象モデルの平均: 既定の予報(JMA)に加えてこれらの予報でも確率を計算し、平均する。
+# ECMWFは0.25度格子のため、応答の座標は要求した座標から最大0.125度ずれる(順序のずれではない)。
+ENSEMBLE_MODELS = ("ecmwf_ifs025",)
+ENSEMBLE_COORD_TOLERANCE_DEG = 0.2
+ENSEMBLE_MAX_FORECAST_DAYS = 15  # Open-MeteoのECMWF IFSの予報日数の上限
 
 # 短い欠測(視程・降水量が単発で欠けている等)は行ごと捨てず時間方向に補間して活かす。
 WEATHER_INTERPOLATE_LIMIT = 3
@@ -233,7 +265,7 @@ class BinaryFogModel:
     classes_ = np.array([0, 1])
 
     def __init__(self, model, base_features, station_rates, global_rate, threshold, n_estimators, params,
-                 station_hour_rates=None, climatology_weight=0.0):
+                 station_hour_rates=None, climatology_weight=0.0, station_static=None, ensemble_models=()):
         self.model = model
         self.base_features = list(base_features)
         self.station_rates = dict(station_rates)
@@ -245,20 +277,29 @@ class BinaryFogModel:
         # 読み込んだ時はgetattrで「混ぜない」として扱う。
         self.station_hour_rates = dict(station_hour_rates or {})
         self.climatology_weight = float(climatology_weight)
+        # 地点の地形 {地点名: {特徴量名: 値}} と、しきい値を選んだ時に平均した気象モデル。
+        # 2026-10-07より前に保存したモデルには無いため、getattrで「使わない」として扱う。
+        self.station_static = dict(station_static or {})
+        self.ensemble_models = tuple(ensemble_models or ())
+
+    @property
+    def static_features(self):
+        return list(TERRAIN_FEATURES) if getattr(self, "station_static", None) else []
 
     @property
     def features(self):
-        return self.base_features + [STATION_FOG_RATE_FEATURE]
+        return self.base_features + [STATION_FOG_RATE_FEATURE] + self.static_features
 
     def station_rate(self, station):
         return float(self.station_rates.get(station, self.global_rate))
 
     def _with_rate(self, X, stations):
         X = X[self.base_features].copy()
-        if isinstance(stations, str):
-            X[STATION_FOG_RATE_FEATURE] = self.station_rate(stations)
-        else:
-            X[STATION_FOG_RATE_FEATURE] = [self.station_rate(s) for s in stations]
+        names = [stations] * len(X) if isinstance(stations, str) else list(stations)
+        X[STATION_FOG_RATE_FEATURE] = [self.station_rate(s) for s in names]
+        static = getattr(self, "station_static", None) or {}
+        for f in self.static_features:
+            X[f] = np.array([static.get(s, {}).get(f, np.nan) for s in names], dtype="float64")
         return X
 
     def climatology(self, X, stations):
@@ -280,18 +321,44 @@ class BinaryFogModel:
             return np.zeros(0)
         return np.asarray(self.model.predict_proba(self._with_rate(X, stations))[:, 1], dtype="float64")
 
-    def fog_probability(self, X, stations):
-        """川霧である確率(0〜1)。stationsは地点名1つ、または行ごとの地点名の配列。
-        LightGBMの確率を気候値と混ぜたもの(climatology_weightが0なら混ぜない)。"""
-        p = self.raw_probability(X, stations)
+    def blend(self, p, X, stations):
+        """LightGBMの確率pを気候値と混ぜる(climatology_weightが0なら混ぜない)。"""
         w = float(getattr(self, "climatology_weight", 0.0) or 0.0)
         if w <= 0 or len(p) == 0:
             return p
         return (1.0 - w) * p + w * self.climatology(X, stations)
 
+    def fog_probability(self, X, stations, alt_X=None):
+        """川霧である確率(0〜1)。stationsは地点名1つ、または行ごとの地点名の配列。
+        LightGBMの確率を気候値と混ぜたもの。alt_X(ほかの気象モデルの予報から作った同じ行の特徴量の
+        リスト。予報の無い行は全項目NaN)を渡すと、行ごとに予報のある気象モデルの確率を平均してから混ぜる。"""
+        p = self.raw_probability(X, stations)
+        if alt_X and len(p):
+            p = _mean_with_alternatives(p, [(self.raw_probability(A, stations), _rows_with_forecast(A))
+                                            for A in alt_X])
+        return self.blend(p, X, stations)
+
     def predict(self, X, stations):
         """二値化した予測(1=川霧あり、0=川霧なし)。"""
         return (self.fog_probability(X, stations) >= self.threshold).astype(int)
+
+
+def _rows_with_forecast(X):
+    """予報値がある行(気温が欠けていない行)。予報の無い時刻は全項目NaNで渡される。"""
+    if COL_TEMP in X.columns:
+        return X[COL_TEMP].notna().to_numpy()
+    return np.ones(len(X), dtype=bool)
+
+
+def _mean_with_alternatives(p, alternatives):
+    """既定の予報での確率pと、ほかの気象モデルでの確率 [(確率, 予報がある行), ...] を行ごとに平均する
+    (予報の無い気象モデルは、その行の平均に入れない)。"""
+    total, count = np.asarray(p, dtype="float64").copy(), np.ones(len(p))
+    for q, ok in alternatives:
+        q = np.asarray(q, dtype="float64")
+        total[ok] += q[ok]
+        count[ok] += 1
+    return total / count
 
 
 def normalize_model_type_label(model_type):
@@ -527,24 +594,119 @@ def _best_climatology_weight(y, p_model, p_clim):
     return float(CLIMATOLOGY_WEIGHT_GRID[int(np.argmin(losses))])
 
 
-def _fit_lgbm(X, y, params, n_estimators, eval_set=None):
+def _fit_lgbm(X, y, params, n_estimators, eval_set=None, sample_weight=None):
     model = LGBMClassifier(**LGBM_BASE_PARAMS, **params, n_estimators=n_estimators)
     if eval_set is None:
-        model.fit(X, y)
+        model.fit(X, y, sample_weight=sample_weight)
         return model
     with warnings.catch_warnings():
         # LightGBM 4.7でeval_setが非推奨になった(動作は同じ)。後継のeval_X/eval_yは
         # 4.6以前に無いため、互換性を優先してeval_setのまま警告だけ抑える。
         warnings.filterwarnings("ignore", message=".*eval_set.*deprecated.*")
-        model.fit(X, y, eval_set=[eval_set], eval_metric="binary_logloss",
+        model.fit(X, y, sample_weight=sample_weight, eval_set=[eval_set], eval_metric="binary_logloss",
                   callbacks=[lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False)])
     return model
 
 
-def _features_with_rate(frame, base_features, rates, global_rate):
+def _features_with_rate(frame, base_features, rates, global_rate, static=None):
+    """base_features + 地点別川霧発生率(+ staticを渡せば地点の地形 TERRAIN_FEATURES)。"""
     X = frame[base_features].copy()
     X[STATION_FOG_RATE_FEATURE] = frame["__station"].map(rates).fillna(global_rate).to_numpy()
+    if static:
+        stations = frame["__station"].to_numpy()
+        for f in TERRAIN_FEATURES:
+            X[f] = np.array([static.get(s, {}).get(f, np.nan) for s in stations], dtype="float64")
     return X
+
+
+def _recency_weights(rows, ref):
+    """新しいデータに重み: 基準時点refからd日前の行を 0.5 ** (d / RECENCY_HALF_LIFE_DAYS) にする。"""
+    age = (pd.Timestamp(ref) - rows["__datetime"]).dt.total_seconds().to_numpy() / 86400.0
+    return 0.5 ** (np.clip(age, 0, None) / RECENCY_HALF_LIFE_DAYS)
+
+
+# --- 地点の地形 ----------------------------------------------------------------------------------
+
+def _gsi_elevation(lat, lon):
+    """国土地理院の標高API(1点)。海・データ無し・失敗ならNone。"""
+    for _ in range(3):
+        try:
+            r = requests.get(GSI_ELEVATION_URL, params={"lon": f"{lon:.6f}", "lat": f"{lat:.6f}", "outtype": "JSON"},
+                             timeout=20)
+            v = r.json().get("elevation")
+            return float(v) if v not in (None, "-----") else None
+        except Exception:
+            time.sleep(2)
+    return None
+
+
+def fetch_station_terrain(lat, lon):
+    """地点の標高と谷の深さ(周囲TERRAIN_RING_KMの東西南北4点の平均標高 − 地点の標高)。"""
+    center = _gsi_elevation(lat, lon)
+    out = {"標高": center}
+    for r_km in TERRAIN_RING_KM:
+        ring = []
+        for ang in (0, 90, 180, 270):
+            a = math.radians(ang)
+            e = _gsi_elevation(lat + r_km * math.cos(a) / 111.0,
+                               lon + r_km * math.sin(a) / (111.0 * math.cos(math.radians(lat))))
+            if e is not None:
+                ring.append(e)
+            time.sleep(0.2)
+        out[f"谷の深さ_{int(r_km)}km"] = float(np.mean(ring) - center) if ring and center is not None else None
+    return out
+
+
+def load_station_terrain(camera_coords, path=STATION_TERRAIN_PATH):
+    """{地点名: {TERRAIN_FEATURESの値}}。保存済みの値を使い、座標があって保存されていない地点だけ取得して
+    保存する。地域_会津はcameras.csvの地域から毎回作る(地点の地域が変わってもすぐ反映されるように)。"""
+    saved = {}
+    if path.exists():
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.warning("Failed to read station terrain (%s): %s", path, e)
+    missing = [s for s in (camera_coords or {}) if s not in saved]
+    for s in missing:
+        lat, lon = camera_coords[s]
+        saved[s] = fetch_station_terrain(lat, lon)
+        log.info("Fetched terrain for new station %s: %s", s, saved[s])
+    if missing:
+        try:
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(saved, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(path)
+        except Exception as e:
+            log.warning("Failed to save station terrain (%s): %s", path, e)
+    try:
+        regions = load_camera_regions()
+    except Exception:
+        regions = {}
+    return {s: {**{k: v for k, v in t.items() if k in TERRAIN_FEATURES},
+                "地域_会津": 1.0 if regions.get(s) == "会津" else 0.0}
+            for s, t in saved.items()}
+
+
+# --- 気象モデルの平均(学習時) ---------------------------------------------------------------------
+
+def _ensemble_raw(predict, rows, alt_hists, station_coords, weather_features, medians):
+    """rows(既定の予報を入力にした行)の確率を、ほかの気象モデルの過去の予報でも計算して行ごとに平均する。
+    predict: 特徴量の行(__station等を含むDataFrame) -> 確率。戻り値: (確率, ほかの気象モデルの予報がある行数)。"""
+    p = predict(rows)
+    if not alt_hists or len(rows) == 0:
+        return p, 0
+    keys = rows[["__datetime", "__station", "__y"]]
+    alternatives, n_alt = [], 0
+    for hist in alt_hists.values():
+        alt = _forecast_input_rows(keys, hist, station_coords, weather_features, medians)
+        merged = keys[["__datetime", "__station"]].merge(alt, on=["__datetime", "__station"], how="left")
+        ok = merged[COL_TEMP].notna().to_numpy() if COL_TEMP in merged.columns else np.zeros(len(rows), bool)
+        q = np.zeros(len(rows))
+        if ok.any():
+            q[ok] = predict(merged[ok].reset_index(drop=True))
+        alternatives.append((q, ok))
+        n_alt = max(n_alt, int(ok.sum()))
+    return _mean_with_alternatives(p, alternatives), n_alt
 
 
 def _forecast_input_rows(rows, hist_by_station, station_coords, weather_features, medians):
@@ -616,16 +778,40 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
         log.info("Fetched historical forecasts for %d/%d station(s)", len(hist_by_station), len(station_coords))
     except Exception as e:
         log.warning("Historical forecast fetch failed; thresholds/evaluation fall back to observed weather: %s", e)
+    # ほかの気象モデル(ENSEMBLE_MODELS)の過去の予報。取得できなければ既定の予報だけで学習・評価し、
+    # 本番でも平均しない(しきい値と気候値の割合を、本番と同じ入力の確率で選ぶため)。
+    alt_hists = {}
+    if hist_by_station:
+        for nwp in ENSEMBLE_MODELS:
+            try:
+                alt = fetch_historical_forecast_multi(
+                    station_coords, (val_start - pd.Timedelta(days=2)).date(), data_end.date(), model=nwp,
+                )
+                if alt:
+                    alt_hists[nwp] = alt
+                log.info("Fetched %s historical forecasts for %d/%d station(s)", nwp, len(alt), len(station_coords))
+            except Exception as e:
+                log.warning("Historical %s forecast fetch failed; not averaging weather models: %s", nwp, e)
+
+    # 地点の地形と、新しいデータに重み(モジュールのdocstring参照)
+    static = {}
+    try:
+        static = load_station_terrain({s: c for s, c in (camera_coords or {}).items() if s in station_coords})
+    except Exception as e:
+        log.warning("Station terrain unavailable; training without terrain features: %s", e)
+    log.info("Terrain features for %d station(s); recency half-life %d days", len(static), RECENCY_HALF_LIFE_DAYS)
+    feats = lambda rows, r, g: _features_with_rate(rows, weather_features, r, g, static=static)
 
     # 1) 検証期間で設定と木の本数を選ぶ(実測を入力に、early stoppingで)
     inner_rates, inner_global = _station_rates(inner)
-    X_inner = _features_with_rate(inner, weather_features, inner_rates, inner_global)
-    X_val = _features_with_rate(val, weather_features, inner_rates, inner_global)
+    X_inner = feats(inner, inner_rates, inner_global)
+    X_val = feats(val, inner_rates, inner_global)
     y_inner, y_val = inner["__y"].to_numpy(), val["__y"].to_numpy()
+    w_inner = _recency_weights(inner, val_start)
     val_pos = int(y_val.sum())
     candidates = []
     for params in LGBM_PARAM_GRID:
-        model = _fit_lgbm(X_inner, y_inner, params, MAX_ESTIMATORS, eval_set=(X_val, y_val))
+        model = _fit_lgbm(X_inner, y_inner, params, MAX_ESTIMATORS, eval_set=(X_val, y_val), sample_weight=w_inner)
         p_val = model.predict_proba(X_val)[:, 1]
         ap = float(average_precision_score(y_val, p_val)) if val_pos else None
         ll = float(log_loss(y_val, p_val, labels=[0, 1]))
@@ -645,8 +831,10 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     use_forecast = len(val_fc) > 0 and int(val_fc["__y"].sum()) >= MIN_POSITIVES_FOR_THRESHOLD
     thr_rows = val_fc if use_forecast else val
     thr_y = thr_rows["__y"].to_numpy()
-    thr_p_raw = inner_model.predict_proba(
-        _features_with_rate(thr_rows, weather_features, inner_rates, inner_global))[:, 1]
+    ens_hists = alt_hists if use_forecast else {}
+    thr_p_raw, n_val_alt = _ensemble_raw(
+        lambda rows: inner_model.predict_proba(feats(rows, inner_rates, inner_global))[:, 1],
+        thr_rows, ens_hists, station_coords, weather_features, shared_medians)
     # 気候値との混合の重み(同じ検証期間・同じ入力で、loglossが最小になる値)。しきい値は混ぜた後の確率で選ぶ。
     clim_val = _climatology_probs(inner, thr_rows)
     prev_weight = _previous_climatology_weight(prev_state)
@@ -673,14 +861,16 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     # 3) 評価: 「学習+検証」で学習したモデルを、評価期間で採点する(予報を入力に。無ければ実測)
     rates, global_rate = _station_rates(train)
     n_est = max(50, int(round(chosen["best_iteration"] * REFIT_ESTIMATOR_SCALE)))
-    eval_model = _fit_lgbm(_features_with_rate(train, weather_features, rates, global_rate),
-                           train["__y"].to_numpy(), params, n_est)
+    eval_model = _fit_lgbm(feats(train, rates, global_rate),
+                           train["__y"].to_numpy(), params, n_est, sample_weight=_recency_weights(train, test_start))
     test_fc = _forecast_input_rows(test, hist_by_station, station_coords, weather_features, shared_medians)
     eval_input = "forecast" if len(test_fc) > 0 else "observed"
     eval_rows = test_fc if eval_input == "forecast" else test.reset_index(drop=True)
     y_test = eval_rows["__y"].to_numpy()
-    p_test_raw = (eval_model.predict_proba(_features_with_rate(eval_rows, weather_features, rates, global_rate))[:, 1]
-                  if len(eval_rows) else np.zeros(0))
+    p_test_raw, n_test_alt = (_ensemble_raw(
+        lambda rows: eval_model.predict_proba(feats(rows, rates, global_rate))[:, 1],
+        eval_rows, ens_hists if eval_input == "forecast" else {}, station_coords, weather_features, shared_medians)
+        if len(eval_rows) else (np.zeros(0), 0))
     clim_test = _climatology_probs(train, eval_rows) if len(eval_rows) else np.zeros(0)
     p_test = (1 - clim_weight) * p_test_raw + clim_weight * clim_test
     pred_test = (p_test >= threshold).astype(int)
@@ -703,12 +893,17 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     # 4) 本番用: 同じ設定で全期間(評価期間も含む)を使って学習し直す
     all_rates, all_global = _station_rates(frame)
     n_final = max(50, int(round(chosen["best_iteration"] * REFIT_ESTIMATOR_SCALE)))
-    final = _fit_lgbm(_features_with_rate(frame, weather_features, all_rates, all_global),
-                      frame["__y"].to_numpy(), params, n_final)
+    final = _fit_lgbm(feats(frame, all_rates, all_global),
+                      frame["__y"].to_numpy(), params, n_final, sample_weight=_recency_weights(frame, data_end))
+    ensemble_models = tuple(ens_hists.keys())
     model = BinaryFogModel(final, weather_features, all_rates, all_global, threshold, n_final, params,
-                           station_hour_rates=_station_hour_rates(frame), climatology_weight=clim_weight)
+                           station_hour_rates=_station_hour_rates(frame), climatology_weight=clim_weight,
+                           station_static=static, ensemble_models=ensemble_models)
+    log.info("Weather models averaged: default%s (validation rows with them: %d, test rows: %d)",
+             "".join(f" + {m}" for m in ensemble_models), n_val_alt, n_test_alt)
 
-    importance = _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input)
+    importance = _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input,
+                                  static=static)
 
     # 方式の比較(RandomForest+XGBoost)。記録だけなので、失敗しても学習は続ける。
     comparison = None
@@ -717,6 +912,7 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
             comparison = _compare_rf_xgboost(
                 inner, val, train, thr_rows, eval_rows, weather_features, inner_rates, inner_global,
                 rates, global_rate, clim_weight, y_test, pred_test, p_test, clim_test,
+                static=static, ref_times=(val_start, test_start), alt=(ens_hists, station_coords, shared_medians),
             )
         except Exception as e:
             log.warning("RF+XGBoost comparison failed: %s", e)
@@ -729,6 +925,9 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
         "climatology_weight": clim_weight, "climatology_weight_source": weight_source,
         "model_unblended": {k: unblended.get(k) for k in ("ap", "brier", "logloss", "f1") if k in unblended},
         "params": params, "n_estimators": n_final, "guard": guard,
+        "terrain_features": list(TERRAIN_FEATURES) if static else [],
+        "recency_half_life_days": RECENCY_HALF_LIFE_DAYS,
+        "ensemble": {"models": ["default", *ensemble_models], "validation_rows": n_val_alt, "test_rows": n_test_alt},
         "n_train": len(frame), "n_train_fog": int(frame["__y"].sum()),
         "train_start": str(frame["__datetime"].min()), "train_end": str(data_end),
         "validation_start": str(val_start), "test_start": str(test_start), "test_end": str(data_end),
@@ -766,23 +965,24 @@ def _fmt(v, digits=3):
     return "n/a" if v is None else f"{v:.{digits}f}"
 
 
-def _fit_rf_xgboost(X, y, n_xgb, eval_set=None):
-    """RandomForestとXGBoostを学習する(予測は2つの確率の平均、_rf_xgboost_proba)。"""
+def _fit_rf_xgboost(X, y, n_xgb, eval_set=None, sample_weight=None):
+    """RandomForestとXGBoostを学習する(予測は2つの確率の平均、_rf_xgboost_proba)。
+    RandomForestは欠測を扱えないため、欠測(地形が取れなかった地点等)は-1で埋める。"""
     from sklearn.ensemble import RandomForestClassifier
     from xgboost import XGBClassifier
-    rf = RandomForestClassifier(**HYBRID_RF_PARAMS).fit(X, y)
+    rf = RandomForestClassifier(**HYBRID_RF_PARAMS).fit(X.fillna(-1), y, sample_weight=sample_weight)
     xgb = XGBClassifier(**HYBRID_XGB_PARAMS, n_estimators=n_xgb,
                         early_stopping_rounds=EARLY_STOPPING_ROUNDS if eval_set is not None else None)
     if eval_set is not None:
-        xgb.fit(X, y, eval_set=[eval_set], verbose=False)
+        xgb.fit(X, y, sample_weight=sample_weight, eval_set=[eval_set], verbose=False)
     else:
-        xgb.fit(X, y, verbose=False)
+        xgb.fit(X, y, sample_weight=sample_weight, verbose=False)
     return rf, xgb
 
 
 def _rf_xgboost_proba(models, X):
     rf, xgb = models
-    return (rf.predict_proba(X)[:, 1] + xgb.predict_proba(X)[:, 1]) / 2.0
+    return (rf.predict_proba(X.fillna(-1))[:, 1] + xgb.predict_proba(X)[:, 1]) / 2.0
 
 
 def _f1_from_pred(y, pred):
@@ -792,18 +992,27 @@ def _f1_from_pred(y, pred):
 
 
 def _compare_rf_xgboost(inner, val, train, thr_rows, eval_rows, weather_features, inner_rates, inner_global,
-                        rates, global_rate, lgbm_clim_weight, y_test, pred_lgbm, p_lgbm, clim_test):
+                        rates, global_rate, lgbm_clim_weight, y_test, pred_lgbm, p_lgbm, clim_test,
+                        static=None, ref_times=None, alt=None):
     """RandomForest+XGBoostを、LightGBMと同じ手順・同じ行で採点し、F1値の差(LightGBM − RF+XGBoost)と
-    評価期間の日単位ブートストラップによる95%区間を返す。"""
-    X = lambda rows, r, g: _features_with_rate(rows, weather_features, r, g)
+    評価期間の日単位ブートストラップによる95%区間を返す。特徴量(地形)・新しいデータの重み・
+    気象モデルの平均もLightGBMと同じにする(staticとref_times=(検証開始, 評価開始)、
+    alt=(ほかの気象モデルの過去の予報, 地点の座標, 中央値))。"""
+    X = lambda rows, r, g: _features_with_rate(rows, weather_features, r, g, static=static)
+    w_inner = _recency_weights(inner, ref_times[0]) if ref_times else None
+    w_train = _recency_weights(train, ref_times[1]) if ref_times else None
+    alt_hists, station_coords, medians = alt if alt else ({}, None, None)
+    ens = lambda models, rows, r, g: _ensemble_raw(lambda x: _rf_xgboost_proba(models, X(x, r, g)), rows,
+                                                   alt_hists, station_coords, weather_features, medians)[0]
     # 1) 検証期間でXGBoostの木の本数を選ぶ(LightGBMと同じく実測入力・早期打ち切り)
     _rf_i, xgb_i = _fit_rf_xgboost(X(inner, inner_rates, inner_global), inner["__y"].to_numpy(), MAX_ESTIMATORS,
-                                   eval_set=(X(val, inner_rates, inner_global), val["__y"].to_numpy()))
+                                   eval_set=(X(val, inner_rates, inner_global), val["__y"].to_numpy()),
+                                   sample_weight=w_inner)
     best = getattr(xgb_i, "best_iteration", None)
     n_xgb = max(50, int(round(((best + 1) if best is not None else MAX_ESTIMATORS) * REFIT_ESTIMATOR_SCALE)))
     # 2) 気候値の割合・しきい値: LightGBMと同じ検証期間の行・同じ入力で、F1最大
     thr_y = thr_rows["__y"].to_numpy()
-    p_thr = _rf_xgboost_proba((_rf_i, xgb_i), X(thr_rows, inner_rates, inner_global))
+    p_thr = ens((_rf_i, xgb_i), thr_rows, inner_rates, inner_global)
     clim_thr = _climatology_probs(inner, thr_rows)
     if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
         w = _best_climatology_weight(thr_y, p_thr, clim_thr)
@@ -811,8 +1020,8 @@ def _compare_rf_xgboost(inner, val, train, thr_rows, eval_rows, weather_features
     else:
         w, threshold = lgbm_clim_weight, DEFAULT_FOG_THRESHOLD
     # 3) 評価: 「学習+検証」で学習し直し、評価期間を採点
-    models = _fit_rf_xgboost(X(train, rates, global_rate), train["__y"].to_numpy(), n_xgb)
-    p = (1 - w) * _rf_xgboost_proba(models, X(eval_rows, rates, global_rate)) + w * clim_test
+    models = _fit_rf_xgboost(X(train, rates, global_rate), train["__y"].to_numpy(), n_xgb, sample_weight=w_train)
+    p = (1 - w) * ens(models, eval_rows, rates, global_rate) + w * clim_test
     pred = (p >= threshold).astype(int)
     hybrid = binary_metrics(y_test, pred, p)
     lgbm = binary_metrics(y_test, pred_lgbm, p_lgbm)
@@ -968,10 +1177,11 @@ def fetch_forecast_range(lat, lon, forecast_days):
 MULTI_LOCATION_COORD_TOLERANCE_DEG = 0.1
 
 
-def _parse_multi_payload(camera_coords, names, payload):
+def _parse_multi_payload(camera_coords, names, payload, tolerance=None):
     """複数地点の応答を {地点名: DataFrame} にする。応答は要求した順に並んでいる前提だが、
     万一ずれていたら誤った地点同士を対応付けないよう、応答が返した座標と要求した座標の差を
-    確認し、MULTI_LOCATION_COORD_TOLERANCE_DEGを超える地点はスキップする。"""
+    確認し、tolerance(既定はMULTI_LOCATION_COORD_TOLERANCE_DEG)を超える地点はスキップする。"""
+    tolerance = MULTI_LOCATION_COORD_TOLERANCE_DEG if tolerance is None else tolerance
     if isinstance(payload, dict):
         payload = [payload]  # 地点が1件だけの時は単一オブジェクトで返ってくるため揃える
     result = {}
@@ -981,8 +1191,7 @@ def _parse_multi_payload(camera_coords, names, payload):
         expected_lat, expected_lon = camera_coords[name]
         echoed_lat, echoed_lon = item.get("latitude"), item.get("longitude")
         if echoed_lat is not None and echoed_lon is not None:
-            if (abs(echoed_lat - expected_lat) > MULTI_LOCATION_COORD_TOLERANCE_DEG
-                    or abs(echoed_lon - expected_lon) > MULTI_LOCATION_COORD_TOLERANCE_DEG):
+            if abs(echoed_lat - expected_lat) > tolerance or abs(echoed_lon - expected_lon) > tolerance:
                 log.error(
                     "Open-Meteo multi-location response order mismatch for %s: expected (%.4f, %.4f), "
                     "got (%.4f, %.4f); skipping to avoid misaligned data",
@@ -996,33 +1205,43 @@ def _parse_multi_payload(camera_coords, names, payload):
     return result
 
 
-def fetch_forecast_range_multi(camera_coords, forecast_days):
+def _model_params(model):
+    """気象モデルの指定(Noneなら既定=JMA)と、応答の座標の許容差。"""
+    if not model:
+        return {}, None
+    return {"models": model}, ENSEMBLE_COORD_TOLERANCE_DEG
+
+
+def fetch_forecast_range_multi(camera_coords, forecast_days, model=None):
     """全地点分の予報を1回のAPI呼び出しでまとめて取得する。戻り値: {地点名: forecast_df}
-    (取得・変換できた地点だけ)。"""
+    (取得・変換できた地点だけ)。modelで気象モデルを指定できる(既定はOpen-Meteoの既定=JMA)。"""
     if not camera_coords:
         return {}
     names = list(camera_coords.keys())
+    extra, tolerance = _model_params(model)
     params = {
-        **_common_params(), "forecast_days": forecast_days,
+        **_common_params(), **extra, "forecast_days": forecast_days,
         "latitude": ",".join(str(camera_coords[n][0]) for n in names),
         "longitude": ",".join(str(camera_coords[n][1]) for n in names),
     }
-    return _parse_multi_payload(camera_coords, names, _get_forecast_with_retry(params, timeout=30).json())
+    return _parse_multi_payload(camera_coords, names, _get_forecast_with_retry(params, timeout=30).json(),
+                                tolerance=tolerance)
 
 
-def fetch_historical_forecast_multi(camera_coords, start_date, end_date):
+def fetch_historical_forecast_multi(camera_coords, start_date, end_date, model=None):
     """指定期間に実際に出されていた予報(historical-forecast-api)を全地点分まとめて取得する。
     戻り値: {地点名: DataFrame}(本番の予報と同じ列名・単位)。"""
     if not camera_coords:
         return {}
     names = list(camera_coords.keys())
+    extra, tolerance = _model_params(model)
     params = {
-        **_common_params(), "start_date": str(start_date), "end_date": str(end_date),
+        **_common_params(), **extra, "start_date": str(start_date), "end_date": str(end_date),
         "latitude": ",".join(str(camera_coords[n][0]) for n in names),
         "longitude": ",".join(str(camera_coords[n][1]) for n in names),
     }
     resp = _get_forecast_with_retry(params, timeout=90, url=OPEN_METEO_HISTORICAL_FORECAST_URL)
-    return _parse_multi_payload(camera_coords, names, resp.json())
+    return _parse_multi_payload(camera_coords, names, resp.json(), tolerance=tolerance)
 
 
 def _station_feature_frame(info, raw, lat, lon):
@@ -1033,9 +1252,30 @@ def _station_feature_frame(info, raw, lat, lon):
     return df, df[weather_features].copy()
 
 
-def build_location_forecast(models, forecast_raw, lat, lon, forecast_by_station=None, camera_coords=None):
+def _alt_feature_frames(info, alt_forecasts, station, datetimes, f_lat, f_lon):
+    """ほかの気象モデルの予報(alt_forecasts={気象モデル名: {地点名: DataFrame}})から、datetimesと同じ行の
+    特徴量を作る。予報の無い時刻は全項目NaN(fog_probabilityがその行の平均から外す)。モデルが学習時に
+    平均していない気象モデルは使わない(しきい値・気候値の割合が平均した確率で選ばれていないため)。"""
+    frames = []
+    used = getattr(info["pipe"], "ensemble_models", ()) or ()
+    for nwp in used:
+        alt = (alt_forecasts or {}).get(nwp, {}).get(station)
+        if alt is None or len(alt) == 0:
+            continue
+        alt_raw = alt.drop_duplicates(subset="datetime").set_index("datetime").reindex(datetimes).reset_index()
+        alt_raw = alt_raw.rename(columns={alt_raw.columns[0]: "datetime"})
+        _, X_alt = _station_feature_frame(info, alt_raw, f_lat, f_lon)
+        X_alt.loc[alt_raw[COL_TEMP].isna().to_numpy(), :] = np.nan
+        frames.append(X_alt)
+    return frames
+
+
+def build_location_forecast(models, forecast_raw, lat, lon, forecast_by_station=None, camera_coords=None,
+                            alt_forecasts=None):
     """予報データに対して地点ごとの川霧の二値予測と確率を計算する。
     地点別の予報があればそれを使い、欠けている時間だけ代表地点の予報で埋める。
+    alt_forecasts({気象モデル名: {地点名: DataFrame}})を渡すと、モデルが学習時に平均した気象モデルの
+    予報でも確率を計算し、行ごとに平均する(ENSEMBLE_MODELS参照)。
     戻り値: (pred_df, prob_df, feature_snapshots)
       pred_df: datetime + 地点ごとの列(1=川霧あり、0=川霧なし、NOT_PREDICTED=夜間で対象外)
       prob_df: datetime + 地点ごとの列(川霧である確率。夜間はNaN)
@@ -1060,7 +1300,8 @@ def build_location_forecast(models, forecast_raw, lat, lon, forecast_by_station=
         model = info["pipe"]
         # 日の出前・日の入り後は学習・評価の対象外(暗くて判定できない)なので予測しない。
         daylight = daylight_mask(df["datetime"], f_lat, f_lon)
-        probs = np.where(daylight, model.fog_probability(X, col), np.nan)
+        alt_X = _alt_feature_frames(info, alt_forecasts, col, pd.DatetimeIndex(df["datetime"]), f_lat, f_lon)
+        probs = np.where(daylight, model.fog_probability(X, col, alt_X=alt_X), np.nan)
         preds = np.where(daylight, (probs >= model.threshold).astype(int), NOT_PREDICTED)
         pred_df[col] = preds
         prob_df[col] = probs
@@ -1170,7 +1411,7 @@ def _group_of(feature):
     return "その他"
 
 
-def _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input):
+def _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate, eval_input, static=None):
     """評価期間(学習に使っていない直近の期間。本番と同じ予報値を入力)での、各特徴量の予測への
     寄与の大きさ(SHAP値の絶対値の平均。LightGBMのpred_contrib)の割合と、まとまりごとの合計。
     gain(学習時に分岐で損失をどれだけ減らしたか)は学習データ上の値で、似た特徴量があると
@@ -1178,7 +1419,7 @@ def _shap_importance(eval_model, eval_rows, weather_features, rates, global_rate
     if eval_rows is None or len(eval_rows) == 0:
         return None
     try:
-        X = _features_with_rate(eval_rows, weather_features, rates, global_rate)
+        X = _features_with_rate(eval_rows, weather_features, rates, global_rate, static=static)
         contrib = eval_model.booster_.predict(X, pred_contrib=True)[:, :-1]
         mean_abs = np.abs(contrib).mean(axis=0)
         total = float(mean_abs.sum()) or 1.0

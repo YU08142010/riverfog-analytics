@@ -255,9 +255,20 @@ def main():
         log.warning("Per-station forecast fetch failed, falling back to the shared forecast: %s", e)
         forecast_by_station = {}
 
+    # 気象モデルの平均(fog_model.ENSEMBLE_MODELS)。取得できなければ既定の予報だけで予測する。
+    alt_forecasts = {}
+    for nwp in fog_model.ENSEMBLE_MODELS:
+        try:
+            alt_forecasts[nwp] = fog_model.fetch_forecast_range_multi(
+                camera_coords, min(args.forecast_days, fog_model.ENSEMBLE_MAX_FORECAST_DAYS), model=nwp)
+            log.info("Fetched %s forecast: %d/%d station(s)", nwp, len(alt_forecasts[nwp]), len(camera_coords))
+        except Exception as e:
+            log.warning("%s forecast fetch failed; using the default forecast only: %s", nwp, e)
+
     pred_df, prob_df, feature_snapshots = fog_model.build_location_forecast(
         models, forecast_raw, lat, lon,
         forecast_by_station=forecast_by_station, camera_coords=camera_coords,
+        alt_forecasts=alt_forecasts,
     )
     # 「川霧あり」と予測された件数を日ごとに残す(しきい値・予報の入力が想定通りかの確認用)。
     obs_hours = pred_df["datetime"].dt.hour.between(OBSERVATION_START_HOUR, OBSERVATION_END_HOUR)

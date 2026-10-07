@@ -186,6 +186,15 @@
     (気候値の割合 {{ "%.0f"|format(global_metrics.climatology_weight * 100) }}%。検証期間で確率の誤差が最小になる割合)。
     予報の誤差の分だけモデルの確率が自信過剰になるのを和らげるため。
     {% endif %}
+    {% if global_metrics.ensemble and global_metrics.ensemble.models|length > 1 %}
+    <br>気象の予報は、気象庁(JMA)と欧州中期予報センター(ECMWF)の2つのモデルそれぞれで確率を計算し、平均している。
+    {% endif %}
+    {% if global_metrics.terrain_features %}
+    <br>地点の特徴として、川霧の発生率に加え、標高と谷の深さ(周囲1km・3kmの平均標高との差、国土地理院の標高データ)を用いている。
+    {% endif %}
+    {% if global_metrics.recency_half_life_days %}
+    <br>学習では新しいデータほど重く扱っている({{ global_metrics.recency_half_life_days }}日前のデータの重みを半分とする)。
+    {% endif %}
     {% endif %}{% endif %}
 </p>
 
