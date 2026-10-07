@@ -30,12 +30,12 @@
     --glass-bg: rgba(255, 255, 255, 0.38);
     --glass-bg-strong: rgba(255, 255, 255, 0.60);
     --glass-bar: rgba(250, 251, 253, 0.34);
-    --glass-edge: rgba(255, 255, 255, 0.75);
+    --glass-edge: rgba(255, 255, 255, 0.16);
     --glass-hairline: rgba(20, 30, 50, 0.08);
     --glass-filter: saturate(200%) blur(30px);
-    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 0.5px var(--glass-hairline),
+    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 0.5px var(--glass-hairline),
                     0 8px 28px rgba(30, 50, 90, 0.08);
-    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px var(--glass-hairline),
+    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 0.5px var(--glass-hairline),
                           0 14px 36px rgba(30, 50, 90, 0.13);
     --shadow-card: var(--glass-shadow);
     --shadow-card-hover: var(--glass-shadow-hover);
@@ -66,7 +66,7 @@
         --glass-bg: rgba(36, 38, 48, 0.32);
         --glass-bg-strong: rgba(40, 42, 52, 0.58);
         --glass-bar: rgba(28, 30, 38, 0.30);
-        --glass-edge: rgba(255, 255, 255, 0.10);
+        --glass-edge: rgba(255, 255, 255, 0.06);
         --glass-hairline: rgba(255, 255, 255, 0.09);
         --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
                         0 10px 30px rgba(0, 0, 0, 0.35);
@@ -98,7 +98,7 @@
     --glass-bg: rgba(36, 38, 48, 0.32);
     --glass-bg-strong: rgba(40, 42, 52, 0.58);
     --glass-bar: rgba(28, 30, 38, 0.30);
-    --glass-edge: rgba(255, 255, 255, 0.10);
+    --glass-edge: rgba(255, 255, 255, 0.06);
     --glass-hairline: rgba(255, 255, 255, 0.09);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
                     0 10px 30px rgba(0, 0, 0, 0.35);
@@ -496,7 +496,7 @@ header h1 { letter-spacing: 0.03em; }
     -webkit-backdrop-filter: saturate(190%) blur(34px);
     backdrop-filter: saturate(190%) blur(34px);
     border: 1px solid var(--glass-edge);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 0 0.5px var(--glass-hairline), 0 30px 80px rgba(0, 0, 0, 0.30);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 0.5px var(--glass-hairline), 0 30px 80px rgba(0, 0, 0, 0.30);
     overflow: hidden;
     transform: translateY(-8px) scale(0.97);
     transition: transform 0.28s var(--spring, ease);
@@ -636,7 +636,7 @@ header h1 { letter-spacing: 0.03em; }
     -webkit-backdrop-filter: saturate(180%) blur(26px);
     backdrop-filter: saturate(180%) blur(26px);
     border: 1px solid var(--glass-edge);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 0.5px var(--glass-hairline), 0 14px 38px rgba(0, 0, 0, 0.2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 0 0.5px var(--glass-hairline), 0 14px 38px rgba(0, 0, 0, 0.2);
     transform: translateY(-14px) scale(0.97);
     transition: opacity 0.25s ease, transform 0.45s var(--spring);
 }
@@ -839,7 +839,7 @@ input[type="date"], input[type="month"], input[type="datetime-local"] { cursor: 
     position: fixed; z-index: 1900; width: min(340px, calc(100vw - 16px)); padding: 0.85rem 0.85rem 0.75rem;
     border: 1px solid var(--glass-edge); border-radius: 18px; background: var(--glass-pop);
     -webkit-backdrop-filter: saturate(190%) blur(34px); backdrop-filter: saturate(190%) blur(34px);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 0.5px var(--glass-hairline), 0 22px 60px rgba(0, 0, 0, 0.25);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 0 0.5px var(--glass-hairline), 0 22px 60px rgba(0, 0, 0, 0.25);
     opacity: 0; transform: translateY(-6px) scale(0.97); transform-origin: top center;
     transition: opacity 0.16s ease, transform 0.3s var(--spring, ease);
 }
@@ -965,3 +965,74 @@ button.date-nav-step { border: none; background: none; cursor: pointer; font: in
 button.date-nav-step:hover:not(:disabled) { background: var(--control-bg); }
 button.date-nav-step:active:not(:disabled) { transform: scale(0.94); }
 button.date-nav-step:disabled { opacity: 0.35; cursor: default; }
+
+/* ==========================================================================
+   背景の絵(base.htmlの.bg-art、2026-10-07)。空の背景(_weather_scene.html)を持たない
+   ページ(観測アーカイブ・分析・地点一覧など)の、夜明けの川の谷: ゆっくり動く色の光、
+   流れのような線、重なる稜線、谷を漂う霧。動かすのはtransformとopacityだけ。
+   ========================================================================== */
+:root {
+    --bg-glow-1: rgba(110, 170, 255, 0.55);
+    --bg-glow-2: rgba(185, 150, 255, 0.42);
+    --bg-glow-3: rgba(100, 210, 200, 0.40);
+    --bg-line: rgba(50, 90, 170, 0.12);
+    --bg-ridge-far: rgba(120, 140, 210, 0.20);
+    --bg-ridge-mid: rgba(95, 118, 190, 0.24);
+    --bg-ridge-near: rgba(70, 92, 160, 0.28);
+    --bg-mist: rgba(255, 255, 255, 0.62);
+}
+:root[data-theme="dark"] {
+    --bg-glow-1: rgba(40, 95, 210, 0.50);
+    --bg-glow-2: rgba(125, 60, 210, 0.40);
+    --bg-glow-3: rgba(20, 140, 150, 0.36);
+    --bg-line: rgba(150, 180, 255, 0.10);
+    --bg-ridge-far: rgba(90, 110, 190, 0.16);
+    --bg-ridge-mid: rgba(20, 26, 50, 0.55);
+    --bg-ridge-near: rgba(8, 10, 20, 0.70);
+    --bg-mist: rgba(170, 195, 255, 0.13);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg-glow-1: rgba(40, 95, 210, 0.50);
+        --bg-glow-2: rgba(125, 60, 210, 0.40);
+        --bg-glow-3: rgba(20, 140, 150, 0.36);
+        --bg-line: rgba(150, 180, 255, 0.10);
+        --bg-ridge-far: rgba(90, 110, 190, 0.16);
+        --bg-ridge-mid: rgba(20, 26, 50, 0.55);
+        --bg-ridge-near: rgba(8, 10, 20, 0.70);
+        --bg-mist: rgba(170, 195, 255, 0.13);
+    }
+}
+.bg-art { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
+.bg-glow {
+    position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%;
+    will-change: transform;
+}
+.bg-glow.g1 { left: -22vmax; top: -30vmax; background: radial-gradient(closest-side, var(--bg-glow-1), transparent); animation: bgDrift1 38s ease-in-out infinite alternate; }
+.bg-glow.g2 { right: -26vmax; top: -18vmax; background: radial-gradient(closest-side, var(--bg-glow-2), transparent); animation: bgDrift2 46s ease-in-out infinite alternate; }
+.bg-glow.g3 { left: 20vw; bottom: -40vmax; background: radial-gradient(closest-side, var(--bg-glow-3), transparent); animation: bgDrift3 52s ease-in-out infinite alternate; }
+@keyframes bgDrift1 { to { transform: translate(14vw, 10vh) scale(1.12); } }
+@keyframes bgDrift2 { to { transform: translate(-12vw, 14vh) scale(0.92); } }
+@keyframes bgDrift3 { to { transform: translate(-16vw, -8vh) scale(1.1); } }
+.bg-lines { position: absolute; inset: -4% -6%; width: 112%; height: 108%; animation: bgFlow 60s ease-in-out infinite alternate; }
+.bg-lines path { fill: none; stroke: var(--bg-line); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+@keyframes bgFlow { to { transform: translateX(-4%) translateY(1.5%); } }
+.bg-ridges { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; }
+.bg-ridges .far { fill: var(--bg-ridge-far); }
+.bg-ridges .mid { fill: var(--bg-ridge-mid); }
+.bg-ridges .near { fill: var(--bg-ridge-near); }
+.bg-mist {
+    position: absolute; left: -50%; width: 200%; height: 18vh; border-radius: 50%;
+    background: radial-gradient(50% 50% at 50% 50%, var(--bg-mist), transparent 70%);
+    will-change: transform;
+}
+.bg-mist.m1 { top: 52vh; opacity: 0.55; animation: bgMist 70s linear infinite; }
+.bg-mist.m2 { top: 66vh; height: 22vh; opacity: 0.8; animation: bgMist 95s linear infinite reverse; }
+.bg-mist.m3 { top: 78vh; height: 20vh; opacity: 0.65; animation: bgMist 120s linear infinite; animation-delay: -40s; }
+@keyframes bgMist { from { transform: translateX(-12%); } 50% { transform: translateX(12%); } to { transform: translateX(-12%); } }
+/* 空の背景のあるページ(地点・ダッシュボード)は、その空を優先する */
+.wx-scene ~ .bg-art { display: none; }
+@media (prefers-reduced-motion: reduce) {
+    .bg-glow, .bg-lines, .bg-mist { animation: none !important; }
+}
+@media print { .bg-art { display: none; } }
