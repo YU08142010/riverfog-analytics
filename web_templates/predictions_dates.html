@@ -10,6 +10,6 @@
 ]) }}
 <div class="card">
     <h2>予測結果(日付一覧)</h2>
-    {{ date_month_groups(date_groups, endpoint, "予測結果がまだありません。") }}
+    {{ date_month_groups(date_groups, endpoint, "予測結果がまだありません。", dates=dates, kind="predictions") }}
 </div>
 {% endblock %}

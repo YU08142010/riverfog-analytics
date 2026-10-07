@@ -5,6 +5,7 @@ LAN/Tailscale内からのみアクセスされる想定。全ページログイ�
 """
 import configparser
 import csv
+import bisect
 import hmac
 import io
 import json
@@ -1053,6 +1054,58 @@ def _group_dates_by_month(dates):
             current_key = key
         groups[-1]["days"].append({"date": d, "day": d[8:10]})
     return groups
+
+
+# --- 日付の一覧(カレンダー・前後の日への移動・Ctrl+Kの日付表示用) -----------------------------------
+# 観測データの日付は全期間のDataFrameを作らずにSQLiteから直接引き、DBの更新時刻が変わるまで使い回す。
+_OBS_DATES_CACHE = {"mtime": None, "dates": []}
+_DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _observation_dates():
+    """観測データのある日付(昇順)。"""
+    try:
+        mtime = WEATHER_DB_PATH.stat().st_mtime
+    except OSError:
+        return []
+    if _OBS_DATES_CACHE["mtime"] != mtime:
+        conn = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT substr(datetime, 1, 10) FROM weather_observations ORDER BY 1").fetchall()
+        finally:
+            conn.close()
+        _OBS_DATES_CACHE.update(mtime=mtime, dates=[r[0] for r in rows if r[0] and _DATE_DIR_RE.match(r[0])])
+    return list(_OBS_DATES_CACHE["dates"])
+
+
+def _available_dates(kind):
+    """kind("observations" / "images" / "predictions")のデータがある日付(昇順)。"""
+    if kind == "observations":
+        return _observation_dates()
+    base = {"images": IMAGE_DIR, "predictions": PRED_DIR}.get(kind)
+    if base is None:
+        return []
+    return [d for d in _sorted_subdirs(base, reverse=False) if _DATE_DIR_RE.match(d)]
+
+
+@app.template_filter("weekday_index")
+def _weekday_index(date_str):
+    """"YYYY-MM-DD"の曜日(月曜=0)。日付として読めなければNone。"""
+    try:
+        return datetime.strptime(str(date_str), "%Y-%m-%d").weekday()
+    except ValueError:
+        return None
+
+
+def _adjacent_dates(kind, date):
+    """dateの前後で、データがある日付 (前, 次)。無ければNone。"""
+    dates = _available_dates(kind)
+    i = bisect.bisect_left(dates, date)
+    prev_date = dates[i - 1] if i > 0 else None
+    j = i + 1 if i < len(dates) and dates[i] == date else i
+    next_date = dates[j] if j < len(dates) else None
+    return prev_date, next_date
 
 
 def _users_conn():
@@ -3993,7 +4046,9 @@ def observations_date(date):
             "cells": cells,
         })
 
-    return render_template("observations_date.html", date=date, station_names=station_names, rows=rows)
+    prev_date, next_date = _adjacent_dates("observations", date)
+    return render_template("observations_date.html", date=date, station_names=station_names, rows=rows,
+                           prev_date=prev_date, next_date=next_date)
 
 
 @app.route("/observations/<date>/chart.json")
@@ -4060,7 +4115,9 @@ def images_date(date):
     date_dir = IMAGE_DIR / date
     if not date_dir.is_dir():
         abort(404)
-    return render_template("images_date.html", date=date, hours=_sorted_subdirs(date_dir))
+    prev_date, next_date = _adjacent_dates("images", date)
+    return render_template("images_date.html", date=date, hours=_sorted_subdirs(date_dir),
+                           prev_date=prev_date, next_date=next_date)
 
 
 @app.route("/images/<date>/<hhmm>")
@@ -4229,9 +4286,11 @@ def predictions_date(date):
             stations.append({"name": m.group(1), "file": f})
     stations.sort(key=lambda s: s["name"])
 
+    prev_date, next_date = _adjacent_dates("predictions", date)
     return render_template(
         "predictions_date.html", date=date,
         summary_file=summary_file, csv_file=csv_file, stations=stations,
+        prev_date=prev_date, next_date=next_date,
     )
 
 
@@ -4271,7 +4330,15 @@ SPOTLIGHT_PAGES = (
     ("コミュニティ", "members_list", "メンバー 仲間 チャット"),
     ("AIチャット", "chat_page", "AI チャット 質問 Gemini"),
     ("ゲーム", "game_home", "ゲーム ショップ ポイント"),
-    ("意見箱", "feedback", "フィードバック 要望"),
+    ("デイリーボーナス", "game_daily", "ゲーム ログインボーナス 毎日"),
+    ("ショップ", "game_shop", "ゲーム 買い物 アイテム テーマ"),
+    ("川霧予想ゲーム", "game_gamble", "ゲーム 予想 賭け"),
+    ("意見箱", "community_feedback", "フィードバック 要望 意見"),
+    ("メッセージ", "dm_inbox", "DM ダイレクトメッセージ 受信箱"),
+    ("グループ", "group_home", "グループ チャット 投票"),
+    ("共有ファイル", "shared_files_page", "ファイル 共有 アップロード ダウンロード"),
+    ("期間レポート", "period_report", "レポート 期間 集計 まとめ"),
+    ("川霧の時刻分布", "river_fog_histogram_page", "ヒストグラム 分布 時刻 分析"),
     ("更新履歴", "changelog_page", "バージョン 変更履歴"),
     ("公開ページ(出やすさ)", "public_forecast", "公開 一般向け 出やすさ"),
     ("この情報について(公開)", "public_about", "公開 説明 仕組み"),
@@ -4288,35 +4355,81 @@ SPOTLIGHT_ADMIN_PAGES = (
     ("DB管理", "admin_db", "データベース DB"),
     ("アカウント管理", "admin_accounts", "アカウント ユーザー 承認"),
     ("設定", "admin_settings", "設定"),
+    ("お知らせ管理", "admin_announcements", "お知らせ 告知 アナウンス"),
+    ("監査ログ", "admin_audit_log", "監査 ログ 操作履歴"),
+    ("コックピット", "admin_cockpit", "概要 一覧 状況"),
+    ("仮検証", "admin_experiment", "実験 検証 モデル比較"),
+    ("ラベルの検証", "admin_experiment_labels", "ラベル 判定 検証"),
+    ("意見箱(管理)", "admin_feedback", "フィードバック 要望"),
+    ("メンテナンス", "admin_maintenance", "メンテナンス 停止"),
+    ("ポイント管理", "admin_points", "ポイント ゲーム"),
+    ("ウイルス検査(ClamAV)", "admin_clamav", "ウイルス ClamAV 検査"),
+    ("環境変数", "admin_env", "環境 変数 env"),
+    ("SMB共有", "admin_smb", "SMB 共有 ネットワーク"),
+    ("Tailscale", "admin_tailscale", "Tailscale ネットワーク 公開"),
+    ("ターミナル", "admin_terminal", "ターミナル コマンド シェル"),
 )
-SPOTLIGHT_DATE_RULES = (("観測データ", "/observations/<date>"), ("カメラ画像", "/images/<date>"), ("予測結果", "/predictions/<date>"))
+SPOTLIGHT_DATE_RULES = (
+    ("観測データ", "/observations/<date>", "observations"),
+    ("カメラ画像", "/images/<date>", "images"),
+    ("予測結果", "/predictions/<date>", "predictions"),
+)
 
 
 def _spotlight_items():
     items = []
 
-    def add(label, endpoint, kind, keywords="", **values):
+    def add(label, endpoint, kind, keywords="", sub="", **values):
         try:
-            items.append({"label": label, "href": url_for(endpoint, **values), "kind": kind, "keywords": keywords})
+            items.append({"label": label, "href": url_for(endpoint, **values), "kind": kind,
+                          "keywords": keywords, "sub": sub})
         except Exception:
             pass
 
     for label, endpoint, keywords in SPOTLIGHT_PAGES:
         add(label, endpoint, "page", keywords)
     for name in STATION_NAMES:
-        add(name, "station_detail", "station", STATION_REGION.get(name) or "", name=name)
+        region = STATION_REGION.get(name) or ""
+        add(name, "station_detail", "station", region, sub=region, name=name)
     if session.get("role") == "admin" and not _is_funnel_request():
         for label, endpoint, keywords in SPOTLIGHT_ADMIN_PAGES:
             add(label, endpoint, "admin", keywords)
     dates = []
-    for label, rule_text in SPOTLIGHT_DATE_RULES:
+    for label, rule_text, kind in SPOTLIGHT_DATE_RULES:
         rule = next((r for r in app.url_map.iter_rules() if r.rule == rule_text), None)
         if rule is not None:
             try:
-                dates.append({"label": label, "href": url_for(rule.endpoint, date="0000-00-00")})
+                dates.append({"label": label, "kind": kind, "href": url_for(rule.endpoint, date="0000-00-00")})
             except Exception:
                 pass
-    return {"items": items, "dates": dates}
+    links = {}
+    # 地点の公開ページ・最新のカメラ画像は、ブラウザ側でこのURLの型から作る(全ページに埋め込む量を増やさない)
+    for key, endpoint, values in (("logout", "logout", {}),
+                                  ("images_hour", "images_hour", {"date": "0000-00-00", "hhmm": "0000"}),
+                                  ("public_station", "public_station", {"name": "__NAME__"})):
+        try:
+            links[key] = url_for(endpoint, **values)
+        except Exception:
+            pass
+    return {"items": items, "dates": dates, "links": links, "dates_url": url_for("calendar_dates")}
+
+
+@app.route("/api/calendar-dates")
+def calendar_dates():
+    """カレンダー(web_static/calendar.js)とCtrl+Kの日付表示用: 種類ごとにデータがある日付(昇順)と、
+    最新のカメラ画像の日付・時刻。ページを開くたびではなく、カレンダーを開いたときだけ読む。"""
+    out = {kind: _available_dates(kind) for _, _, kind in SPOTLIGHT_DATE_RULES}
+    latest_image = None
+    if out["images"]:
+        last = out["images"][-1]
+        hours = _sorted_subdirs(IMAGE_DIR / last)
+        if hours:
+            latest_image = {"date": last, "hhmm": hours[0]}
+    out["latest_image"] = latest_image
+    out["today"] = datetime.now(JST).strftime("%Y-%m-%d")
+    resp = jsonify(out)
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    return resp
 
 
 @app.context_processor

@@ -1,10 +1,30 @@
 {# observations_dates.html/predictions_dates.html/images_dates.htmlで共通の、月ごとに
    折りたたまれた日付一覧(<details>)を描画するマクロ。以前はこの3ファイルにほぼ同じ
-   マークアップが個別にコピーされていた。 #}
-{% macro date_month_groups(date_groups, endpoint, empty_message) %}
+   マークアップが個別にコピーされていた。
+   dates(日付の一覧)とkindを渡すと、上にカレンダー(web_static/calendar.js)を出し、
+   月ごとの一覧は「一覧で見る」の中に畳む。 #}
+{% macro date_month_groups(date_groups, endpoint, empty_message, dates=None, kind=None) %}
 {% if date_groups %}
+{% if dates %}
+{% set latest = dates|max %}
+<div class="date-browser">
+    <div class="date-browser-cal" data-calendar-inline data-kind="{{ kind or '' }}"
+         data-href="{{ url_for(endpoint, date='0000-00-00') }}" data-dates='{{ dates|tojson }}'
+         data-label="日付を選ぶ"><noscript><p class="muted">カレンダーの表示にはJavaScriptが必要です。下の一覧から選んでください。</p></noscript></div>
+    <div class="date-browser-side">
+        <p class="muted date-browser-hint">色の付いた日にデータがあります。押すとその日のページを開きます。</p>
+        <a class="date-browser-latest" href="{{ url_for(endpoint, date=latest) }}">
+            <span>最新</span><b>{{ latest[5:7]|int }}月{{ latest[8:10]|int }}日</b><small>{{ latest[:4] }}年</small>
+        </a>
+        {% set first = dates|min %}
+        <p class="muted date-browser-count">全{{ dates|length }}日分({{ first[:4] }}年{{ first[5:7]|int }}月〜)</p>
+    </div>
+</div>
+<details class="date-list-all">
+    <summary>一覧で見る</summary>
+{% endif %}
 {% for g in date_groups %}
-<details class="date-month-group" {{ "open" if loop.first }}>
+<details class="date-month-group" {{ "open" if loop.first and not dates }}>
     <summary>{{ g.label }}<span class="muted">({{ g.days|length }}日分)</span></summary>
     <ul class="date-list compact">
         {% for d in g.days %}
@@ -13,7 +33,35 @@
     </ul>
 </details>
 {% endfor %}
+{% if dates %}
+</details>
+{% endif %}
 {% else %}
 <p class="muted">{{ empty_message }}</p>
 {% endif %}
+{% endmacro %}
+
+{# 日付ごとのページの上に出す「前の日 / カレンダー / 次の日」。kindは"observations"/"images"/"predictions"。 #}
+{% macro date_nav(kind, endpoint, date, prev_date=None, next_date=None) %}
+{% set wd = ["月", "火", "水", "木", "金", "土", "日"] %}
+<nav class="date-nav" aria-label="日付の移動">
+    {% if prev_date %}
+    <a class="date-nav-step" href="{{ url_for(endpoint, date=prev_date) }}" rel="prev" title="{{ prev_date }}">
+        <span aria-hidden="true">‹</span> 前の日</a>
+    {% else %}
+    <span class="date-nav-step is-disabled" aria-disabled="true"><span aria-hidden="true">‹</span> 前の日</span>
+    {% endif %}
+    <button type="button" class="date-nav-pick" data-calendar-button data-kind="{{ kind }}" data-current="{{ date }}"
+            data-href="{{ url_for(endpoint, date='0000-00-00') }}" data-label="日付を選ぶ" title="カレンダーから日付を選ぶ">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+        <span>{{ date[:4] }}年{{ date[5:7]|int }}月{{ date[8:10]|int }}日({{ wd[date|weekday_index] if date|weekday_index is not none else "" }})</span>
+        <span class="date-nav-caret" aria-hidden="true">▾</span>
+    </button>
+    {% if next_date %}
+    <a class="date-nav-step" href="{{ url_for(endpoint, date=next_date) }}" rel="next" title="{{ next_date }}">
+        次の日 <span aria-hidden="true">›</span></a>
+    {% else %}
+    <span class="date-nav-step is-disabled" aria-disabled="true">次の日 <span aria-hidden="true">›</span></span>
+    {% endif %}
+</nav>
 {% endmacro %}

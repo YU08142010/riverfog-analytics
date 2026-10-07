@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_date_month_groups.html" import date_nav %}
 {% block title %}{{ date }}の画像{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -8,6 +9,7 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ date_nav("images", "images_date", date, prev_date, next_date) }}
 <div class="card">
     <h2>{{ date }} の撮影時刻一覧</h2>
     {% if hours %}

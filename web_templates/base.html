@@ -845,6 +845,7 @@ document.addEventListener("submit", function(e) {
 </script>
 {% endif %}
 <script id="spotlight-data" type="application/json">{{ spotlight_items()|tojson }}</script>
+<script src="{{ url_for('static', filename='calendar.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
 </html>

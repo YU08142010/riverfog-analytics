@@ -14,6 +14,6 @@
         <a class="button" href="{{ url_for('download_xlsx') }}">只見川.xlsxをダウンロード</a>
         <a class="button" href="{{ url_for('download_xlsx_aizu') }}">会津.xlsxをダウンロード</a>
     </p>
-    {{ date_month_groups(date_groups, endpoint, "観測データがまだありません。") }}
+    {{ date_month_groups(date_groups, endpoint, "観測データがまだありません。", dates=dates, kind="observations") }}
 </div>
 {% endblock %}

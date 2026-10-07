@@ -27,12 +27,12 @@
     --radius-md: 14px;
     --radius-lg: 18px;
 
-    --glass-bg: rgba(255, 255, 255, 0.70);
-    --glass-bg-strong: rgba(255, 255, 255, 0.84);
-    --glass-bar: rgba(250, 251, 253, 0.66);
+    --glass-bg: rgba(255, 255, 255, 0.58);
+    --glass-bg-strong: rgba(255, 255, 255, 0.74);
+    --glass-bar: rgba(250, 251, 253, 0.52);
     --glass-edge: rgba(255, 255, 255, 0.75);
     --glass-hairline: rgba(20, 30, 50, 0.08);
-    --glass-filter: saturate(180%) blur(22px);
+    --glass-filter: saturate(190%) blur(26px);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 0.5px var(--glass-hairline),
                     0 8px 28px rgba(30, 50, 90, 0.08);
     --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px var(--glass-hairline),
@@ -63,9 +63,9 @@
         --color-border: rgba(255, 255, 255, 0.10);
         --color-text: #f2f2f5;
         --color-text-muted: #a1a6b2;
-        --glass-bg: rgba(36, 38, 48, 0.62);
-        --glass-bg-strong: rgba(40, 42, 52, 0.85);
-        --glass-bar: rgba(28, 30, 38, 0.60);
+        --glass-bg: rgba(36, 38, 48, 0.50);
+        --glass-bg-strong: rgba(40, 42, 52, 0.74);
+        --glass-bar: rgba(28, 30, 38, 0.46);
         --glass-edge: rgba(255, 255, 255, 0.10);
         --glass-hairline: rgba(255, 255, 255, 0.09);
         --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
@@ -95,9 +95,9 @@
     --color-border: rgba(255, 255, 255, 0.10);
     --color-text: #f2f2f5;
     --color-text-muted: #a1a6b2;
-    --glass-bg: rgba(36, 38, 48, 0.62);
-    --glass-bg-strong: rgba(40, 42, 52, 0.85);
-    --glass-bar: rgba(28, 30, 38, 0.60);
+    --glass-bg: rgba(36, 38, 48, 0.50);
+    --glass-bg-strong: rgba(40, 42, 52, 0.74);
+    --glass-bar: rgba(28, 30, 38, 0.46);
     --glass-edge: rgba(255, 255, 255, 0.10);
     --glass-hairline: rgba(255, 255, 255, 0.09);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
@@ -696,4 +696,265 @@ header h1 { letter-spacing: 0.03em; }
 @media (prefers-reduced-motion: reduce) {
     .ui-reveal { opacity: 1 !important; transform: none !important; }
     .chart-wrap.is-loading::after, .chart-themed.js-plotly-plot, .timelapse-img.tl-fade, .map-marker-alert, .pf-marker-high { animation: none !important; }
+}
+
+/* ==========================================================================
+   透明にする面を増やす(2026-10-07)。まだ不透明だった小さな面(地点カード・メンバーや
+   バッジのタイル・右クリックメニュー・トップへボタン・検索欄・吹き出し等)もガラスにし、
+   淡い色の面(日付ボタン・月の見出し)は色を半透明にして壁紙が透けるようにする。
+   表の固定列(時刻)は、横スクロールした中身が重なって読めなくなるため不透明のまま。
+   ========================================================================== */
+:root {
+    --tint-bg: rgba(10, 100, 210, 0.08);
+    --tint-bg-hover: rgba(10, 100, 210, 0.15);
+    --tint-edge: rgba(10, 100, 210, 0.16);
+    --glass-soft: rgba(255, 255, 255, 0.42);
+    /* 他の中身の上に浮かぶ小窓(カレンダー等)は、下の文字と重なって読みにくくならないよう濃いめ */
+    --glass-pop: rgba(255, 255, 255, 0.88);
+}
+:root[data-theme="dark"] {
+    --tint-bg: rgba(74, 163, 255, 0.10);
+    --tint-bg-hover: rgba(74, 163, 255, 0.18);
+    --tint-edge: rgba(74, 163, 255, 0.20);
+    --glass-soft: rgba(255, 255, 255, 0.05);
+    --glass-pop: rgba(34, 36, 46, 0.88);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --tint-bg: rgba(74, 163, 255, 0.10);
+        --tint-bg-hover: rgba(74, 163, 255, 0.18);
+        --tint-edge: rgba(74, 163, 255, 0.20);
+        --glass-soft: rgba(255, 255, 255, 0.05);
+        --glass-pop: rgba(34, 36, 46, 0.88);
+    }
+}
+.station-card, .member-tile, .badge-tile, .context-menu, .back-to-top, .search-box, .pinned-bar-item,
+.dm-quick-action-btn, .reaction-pill, .files-tab.active, .phenom-btn, .rfcal-pop {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border-color: var(--glass-edge);
+}
+.context-menu, .back-to-top { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
+.station-card, .member-tile, .badge-tile { box-shadow: var(--glass-shadow); }
+/* 通知パネルは全体がガラスなので、見出しと末尾の帯も同じ面に溶け込ませる */
+.notif-panel-header, .notif-footnote { background: transparent; }
+.notif-panel-header { border-bottom: 0.5px solid var(--glass-hairline); }
+/* 面の中の小さな区画は、色を敷かずにうっすら明るくするだけ */
+.weather-info-item, .ranking-item, .image-grid figure, .dm-thread-item, .file-tag-chip,
+.observation-report-noimage, .reply-preview, .reply-banner { background: var(--glass-soft); }
+.dm-bubble { background: var(--glass-bg-strong); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+ul.tile-list li a, ul.date-list li a {
+    background: var(--tint-bg);
+    border-color: var(--tint-edge);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+}
+ul.tile-list li a:hover, ul.date-list li a:hover { background: var(--tint-bg-hover); }
+details.date-month-group { border-color: var(--glass-hairline); background: var(--glass-soft); }
+details.date-month-group summary { background: var(--tint-bg); }
+input[type="date"], input[type="month"], input[type="datetime-local"] { cursor: pointer; }
+/* ダークモードでは、日付入力欄のカレンダーの印・開いたカレンダーも暗い配色にする */
+:root[data-theme="dark"] input { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) input { color-scheme: dark; } }
+
+@media (prefers-reduced-transparency: reduce) {
+    .station-card, .member-tile, .badge-tile, .context-menu, .back-to-top, .search-box, .pinned-bar-item,
+    .dm-quick-action-btn, .reaction-pill, .files-tab.active, .phenom-btn, .dm-bubble, .rfcal-pop,
+    ul.tile-list li a, ul.date-list li a, .date-nav, .date-browser-latest {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        background: var(--color-surface);
+    }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .station-card, .member-tile, .badge-tile, .context-menu, .back-to-top, .search-box, .pinned-bar-item,
+    .dm-quick-action-btn, .reaction-pill, .files-tab.active, .phenom-btn, .dm-bubble, .rfcal-pop, .date-nav {
+        background: var(--color-surface);
+    }
+}
+
+/* ==========================================================================
+   カレンダー(web_static/calendar.js)
+   ========================================================================== */
+.rfcal { width: 100%; max-width: 360px; user-select: none; }
+.rfcal-head { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem; }
+.rfcal-title { flex: 1 1 auto; text-align: center; font-weight: 700; font-size: 1.02rem; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.rfcal-nav, .rfcal-today {
+    border: none; cursor: pointer; color: var(--color-text);
+    background: var(--control-bg); border-radius: 999px; line-height: 1;
+    transition: background-color 0.15s ease, transform 0.3s var(--spring, ease);
+}
+.rfcal-nav { width: 2rem; height: 2rem; font-size: 1.2rem; }
+.rfcal-today { padding: 0.45rem 0.75rem; font-size: 0.78rem; font-weight: 600; }
+.rfcal-nav:hover:not(:disabled), .rfcal-today:hover { background: var(--tint-bg-hover); }
+.rfcal-nav:active:not(:disabled), .rfcal-today:active { transform: scale(0.92); }
+.rfcal-nav:disabled { opacity: 0.3; cursor: default; }
+.rfcal-week, .rfcal-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.rfcal-week { margin-bottom: 3px; }
+.rfcal-week span { text-align: center; font-size: 0.72rem; font-weight: 600; color: var(--color-text-muted); padding: 0.15rem 0; }
+.rfcal-week .sun, .rfcal-day.sun b { color: #d9534f; }
+.rfcal-week .sat, .rfcal-day.sat b { color: #2f7fd8; }
+:root[data-theme="dark"] .rfcal-week .sun, :root[data-theme="dark"] .rfcal-day.sun b { color: #ff8a80; }
+:root[data-theme="dark"] .rfcal-week .sat, :root[data-theme="dark"] .rfcal-day.sat b { color: #7dbdff; }
+.rfcal-grid { display: grid; gap: 3px; }
+.rfcal-grid.slide-l { animation: rfcalInL 0.28s var(--ease-out, ease) both; }
+.rfcal-grid.slide-r { animation: rfcalInR 0.28s var(--ease-out, ease) both; }
+@keyframes rfcalInL { from { opacity: 0; transform: translateX(14px); } }
+@keyframes rfcalInR { from { opacity: 0; transform: translateX(-14px); } }
+.rfcal-day {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    aspect-ratio: 1 / 0.92; min-height: 2.2rem; border-radius: 10px; font-size: 0.9rem;
+    color: var(--color-text); text-decoration: none; border: none; padding: 0; background: transparent;
+    font-variant-numeric: tabular-nums;
+}
+.rfcal-day b { font-weight: 500; }
+.rfcal-day.out { visibility: hidden; }
+.rfcal-day.none { color: var(--color-text-muted); opacity: 0.45; }
+.rfcal-day.none b { color: inherit !important; }
+.rfcal-day.has {
+    cursor: pointer; background: var(--tint-bg); box-shadow: inset 0 0 0 0.5px var(--tint-edge);
+    transition: background-color 0.15s ease, transform 0.3s var(--spring, ease), box-shadow 0.15s ease;
+}
+.rfcal-day.has b { font-weight: 650; }
+.rfcal-day.has:hover { background: var(--tint-bg-hover); transform: translateY(-1px); }
+.rfcal-day.has:active { transform: scale(0.92); }
+.rfcal-day.today::after {
+    content: ""; position: absolute; top: 4px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--color-primary);
+}
+.rfcal-day.selected, .rfcal-day.selected:hover { background: var(--button-bg); box-shadow: 0 4px 12px rgba(10, 100, 210, 0.35); }
+.rfcal-day.selected b { color: #fff !important; }
+.rfcal-day:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.rfcal-dots { display: flex; gap: 2px; margin-top: 2px; height: 5px; }
+.rfcal-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--color-primary); }
+.rfcal-dot.obs { background: #0a8f6c; }
+.rfcal-dot.img { background: #e8833a; }
+.rfcal-dot.pred { background: #7a5cf0; }
+.rfcal-legend { display: flex; gap: 0.9rem; justify-content: center; margin-top: 0.55rem; font-size: 0.74rem; color: var(--color-text-muted); }
+.rfcal-legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.rfcal-legend .rfcal-dot { width: 7px; height: 7px; }
+
+/* ボタンの下に浮かぶカレンダー */
+.rfcal-pop {
+    position: fixed; z-index: 1900; width: min(340px, calc(100vw - 16px)); padding: 0.85rem 0.85rem 0.75rem;
+    border: 1px solid var(--glass-edge); border-radius: 18px; background: var(--glass-pop);
+    -webkit-backdrop-filter: saturate(190%) blur(34px); backdrop-filter: saturate(190%) blur(34px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 0.5px var(--glass-hairline), 0 22px 60px rgba(0, 0, 0, 0.25);
+    opacity: 0; transform: translateY(-6px) scale(0.97); transform-origin: top center;
+    transition: opacity 0.16s ease, transform 0.3s var(--spring, ease);
+}
+.rfcal-pop.open { opacity: 1; transform: none; }
+
+/* 日付一覧のページ: カレンダー+最新の日 */
+.date-browser { display: flex; flex-wrap: wrap; gap: 1.2rem 1.6rem; align-items: flex-start; margin: 0.4rem 0 1rem; }
+.date-browser-cal { flex: 0 1 360px; min-width: 0; }
+.date-browser-side { flex: 1 1 200px; display: flex; flex-direction: column; gap: 0.6rem; }
+.date-browser-hint, .date-browser-count { margin: 0; font-size: 0.82rem; }
+.date-browser-latest {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; max-width: 220px;
+    padding: 0.8rem 1rem; border-radius: 16px; text-decoration: none; color: var(--color-text);
+    background: var(--tint-bg); box-shadow: inset 0 0 0 0.5px var(--tint-edge);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    transition: background-color 0.15s ease, transform 0.3s var(--spring, ease);
+}
+.date-browser-latest:hover { background: var(--tint-bg-hover); transform: translateY(-2px); }
+.date-browser-latest span { font-size: 0.74rem; font-weight: 700; color: var(--color-primary); letter-spacing: 0.08em; }
+.date-browser-latest b { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.date-browser-latest small { font-size: 0.78rem; color: var(--color-text-muted); }
+details.date-list-all { margin-top: 0.4rem; }
+details.date-list-all > summary {
+    cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem; list-style: none;
+    padding: 0.35rem 0.8rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600;
+    background: var(--control-bg); color: var(--color-text-muted); margin-bottom: 0.6rem;
+}
+details.date-list-all > summary::-webkit-details-marker { display: none; }
+details.date-list-all > summary::before { content: "▸"; transition: transform 0.15s ease; }
+details.date-list-all[open] > summary::before { transform: rotate(90deg); }
+
+/* 日付ごとのページ: 前の日 / カレンダー / 次の日 */
+.date-nav {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    margin: 0 0 1rem; padding: 0.35rem; border-radius: 16px;
+    background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+}
+.date-nav-step {
+    display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.5rem 0.85rem; border-radius: 12px;
+    font-size: 0.86rem; font-weight: 600; color: var(--color-text); text-decoration: none; white-space: nowrap;
+    transition: background-color 0.15s ease, transform 0.3s var(--spring, ease);
+}
+a.date-nav-step:hover { background: var(--control-bg); }
+a.date-nav-step:active { transform: scale(0.94); }
+.date-nav-step.is-disabled { opacity: 0.35; }
+.date-nav-pick {
+    display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border: none; border-radius: 12px;
+    background: var(--tint-bg); color: var(--color-text); font-size: 0.95rem; font-weight: 650; cursor: pointer;
+    font-variant-numeric: tabular-nums; box-shadow: inset 0 0 0 0.5px var(--tint-edge);
+    transition: background-color 0.15s ease, transform 0.3s var(--spring, ease);
+}
+.date-nav-pick:hover, .date-nav-pick[aria-expanded="true"] { background: var(--tint-bg-hover); }
+.date-nav-pick:active { transform: scale(0.96); }
+.date-nav-pick svg { width: 18px; height: 18px; fill: none; stroke: var(--color-primary); stroke-width: 1.9; stroke-linecap: round; }
+.date-nav-caret { font-size: 0.7rem; color: var(--color-text-muted); transition: transform 0.2s ease; }
+.date-nav-pick[aria-expanded="true"] .date-nav-caret { transform: rotate(180deg); }
+.date-nav-pick.is-loading { opacity: 0.6; cursor: progress; }
+@media (max-width: 560px) {
+    .date-nav-step { padding: 0.5rem 0.55rem; font-size: 0.8rem; }
+    .date-nav-pick { padding: 0.5rem 0.65rem; font-size: 0.86rem; gap: 0.35rem; }
+    .date-nav-pick svg { display: none; }
+}
+
+/* ==========================================================================
+   Spotlight(Ctrl+K)の追加分: 絞り込みのチップ・見出し・一致の強調・カレンダー・ヘルプ
+   ========================================================================== */
+.spotlight-chips { display: flex; gap: 0.35rem; padding: 0 1.1rem 0.6rem; flex-wrap: wrap; }
+.spotlight-chips button {
+    border: none; cursor: pointer; padding: 0.28rem 0.75rem; border-radius: 999px; font-size: 0.76rem; font-weight: 600;
+    background: var(--control-bg); color: var(--color-text-muted); transition: background-color 0.15s ease, color 0.15s ease;
+}
+.spotlight-chips button:hover { color: var(--color-text); }
+.spotlight-chips button.on { background: var(--button-bg); color: #fff; }
+.spotlight-back {
+    border: none; background: var(--control-bg); color: var(--color-text); width: 1.9rem; height: 1.9rem;
+    border-radius: 999px; font-size: 1.2rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
+}
+.spotlight-back[hidden] { display: none; }
+.spotlight.is-panel .spotlight-glass { display: none; }
+.spotlight-header {
+    list-style: none; padding: 0.55rem 0.75rem 0.2rem; font-size: 0.7rem; font-weight: 700;
+    color: var(--color-text-muted); letter-spacing: 0.08em;
+}
+.spotlight-label mark { background: none; color: var(--color-primary); font-weight: 750; padding: 0; }
+.spotlight-item.active .spotlight-label mark { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.spotlight-sub { margin-left: 0.55rem; font-size: 0.76rem; color: var(--color-text-muted); }
+.spotlight-item.active .spotlight-sub { color: rgba(255, 255, 255, 0.82); }
+.spotlight-item.is-disabled { opacity: 0.45; cursor: default; }
+.spotlight-item.is-disabled.active { background: var(--control-bg); color: var(--color-text); }
+.spotlight-icon-public { background: linear-gradient(160deg, #4fd1c5, #0f9488); }
+.spotlight-icon-action { background: linear-gradient(160deg, #ffd166, #f08c00); }
+.spotlight-icon-quick { background: linear-gradient(160deg, #5ee08a, #1f9d55); }
+.spotlight-icon-month { background: linear-gradient(160deg, #ff9f6b, #e8583a); }
+.spotlight-empty small { display: block; margin-top: 0.35rem; font-size: 0.78rem; }
+.spotlight-panel { padding: 0.8rem 1.1rem 1rem; border-top: 0.5px solid var(--glass-hairline); max-height: min(60vh, 520px); overflow-y: auto; }
+.spotlight-panel[hidden] { display: none; }
+.spotlight-cal { display: flex; justify-content: center; }
+.spotlight-panel-note { margin: 0 0 0.7rem; font-size: 0.8rem; color: var(--color-text-muted); text-align: center; }
+.spotlight-panel-note kbd, .spotlight-help kbd {
+    font-family: var(--font-ui, inherit); font-size: 0.72rem; padding: 0.08rem 0.38rem; border-radius: 6px;
+    background: var(--control-bg); border: 0.5px solid var(--glass-hairline); color: var(--color-text);
+}
+.spotlight-panel-title { margin: 0 0 0.6rem; font-weight: 700; font-size: 1.05rem; }
+.spotlight-daylist { list-style: none; margin: 0 0 0.8rem; padding: 0; display: grid; gap: 0.4rem; }
+.spotlight-dayitem {
+    display: block; padding: 0.7rem 0.9rem; border-radius: 12px; text-decoration: none; color: var(--color-text);
+    background: var(--tint-bg); font-weight: 600; transition: background-color 0.15s ease;
+}
+.spotlight-dayitem:hover, .spotlight-dayitem:focus-visible { background: var(--button-bg); color: #fff; }
+.spotlight-help { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1rem; margin: 0; font-size: 0.86rem; }
+.spotlight-help dt { white-space: nowrap; }
+.spotlight-help dd { margin: 0; color: var(--color-text-muted); }
+@media (max-width: 640px) { .spotlight-help { grid-template-columns: 1fr; gap: 0.15rem; } .spotlight-help dd { margin-bottom: 0.45rem; } }
+@media (prefers-reduced-motion: reduce) {
+    .rfcal-grid.slide-l, .rfcal-grid.slide-r { animation: none; }
+    .rfcal-pop, .rfcal-day.has, .date-nav-pick, .date-nav-step, .date-browser-latest { transition: none; transform: none !important; }
 }

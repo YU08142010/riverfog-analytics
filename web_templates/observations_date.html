@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_date_month_groups.html" import date_nav %}
 {% block title %}{{ date }}の観測データ{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -8,6 +9,7 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ date_nav("observations", "observations_date", date, prev_date, next_date) }}
 <div class="card">
     <h2>{{ date }} の観測値推移</h2>
     <p>

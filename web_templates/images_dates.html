@@ -10,6 +10,6 @@
 ]) }}
 <div class="card">
     <h2>カメラ画像(日付一覧)</h2>
-    {{ date_month_groups(date_groups, endpoint, "画像がまだありません。") }}
+    {{ date_month_groups(date_groups, endpoint, "画像がまだありません。", dates=dates, kind="images") }}
 </div>
 {% endblock %}
