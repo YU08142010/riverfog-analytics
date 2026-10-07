@@ -347,7 +347,12 @@
         if (!item.href) { return; }
         remember(item);
         if (newTab) { window.open(item.href, "_blank", "noopener"); close(); return; }
-        window.location.href = item.href;
+        openHref(item.href);
+    }
+    /* 全画面のときは全画面を保ったまま開く(web_static/fs_shell.js) */
+    function openHref(href) {
+        if (window.RFShell && window.RFShell.navigate(href)) { close(); return; }
+        window.location.href = href;
     }
 
     /* ---- カレンダー・ヘルプの表示 ---- */
@@ -385,7 +390,7 @@
     }
     function showDay(date) {
         var items = dateItems(date).filter(function(x) { return !x.disabled; });
-        if (items.length === 1) { remember(items[0]); window.location.href = items[0].href; return; }
+        if (items.length === 1) { remember(items[0]); openHref(items[0].href); return; }
         setMode("day");
         var wd = window.RFCalendar ? "(" + window.RFCalendar.weekday(date) + ")" : "";
         panel.innerHTML = '<p class="spotlight-panel-title">' + date + wd + '</p><ul class="spotlight-daylist"></ul>' +

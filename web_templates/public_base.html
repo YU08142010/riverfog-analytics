@@ -256,35 +256,9 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
         try { localStorage.setItem("theme", next); } catch (e) {}
     });
 })();
-// ページ全体の全画面表示(発表や展示でスクリーンに映す用)。Escキーかもう一度押すと戻る。
-(function() {
-    var btn = document.getElementById("pf-fs-btn");
-    var root = document.documentElement;
-    var supported = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-    if (!btn || !supported) { return; }
-    btn.hidden = false;
-    function current() { return document.fullscreenElement || document.webkitFullscreenElement; }
-    function sync() {
-        var on = !!current();
-        btn.setAttribute("aria-pressed", on ? "true" : "false");
-        var label = on ? "全画面表示を終了する" : "全画面で表示する";
-        btn.setAttribute("aria-label", label);
-        btn.title = label;
-    }
-    btn.addEventListener("click", function() {
-        try {
-            if (current()) {
-                (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-            } else {
-                var req = root.requestFullscreen || root.webkitRequestFullscreen;
-                var p = req.call(root);
-                if (p && p.catch) { p.catch(function() {}); }
-            }
-        } catch (e) { /* 拒否された場合は何もしない */ }
-    });
-    document.addEventListener("fullscreenchange", sync);
-    document.addEventListener("webkitfullscreenchange", sync);
-})();
+// ページ全体の全画面表示(発表や展示でスクリーンに映す用)は web_static/fs_shell.js(研究用サイトと共通)。
+// 全画面のままページを移っても解除されない。
 </script>
+<script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
 </html>

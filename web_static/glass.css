@@ -1036,3 +1036,32 @@ button.date-nav-step:disabled { opacity: 0.35; cursor: default; }
     .bg-glow, .bg-lines, .bg-mist { animation: none !important; }
 }
 @media print { .bg-art { display: none; } }
+
+/* ==========================================================================
+   全画面のままページを移る枠と、「全画面に戻す」ボタン(web_static/fs_shell.js)
+   ========================================================================== */
+.fs-shell-frame {
+    position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 2147483000;
+    background: var(--color-surface, #fff);
+}
+:root.fs-shell-on, :root.fs-shell-on body { overflow: hidden; }
+.fs-restore {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 2500; display: flex; align-items: center; gap: 0.2rem;
+    padding: 0.3rem; border-radius: 999px; border: 1px solid var(--glass-edge);
+    background: var(--glass-pop, var(--glass-bg-strong)); color: var(--color-text);
+    -webkit-backdrop-filter: saturate(190%) blur(24px); backdrop-filter: saturate(190%) blur(24px);
+    box-shadow: 0 0 0 0.5px var(--glass-hairline), 0 12px 34px rgba(0, 0, 0, 0.22);
+    animation: fsRestoreIn 0.4s var(--spring, ease) both;
+}
+@keyframes fsRestoreIn { from { opacity: 0; transform: translateY(12px) scale(0.95); } }
+.fs-restore button { border: none; cursor: pointer; font: inherit; color: inherit; background: none; }
+.fs-restore-go {
+    display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.5rem 0.95rem; border-radius: 999px;
+    background: var(--button-bg, #0a64d2) !important; color: #fff !important; font-weight: 650; font-size: 0.88rem;
+}
+.fs-restore-go:hover { background: var(--button-bg-hover, #0751ad) !important; }
+.fs-restore-go svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fs-restore-close { width: 2rem; height: 2rem; border-radius: 50%; font-size: 1.1rem; color: var(--color-text-muted) !important; }
+.fs-restore-close:hover { background: var(--control-bg) !important; }
+@media (prefers-reduced-motion: reduce) { .fs-restore { animation: none; } }
+@media print { .fs-restore, .fs-shell-frame { display: none; } }

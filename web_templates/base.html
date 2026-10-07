@@ -229,35 +229,7 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
     });
 });
 
-// 全画面表示(公開ページのpublic_base.htmlと同じ動き)。Escキーかもう一度押すと戻る。
-// 対応しない環境(iPhoneのSafari等)ではボタンを出さない。
-(function() {
-    var wrap = document.getElementById("fs-wrap");
-    var btn = document.getElementById("fs-toggle-btn");
-    var root = document.documentElement;
-    if (!wrap || !btn || !(document.fullscreenEnabled || document.webkitFullscreenEnabled)) { return; }
-    wrap.hidden = false;
-    function current() { return document.fullscreenElement || document.webkitFullscreenElement; }
-    function sync() {
-        var on = !!current();
-        var label = on ? "全画面表示を終了する" : "全画面で表示する";
-        btn.setAttribute("aria-pressed", on ? "true" : "false");
-        btn.setAttribute("aria-label", label);
-        btn.title = label;
-    }
-    btn.addEventListener("click", function() {
-        try {
-            if (current()) {
-                (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-            } else {
-                var p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
-                if (p && p.catch) { p.catch(function() {}); }
-            }
-        } catch (e) { /* 拒否された場合は何もしない */ }
-    });
-    document.addEventListener("fullscreenchange", sync);
-    document.addEventListener("webkitfullscreenchange", sync);
-})();
+// 全画面表示のボタンと、全画面のままページを移る仕組みは web_static/fs_shell.js(公開ページと共通)。
 
 // ハンバーガーメニュー(狭い画面でナビを折りたたむ)。
 (function() {
@@ -865,6 +837,7 @@ document.addEventListener("submit", function(e) {
 </script>
 {% endif %}
 <script id="spotlight-data" type="application/json">{{ spotlight_items()|tojson }}</script>
+<script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='calendar.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
