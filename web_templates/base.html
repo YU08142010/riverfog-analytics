@@ -506,11 +506,19 @@ function chartThemeLayoutPatch(el, theme) {
         "hoverlabel.font.color": pal.fg,
     };
     var layout = (el && el.layout) || {};
+    // すりガラスのカードの上に描くので、グリッドは不透明の灰色ではなく半透明の細線にし、
+    // 軸の線は消す(不透明の#e3e6ecは色付きの背景の上で白い線として浮いていた)。
+    var grid = theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(20,30,50,0.09)";
+    var zero = theme === "dark" ? "rgba(255,255,255,0.22)" : "rgba(20,30,50,0.22)";
+    patch["legend.bgcolor"] = "rgba(0,0,0,0)";
+    patch["modebar.bgcolor"] = "rgba(0,0,0,0)";
+    patch["modebar.color"] = theme === "dark" ? "rgba(255,255,255,0.45)" : "rgba(20,30,50,0.4)";
+    patch["modebar.activecolor"] = theme === "dark" ? "#7dbdff" : "#0a64d2";
     Object.keys(layout).forEach(function(key) {
         if (!/^[xy]axis\d*$/.test(key)) { return; }
-        patch[key + ".gridcolor"] = pal.grid;
-        patch[key + ".zerolinecolor"] = pal.grid;
-        patch[key + ".linecolor"] = pal.grid;
+        patch[key + ".gridcolor"] = grid;
+        patch[key + ".zerolinecolor"] = zero;
+        patch[key + ".linecolor"] = "rgba(0,0,0,0)";
         patch[key + ".tickfont.color"] = pal.fg;
         patch[key + ".title.font.color"] = pal.fg;
     });
@@ -567,6 +575,53 @@ function polishChart(el, theme) {
         }
         if (Object.keys(u).length) { Plotly.restyle(el, u, [i]); }
     });
+    polishTreeNodes(el, theme);
+}
+
+// 決定木の図(fog_tree_viz)の節: 不透明な四角(#a9c6de/#e6c789/#9aa5b1)と濃い枠を、角の丸い半透明の色の面にする。
+// 一度変えた節はshape.nameに種類を残し、テーマを切り替えたときもその種類で塗り直す。
+var TREE_NODE_COLORS = {
+    light: {split: ["rgba(42,120,214,0.14)", "rgba(42,120,214,0.45)"], leaf: ["rgba(235,104,52,0.14)", "rgba(235,104,52,0.5)"],
+            more: ["rgba(110,120,140,0.10)", "rgba(110,120,140,0.35)"]},
+    dark: {split: ["rgba(57,135,229,0.22)", "rgba(125,189,255,0.5)"], leaf: ["rgba(217,89,38,0.22)", "rgba(255,160,120,0.5)"],
+           more: ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.25)"]}
+};
+var TREE_NODE_KIND = {"#a9c6de": "split", "#e6c789": "leaf", "#9aa5b1": "more"};
+function polishTreeNodes(el, theme) {
+    var shapes = (el.layout && el.layout.shapes) || [];
+    var isTree = false;
+    var out = shapes.map(function(sh) {
+        var kind = sh.name && sh.name.indexOf("rf-node-") === 0 ? sh.name.slice(8) : TREE_NODE_KIND[String(sh.fillcolor || "").toLowerCase()];
+        if (!kind || (sh.type !== "rect" && sh.type !== "path")) { return sh; }
+        isTree = true;
+        var c = TREE_NODE_COLORS[theme === "dark" ? "dark" : "light"][kind];
+        var n = Object.assign({}, sh, {name: "rf-node-" + kind, fillcolor: c[0], opacity: 1, line: {color: c[1], width: 1}});
+        if (sh.type === "rect") {
+            // 角を丸めた四角をpathで描く(Plotlyの四角には角丸の指定が無い)
+            var x0 = sh.x0, x1 = sh.x1, y0 = sh.y0, y1 = sh.y1, rx = (x1 - x0) * 0.16, ry = (y1 - y0) * 0.2;
+            n.type = "path";
+            n.path = "M" + (x0 + rx) + "," + y0 + " L" + (x1 - rx) + "," + y0 + " Q" + x1 + "," + y0 + " " + x1 + "," + (y0 + ry) +
+                     " L" + x1 + "," + (y1 - ry) + " Q" + x1 + "," + y1 + " " + (x1 - rx) + "," + y1 +
+                     " L" + (x0 + rx) + "," + y1 + " Q" + x0 + "," + y1 + " " + x0 + "," + (y1 - ry) +
+                     " L" + x0 + "," + (y0 + ry) + " Q" + x0 + "," + y0 + " " + (x0 + rx) + "," + y0 + " Z";
+        }
+        return n;
+    });
+    if (!isTree) { return; }
+    var patch = {shapes: out};
+    // 節の文字(データ座標に置いた注記)は、半透明になった面の上で読めるようテーマの文字色にする
+    var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733"};
+    (el.layout.annotations || []).forEach(function(a, i) {
+        if (a.xref === "x" && a.yref === "y") { patch["annotations[" + i + "].font.color"] = pal.fg; }
+    });
+    Plotly.relayout(el, patch);
+    el.data.forEach(function(t, i) {
+        if (t.mode === "lines") {
+            Plotly.restyle(el, {"line.color": theme === "dark" ? "rgba(255,255,255,0.22)" : "rgba(20,30,50,0.22)", "line.width": 1.2}, [i]);
+        } else if (t.mode === "markers" && t.marker && String(t.marker.color).replace(/\s+/g, "") === "rgba(0,0,0,0)") {
+            Plotly.restyle(el, {"marker.line.color": "rgba(0,0,0,0)"}, [i]);  // 節の上の白い輪(ホバー用の印)は見せない
+        }
+    });
 }
 
 function mountPlotlyChart(el) {
@@ -585,7 +640,15 @@ function mountPlotlyChart(el) {
             return resp.json();
         })
         .then(function(fig) {
-            return Plotly.newPlot(el, fig.data, fig.layout || {}, {responsive: true, displaylogo: false});
+            var layout = fig.layout || {};
+            // カードの見出しと同じ内容のグラフ自身のタイトルは重複するので消す
+            // (カードの中のグラフが1つだけで、カードに見出しがある場合のみ)。
+            var card = el.closest(".card");
+            if (card && card.querySelector("h2, h3") && card.querySelectorAll(".chart-themed").length === 1 && layout.title) {
+                layout.title = {text: ""};
+                layout.margin = Object.assign({}, layout.margin || {}, {t: Math.min((layout.margin || {}).t || 40, 40)});
+            }
+            return Plotly.newPlot(el, fig.data, layout, {responsive: true, displaylogo: false});
         })
         .then(function() {
             applyChartTheme(el, currentChartTheme());

@@ -220,27 +220,58 @@ IFRAME_THEME_SCRIPT = """<script>
     var onChange = function() { if (currentTheme() !== theme) { location.reload(); } };
     if (mq.addEventListener) { mq.addEventListener('change', onChange); } else if (mq.addListener) { mq.addListener(onChange); }
   }
+  // 親ページ(glass.css)と同じcolor-schemeにする。食い違うとブラウザがiframeの後ろを不透明に塗り、
+  // カードの中に黒い四角が出る(2026-10-07)。
   document.documentElement.style.colorScheme = theme;
+  document.documentElement.style.background = 'transparent';
   document.body.style.margin = '0';
   document.body.style.background = 'transparent';
-  if (theme !== 'dark') { return; }
+  // サイトのカードの中(iframe)に出すときは、カードの見出しと重なるグラフ自身のタイトルを消し、
+  // 右側の縦の凡例を上の横並びにして、グラフの幅を広げる。単独で開いたときはそのまま。
+  var embedded = false;
+  try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
+  var dark = theme === 'dark';
   var L = %(light)s, D = %(dark)s;
   var DARK_INKS = ['#2a3f5f', '#1d1d1f', '#444', '#444444', '#000', '#000000', 'black', '#333', '#333333', '#5c6370', '#52514e'];
   function isDarkInk(c) { return !c || DARK_INKS.indexOf(String(c).toLowerCase()) >= 0; }
   function apply(el) {
     if (el.__rfThemed) { return; }
     el.__rfThemed = true;
-    var patch = {'font.color': '#e6e8ee', 'title.font.color': '#f2f2f5', 'legend.font.color': '#e6e8ee',
-                 'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)',
-                 'hoverlabel.bgcolor': 'rgba(40,42,52,0.92)', 'hoverlabel.font.color': '#f2f2f5'};
+    var patch = {'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)',
+                 'font.family': "%(font)s", 'hoverlabel.font.family': "%(font)s",
+                 'hoverlabel.bordercolor': 'rgba(0,0,0,0)',
+                 'hoverlabel.bgcolor': dark ? 'rgba(40,42,52,0.92)' : 'rgba(255,255,255,0.95)',
+                 'hoverlabel.font.color': dark ? '#f2f2f5' : '#1d1d1f'};
+    if (dark) {
+      patch['font.color'] = '#e6e8ee'; patch['title.font.color'] = '#f2f2f5'; patch['legend.font.color'] = '#e6e8ee';
+    }
+    if (embedded) {
+      patch['title.text'] = '';
+      patch['legend.orientation'] = 'h'; patch['legend.x'] = 0; patch['legend.xanchor'] = 'left';
+      patch['legend.y'] = 1.005; patch['legend.yanchor'] = 'bottom'; patch['legend.bgcolor'] = 'rgba(0,0,0,0)';
+      patch['margin.t'] = 64; patch['margin.r'] = 16; patch['margin.l'] = 64;
+    }
     Object.keys(el.layout).forEach(function(k) {
       if (!/^[xy]axis\\d*$/.test(k)) { return; }
-      patch[k + '.gridcolor'] = 'rgba(255,255,255,0.08)';
-      patch[k + '.zerolinecolor'] = 'rgba(255,255,255,0.25)';
-      patch[k + '.linecolor'] = 'rgba(255,255,255,0.25)';
-      patch[k + '.tickfont.color'] = '#a1a6b2';
-      patch[k + '.title.font.color'] = '#c3c7d0';
+      patch[k + '.gridcolor'] = dark ? 'rgba(255,255,255,0.08)' : 'rgba(20,30,50,0.09)';
+      patch[k + '.zerolinecolor'] = dark ? 'rgba(255,255,255,0.22)' : 'rgba(20,30,50,0.22)';
+      patch[k + '.linecolor'] = 'rgba(0,0,0,0)';
+      if (dark) {
+        patch[k + '.tickfont.color'] = '#a1a6b2';
+        patch[k + '.title.font.color'] = '#c3c7d0';
+      }
     });
+    // 一番下の帯の「夜間」(#566573)・「川霧なし」(#d5d8dc)の不透明な灰色を、半透明にしてなじませる
+    var SOFT = dark ? {'#566573': 'rgba(255,255,255,0.08)', '#d5d8dc': 'rgba(255,255,255,0.20)'}
+                    : {'#566573': 'rgba(86,101,115,0.30)', '#d5d8dc': 'rgba(120,130,150,0.22)'};
+    el.data.forEach(function(t, i) {
+      var mc = t.marker && t.marker.color;
+      if (t.type !== 'bar' || !Array.isArray(mc)) { return; }
+      var changed = false;
+      var next = mc.map(function(c) { var k = String(c).toLowerCase(); if (SOFT[k]) { changed = true; return SOFT[k]; } return c; });
+      if (changed) { Plotly.restyle(el, {'marker.color': [next]}, [i]); }
+    });
+    if (!dark) { Plotly.relayout(el, patch); return; }
     (el.layout.annotations || []).forEach(function(a, i) {
       if (isDarkInk(a.font && a.font.color)) { patch['annotations[' + i + '].font.color'] = '#c3c7d0'; }
       if (a.bgcolor && /^(#fff|#ffffff|white|rgba\\(255, ?255, ?255)/i.test(a.bgcolor)) { patch['annotations[' + i + '].bgcolor'] = 'rgba(30,32,39,0.85)'; }
@@ -279,6 +310,7 @@ IFRAME_THEME_SCRIPT = """<script>
     "dark": str(SERIES_DARK).replace("'", '"'),
     "surface": SURFACE_LIGHT, "surface_dark": SURFACE_DARK,
     "seq_dark": str(SEQ_DARK).replace("'", '"'),
+    "font": FONT.replace('"', "'"),
 }
 
 

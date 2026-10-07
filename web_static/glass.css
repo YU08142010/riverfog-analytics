@@ -1065,3 +1065,26 @@ button.date-nav-step:disabled { opacity: 0.35; cursor: default; }
 .fs-restore-close:hover { background: var(--control-bg) !important; }
 @media (prefers-reduced-motion: reduce) { .fs-restore { animation: none; } }
 @media print { .fs-restore, .fs-shell-frame { display: none; } }
+
+/* ==========================================================================
+   グラフをカードになじませる・カードの並び(2026-10-07)
+   ========================================================================== */
+/* ページのcolor-schemeをテーマに合わせる。予報グラフのiframe(chart_style.IFRAME_THEME_SCRIPT)と
+   食い違うと、ブラウザがiframeの後ろを不透明に塗り、ダークモードでカードの中に黒い四角が出ていた。 */
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
+/* グラフはカードの中に直接描く(枠で囲んだ別の箱にしない) */
+.chart-wrap div.chart-themed { border: none; border-radius: 0; }
+img.full-graph { border: none; border-radius: 12px; }
+.forecast-frame { display: block; width: 100%; height: 760px; border: 0; background: transparent; }
+@media (max-width: 640px) { .forecast-frame { height: 640px; } }
+/* 2列の並び: カードの間隔をページ全体と同じにし、.is-evenでは同じ行のカードの高さをそろえて
+   グラフの下端も合わせる(短いカードの下に空きができないように) */
+.content-grid-2 { gap: 1.4rem; margin-bottom: 1.4rem; }
+.content-grid-2.is-even { align-items: stretch; }
+.content-grid-2.is-even > .card { display: flex; flex-direction: column; }
+.content-grid-2.is-even > .card > .chart-wrap { margin-top: auto; }
+/* Plotlyのツールバーは触れたときだけ、控えめに */
+.js-plotly-plot .modebar { opacity: 0; transition: opacity 0.2s ease; }
+.js-plotly-plot:hover .modebar, .js-plotly-plot:focus-within .modebar { opacity: 1; }

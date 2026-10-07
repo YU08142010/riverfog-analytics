@@ -187,13 +187,14 @@
     {% endif %}
 </div>
 
-<div class="content-grid-2">
+{# 並び(2026-10-07): 縦に長い予測グラフと短いグラフを横に並べると、短い方の下に大きな空きができて
+   いたため、予測グラフ・的中率の推移は横幅いっぱいにし、同じくらいの大きさの2つだけを横に並べる。 #}
 <div class="card">
     <h2>今後の予測グラフ</h2>
     {% if forecast_file %}
     <p class="muted">{{ latest_pred_date }}</p>
     {% if forecast_file.endswith('.html') %}
-    <div class="chart-wrap"><iframe src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" style="width:100%; height:800px; border:none;" title="{{ name }}の予測グラフ"></iframe></div>
+    <div class="chart-wrap"><iframe class="forecast-frame" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" title="{{ name }}の予測グラフ"></iframe></div>
     {% else %}
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" alt="{{ name }}の予測グラフ"></div>
     {% endif %}
@@ -206,9 +207,8 @@
     <h2>的中率の推移</h2>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の的中率推移グラフ" data-chart-url="{{ url_for('station_chart', name=name) }}"></div></div>
 </div>
-</div>
 
-<div class="content-grid-2">
+<div class="content-grid-2 is-even">
 <div class="card">
     <h2>学習時のモデル精度推移</h2>
     <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(学習に使っていない評価期間での値)の推移。</p>
