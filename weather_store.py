@@ -128,13 +128,18 @@ def load_weather_df(conn):
     return df
 
 
-def load_phenomena_wide_df(conn, station_names):
+def load_phenomena_wide_df(conn, station_names, since=None):
     """地点名を列にしたワイド形式のDataFrame(datetime, 地点名1, 地点名2, ...)を返す。
     セルの値は只見川.xlsxと同じ表現(現象なし="/"文字列、単一コードはint、
     2コード同時観測はパック済みint(100超)、未分類はNone)にし、
     fog_features.encode_phenomena_cellをそのまま使う既存呼び出し元との互換性を保つ。
+    since(datetime)を渡すと、その日時以降の行だけを読む(毎時のナウキャスト用。全期間を読まない)。
     """
-    df = pd.read_sql_query("SELECT datetime, station_name, code FROM phenomena", conn)
+    if since is None:
+        df = pd.read_sql_query("SELECT datetime, station_name, code FROM phenomena", conn)
+    else:
+        df = pd.read_sql_query("SELECT datetime, station_name, code FROM phenomena WHERE datetime >= ?", conn,
+                               params=(pd.Timestamp(since).strftime("%Y-%m-%d %H:%M:%S"),))
     if df.empty:
         wide = pd.DataFrame({"datetime": pd.Series(dtype="datetime64[ns]")})
         for name in station_names:

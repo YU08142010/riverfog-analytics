@@ -476,12 +476,35 @@ def _apply_station_weather(main_df, station_name, weather_conn):
     return out.reset_index()
 
 
+# 同じプロセスで同じ入力から2回作らないためのキャッシュ(predict.pyは本体のモデルとナウキャストの学習で
+# 同じmain_df/phenom_dfを渡す。組み立てに約25秒かかる)。入力のオブジェクト自体を保持して、別の
+# オブジェクトが同じidを再利用して誤ってヒットすることを防ぐ。直近1件だけ持つ。
+_FRAME_CACHE = {"inputs": None, "result": None}
+
+
 def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coords=None, weather_conn=None):
     """全地点の学習データを縦持ち(1行=地点×時刻)にまとめる。
     戻り値: (frame, weather_features, shared_medians, station_coords)
       frame: weather_features + __y(川霧なら1) + __datetime + __station
       station_coords: {地点名: (緯度, 経度)}(座標が無い地点は代表地点)
+    同じプロセスで同じ入力(同じオブジェクト)なら、前回の結果のコピーを返す。
     """
+    inputs = (main_df, phenom_df, tuple(phenom_cols), lat, lon, camera_coords, weather_conn)
+    cached = _FRAME_CACHE["inputs"]
+    same = (cached is not None and cached[0] is main_df and cached[1] is phenom_df and cached[2] == inputs[2]
+            and cached[3] == lat and cached[4] == lon and cached[5] is camera_coords and cached[6] is weather_conn)
+    if same:
+        frame, wf, medians, coords = _FRAME_CACHE["result"]
+        log.info("Reusing the training frame built earlier in this run (%d rows)", len(frame))
+        return frame.copy(), list(wf), dict(medians), dict(coords)
+    result = _build_training_frame_uncached(main_df, phenom_df, phenom_cols, lat, lon,
+                                            camera_coords=camera_coords, weather_conn=weather_conn)
+    _FRAME_CACHE["inputs"], _FRAME_CACHE["result"] = inputs, result
+    frame, wf, medians, coords = result
+    return frame.copy(), list(wf), dict(medians), dict(coords)
+
+
+def _build_training_frame_uncached(main_df, phenom_df, phenom_cols, lat, lon, camera_coords=None, weather_conn=None):
     # 人による訂正(users.dbのphenomena_corrections)をラベルに反映する。訂正済みのラベルは
     # 人が確認したものなので、Geminiの確信度がlowでも学習から除外しない。
     corrections = fog_data.load_phenomena_corrections()
@@ -493,9 +516,14 @@ def _build_training_frame(main_df, phenom_df, phenom_cols, lat, lon, camera_coor
     low_confidence = load_low_confidence_set() - set(corrections)
     if low_confidence:
         dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        low_by_station = {}
+        for dt_str, station in low_confidence:
+            low_by_station.setdefault(station, set()).add(dt_str)
         excluded_total = 0
         for col in phenom_cols:
-            mask = dt_strs.apply(lambda s, c=col: (s, c) in low_confidence)
+            if col not in low_by_station:
+                continue
+            mask = dt_strs.isin(low_by_station[col])
             n = int(mask.sum())
             if n:
                 targets.loc[mask, col] = np.nan
@@ -1228,11 +1256,31 @@ def fetch_forecast_range_multi(camera_coords, forecast_days, model=None):
                                 tolerance=tolerance)
 
 
+# 同じプロセスで同じ範囲を2回取得しないためのキャッシュ(predict.pyは本体のモデルとナウキャストの学習で
+# 同じ範囲を取得する。1回で65地点×約5週間分のAPI利用回数を使う)。
+_HIST_CACHE = {}
+_HIST_CACHE_MAX = 4
+
+
 def fetch_historical_forecast_multi(camera_coords, start_date, end_date, model=None):
     """指定期間に実際に出されていた予報(historical-forecast-api)を全地点分まとめて取得する。
-    戻り値: {地点名: DataFrame}(本番の予報と同じ列名・単位)。"""
+    戻り値: {地点名: DataFrame}(本番の予報と同じ列名・単位)。同じプロセスで同じ地点・期間・気象モデルを
+    取得済みなら、その結果を返す(DataFrameは呼び出し側で書き換えない前提)。"""
     if not camera_coords:
         return {}
+    key = (tuple(sorted((n, tuple(c)) for n, c in camera_coords.items())), str(start_date), str(end_date), model)
+    if key in _HIST_CACHE:
+        log.info("Reusing historical forecasts fetched earlier in this run (%s, %s - %s)",
+                 model or "default", start_date, end_date)
+        return dict(_HIST_CACHE[key])
+    result = _fetch_historical_forecast_multi(camera_coords, start_date, end_date, model)
+    if len(_HIST_CACHE) >= _HIST_CACHE_MAX:
+        _HIST_CACHE.pop(next(iter(_HIST_CACHE)))
+    _HIST_CACHE[key] = result
+    return dict(result)
+
+
+def _fetch_historical_forecast_multi(camera_coords, start_date, end_date, model=None):
     names = list(camera_coords.keys())
     extra, tolerance = _model_params(model)
     params = {

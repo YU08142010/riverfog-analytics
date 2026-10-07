@@ -293,7 +293,8 @@ def run_nowcast(now=None):
         NOWCAST_LATEST_PATH.unlink(missing_ok=True)
         return 0
     now = now or datetime.now(JST).replace(tzinfo=None)
-    main_df, phenom_df, names = fog_data.load_river_fog_data()
+    # 使うのは直近6時間の観測だけなので、全期間のデータは読まない
+    phenom_df, names = fog_data.load_recent_phenomena(now - timedelta(hours=7))
     coords = {**model.station_coords, **load_camera_coords()}
     Y, region = observation_matrix_from_phenom(phenom_df, names, coords, since=now - timedelta(hours=6))
     observed = region.dropna()

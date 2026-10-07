@@ -43,6 +43,18 @@ BINARY_CLEAR_COLOR = "#d5d8dc"
 BINARY_NIGHT_COLOR = "#566573"
 
 
+def _hours(datetimes):
+    """横軸の日時を時単位の短い文字列("2026-10-06 19")にする。Plotlyは末尾を省いた日時を受け付け、
+    既定の"2026-10-06T19:00:00"より1点あたり6文字短い(1地点のグラフで約2,300点)。"""
+    return pd.to_datetime(pd.Series(datetimes)).dt.strftime("%Y-%m-%d %H").tolist()
+
+
+def _rounded(values, digits):
+    """表示に要る桁に丸める(グラフのHTMLに書き出される数値の桁を減らす)。欠測はNone。"""
+    arr = np.round(np.asarray(values, dtype="float64"), digits)
+    return [None if v != v else (int(v) if digits == 0 else float(v)) for v in arr]
+
+
 def _phenom_name(code):
     return "現象なし" if code == 0 else PHENOM_LABELS.get(code, f"コード{code}")
 
@@ -118,27 +130,28 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         row_heights=[0.40, 0.14, 0.26, 0.14], vertical_spacing=0.035,
     )
 
-    fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_TEMP], mode="lines",
+    x_hist, x_fc = _hours(hist_main["datetime"]), _hours(forecast_raw["datetime"])
+    fig.add_trace(go.Scatter(x=x_hist, y=_rounded(hist_main[COL_TEMP], 1), mode="lines",
                               line={"color": cs.ORANGE, "width": 2}, name="気温(℃)[実測]"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_DEWPOINT], mode="lines",
+    fig.add_trace(go.Scatter(x=x_hist, y=_rounded(hist_main[COL_DEWPOINT], 1), mode="lines",
                               line={"color": cs.AQUA, "width": 2}, name="露点温度(℃)[実測]"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_TEMP], mode="lines",
+    fig.add_trace(go.Scatter(x=x_fc, y=_rounded(forecast_raw[COL_TEMP], 1), mode="lines",
                               line={"color": cs.ORANGE, "width": 2, "dash": "dash"},
                               name="気温(℃)[予報]"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_DEWPOINT], mode="lines",
+    fig.add_trace(go.Scatter(x=x_fc, y=_rounded(forecast_raw[COL_DEWPOINT], 1), mode="lines",
                               line={"color": cs.AQUA, "width": 2, "dash": "dash"},
                               name="露点温度(℃)[予報]"), row=1, col=1)
 
-    fig.add_trace(go.Scatter(x=hist_main["datetime"], y=hist_main[COL_HUMIDITY], mode="lines",
+    fig.add_trace(go.Scatter(x=x_hist, y=_rounded(hist_main[COL_HUMIDITY], 0), mode="lines",
                               line={"color": cs.YELLOW, "width": 2},
                               name="相対湿度(％)[実測]"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=forecast_raw["datetime"], y=forecast_raw[COL_HUMIDITY], mode="lines",
+    fig.add_trace(go.Scatter(x=x_fc, y=_rounded(forecast_raw[COL_HUMIDITY], 0), mode="lines",
                               line={"color": cs.YELLOW, "width": 2, "dash": "dash"},
                               name="相対湿度(％)[予報]"), row=2, col=1)
 
     if probs is not None:
         fig.add_trace(go.Scatter(
-            x=forecast_raw["datetime"], y=probs, mode="lines", fill="tozeroy",
+            x=x_fc, y=_rounded(probs, 1), mode="lines", fill="tozeroy",
             line={"color": cs.BLUE, "width": 2},
             name="川霧(1〜3)の予測確率",
         ), row=3, col=1)
@@ -150,8 +163,8 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
         ), row=3, col=1)
 
     if len(hist_phenom):
-        fig.add_trace(_phenom_code_bar(hist_phenom["datetime"], hist_codes, "実測"), row=4, col=1)
-    fig.add_trace(_binary_forecast_bar(forecast_raw["datetime"], pred_codes), row=4, col=1)
+        fig.add_trace(_phenom_code_bar(_hours(hist_phenom["datetime"]), hist_codes, "実測"), row=4, col=1)
+    fig.add_trace(_binary_forecast_bar(x_fc, pred_codes), row=4, col=1)
 
     fig.add_vrect(x0=fc_start, x1=fc_end, fillcolor="rgb(120,130,150)", opacity=0.10, line_width=0,
                   row="all", col="all")
@@ -162,6 +175,7 @@ def plot_single_location_forecast(main_df, phenom_df, col, forecast_raw, pred_se
     fig.update_yaxes(title_text="相対湿度(％)", range=[0, 115], row=2, col=1)
     fig.update_yaxes(title_text="川霧の確率(％)", range=[0, 100], row=3, col=1)
     fig.update_yaxes(title_text=col, visible=False, range=[-0.6, 0.6], row=4, col=1)
+    fig.update_xaxes(type="date")  # 時単位の短い日時文字列(_hours)を確実に日時として扱わせる
     fig.update_xaxes(title_text="日時(年/月/日)", row=4, col=1)
 
     fig.update_layout(
@@ -226,6 +240,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
         else:
             mean_probs.append(np.nan)
 
+    mean_probs = [None if v != v else round(float(v), 1) for v in mean_probs]
     heat = np.full((n_total, n_days), np.nan)
     if prob_df is not None:
         for i, col in enumerate(fog_cols):
@@ -233,6 +248,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
                 mask = prob_dates == d
                 if mask.any():
                     heat[i, j] = float(prob_df.loc[mask, col].max() * 100.0)
+    heat = np.round(heat, 1)
 
     date_labels = [d.strftime("%m/%d") for d in dates]
     count_pct = [100.0 * c / n_total for c in counts]
@@ -248,7 +264,7 @@ def plot_all_location_summary(pred_df, models, out_dir, prob_df=None, run_date_s
         x=date_labels, y=count_pct, marker_color=cs.BLUE, name="川霧が予測された地点数",
         customdata=counts, hovertemplate=f"%{{x}}: %{{customdata}}地点(全{n_total}中)<extra></extra>",
     ), row=1, col=1)
-    if prob_df is not None and not all(np.isnan(mean_probs)):
+    if prob_df is not None and any(v is not None for v in mean_probs):
         fig.add_trace(go.Scatter(
             x=date_labels, y=mean_probs, mode="lines+markers", line={"color": cs.ORANGE, "width": 2},
             marker={"size": 6}, name="川霧確率の平均(全地点・全時刻)",

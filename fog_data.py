@@ -77,6 +77,18 @@ def load_river_fog_data(db_path=WEATHER_DB_PATH, cameras_csv=CAMERAS_CSV):
     return main_df.copy(), phenom_df.copy(), list(station_names)
 
 
+def load_recent_phenomena(since, db_path=WEATHER_DB_PATH, cameras_csv=CAMERAS_CSV):
+    """since以降の現象記録だけを (phenom_df, station_names) で返す(形はload_river_fog_dataと同じ)。
+    毎時のナウキャストは直近数時間の観測しか使わないため、全期間の気象・現象を読まずに済ませる。"""
+    station_names = load_station_names(cameras_csv)
+    conn = weather_store.connect(db_path)
+    try:
+        phenom_df = weather_store.load_phenomena_wide_df(conn, station_names, since=since)
+    finally:
+        conn.close()
+    return phenom_df, station_names
+
+
 def _load_river_fog_data_uncached(db_path, cameras_csv):
     """load_river_fog_data()の実処理(キャッシュ未ヒット時のみ呼ばれる)。"""
     station_names = load_station_names(cameras_csv)
