@@ -194,7 +194,7 @@
     {% if forecast_file %}
     <p class="muted">{{ latest_pred_date }}</p>
     {% if forecast_file.endswith('.html') %}
-    <div class="chart-wrap"><iframe class="forecast-frame" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" title="{{ name }}の予測グラフ"></iframe></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の予測グラフ" data-chart-url="{{ url_for('predictions_figure', date=latest_pred_date, filename=forecast_file) }}"></div></div>
     {% else %}
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=forecast_file) }}" alt="{{ name }}の予測グラフ"></div>
     {% endif %}

@@ -1088,3 +1088,14 @@ img.full-graph { border: none; border-radius: 12px; }
 /* Plotlyのツールバーは触れたときだけ、控えめに */
 .js-plotly-plot .modebar { opacity: 0; transition: opacity 0.2s ease; }
 .js-plotly-plot:hover .modebar, .js-plotly-plot:focus-within .modebar { opacity: 1; }
+
+/* グラフの画像(matplotlib、2026-10-07〜。base.htmlのmountPlotlyChart)。テーマに合わせてサーバーが描くので、
+   style.cssの「ダークモードで画像の色を反転する」指定は当てない。読み込み中の高さは確保し、表示後は画像の高さに合わせる */
+.chart-wrap img.chart-img, img.chart-img {
+    display: block; width: 100%; height: auto; border: none; border-radius: 0;
+    filter: none !important; -webkit-user-drag: auto;
+    background: transparent !important; padding: 0 !important;  /* style.cssの「ダークモードは画像の後ろを白く」も当てない */
+    animation: uiChartIn 0.5s var(--ease-out, ease) both;
+}
+.chart-wrap div.chart-themed.is-ready { min-height: 0; }
+@media (prefers-reduced-motion: reduce) { img.chart-img { animation: none; } }

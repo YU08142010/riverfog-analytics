@@ -294,7 +294,7 @@ document.addEventListener("ajaxformsuccess", function(e) {
     {% if region_summary_file %}
     <h3 style="margin-bottom:0.5rem;">{{ region_label }}</h3>
     {% if region_summary_file.endswith('.html') %}
-    <div class="chart-wrap"><iframe src="{{ url_for('predictions_file', date=latest_pred_date, filename=region_summary_file) }}" style="width:100%; height:700px; border:none;" title="{{ region_label }}の予測サマリーグラフ"></iframe></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ region_label }}の予測サマリーグラフ" data-notitle="1" data-chart-url="{{ url_for('predictions_figure', date=latest_pred_date, filename=region_summary_file) }}"></div></div>
     {% else %}
     <div class="chart-wrap"><div class="spinner"></div><img class="full-graph" src="{{ url_for('predictions_file', date=latest_pred_date, filename=region_summary_file) }}" alt="{{ region_label }}の予測サマリーグラフ"></div>
     {% endif %}

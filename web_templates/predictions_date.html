@@ -19,7 +19,8 @@
 
     {% if summary_file %}
     <h3 style="font-size:0.95rem;">全地点サマリー</h3>
-    <p><a class="button" href="{{ url_for('predictions_file', date=date, filename=summary_file) }}" target="_blank" rel="noopener">開く</a></p>
+    {# グラフは画像(matplotlib)で開く(2026-10-07〜、webapp._chart_as_png)。古い形式の画像ファイルはそのまま #}
+    <p><a class="button" href="{{ url_for('predictions_figure', date=date, filename=summary_file, format='png', w=1400) if summary_file.endswith('.html') else url_for('predictions_file', date=date, filename=summary_file) }}" target="_blank" rel="noopener">開く</a></p>
     {% endif %}
 
     {% if stations %}
@@ -38,7 +39,7 @@
     {% for s in stations %}
     <h4 id="station-{{ loop.index }}" style="font-size:0.9rem; margin-top:1.4rem; display:flex; align-items:center; gap:0.6rem;">
         {{ s.name }}
-        <a class="button" href="{{ url_for('predictions_file', date=date, filename=s.file) }}" target="_blank" rel="noopener" style="font-size:0.8rem;">開く</a>
+        <a class="button" href="{{ url_for('predictions_figure', date=date, filename=s.file, format='png', w=1400) if s.file.endswith('.html') else url_for('predictions_file', date=date, filename=s.file) }}" target="_blank" rel="noopener" style="font-size:0.8rem;">開く</a>
     </h4>
     {% endfor %}
     {% endif %}

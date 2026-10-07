@@ -18,7 +18,6 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 <script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
-<script src="{{ url_for('static', filename='vendor/plotly-cartesian-2.35.2.min.js') }}"></script>
 {% block extra_head %}{% endblock %}
 <script>
 window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
@@ -474,12 +473,12 @@ document.addEventListener("click", function(e) {
     URL.revokeObjectURL(url);
 });
 
-// Plotlyへの移行(2026-09-14)で追加。matplotlib版PNG(<img class="chart-themed">)と
-// 同じ「テーマに合わせて配色する」役割を、<div class="chart-themed" data-chart-url="...">
-// を対象にクライアント側で行う。サーバーはテーマ非依存でJSON(plotly.io.to_json())を
-// 返すだけなので、テーマ切替時もサーバーへ再取得しに行く必要が無い(下のtheme-toggle-btn
-// ハンドラ参照)。
-window.PLOTLY_CHARTS = [];
+// グラフ(2026-10-07〜): <div class="chart-themed" data-chart-url="..."> に、サーバーがmatplotlibで描いた画像
+// (webapp._chart_as_png・mpl_render)を表示する。2026-09-14からのPlotly(拡大・移動できるグラフ)は、触ると
+// 拡大・移動してしまい使いづらかったため戻した。グラフのURLは今までどおりfigureのJSONを返し、
+// ?format=png&theme=&w=&scale=&notitle= を付けると画像になる。テーマを切り替えたとき・幅が大きく
+// 変わったときは描き直す。カードの見出しと重なるグラフ自身のタイトルは出さない(notitle)。
+window.PLOTLY_CHARTS = [];  // (名前は以前のまま)表示中のグラフ
 
 function currentChartTheme() {
     var t = document.documentElement.getAttribute("data-theme");
@@ -487,146 +486,29 @@ function currentChartTheme() {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-// elのlayoutに実際に存在する軸(xaxis, xaxis2, yaxis2...)だけを対象に、Plotly.relayoutの
-// ドット記法で配色パッチを組み立てる。サブプロットを使う図(予測グラフ等)でも
-// xaxis2/yaxis2等が正しく拾えるよう、_render_*関数側は空のlayoutでも
-// 必ずxaxis/yaxisキー自体は明示しておくこと。
-function chartThemeLayoutPatch(el, theme) {
-    var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733", grid: "#c7d0da"};
-    var patch = {
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(0,0,0,0)",
-        "font.color": pal.fg,
-        "legend.font.color": pal.fg,
-        "title.font.color": pal.fg,
-        "font.family": "Inter, 'Zen Kaku Gothic New', -apple-system, 'Hiragino Sans', sans-serif",
-        "hoverlabel.font.family": "Inter, 'Zen Kaku Gothic New', -apple-system, 'Hiragino Sans', sans-serif",
-        "hoverlabel.bordercolor": "rgba(0,0,0,0)",
-        "hoverlabel.bgcolor": theme === "dark" ? "rgba(40,42,52,0.92)" : "rgba(255,255,255,0.95)",
-        "hoverlabel.font.color": pal.fg,
-    };
-    var layout = (el && el.layout) || {};
-    // すりガラスのカードの上に描くので、グリッドは不透明の灰色ではなく半透明の細線にし、
-    // 軸の線は消す(不透明の#e3e6ecは色付きの背景の上で白い線として浮いていた)。
-    var grid = theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(20,30,50,0.09)";
-    var zero = theme === "dark" ? "rgba(255,255,255,0.22)" : "rgba(20,30,50,0.22)";
-    patch["legend.bgcolor"] = "rgba(0,0,0,0)";
-    patch["modebar.bgcolor"] = "rgba(0,0,0,0)";
-    patch["modebar.color"] = theme === "dark" ? "rgba(255,255,255,0.45)" : "rgba(20,30,50,0.4)";
-    patch["modebar.activecolor"] = theme === "dark" ? "#7dbdff" : "#0a64d2";
-    Object.keys(layout).forEach(function(key) {
-        if (!/^[xy]axis\d*$/.test(key)) { return; }
-        patch[key + ".gridcolor"] = grid;
-        patch[key + ".zerolinecolor"] = zero;
-        patch[key + ".linecolor"] = "rgba(0,0,0,0)";
-        patch[key + ".tickfont.color"] = pal.fg;
-        patch[key + ".title.font.color"] = pal.fg;
-    });
-    return patch;
+function chartImageWidth(el) {
+    var w = el.clientWidth || (el.parentNode && el.parentNode.clientWidth) || 800;
+    return Math.max(320, Math.min(1800, Math.round(w / 40) * 40));
 }
 
-// 混同行列(data-chart-kind="heatmap")はカラーバーの目盛り色がtrace側(marker.colorbar)に
-// あるため、layoutの一括relayoutでは拾えず個別にPlotly.restyleする必要がある。
+function chartImageSrc(el, theme) {
+    var url = el.dataset.chartUrl;
+    var card = el.closest(".card");
+    var notitle = el.dataset.notitle === "1" ||
+        (card && card.querySelector("h2, h3") && card.querySelectorAll(".chart-themed").length === 1);
+    var scale = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
+    el.__rfW = chartImageWidth(el);
+    return url + (url.indexOf("?") >= 0 ? "&" : "?") + "format=png&theme=" + theme + "&w=" + el.__rfW +
+        "&scale=" + scale + "&notitle=" + (notitle ? 1 : 0);
+}
+
 function applyChartTheme(el, theme) {
-    if (!window.Plotly || !el.layout) { return; }
-    Plotly.relayout(el, chartThemeLayoutPatch(el, theme));
-    try { polishChart(el, theme); } catch (e) { console.warn("polishChart failed", e); }
-    if (el.dataset.chartKind === "heatmap") {
-        var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733"};
-        Plotly.restyle(el, {
-            "colorbar.tickfont.color": pal.fg,
-            "colorbar.title.font.color": pal.fg,
-        });
-    }
-}
-
-// グラフの色をテーマに合わせる(chart_style.pyと組)。サーバー側はライト用の色で描くので、
-// ダークモードでは同じ位置のダーク用の色(明るさを変えた同じ色相)に置き換え、ライトに戻すときは逆にする。
-// 点の縁取り(背景色)・面の薄い塗り・ヒートマップの濃淡もテーマに合わせる。
-var CHART_SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
-var CHART_SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
-var CHART_SEQ_LIGHT = [[0.0, "#eef4fc"], [0.2, "#cde2fb"], [0.4, "#86b6ef"], [0.6, "#3987e5"], [0.8, "#1c5cab"], [1.0, "#0d366b"]];
-var CHART_SEQ_DARK = [[0.0, "#1f2633"], [0.2, "#1c3a60"], [0.4, "#1c5cab"], [0.6, "#3987e5"], [0.8, "#86b6ef"], [1.0, "#cde2fb"]];
-function polishChart(el, theme) {
-    if (!window.Plotly || !el.data) { return; }
-    var from = theme === "dark" ? CHART_SERIES_LIGHT : CHART_SERIES_DARK;
-    var to = theme === "dark" ? CHART_SERIES_DARK : CHART_SERIES_LIGHT;
-    function swap(c) {
-        if (typeof c !== "string") { return null; }
-        var k = from.indexOf(c.toLowerCase());
-        return k >= 0 ? to[k] : null;
-    }
-    function wash(hex, a) {
-        if (typeof hex !== "string" || hex.length !== 7) { return null; }
-        return "rgba(" + parseInt(hex.slice(1, 3), 16) + "," + parseInt(hex.slice(3, 5), 16) + "," + parseInt(hex.slice(5, 7), 16) + "," + a + ")";
-    }
-    var seqJson = [JSON.stringify(CHART_SEQ_LIGHT), JSON.stringify(CHART_SEQ_DARK)];
-    el.data.forEach(function(t, i) {
-        var u = {}, s;
-        var lc = t.line && t.line.color, mc = t.marker && t.marker.color;
-        if ((s = swap(lc))) { u["line.color"] = s; lc = s; }
-        if ((s = swap(mc))) { u["marker.color"] = s; mc = s; }
-        var ring = t.marker && t.marker.line && t.marker.line.color;
-        if (ring === "#ffffff" || ring === "#1e2027") { u["marker.line.color"] = theme === "dark" ? "#1e2027" : "#ffffff"; }
-        if (t.fill && t.fill !== "none" && lc && (s = wash(lc, 0.12))) { u["fillcolor"] = s; }
-        if (t.type === "box" && (s = wash(lc || mc, 0.14))) { u["fillcolor"] = s; }
-        if (t.type === "heatmap" && seqJson.indexOf(JSON.stringify(t.colorscale)) >= 0) {
-            u["colorscale"] = [theme === "dark" ? CHART_SEQ_DARK : CHART_SEQ_LIGHT];
-        }
-        if (Object.keys(u).length) { Plotly.restyle(el, u, [i]); }
-    });
-    polishTreeNodes(el, theme);
-}
-
-// 決定木の図(fog_tree_viz)の節: 不透明な四角(#a9c6de/#e6c789/#9aa5b1)と濃い枠を、角の丸い半透明の色の面にする。
-// 一度変えた節はshape.nameに種類を残し、テーマを切り替えたときもその種類で塗り直す。
-var TREE_NODE_COLORS = {
-    light: {split: ["rgba(42,120,214,0.14)", "rgba(42,120,214,0.45)"], leaf: ["rgba(235,104,52,0.14)", "rgba(235,104,52,0.5)"],
-            more: ["rgba(110,120,140,0.10)", "rgba(110,120,140,0.35)"]},
-    dark: {split: ["rgba(57,135,229,0.22)", "rgba(125,189,255,0.5)"], leaf: ["rgba(217,89,38,0.22)", "rgba(255,160,120,0.5)"],
-           more: ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.25)"]}
-};
-var TREE_NODE_KIND = {"#a9c6de": "split", "#e6c789": "leaf", "#9aa5b1": "more"};
-function polishTreeNodes(el, theme) {
-    var shapes = (el.layout && el.layout.shapes) || [];
-    var isTree = false;
-    var out = shapes.map(function(sh) {
-        var kind = sh.name && sh.name.indexOf("rf-node-") === 0 ? sh.name.slice(8) : TREE_NODE_KIND[String(sh.fillcolor || "").toLowerCase()];
-        if (!kind || (sh.type !== "rect" && sh.type !== "path")) { return sh; }
-        isTree = true;
-        var c = TREE_NODE_COLORS[theme === "dark" ? "dark" : "light"][kind];
-        var n = Object.assign({}, sh, {name: "rf-node-" + kind, fillcolor: c[0], opacity: 1, line: {color: c[1], width: 1}});
-        if (sh.type === "rect") {
-            // 角を丸めた四角をpathで描く(Plotlyの四角には角丸の指定が無い)
-            var x0 = sh.x0, x1 = sh.x1, y0 = sh.y0, y1 = sh.y1, rx = (x1 - x0) * 0.16, ry = (y1 - y0) * 0.2;
-            n.type = "path";
-            n.path = "M" + (x0 + rx) + "," + y0 + " L" + (x1 - rx) + "," + y0 + " Q" + x1 + "," + y0 + " " + x1 + "," + (y0 + ry) +
-                     " L" + x1 + "," + (y1 - ry) + " Q" + x1 + "," + y1 + " " + (x1 - rx) + "," + y1 +
-                     " L" + (x0 + rx) + "," + y1 + " Q" + x0 + "," + y1 + " " + x0 + "," + (y1 - ry) +
-                     " L" + x0 + "," + (y0 + ry) + " Q" + x0 + "," + y0 + " " + (x0 + rx) + "," + y0 + " Z";
-        }
-        return n;
-    });
-    if (!isTree) { return; }
-    var patch = {shapes: out};
-    // 節の文字(データ座標に置いた注記)は、半透明になった面の上で読めるようテーマの文字色にする
-    var pal = (window.CHART_THEME_PALETTE || {})[theme] || {fg: "#1c2733"};
-    (el.layout.annotations || []).forEach(function(a, i) {
-        if (a.xref === "x" && a.yref === "y") { patch["annotations[" + i + "].font.color"] = pal.fg; }
-    });
-    Plotly.relayout(el, patch);
-    el.data.forEach(function(t, i) {
-        if (t.mode === "lines") {
-            Plotly.restyle(el, {"line.color": theme === "dark" ? "rgba(255,255,255,0.22)" : "rgba(20,30,50,0.22)", "line.width": 1.2}, [i]);
-        } else if (t.mode === "markers" && t.marker && String(t.marker.color).replace(/\s+/g, "") === "rgba(0,0,0,0)") {
-            Plotly.restyle(el, {"marker.line.color": "rgba(0,0,0,0)"}, [i]);  // 節の上の白い輪(ホバー用の印)は見せない
-        }
-    });
+    if (el.__rfImg) { el.__rfImg.src = chartImageSrc(el, theme); }
 }
 
 function mountPlotlyChart(el) {
     var url = el.dataset.chartUrl;
-    if (!url || !window.Plotly) { return; }
+    if (!url) { return; }
     var wrap = el.closest(".chart-wrap");
     el.classList.add("loading");
     if (wrap) { wrap.classList.add("is-loading"); }
@@ -634,33 +516,36 @@ function mountPlotlyChart(el) {
         el.classList.remove("loading");
         if (wrap) { wrap.classList.remove("is-loading"); }
     };
-    fetch(url)
-        .then(function(resp) {
-            if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-            return resp.json();
-        })
-        .then(function(fig) {
-            var layout = fig.layout || {};
-            // カードの見出しと同じ内容のグラフ自身のタイトルは重複するので消す
-            // (カードの中のグラフが1つだけで、カードに見出しがある場合のみ)。
-            var card = el.closest(".card");
-            if (card && card.querySelector("h2, h3") && card.querySelectorAll(".chart-themed").length === 1 && layout.title) {
-                layout.title = {text: ""};
-                layout.margin = Object.assign({}, layout.margin || {}, {t: Math.min((layout.margin || {}).t || 40, 40)});
-            }
-            return Plotly.newPlot(el, fig.data, layout, {responsive: true, displaylogo: false});
-        })
-        .then(function() {
-            applyChartTheme(el, currentChartTheme());
-            window.PLOTLY_CHARTS.push(el);
-            stop();
-        })
-        .catch(function(err) {
-            el.textContent = "グラフの読み込みに失敗しました";
-            console.error("chart load failed:", url, err);
-            stop();
-        });
+    var img = document.createElement("img");
+    img.className = "chart-img";
+    img.alt = el.getAttribute("aria-label") || "グラフ";
+    img.decoding = "async";
+    img.addEventListener("load", function() { stop(); el.classList.add("is-ready"); });
+    img.addEventListener("error", function() {
+        el.textContent = "グラフの読み込みに失敗しました";
+        stop();
+    });
+    el.textContent = "";
+    el.appendChild(img);
+    el.__rfImg = img;
+    img.src = chartImageSrc(el, currentChartTheme());
+    window.PLOTLY_CHARTS.push(el);
 }
+
+// 画面の幅が大きく変わったら(回転・ウィンドウの大きさの変更)、その幅で描き直す
+(function() {
+    var timer = null;
+    window.addEventListener("resize", function() {
+        clearTimeout(timer);
+        timer = setTimeout(function() {
+            (window.PLOTLY_CHARTS || []).forEach(function(el) {
+                if (!el.__rfImg || !document.body.contains(el)) { return; }
+                var w = chartImageWidth(el);
+                if (el.__rfW && Math.abs(w - el.__rfW) / el.__rfW > 0.15) { applyChartTheme(el, currentChartTheme()); }
+            });
+        }, 400);
+    });
+})();
 
 document.addEventListener("DOMContentLoaded", function() {
     document.querySelectorAll(".chart-wrap img").forEach(function(img) {

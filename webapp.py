@@ -57,6 +57,7 @@ import users
 import fog_data
 import fog_model
 import chart_style
+import mpl_render
 import fog_features
 from fog_features import is_daylight as fog_features_is_daylight
 import fog_tree_viz
@@ -616,6 +617,42 @@ def _apply_security_headers(response):
 STATIC_LONG_CACHE_DIRS = ("fonts/", "vendor/", "icons/")
 STATIC_LONG_CACHE_SECONDS = 30 * 24 * 3600
 STATIC_SHORT_CACHE_SECONDS = 600
+
+
+# グラフは画像(matplotlib)で表示する(2026-10-07〜)。各グラフのURLはPlotlyのfigureのJSONを返すままにして、
+# ?format=pngが付いたときだけ、ここでmpl_renderが画像に描き直して返す(全グラフ共通。テーマ・幅・倍率・
+# タイトルの有無は引数で受け取る)。2026-09-14からのPlotly(拡大・移動できるグラフ)は、触ると拡大・移動して
+# しまい使いづらかったため。この関数は_apply_security_headersより後に登録しているので先に動き、
+# 作り直した画像の応答にもセキュリティヘッダーが付く。
+@app.after_request
+def _chart_as_png(response):
+    if request.args.get("format") != "png" or response.status_code != 200 or response.direct_passthrough:
+        return response
+    try:
+        body = response.get_data(as_text=True)
+    except Exception:
+        return response
+    if not body.lstrip().startswith("{"):
+        return response
+    try:
+        fig = json.loads(body)
+    except ValueError:
+        return response
+    if not isinstance(fig, dict) or not ("data" in fig or "layout" in fig):
+        return response
+    try:
+        width = int(request.args.get("w", 900))
+    except ValueError:
+        width = 900
+    try:
+        scale = float(request.args.get("scale", 1))
+    except ValueError:
+        scale = 1.0
+    png = mpl_render.render_cached(fig, theme="dark" if request.args.get("theme") == "dark" else "light",
+                                   width=width, scale=scale, notitle=request.args.get("notitle") == "1")
+    out = Response(png, mimetype="image/png")
+    out.headers["Cache-Control"] = "private, max-age=600"
+    return out
 
 try:
     STATION_NAMES = fog_data.load_station_names()
@@ -4292,6 +4329,28 @@ def predictions_date(date):
         summary_file=summary_file, csv_file=csv_file, stations=stations,
         prev_date=prev_date, next_date=next_date,
     )
+
+
+@app.route("/predictions/<date>/figure/<path:filename>")
+def predictions_figure(date, filename):
+    """予報グラフ・全地点サマリー(fog_graphsが書き出したPlotlyのHTML)から図を取り出してJSONで返す。
+    ページでは?format=pngを付けて画像で表示する(_chart_as_png)。過去の日付のファイルにもそのまま効く。"""
+    date = _validate_date(date)
+    if not filename.lower().endswith(".html"):
+        abort(404)
+    from werkzeug.security import safe_join
+    path = safe_join(str(PRED_DIR / date), filename)
+    if path is None or not os.path.isfile(path):
+        abort(404)
+    try:
+        with open(path, encoding="utf-8") as f:
+            fig = mpl_render.figure_from_plotly_html(f.read())
+    except (OSError, ValueError) as e:
+        log.warning("Failed to read the figure in %s: %s", path, e)
+        abort(404)
+    resp = Response(json.dumps(fig, ensure_ascii=False), mimetype="application/json")
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
 
 
 @app.route("/predictions/<date>/file/<path:filename>")
