@@ -194,17 +194,18 @@
 .wx-hero-cond { font-size: 1.3rem; font-weight: 600; }
 .wx-hero-sub { font-size: 0.88rem; opacity: 0.9; margin-top: 0.3rem; }
 
-/* 背景を見せるため、地点ページのカードはふだんより透けさせる。 */
+/* 背景を見せるため、地点ページのカードはふだんより透けさせる(2026-10-07にさらに透明に。
+   文字の読みやすさは、glass.cssの強めのぼかし(--glass-filter)で保つ)。 */
 .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card {
-    background: rgba(255, 255, 255, 0.80);
+    background: rgba(255, 255, 255, 0.46);
 }
 :root[data-theme="dark"] .wx-scene ~ main .card,
 :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
-:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.74); }
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.40); }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .wx-scene ~ main .card,
     :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
-    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.74); }
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.40); }
 }
 .wx-scene ~ main .breadcrumb, .wx-scene ~ main .breadcrumb a, .wx-scene ~ main .pf-back {
     color: #fff;

@@ -27,12 +27,12 @@
     --radius-md: 14px;
     --radius-lg: 18px;
 
-    --glass-bg: rgba(255, 255, 255, 0.58);
-    --glass-bg-strong: rgba(255, 255, 255, 0.74);
-    --glass-bar: rgba(250, 251, 253, 0.52);
+    --glass-bg: rgba(255, 255, 255, 0.38);
+    --glass-bg-strong: rgba(255, 255, 255, 0.60);
+    --glass-bar: rgba(250, 251, 253, 0.34);
     --glass-edge: rgba(255, 255, 255, 0.75);
     --glass-hairline: rgba(20, 30, 50, 0.08);
-    --glass-filter: saturate(190%) blur(26px);
+    --glass-filter: saturate(200%) blur(30px);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 0 0.5px var(--glass-hairline),
                     0 8px 28px rgba(30, 50, 90, 0.08);
     --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px var(--glass-hairline),
@@ -63,9 +63,9 @@
         --color-border: rgba(255, 255, 255, 0.10);
         --color-text: #f2f2f5;
         --color-text-muted: #a1a6b2;
-        --glass-bg: rgba(36, 38, 48, 0.50);
-        --glass-bg-strong: rgba(40, 42, 52, 0.74);
-        --glass-bar: rgba(28, 30, 38, 0.46);
+        --glass-bg: rgba(36, 38, 48, 0.32);
+        --glass-bg-strong: rgba(40, 42, 52, 0.58);
+        --glass-bar: rgba(28, 30, 38, 0.30);
         --glass-edge: rgba(255, 255, 255, 0.10);
         --glass-hairline: rgba(255, 255, 255, 0.09);
         --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
@@ -95,9 +95,9 @@
     --color-border: rgba(255, 255, 255, 0.10);
     --color-text: #f2f2f5;
     --color-text-muted: #a1a6b2;
-    --glass-bg: rgba(36, 38, 48, 0.50);
-    --glass-bg-strong: rgba(40, 42, 52, 0.74);
-    --glass-bar: rgba(28, 30, 38, 0.46);
+    --glass-bg: rgba(36, 38, 48, 0.32);
+    --glass-bg-strong: rgba(40, 42, 52, 0.58);
+    --glass-bar: rgba(28, 30, 38, 0.30);
     --glass-edge: rgba(255, 255, 255, 0.10);
     --glass-hairline: rgba(255, 255, 255, 0.09);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
@@ -708,7 +708,7 @@ header h1 { letter-spacing: 0.03em; }
     --tint-bg: rgba(10, 100, 210, 0.08);
     --tint-bg-hover: rgba(10, 100, 210, 0.15);
     --tint-edge: rgba(10, 100, 210, 0.16);
-    --glass-soft: rgba(255, 255, 255, 0.42);
+    --glass-soft: rgba(255, 255, 255, 0.28);
     /* 他の中身の上に浮かぶ小窓(カレンダー等)は、下の文字と重なって読みにくくならないよう濃いめ */
     --glass-pop: rgba(255, 255, 255, 0.88);
 }
@@ -958,3 +958,10 @@ a.date-nav-step:active { transform: scale(0.94); }
     .rfcal-grid.slide-l, .rfcal-grid.slide-r { animation: none; }
     .rfcal-pop, .rfcal-day.has, .date-nav-pick, .date-nav-step, .date-browser-latest { transition: none; transform: none !important; }
 }
+
+/* 地点ページのタイムラプスの日付(station_detail.html)。カードの中央寄せの中で幅を抑える。 */
+.tl-datebar { max-width: 520px; margin: 0 auto 0.9rem; }
+button.date-nav-step { border: none; background: none; cursor: pointer; font: inherit; font-size: 0.86rem; font-weight: 600; }
+button.date-nav-step:hover:not(:disabled) { background: var(--control-bg); }
+button.date-nav-step:active:not(:disabled) { transform: scale(0.94); }
+button.date-nav-step:disabled { opacity: 0.35; cursor: default; }

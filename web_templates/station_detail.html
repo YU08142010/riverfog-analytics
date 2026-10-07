@@ -272,17 +272,17 @@
     {% if timelapse %}
     <div style="text-align:center;">
         {% if date_groups %}
-        <div style="margin-bottom:0.8rem; display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
-            <select id="tl-month-select" style="padding:0.4rem;">
-                <option value="">月を選んで移動...</option>
-                {% for g in date_groups %}
-                <option value="{{ loop.index0 }}">{{ g.label }}</option>
-                {% endfor %}
-            </select>
-            <select id="tl-day-select" style="padding:0.4rem;" disabled>
-                <option value="">日を選択</option>
-            </select>
-        </div>
+        {# 日付はカレンダー(web_static/calendar.js)で選ぶ。前の日/次の日は画像のある日へ移る。 #}
+        <nav class="date-nav tl-datebar" aria-label="タイムラプスの日付">
+            <button type="button" class="date-nav-step" id="tl-day-prev"><span aria-hidden="true">‹</span> 前の日</button>
+            <button type="button" class="date-nav-pick" id="tl-date-pick" aria-haspopup="dialog" aria-expanded="false"
+                    title="カレンダーから日付を選ぶ">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+                <span id="tl-date-label">直近の画像</span>
+                <span class="date-nav-caret" aria-hidden="true">▾</span>
+            </button>
+            <button type="button" class="date-nav-step" id="tl-day-next">次の日 <span aria-hidden="true">›</span></button>
+        </nav>
         {% endif %}
         <img id="tl-img" class="full-graph timelapse-img" src="" alt="{{ name }}のタイムラプス画像">
         <p class="muted" id="tl-caption"></p>
@@ -305,8 +305,15 @@
         var cap = document.getElementById("tl-caption");
         var playBtn = document.getElementById("tl-play");
         var scrubber = document.getElementById("tl-scrubber");
-        var monthSelect = document.getElementById("tl-month-select");
-        var daySelect = document.getElementById("tl-day-select");
+        var pickBtn = document.getElementById("tl-date-pick");
+        var dateLabel = document.getElementById("tl-date-label");
+        var dayPrev = document.getElementById("tl-day-prev");
+        var dayNext = document.getElementById("tl-day-next");
+        // 画像のある日付(昇順)と、いま表示している日
+        var dates = [];
+        dateGroups.forEach(function(g) { g.days.forEach(function(d) { dates.push(d.date); }); });
+        dates.sort();
+        var currentDate = items.length ? items[items.length - 1].caption.slice(0, 10) : null;
 
         function stopPlaying() {
             if (timer) {
@@ -340,34 +347,32 @@
             }
         });
 
-        if (monthSelect) {
-            monthSelect.addEventListener("change", function() {
-                daySelect.innerHTML = '<option value="">日を選択</option>';
-                var gi = monthSelect.value;
-                if (gi === "") {
-                    daySelect.disabled = true;
-                    return;
-                }
-                dateGroups[parseInt(gi, 10)].days.forEach(function(d) {
-                    var opt = document.createElement("option");
-                    opt.value = d.date;
-                    opt.textContent = d.day + "日";
-                    daySelect.appendChild(opt);
-                });
-                daySelect.disabled = false;
-            });
-
-            daySelect.addEventListener("change", function() {
-                var date = daySelect.value;
-                if (!date) { return; }
+        if (pickBtn) {
+            var WEEK = ["日", "月", "火", "水", "木", "金", "土"];
+            function labelOf(date) {
+                var p = date.split("-");
+                var d = new Date(+p[0], +p[1] - 1, +p[2]);
+                return p[0] + "年" + (+p[1]) + "月" + (+p[2]) + "日(" + WEEK[d.getDay()] + ")";
+            }
+            function updateBar() {
+                var i = currentDate ? dates.indexOf(currentDate) : -1;
+                dateLabel.textContent = currentDate ? labelOf(currentDate) : "直近の画像";
+                dayPrev.disabled = !currentDate || i <= 0;
+                dayNext.disabled = !currentDate || i < 0 || i >= dates.length - 1;
+            }
+            function loadDate(date) {
                 stopPlaying();
+                currentDate = date;
+                updateBar();
+                cap.textContent = "読み込み中…";
                 fetch("{{ url_for('station_timelapse_json', name=name) }}?date=" + encodeURIComponent(date))
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         items = data.items || [];
                         if (!items.length) {
-                            cap.textContent = "この日の画像はありません。";
+                            cap.textContent = "この日のこの地点の画像はありません。";
                             img.removeAttribute("src");
+                            scrubber.max = "0";
                             return;
                         }
                         show(items.length - 1);
@@ -375,7 +380,26 @@
                     .catch(function() {
                         cap.textContent = "画像の取得に失敗しました。";
                     });
+            }
+            dayPrev.addEventListener("click", function() {
+                var i = dates.indexOf(currentDate);
+                if (i > 0) { loadDate(dates[i - 1]); }
             });
+            dayNext.addEventListener("click", function() {
+                var i = dates.indexOf(currentDate);
+                if (i >= 0 && i < dates.length - 1) { loadDate(dates[i + 1]); }
+            });
+            pickBtn.addEventListener("click", function() {
+                if (!window.RFCalendar) { return; }
+                if (pickBtn.getAttribute("aria-expanded") === "true") { window.RFCalendar.close(); return; }
+                var marks = {};
+                dates.forEach(function(d) { marks[d] = ["images"]; });
+                window.RFCalendar.popover(pickBtn, {
+                    marks: marks, selected: currentDate, label: "タイムラプスの日付を選ぶ",
+                    onPick: function(date) { window.RFCalendar.close(); loadDate(date); pickBtn.focus(); }
+                });
+            });
+            updateBar();
         }
 
         show(items.length - 1);
