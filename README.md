@@ -137,3 +137,14 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 - ログ: `/opt/river-fog/logs/`。
 - バックアップ: `backup.py`(`.gitignore` で `backups/` は除外)。
 - 過去の変更履歴は `CHANGELOG.md` を参照。
+
+## 毎日の再起動とチャット通知(2026-10-08〜)
+
+- **毎日03:40にサーバーを再起動する**(所有者の依頼)。`rf-daily-reboot.timer` → `rf-daily-reboot.service` →
+  `/usr/local/sbin/rf-daily-reboot.sh`(このリポジトリの外、root管理)。03:00のバックアップや予測がまだ動いていれば
+  最大15分待ってから再起動し、04:00の観測収集の前に終わるようにしている。止めるときは
+  `sudo systemctl disable --now rf-daily-reboot.timer`。待ちの判定だけ試すときは `sudo RF_DRY_RUN=1 /usr/local/sbin/rf-daily-reboot.sh`。
+- **チャットの通知(音なし)**: ベルのパネルの切り替えでオンにする。サイトのタブが開いている間(裏でも)、
+  共通の15秒ごとの未読確認(`api_nav_status`)でDM・グループの未読が増えたら、ブラウザの通知を`silent: true`で出す。
+  オン/オフと前回の未読数はブラウザのlocalStorage。`web_static/sw.js`は通知を出すためだけの最小のService Worker
+  (キャッシュしない、オンの時だけ登録)。ブラウザを閉じていると届かない(Web Pushではない)。
