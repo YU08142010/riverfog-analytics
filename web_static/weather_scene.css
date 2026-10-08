@@ -411,3 +411,62 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
 .wx-hour.now .lv1 { color: #fff; background: rgba(255, 255, 255, 0.25); }
 .wx-hour small { font-size: 0.68rem; opacity: 0.85; }
 .wx-hour-day { flex: 0 0 auto; align-self: center; writing-mode: vertical-rl; font-size: 0.72rem; font-weight: 700; color: var(--color-text-muted); padding: 0 0.1rem; }
+/* ==========================================================================
+   ダークモード(2026-10-08): 空の絵は時間帯・天気で決まるため、ダークモードでも昼の明るい空が
+   出て、その上の半透明のカードに明るい文字が乗り、読めなくなっていた。ダークモードでは空を
+   暗くし、カードを少し濃くして、霧・曇りの日中に濃い色へ切り替える見出しの文字も白のままにする。
+   ========================================================================== */
+:root[data-theme="dark"] .wx-scene { filter: brightness(0.4) saturate(0.85);}
+:root[data-theme="dark"] .wx-scene ~ main .card,
+:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.56);}
+:root[data-theme="dark"] .wx-scene ~ main .wx-hero,
+:root[data-theme="dark"] .wx-scene ~ main .wx-hero a,
+:root[data-theme="dark"] .wx-scene ~ main .pf-hero h1,
+:root[data-theme="dark"] .wx-scene ~ main .pf-hero p,
+:root[data-theme="dark"] .wx-scene ~ main .pf-hero .pf-muted,
+:root[data-theme="dark"] .wx-scene ~ main > p.pf-muted,
+:root[data-theme="dark"] .wx-scene ~ main .breadcrumb,
+:root[data-theme="dark"] .wx-scene ~ main .breadcrumb a,
+:root[data-theme="dark"] .wx-scene ~ main .pf-back {
+    color: #f4f6fa !important;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45) !important;}
+:root[data-theme="dark"] .wx-scene ~ main .wx-hero-stat { background: rgba(255, 255, 255, 0.10) !important; border-color: rgba(255, 255, 255, 0.22) !important;}
+:root[data-theme="dark"] .wx-card,
+:root[data-theme="dark"] .wx-card.wx-day.wx-fog,
+:root[data-theme="dark"] .wx-card.wx-day.wx-cloud,
+:root[data-theme="dark"] .wx-card.wx-day.wx-riverfog.wx-lv3 {
+    color: #fff;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+    background:
+        linear-gradient(rgba(10, 14, 26, 0.50), rgba(10, 14, 26, 0.50)),
+        linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 75%, var(--wx-sky-bottom) 140%);
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) .wx-scene { filter: brightness(0.4) saturate(0.85);}
+:root:not([data-theme="light"]) .wx-scene ~ main .card,
+:root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
+:root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.56);}
+:root:not([data-theme="light"]) .wx-scene ~ main .wx-hero,
+:root:not([data-theme="light"]) .wx-scene ~ main .wx-hero a,
+:root:not([data-theme="light"]) .wx-scene ~ main .pf-hero h1,
+:root:not([data-theme="light"]) .wx-scene ~ main .pf-hero p,
+:root:not([data-theme="light"]) .wx-scene ~ main .pf-hero .pf-muted,
+:root:not([data-theme="light"]) .wx-scene ~ main > p.pf-muted,
+:root:not([data-theme="light"]) .wx-scene ~ main .breadcrumb,
+:root:not([data-theme="light"]) .wx-scene ~ main .breadcrumb a,
+:root:not([data-theme="light"]) .wx-scene ~ main .pf-back {
+    color: #f4f6fa !important;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45) !important;}
+:root:not([data-theme="light"]) .wx-scene ~ main .wx-hero-stat { background: rgba(255, 255, 255, 0.10) !important; border-color: rgba(255, 255, 255, 0.22) !important;}
+:root:not([data-theme="light"]) .wx-card,
+:root:not([data-theme="light"]) .wx-card.wx-day.wx-fog,
+:root:not([data-theme="light"]) .wx-card.wx-day.wx-cloud,
+:root:not([data-theme="light"]) .wx-card.wx-day.wx-riverfog.wx-lv3 {
+    color: #fff;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+    background:
+        linear-gradient(rgba(10, 14, 26, 0.50), rgba(10, 14, 26, 0.50)),
+        linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 75%, var(--wx-sky-bottom) 140%);
+}
+}

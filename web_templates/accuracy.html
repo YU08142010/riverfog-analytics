@@ -226,7 +226,7 @@
     </p>
     {% set d = cmp.f1_diff %}
     <div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:baseline; margin:0.6rem 0 0.9rem;">
-        <div style="font-size:2rem; font-weight:700; font-variant-numeric:tabular-nums; color:{{ 'var(--accent, #1a5276)' if d is not none and d >= 0 else '#b5562b' }};">
+        <div style="font-size:2rem; font-weight:700; font-variant-numeric:tabular-nums; color:{{ 'var(--color-primary)' if d is not none and d >= 0 else '#b5562b' }};">
             {{ "%+.3f"|format(d) if d is not none else "-" }}
         </div>
         <div>

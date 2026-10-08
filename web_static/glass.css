@@ -62,7 +62,7 @@
         --color-surface: #1e2027;
         --color-border: rgba(255, 255, 255, 0.10);
         --color-text: #f2f2f5;
-        --color-text-muted: #a1a6b2;
+        --color-text-muted: #bcc1cc;
         --glass-bg: rgba(36, 38, 48, 0.32);
         --glass-bg-strong: rgba(40, 42, 52, 0.58);
         --glass-bar: rgba(28, 30, 38, 0.30);
@@ -94,7 +94,7 @@
     --color-surface: #1e2027;
     --color-border: rgba(255, 255, 255, 0.10);
     --color-text: #f2f2f5;
-    --color-text-muted: #a1a6b2;
+    --color-text-muted: #bcc1cc;
     --glass-bg: rgba(36, 38, 48, 0.32);
     --glass-bg-strong: rgba(40, 42, 52, 0.58);
     --glass-bar: rgba(28, 30, 38, 0.30);
@@ -1099,3 +1099,16 @@ img.full-graph { border: none; border-radius: 12px; }
 }
 .chart-wrap div.chart-themed.is-ready { min-height: 0; }
 @media (prefers-reduced-motion: reduce) { img.chart-img { animation: none; } }
+
+/* ダークモードで補足の文字が読みにくかったため(2026-10-08)、muted色を明るくし(上の変数)、
+   カレンダーのデータがない日も少し濃くする。 */
+:root[data-theme="dark"] .rfcal-day.none { opacity: 0.62; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rfcal-day.none { opacity: 0.62; } }
+/* ダークモードの赤(--color-danger)は文字・枠線用に明るくしてあり、白文字を載せる背景には薄すぎた。 */
+:root[data-theme="dark"] .nav-unread-badge, :root[data-theme="dark"] a.button.button-danger, :root[data-theme="dark"] button.button.button-danger, :root[data-theme="dark"] .chat-delete-btn:hover { background: #b83a2d; }
+:root[data-theme="dark"] a.button.button-danger:hover, :root[data-theme="dark"] button.button.button-danger:hover { background: #9e2f24; }
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) .nav-unread-badge, :root:not([data-theme="light"]) a.button.button-danger, :root:not([data-theme="light"]) button.button.button-danger, :root:not([data-theme="light"]) .chat-delete-btn:hover { background: #b83a2d; }
+:root:not([data-theme="light"]) a.button.button-danger:hover, :root:not([data-theme="light"]) button.button.button-danger:hover { background: #9e2f24; }
+}
+.page-tabs a.button, .page-tabs a.button:hover { color: #fff; }
