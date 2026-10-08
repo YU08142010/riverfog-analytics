@@ -111,6 +111,12 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
             <p class="notif-footnote muted">お気に入り地点(<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で設定)だけに絞り込んで表示しています。</p>
             {% endif %}
             <p class="notif-footnote muted">既読状態はこの端末のブラウザにのみ保存されます(他の端末では未読のまま表示されます)。</p>
+            {% if session.get('user_id') %}
+            <div class="chat-notify-row" id="chat-notify-row" hidden>
+                <span>チャットの通知(音なし)<small class="muted" id="chat-notify-state"></small></span>
+                <button type="button" class="button cancel chat-notify-btn" id="chat-notify-btn">オンにする</button>
+            </div>
+            {% endif %}
         </div>
     </div>
     {% if session.get('user_id') %}
@@ -753,13 +759,95 @@ document.addEventListener("submit", function(e) {
         });
         return Object.keys(ids);
     }
+    // チャットの通知(2026-10-08)。ブラウザの通知機能を音なし(silent)で使う。サイトを開いている
+    // タブがあれば(裏に回っていても)、DM・グループの未読が増えた時に通知する。オン/オフと
+    // 前回の未読数はこの端末のブラウザに保存する(複数タブで同じ通知を重ねて出さないため)。
+    var NOTIFY_KEY = "rf-chat-notify", LAST_KEY = "rf-chat-last";
+    var DM_URL = "{{ url_for('dm_inbox') }}", GROUP_URL = "{{ url_for('group_home') }}";
+    var SW_URL = "{{ url_for('static', filename='sw.js') }}?v={{ app_version|default('') }}";
+    var ICON_URL = "{{ url_for('static', filename='icons/icon-192.png') }}";
+    var swReg = null;
+    function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+    function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    function notifySupported() { return "Notification" in window; }
+    function notifyOn() { return notifySupported() && lsGet(NOTIFY_KEY) === "1" && Notification.permission === "granted"; }
+    function registerSw() {
+        if (swReg || !("serviceWorker" in navigator)) { return; }
+        navigator.serviceWorker.register(SW_URL, {scope: "{{ url_for('static', filename='') }}"})
+            .then(function(r) { swReg = r; }).catch(function() {});
+    }
+    function showNotice(title, body, url) {
+        var opts = {body: body, silent: true, icon: ICON_URL, data: {url: url}};
+        if (swReg && swReg.showNotification) { swReg.showNotification(title, opts).catch(function() {}); return; }
+        try {
+            var n = new Notification(title, opts);
+            n.onclick = function() { window.focus(); location.href = url; n.close(); };
+        } catch (e) {}
+    }
+    function checkChatNotice(data) {
+        var dm = data.dm_unread || 0, gr = data.group_unread || 0;
+        var last = {};
+        try { last = JSON.parse(lsGet(LAST_KEY) || "{}") || {}; } catch (e) {}
+        lsSet(LAST_KEY, JSON.stringify({dm: dm, group: gr}));
+        if (!notifyOn()) { return; }
+        var newDm = dm > (last.dm || 0), newGr = gr > (last.group || 0);
+        if (!newDm && !newGr) { return; }
+        // いま見ているチャットの分は通知しない
+        var path = location.pathname, visible = document.visibilityState === "visible";
+        if (visible && newDm && path.indexOf(DM_URL) === 0) { newDm = false; }
+        if (visible && newGr && path.indexOf(GROUP_URL) === 0) { newGr = false; }
+        if (!newDm && !newGr) { return; }
+        var parts = [];
+        if (dm) { parts.push("DM 未読" + dm + "件"); }
+        if (gr) { parts.push("グループ 未読" + gr + "件"); }
+        showNotice("新しいメッセージ", parts.join(" ・ "), newDm ? DM_URL : GROUP_URL);
+    }
+    var notifyRow = document.getElementById("chat-notify-row");
+    var notifyBtn = document.getElementById("chat-notify-btn");
+    var notifyState = document.getElementById("chat-notify-state");
+    function renderNotifyUi() {
+        if (!notifyRow) { return; }
+        if (!notifySupported()) {
+            notifyRow.hidden = false; notifyBtn.hidden = true;
+            notifyState.textContent = "このブラウザでは使えません";
+            return;
+        }
+        notifyRow.hidden = false; notifyBtn.hidden = false;
+        if (Notification.permission === "denied") {
+            notifyBtn.hidden = true;
+            notifyState.textContent = "ブラウザの設定で通知がブロックされています";
+        } else if (notifyOn()) {
+            notifyBtn.textContent = "オフにする"; notifyState.textContent = "オン";
+        } else {
+            notifyBtn.textContent = "オンにする"; notifyState.textContent = "オフ";
+        }
+    }
+    if (notifyBtn) {
+        notifyBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            if (notifyOn()) { lsSet(NOTIFY_KEY, "0"); renderNotifyUi(); return; }
+            Notification.requestPermission().then(function(p) {
+                if (p === "granted") {
+                    lsSet(NOTIFY_KEY, "1");
+                    registerSw();
+                    showNotice("チャットの通知をオンにしました", "新しいメッセージが届くと、音なしでお知らせします。", DM_URL);
+                }
+                renderNotifyUi();
+            });
+        });
+    }
+    renderNotifyUi();
+    if (notifyOn()) { registerSw(); }
+
     function poll() {
-        if (document.visibilityState !== "visible") { return; }
+        // 通知がオンの時は、タブが裏に回っていても未読を確かめる(オフの時は従来どおり止める)
+        if (document.visibilityState !== "visible" && !notifyOn()) { return; }
         var ids = watchedUserIds();
         var url = "{{ url_for('api_nav_status') }}" + (ids.length ? "?ids=" + ids.join(",") : "");
         fetch(url, {headers: {"X-Requested-With": "XMLHttpRequest"}})
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                checkChatNotice(data);
                 if (communityBadge) {
                     var total = (data.dm_unread || 0) + (data.group_unread || 0);
                     communityBadge.textContent = total;

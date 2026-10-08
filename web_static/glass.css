@@ -1126,3 +1126,8 @@ a.button.cancel, button.button.cancel { color: var(--color-text); }
 @media (prefers-color-scheme: dark) {
 :root:not([data-theme="light"]) .ranking-toggle-btn.active, :root:not([data-theme="light"]) .pf-seg button[aria-pressed="true"] { color: #0b1726; }
 }
+
+/* ベルのパネル内の「チャットの通知(音なし)」の切り替え(2026-10-08) */
+.chat-notify-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.55rem 0.9rem 0.7rem; border-top: 1px solid var(--glass-hairline, rgba(127,127,127,.2)); font-size: 0.82rem; }
+.chat-notify-row small { margin-left: 0.4rem; }
+.chat-notify-btn { padding: 0.25rem 0.75rem !important; font-size: 0.78rem !important; white-space: nowrap; }
