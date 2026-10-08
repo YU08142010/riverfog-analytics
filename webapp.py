@@ -824,7 +824,12 @@ def _require_login():
     if request.path.startswith(LOGIN_EXEMPT_PREFIXES):
         return None
     user_id = session.get("user_id")
+    # nginxのauth_request(admin_auth_check)はリダイレクトを扱えないので、未ログイン・
+    # 削除済みアカウントは401で返す。
+    is_auth_check = request.path == "/admin/auth-check"
     if not user_id:
+        if is_auth_check:
+            return "", 401
         # 未ログインでトップに来た人(外部の人)は、ログイン画面ではなく公開ページに案内する。
         if request.path == "/":
             return redirect(url_for("public_forecast"))
@@ -838,6 +843,8 @@ def _require_login():
         conn.close()
     if user is None:
         session.clear()
+        if is_auth_check:
+            return "", 401
         flash("アカウントが削除されたため、ログアウトしました。")
         return redirect(url_for("login", next=request.path))
     session["role"] = user["role"]
@@ -10303,6 +10310,18 @@ def admin_status():
         crontab=_crontab_safe(), running=running,
         resources=_read_server_resources(),
     )
+
+
+@app.route("/admin/auth-check")
+def admin_auth_check():
+    """nginxのauth_request用。/admin/terminal-ws/(ttyd)と/cockpit-ui/(Cockpit)は
+    Flaskを通らずnginxから直接プロキシされるため、以前はtailnet内からなら誰でも
+    ttyd/CockpitのログインやBasic認証の総当たりを試せた(2026-10-08の監査で指摘)。
+    nginxがこのURLに副リクエストを送り、管理者としてログイン中(requires_adminと同じ条件)
+    の時だけ204を返して通す。リダイレクトはauth_requestでは使えないため401を返す。"""
+    if session.get("user_id") and session.get("role") == "admin" and not _is_funnel_request():
+        return "", 204
+    return "", 401
 
 
 @app.route("/admin/cockpit")
