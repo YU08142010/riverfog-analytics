@@ -5,7 +5,7 @@
    - CSSだけの霧(.wx-fogbank等)はJSが動かない場合の代わりとして残し、JSが動いたら隠す。
    - 描画は画面の半分の解像度で行い(霧はぼけているので見た目は変わらない)、約15fpsに抑える
      (2026-10-08に30→15fps。上に重なるガラスの面のぼかしが描くたびに計算し直しになり重かった)。
-     スクロール中(html.rf-scrolling)は描かない。
+     (スクロール中に描くのを止めると、スクロールに合わせて動く霧が止まった後にずれて見えたので、止めない)
    - タブが裏にある間は止め、「動きを減らす」設定の利用者には1コマだけ描いて止める。 */
 (function() {
     "use strict";
@@ -173,7 +173,7 @@
         var dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016;
         last = now;
         acc += dt;
-        if (acc >= 1 / 16 && !document.documentElement.classList.contains("rf-scrolling")) {  // 約15fps
+        if (acc >= 1 / 16) {  // 約15fps
             draw(now / 1000, acc);
             acc = 0;
         }

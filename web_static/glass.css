@@ -1225,3 +1225,15 @@ html.rf-zoom-open, html.rf-zoom-open body { overflow: hidden; }
    毎コマ計算し直さないように。止まっていても見た目はほぼ変わらない)。base.htmlがスクロール中だけ付ける。 */
 html.rf-scrolling .bg-art *, html.rf-scrolling .wx-scene, html.rf-scrolling .wx-scene *,
 html.rf-scrolling .wx-scene::after { animation-play-state: paused !important; }
+
+/* スクロールすると背景がずれて、後ろの白っぽい地(html)が見えていた(2026-10-08)。スマホではアドレスバーが
+   隠れて画面が縦に伸びる間、固定の背景の高さが追いつかない。背景の層はアドレスバーが隠れた時の高さ(100lvh)まで
+   最初から伸ばしておき、端を引っ張った時(跳ね返り)に見える地の色も空・壁紙に近い色にする。 */
+body::before, .bg-art, .wx-scene { bottom: auto; height: 100vh; height: 100lvh; min-height: 100%; }
+html:has(.wx-scene.wx-day) { background: #8cc0ef; }
+html:has(.wx-scene.wx-day.wx-fog), html:has(.wx-scene.wx-day.wx-cloud), html:has(.wx-scene.wx-day.wx-riverfog.wx-lv3) { background: #c5d2dd; }
+html:has(.wx-scene.wx-day.wx-rain) { background: #8c9aa8; }
+html:has(.wx-scene.wx-dawn), html:has(.wx-scene.wx-dusk) { background: #8f7f9c; }
+html:has(.wx-scene.wx-night) { background: #142046; }
+:root[data-theme="dark"]:has(.wx-scene) { background: #0d121c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):has(.wx-scene) { background: #0d121c; } }
