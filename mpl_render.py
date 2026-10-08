@@ -53,11 +53,15 @@ FONT = ["Noto Sans CJK JP", "DejaVu Sans"]
 matplotlib.rcParams["font.family"] = FONT
 matplotlib.rcParams["axes.unicode_minus"] = False
 PX = 0.72  # Plotlyのpx → matplotlibのpt(dpi=100で1px=0.72pt)
+# 読みやすさ(2026-10-08): 画像になると文字が小さく薄く見えるとの声があり、文字を大きく・濃く、線を太くした
+TICK_PX, LEGEND_PX, AXIS_TITLE_PX, TITLE_PX, CBAR_PX = 13, 13, 13.5, 15.5, 12
+TEXT_SCALE = 1.15     # 注記・棒の数字などの文字の拡大率
+LINE_SCALE = 1.35     # 線の太さの拡大率
 
 THEMES = {
-    "light": {"fg": "#1d1d1f", "muted": "#5c6370", "grid": (20 / 255, 30 / 255, 50 / 255, 0.10),
+    "light": {"fg": "#1d1d1f", "muted": "#3d4452", "grid": (20 / 255, 30 / 255, 50 / 255, 0.13),
               "zero": (20 / 255, 30 / 255, 50 / 255, 0.28), "surface": "#ffffff"},
-    "dark": {"fg": "#e6e8ee", "muted": "#a1a6b2", "grid": (1, 1, 1, 0.09),
+    "dark": {"fg": "#eef0f4", "muted": "#c5cad4", "grid": (1, 1, 1, 0.12),
              "zero": (1, 1, 1, 0.25), "surface": "#1e2027"},
 }
 _DARK_INKS = {"#2a3f5f", "#1d1d1f", "#1c2733", "#444", "#444444", "#000", "#000000", "black", "#333", "#333333",
@@ -298,9 +302,9 @@ def _render_png(fig_dict, theme, width, scale, notitle):
         if len(legend_items) < 2 and layout.get("showlegend") is not True:
             legend_items = []
     plot_w = W - ml - mr
-    ncol = max(1, min(len(legend_items), int(plot_w // 150))) if legend_items else 1
+    ncol = max(1, min(len(legend_items), int(plot_w // 175))) if legend_items else 1
     legend_rows = math.ceil(len(legend_items) / ncol) if legend_items else 0
-    need_t = 10 + (22 if title else 0) + 19 * legend_rows + (6 if legend_rows else 0)
+    need_t = 10 + (24 if title else 0) + 23 * legend_rows + (6 if legend_rows else 0)
     has_paper_annot_top = any((a.get("yref") == "paper" and float(a.get("y", 0) or 0) >= 1.0)
                               for a in (layout.get("annotations") or []))
     mt = max(need_t + (20 if has_paper_annot_top else 0), 14 if (notitle and not legend_rows) else min(mt, 46))
@@ -403,9 +407,9 @@ def _render_png(fig_dict, theme, width, scale, notitle):
     # タイトル・凡例(上に横並び)
     y_cursor = 1 - 8 / H
     if title:
-        fig.text(left, y_cursor, title, ha="left", va="top", fontsize=14 * PX * 1.05, color=pal["fg"],
+        fig.text(left, y_cursor, title, ha="left", va="top", fontsize=TITLE_PX * PX, color=pal["fg"],
                  fontweight="bold", family=FONT)
-        y_cursor -= 24 / H
+        y_cursor -= 26 / H
     if legend_items:
         handles, labels = [], []
         for t in legend_items:
@@ -417,8 +421,8 @@ def _render_png(fig_dict, theme, width, scale, notitle):
             labels.append(name)
         if handles:
             fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(left - 0.005, y_cursor), ncol=ncol,
-                       frameon=False, fontsize=11 * PX, labelcolor=pal["fg"], handlelength=1.8, columnspacing=1.4,
-                       handletextpad=0.5, borderaxespad=0, prop={"family": FONT, "size": 11 * PX})
+                       frameon=False, fontsize=LEGEND_PX * PX, labelcolor=pal["fg"], handlelength=1.8, columnspacing=1.4,
+                       handletextpad=0.5, borderaxespad=0, prop={"family": FONT, "size": LEGEND_PX * PX})
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100 * scale, transparent=True)
@@ -437,7 +441,7 @@ def _scatter(ax, t, xi, yi, ctx, prev):
     marker = t.get("marker") or {}
     lc = color(line.get("color") or marker.get("color") if not isinstance(marker.get("color"), list) else line.get("color"),
                theme, default=color(cs.SERIES_LIGHT[0], theme))
-    lw = float(line.get("width", 2)) * PX * 1.1
+    lw = float(line.get("width", 2)) * PX * LINE_SCALE
     dash = _DASH.get(line.get("dash") or "solid", "-")
     handle = None
     if "lines" in mode and n:
@@ -489,7 +493,7 @@ def _scatter(ax, t, xi, yi, ctx, prev):
             if np.isnan(x) or np.isnan(y) or s_ in (None, ""):
                 continue
             ax.annotate(_strip(s_), (x, y), xytext=(0, 4 if va == "bottom" else (-4 if va == "top" else 0)),
-                        textcoords="offset points", ha=ha, va=va, fontsize=float(tf.get("size", 11)) * PX, color=tc,
+                        textcoords="offset points", ha=ha, va=va, fontsize=max(float(tf.get("size", 11)) * TEXT_SCALE, 12) * PX, color=tc,
                         family=FONT)
     return handle
 
@@ -580,11 +584,11 @@ def _bar(ax, t, xi, yi, ctx, group):
             if horiz:
                 ax.annotate(_strip(s_), (end if not inside else b + v / 2, c), xytext=(3 if not inside else 0, 0),
                             textcoords="offset points", ha="left" if not inside else "center", va="center",
-                            fontsize=float(tf.get("size", 10)) * PX, color=tc, family=FONT, annotation_clip=False)
+                            fontsize=max(float(tf.get("size", 10)) * TEXT_SCALE, 12) * PX, color=tc, family=FONT, annotation_clip=False)
             else:
                 ax.annotate(_strip(s_), (c, end if not inside else b + v / 2), xytext=(0, 2 if not inside else 0),
                             textcoords="offset points", ha="center", va="bottom" if not inside else "center",
-                            fontsize=float(tf.get("size", 10)) * PX, color=tc, family=FONT, annotation_clip=False)
+                            fontsize=max(float(tf.get("size", 10)) * TEXT_SCALE, 12) * PX, color=tc, family=FONT, annotation_clip=False)
     return Patch(facecolor=cols[0] if cols else None, hatch=hatch, edgecolor=edge if hatch else None) if n else None
 
 
@@ -632,10 +636,10 @@ def _heatmap(ax, t, xi, yi, ctx):
     if t.get("showscale", True) is not False:
         cb = ctx["fig"].colorbar(mesh, ax=ax, fraction=0.035, pad=0.015)
         cb.outline.set_visible(False)
-        cb.ax.tick_params(colors=ctx["pal"]["muted"], labelsize=10 * PX, length=0)
+        cb.ax.tick_params(colors=ctx["pal"]["muted"], labelsize=CBAR_PX * PX, length=0)
         ttl = _title_text(((t.get("colorbar") or {}).get("title")))
         if ttl:
-            cb.ax.set_title(ttl, fontsize=10 * PX, color=ctx["pal"]["muted"], family=FONT, loc="left")
+            cb.ax.set_title(ttl, fontsize=CBAR_PX * PX, color=ctx["pal"]["muted"], family=FONT, loc="left")
     tt = t.get("texttemplate")
     text = t.get("text")
     if tt or text is not None:
@@ -656,7 +660,7 @@ def _heatmap(ax, t, xi, yi, ctx):
                 tc = (1, 1, 1, 0.95) if bright else to_rgba(ctx["pal"]["fg"])
                 if theme == "dark":
                     tc = (0.07, 0.08, 0.1, 0.95) if frac > 0.55 else to_rgba(ctx["pal"]["fg"])
-                ax.text(xp[j], yp[i], _strip(s_), ha="center", va="center", fontsize=float(tf.get("size", 11)) * PX,
+                ax.text(xp[j], yp[i], _strip(s_), ha="center", va="center", fontsize=max(float(tf.get("size", 11)) * TEXT_SCALE, 12.5) * PX,
                         color=tc, family=FONT)
     return None
 
@@ -695,7 +699,7 @@ def _box(ax, t, xi, yi, ctx):
     lc = color(line.get("color") or marker.get("color"), theme, default=color(cs.SERIES_LIGHT[0], theme))
     fc = color(t.get("fillcolor"), theme) or _with_alpha(lc, 0.14)
     bp = ax.boxplot([ys], positions=[pos], widths=0.5, patch_artist=True, showfliers=True, manage_ticks=False,
-                    medianprops={"color": lc, "linewidth": 1.6}, whiskerprops={"color": lc, "linewidth": 1.1},
+                    medianprops={"color": lc, "linewidth": 2.0}, whiskerprops={"color": lc, "linewidth": 1.3},
                     capprops={"color": lc, "linewidth": 1.1},
                     flierprops={"marker": "o", "markersize": 2.6, "markerfacecolor": lc, "markeredgecolor": "none", "alpha": 0.6})
     for b in bp["boxes"]:
@@ -713,7 +717,7 @@ def _proxy(t, ctx):
     if typ == "scatter":
         line = t.get("line") or {}
         c = color(line.get("color") or (t.get("marker") or {}).get("color"), theme, default=color(cs.SERIES_LIGHT[0], theme))
-        return Line2D([0], [0], color=c, lw=2 * PX * 1.1, linestyle=_DASH.get(line.get("dash") or "solid", "-"))
+        return Line2D([0], [0], color=c, lw=2 * PX * LINE_SCALE, linestyle=_DASH.get(line.get("dash") or "solid", "-"))
     c = color((t.get("marker") or {}).get("color"), theme, default=color(cs.SERIES_LIGHT[0], theme))
     return Patch(facecolor=c)
 
@@ -723,7 +727,7 @@ def _style_axis(ax, xi, yi, ctx):
     pal = ctx["pal"]
     for sp in ax.spines.values():
         sp.set_visible(False)
-    ax.tick_params(axis="both", length=0, colors=pal["muted"], labelsize=11 * PX, pad=4)
+    ax.tick_params(axis="both", length=0, colors=pal["muted"], labelsize=TICK_PX * PX, pad=4)
     if id(ax) not in ctx.get("_nogrid", set()):
         ax.grid(True, color=pal["grid"], linewidth=0.8)
         ax.set_axisbelow(True)
@@ -802,9 +806,9 @@ def _style_axis(ax, xi, yi, ctx):
         ttl = _title_text(spec.get("title"))
         if ttl:
             if which == "x":
-                ax.set_xlabel(ttl, color=pal["fg"], fontsize=11.5 * PX, family=FONT, labelpad=4)
+                ax.set_xlabel(ttl, color=pal["fg"], fontsize=AXIS_TITLE_PX * PX, family=FONT, labelpad=4)
             else:
-                ax.set_ylabel(ttl, color=pal["fg"], fontsize=11.5 * PX, family=FONT, labelpad=4)
+                ax.set_ylabel(ttl, color=pal["fg"], fontsize=AXIS_TITLE_PX * PX, family=FONT, labelpad=4)
     if xi.type == "date":
         ax.xaxis.set_tick_params(rotation=0)
 
@@ -908,7 +912,8 @@ def _annotation(an, ctx):
     va = {"top": "top", "bottom": "bottom", "middle": "center"}.get(ya, "center")
     if ya == "auto" and an.get("yref") == "paper" and float(an.get("y", 0.5)) >= 1.0:
         va = "bottom"
-    size = float(font.get("size", 12)) * PX
+    # 決定木の節の文字(元は8.5px)などの小さすぎる文字も、読める大きさにする
+    size = max(float(font.get("size", 12)) * TEXT_SCALE, 11) * PX
     bbox = None
     if an.get("bgcolor"):
         bg = color(an["bgcolor"], theme)
