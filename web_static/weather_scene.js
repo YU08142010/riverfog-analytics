@@ -94,7 +94,8 @@
     }
 
     function resize() {
-        W = window.innerWidth; H = window.innerHeight;
+        // 背景は画面より大きくしてある(glass.css)ので、背景そのものの大きさで描く(引き伸ばさない)
+        W = scene.clientWidth || window.innerWidth; H = scene.clientHeight || window.innerHeight;
         unit = Math.max(0.6, Math.min(1.4, W / 1280));
         canvas.width = Math.ceil(W * SCALE);
         canvas.height = Math.ceil(H * SCALE);

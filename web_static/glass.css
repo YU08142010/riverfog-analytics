@@ -1229,7 +1229,11 @@ html.rf-scrolling .wx-scene::after { animation-play-state: paused !important; }
 /* スクロールすると背景がずれて、後ろの白っぽい地(html)が見えていた(2026-10-08)。スマホではアドレスバーが
    隠れて画面が縦に伸びる間、固定の背景の高さが追いつかない。背景の層はアドレスバーが隠れた時の高さ(100lvh)まで
    最初から伸ばしておき、端を引っ張った時(跳ね返り)に見える地の色も空・壁紙に近い色にする。 */
-body::before, .bg-art, .wx-scene { bottom: auto; height: 100vh; height: 100lvh; min-height: 100%; }
+/* さらに、背景は画面より上下に15vhずつ大きくして固定する(引っ張った時やアドレスバーの出入りで端が見えないように) */
+body::before, .bg-art, .wx-scene {
+    top: -15vh; bottom: auto; left: 0; right: 0;
+    height: calc(100vh + 30vh); height: calc(100lvh + 30vh);
+}
 html:has(.wx-scene.wx-day) { background: #8cc0ef; }
 html:has(.wx-scene.wx-day.wx-fog), html:has(.wx-scene.wx-day.wx-cloud), html:has(.wx-scene.wx-day.wx-riverfog.wx-lv3) { background: #c5d2dd; }
 html:has(.wx-scene.wx-day.wx-rain) { background: #8c9aa8; }
