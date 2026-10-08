@@ -50,6 +50,13 @@ MAX_OBS_AGE_HOURS = 2              # 最新の観測がこれより古ければ(
 # 2026-10-06の初回の学習では、直近21日は霧が少なくAP 0.169 対 0.172とほぼ同じだった
 # (6週の実験では有意に改善。改善は霧の多かった時期に大きい)。
 GUARD_AP_MARGIN = 0.02
+# 使うかどうか(2026-10-08〜 止めている)。本体のモデルに地形・新しいデータの重み・JMA+ECMWFの平均を入れた
+# (2026-10-07)ことで、本体のモデルの方が当日の残りの時間も良く当たるようになった: 直近6週を2週×3でずらした
+# 評価の同じ行で、本体のモデルAP 0.234に対しナウキャスト0.221、地形・重みを入れたナウキャストでも0.222
+# (loglossは本体より有意に悪い。data/experiments/model_improvement_check5_nowcast.json)。
+# 上の安全装置はナウキャスト自身の中の簡易な基本モデル(改良前の構成)と比べるため、本番より悪いのに通ることがある。
+# 止めている間は毎晩の学習も毎時の予測し直しもせず、公開ページの本日分は前日夜の予測のままになる。
+ENABLED = False
 LEAD_FEATURE = "先行時間"
 OBS_FEATURES = ["観測_川霧_今", "観測_川霧_1h前", "観測_川霧_2h前", "観測_川霧_直近3h",
                 "観測_広域川霧率_今", "観測_広域川霧率_1h前"]
@@ -261,6 +268,9 @@ def load_state(path=NOWCAST_STATE_PATH):
 
 
 def train_and_save(main_df, phenom_df, names, lat, lon, camera_coords=None, weather_conn=None):
+    if not ENABLED:
+        log.info("Nowcast is disabled (nowcast.ENABLED); skipping training")
+        return None, None
     prev = (load_state() or {}).get("model")
     model, metrics = train_nowcast_model(main_df, phenom_df, names, lat, lon,
                                          camera_coords=camera_coords, weather_conn=weather_conn, prev=prev)
@@ -281,6 +291,9 @@ def _ensure_table(conn):
 def run_nowcast(now=None):
     """最新の観測を起点に、その日の残りの日中(最大MAX_LEAD_HOURS時間先)を予測し直して保存する。
     戻り値: 予測した(地点×時刻の)件数。モデルが無い・観測が古い等で更新しなければ0。"""
+    if not ENABLED:
+        NOWCAST_LATEST_PATH.unlink(missing_ok=True)  # 公開ページが古い予測し直しを使わないように
+        return 0
     state = load_state()
     if not state or state.get("model") is None:
         log.info("Nowcast: no trained model yet; skipping")

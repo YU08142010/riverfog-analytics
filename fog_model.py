@@ -173,11 +173,16 @@ LGBM_BASE_PARAMS = dict(
     objective="binary", learning_rate=0.04, subsample=0.8, subsample_freq=1,
     colsample_bytree=0.8, reg_lambda=5.0, random_state=0, n_jobs=2, verbosity=-1,
 )
+# 抜き取りを強める(列0.6・行0.7、2026-10-08〜): 地形・新しいデータの重み・JMA+ECMWFの平均を入れた構成で、
+# 直近6週を2週×3でずらした評価(過去の予報を入力)のloglossが有意に改善(差の95%区間 -0.0022〜-0.0007)、
+# APも3期間すべてで少し上がった(+0.004)。同じ評価で、学習率0.02・小さな木・extra_trees・ICON/GFSの追加は
+# 改善しなかった(data/experiments/model_improvement_check5.json)。ナウキャストの学習には使わない。
+LGBM_SAMPLING = dict(colsample_bytree=0.6, subsample=0.7)
 LGBM_PARAM_GRID = (
-    dict(num_leaves=15, min_child_samples=60),
-    dict(num_leaves=31, min_child_samples=60),
-    dict(num_leaves=15, min_child_samples=120),
-    dict(num_leaves=31, min_child_samples=30),
+    dict(num_leaves=15, min_child_samples=60, **LGBM_SAMPLING),
+    dict(num_leaves=31, min_child_samples=60, **LGBM_SAMPLING),
+    dict(num_leaves=15, min_child_samples=120, **LGBM_SAMPLING),
+    dict(num_leaves=31, min_child_samples=30, **LGBM_SAMPLING),
 )
 MAX_ESTIMATORS = 800
 EARLY_STOPPING_ROUNDS = 50
@@ -623,7 +628,8 @@ def _best_climatology_weight(y, p_model, p_clim):
 
 
 def _fit_lgbm(X, y, params, n_estimators, eval_set=None, sample_weight=None):
-    model = LGBMClassifier(**LGBM_BASE_PARAMS, **params, n_estimators=n_estimators)
+    # paramsに同じ名前があればそちらを優先する(LGBM_SAMPLING等で基本値を上書きできるように)
+    model = LGBMClassifier(**{**LGBM_BASE_PARAMS, **params}, n_estimators=n_estimators)
     if eval_set is None:
         model.fit(X, y, sample_weight=sample_weight)
         return model
