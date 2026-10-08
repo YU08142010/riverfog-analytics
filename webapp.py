@@ -5185,6 +5185,27 @@ def _station_hourly(name):
     return out
 
 
+def _station_days(name):
+    """地点ページの「この先3日の見込み」のカード(公開ページの日付カードと同じ3段階)。
+    戻り値: [{"label": "今日", "date": "10/8(木)", "level": 0〜3, "short": "高"等, "span": "6時〜7時"}, ...]
+    (level 0は、その日の日中の予測が無い)。"""
+    data = _public_forecast_safe() or {}
+    station = next((s for s in data.get("stations", []) if s["name"] == name), None)
+    if not station:
+        return []
+    out = []
+    for day, d in zip(data.get("days", [])[:3], station["days"]):
+        hours = d.get("hours") or {}
+        top = int(d.get("max") or (max(hours.values()) if hours else 0) or 0)
+        span = ""
+        if top >= 2:
+            hs = sorted(h for h, lv in hours.items() if lv == top)
+            span = f"{hs[0]}時" + (f"〜{hs[-1]}時" if len(hs) > 1 else "")
+        out.append({"label": day["label"], "date": day.get("date_label", ""), "level": top,
+                    "short": PUBLIC_LEVELS[top]["short"] if top in PUBLIC_LEVELS else "-", "span": span})
+    return out
+
+
 @app.route("/stations/<name>")
 def station_detail(name):
     name = _validate_station(name)
@@ -5248,6 +5269,7 @@ def station_detail(name):
         phenom_labels=PHENOM_LABELS,
         phenom_style=PHENOM_STYLE,
         hourly=_station_hourly(name),
+        station_days=_station_days(name),
     )
 
 

@@ -21,6 +21,18 @@
     <div class="wx-hero-sub">{{ observations_datetime.strftime("%m/%d %H:%M") }} の観測{% if w and w.humidity is not none and w.humidity == w.humidity %} ・ 湿度 {{ "%.0f"|format(w.humidity) }}%{% endif %}</div>
 </div>
 {% endif %}
+{% if station_days %}
+<div class="wx-days" role="list" aria-label="この先3日の川霧の見込み">
+    {% for d in station_days %}
+    <div class="card wx-day-card lv{{ d.level }}" role="listitem">
+        <div class="wx-day-head"><b>{{ d.label }}</b><small>{{ d.date }}</small></div>
+        <span class="wx-day-dot lv{{ d.level }}">{{ d.short if d.level else "-" }}</span>
+        <div class="wx-day-text">{{ {3: '出やすい', 2: 'やや出やすい', 1: '出にくい'}.get(d.level, '予測なし') }}</div>
+        <small class="wx-day-span">{{ (d.span ~ "ごろ") if d.span else " " }}</small>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
 {% if hourly %}
 <div class="card">
     <h2>時間ごとの川霧の出やすさ</h2>
