@@ -22,14 +22,16 @@
 }
 
 /* ---- 時間帯ごとの空 ------------------------------------------------------- */
-.wx-day   { --wx-sky-top: #3f8ee0; --wx-sky-mid: #8cc0ef; --wx-sky-bottom: #d9ecfa; --wx-glow: 255, 248, 220; }
+/* 日中の空は下の方ほど白に近づけすぎると、透けたカードと合わさって画面が白飛びして見えた(2026-10-09)ので、
+   下の方も青みを残す。霧・曇りの空も同じ理由で一段落とす。 */
+.wx-day   { --wx-sky-top: #3a86d8; --wx-sky-mid: #6aa6e2; --wx-sky-bottom: #9cc4ea; --wx-glow: 255, 248, 220; }
 .wx-dawn  { --wx-sky-top: #48609e; --wx-sky-mid: #d99a9a; --wx-sky-bottom: #f6d2a8; --wx-glow: 255, 205, 150; }
 .wx-dusk  { --wx-sky-top: #2e3f7a; --wx-sky-mid: #b4708c; --wx-sky-bottom: #f0a878; --wx-glow: 255, 170, 120; }
 .wx-night { --wx-sky-top: #070b1d; --wx-sky-mid: #142046; --wx-sky-bottom: #26355f; --wx-glow: 190, 210, 255; --wx-fog: 190, 200, 225; }
 
 /* 霧・曇り・雨のときは空をくすませる(霧が濃いほど白っぽく、雨は灰色に)。 */
-.wx-fog.wx-day, .wx-riverfog.wx-lv3.wx-day { --wx-sky-top: #8fa5ba; --wx-sky-mid: #c5d2dd; --wx-sky-bottom: #e8edf1; }
-.wx-cloud.wx-day { --wx-sky-top: #6f8fae; --wx-sky-mid: #aec2d4; --wx-sky-bottom: #dfe7ee; }
+.wx-fog.wx-day, .wx-riverfog.wx-lv3.wx-day { --wx-sky-top: #7f95ab; --wx-sky-mid: #a9b8c6; --wx-sky-bottom: #c4cfd9; }
+.wx-cloud.wx-day { --wx-sky-top: #637f9c; --wx-sky-mid: #93a9bd; --wx-sky-bottom: #bccad7; }
 .wx-rain.wx-day  { --wx-sky-top: #56677a; --wx-sky-mid: #8c9aa8; --wx-sky-bottom: #b9c3cc; }
 .wx-fog.wx-dawn, .wx-fog.wx-dusk, .wx-rain.wx-dawn, .wx-rain.wx-dusk { --wx-sky-top: #4d5874; --wx-sky-mid: #9a95a6; --wx-sky-bottom: #cdc4c0; }
 .wx-rain.wx-night, .wx-fog.wx-night { --wx-sky-top: #0c1020; --wx-sky-mid: #1b2338; --wx-sky-bottom: #2c3550; }
@@ -58,6 +60,7 @@
     background: radial-gradient(circle, rgba(var(--wx-glow), 0.85) 0%, rgba(var(--wx-glow), 0.25) 18%, transparent 55%);
     opacity: 0.9;
 }
+.wx-day .wx-glow { background: radial-gradient(circle, rgba(var(--wx-glow), 0.6) 0%, rgba(var(--wx-glow), 0.16) 18%, transparent 50%); }
 .wx-dawn .wx-glow, .wx-dusk .wx-glow { top: auto; bottom: -38vmax; right: -10vmax; }
 .wx-night .wx-glow { opacity: 0.35; width: 40vmax; height: 40vmax; right: 6vmax; top: -14vmax; }
 .wx-fog .wx-glow, .wx-rain .wx-glow { opacity: 0.25; }
@@ -252,7 +255,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    background: radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.14), transparent 60%);
+    background: radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.08), transparent 60%);
     animation: wxSky 18s ease-in-out infinite alternate;
     pointer-events: none;
 }
