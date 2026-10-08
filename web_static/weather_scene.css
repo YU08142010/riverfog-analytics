@@ -416,7 +416,7 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
    出て、その上の半透明のカードに明るい文字が乗り、読めなくなっていた。ダークモードでは空を
    暗くし、カードを少し濃くして、霧・曇りの日中に濃い色へ切り替える見出しの文字も白のままにする。
    ========================================================================== */
-:root[data-theme="dark"] .wx-scene { filter: brightness(0.4) saturate(0.85);}
+:root[data-theme="dark"] .wx-scene::before { content: ""; position: absolute; inset: 0; z-index: 3; background: rgba(6, 9, 18, 0.62); pointer-events: none;}
 :root[data-theme="dark"] .wx-scene ~ main .card,
 :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
 :root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.56);}
@@ -443,7 +443,7 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
         linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 75%, var(--wx-sky-bottom) 140%);
 }
 @media (prefers-color-scheme: dark) {
-:root:not([data-theme="light"]) .wx-scene { filter: brightness(0.4) saturate(0.85);}
+:root:not([data-theme="light"]) .wx-scene::before { content: ""; position: absolute; inset: 0; z-index: 3; background: rgba(6, 9, 18, 0.62); pointer-events: none;}
 :root:not([data-theme="light"]) .wx-scene ~ main .card,
 :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
 :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.56);}
@@ -470,3 +470,7 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
         linear-gradient(180deg, var(--wx-sky-top) 0%, var(--wx-sky-mid) 75%, var(--wx-sky-bottom) 140%);
 }
 }
+
+/* 軽量化(2026-10-08): 地点一覧の65枚のカードで、ぼかした霧が2層ずつ動き続けていた(計130層)。止めた絵にする。
+   ダークモードの空を暗くするのは、動く空全体にfilterをかける(毎コマ計算し直し)のをやめ、上に暗い膜を重ねる。 */
+.wx-card::before, .wx-card::after { animation: none; }

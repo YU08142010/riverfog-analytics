@@ -2550,7 +2550,21 @@ def _low_accuracy_stations(state, n=5):
     return [name for name, _ in scored[:n]]
 
 
+# 川霧アラート(今後ALERT_HOURS_AHEAD時間)は通知のベル・ダッシュボードで全ページから呼ばれ、1回約0.26秒かかる。
+# 予測は1日1回しか変わらないので60秒だけ使い回す(2026-10-08)。
+UPCOMING_ALERTS_CACHE_SECONDS = 60
+_upcoming_alerts_cache = {"data": None, "at": 0.0}
+
+
 def _upcoming_fog_alerts_safe():
+    now = time.monotonic()
+    c = _upcoming_alerts_cache
+    if c["data"] is None or now - c["at"] >= UPCOMING_ALERTS_CACHE_SECONDS:
+        c["data"], c["at"] = _upcoming_fog_alerts_uncached(), now
+    return [dict(a) if isinstance(a, dict) else a for a in c["data"]]
+
+
+def _upcoming_fog_alerts_uncached():
     if not DB_PATH.exists():
         return []
     now_naive = now_jst_naive()
@@ -3538,7 +3552,10 @@ def _active_announcements_safe():
 # ダッシュボード等、複数のページから毎リクエスト呼ばれる集計(predictionsテーブル全体を
 # GROUP BYで走査する)。データが更新されるのはpredict.py実行時(1日1回程度)だけなので、
 # 短いTTLでキャッシュして無駄な全表走査を減らす。
-ACCURACY_SUMMARY_CACHE_SECONDS = 60
+# (2026-10-08に60秒→15分。予測の答え合わせは1時間ごと・予測は1日1回なので、15分遅れても困らない。
+# 天気別の集計は1回約10秒かかり、60秒で切れると分析ページを開くたびに待たされていた。
+# 期限が切れる前に_warm_caches_foreverが裏で作り直す)
+ACCURACY_SUMMARY_CACHE_SECONDS = 900
 _accuracy_summary_cache = {"data": None, "at": 0.0}
 _accuracy_summary_cache_lock = threading.Lock()
 
@@ -11150,8 +11167,47 @@ except Exception:
     log.exception("Failed to register the experiment (仮検証) admin tab")
 
 
+# --- 重い集計を裏で先に作っておく(2026-10-08) ---------------------------------------------------
+# 再起動直後(毎日03:40)や、キャッシュの期限切れ・毎時の観測の書き込みの後に最初に開いた人が、
+# ダッシュボード約10秒・分析ページ約12秒・地点一覧約4秒待たされていた。期限が近いものから裏で作り直す。
+WARM_INTERVAL_SECONDS = 120
+
+
+def _warm_caches_once():
+    def refresh(cache, ttl, fn):
+        age = time.monotonic() - cache["at"]
+        if cache["data"] is None or age > ttl - WARM_INTERVAL_SECONDS - 30:
+            cache["at"] = -1e12  # 期限切れ扱いにして作り直させる(古い値は作り直すまで残る)
+            fn()
+    steps = (
+        ("weather data", lambda: fog_data.load_river_fog_data()),  # 観測DBの更新時刻で自動的に読み直す
+        ("public forecast", lambda: refresh(_public_forecast_cache, PUBLIC_CACHE_SECONDS, _public_forecast_safe)),
+        ("accuracy summary", lambda: refresh(_accuracy_summary_cache, ACCURACY_SUMMARY_CACHE_SECONDS, _accuracy_summary_safe)),
+        ("accuracy by weather", lambda: refresh(_accuracy_by_weather_cache, ACCURACY_SUMMARY_CACHE_SECONDS,
+                                               _accuracy_by_weather_safe)),
+        ("fog pair counts", lambda: refresh(_fog_pair_counts_cache, ACCURACY_SUMMARY_CACHE_SECONDS, _fog_pair_counts_safe)),
+        ("fog alerts", lambda: refresh(_upcoming_alerts_cache, UPCOMING_ALERTS_CACHE_SECONDS + WARM_INTERVAL_SECONDS,
+                                       _upcoming_fog_alerts_safe)),
+    )
+    for name, step in steps:
+        try:
+            step()
+        except Exception as e:
+            log.warning("Cache warm-up (%s) failed: %s", name, e)
+
+
+def _warm_caches_forever():
+    time.sleep(3)
+    while True:
+        t0 = time.monotonic()
+        _warm_caches_once()
+        log.debug("Cache warm-up took %.1fs", time.monotonic() - t0)
+        time.sleep(WARM_INTERVAL_SECONDS)
+
+
 if __name__ == "__main__":
     from waitress import serve
+    threading.Thread(target=_warm_caches_forever, name="cache-warmer", daemon=True).start()
     # 8080番は外部公開用にnginxが受け、Cockpit(9090番、別オリジン)と同一オリジンで
     # リバースプロキシするために127.0.0.1:8081をローカル専用で使う(直接の外部公開はしない)。
     # trusted_proxyを設定しないと、waitressはX-Forwarded-For等のヘッダーを黙って

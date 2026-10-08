@@ -936,6 +936,17 @@ document.addEventListener("submit", function(e) {
 <script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='calendar.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='chart_zoom.js') }}?v={{ app_version|default('') }}" defer></script>
+<script>
+// スクロール中だけ html.rf-scrolling を付け、背景のアニメーションを止める(glass.css・weather_scene.js)
+(function() {
+    var root = document.documentElement, timer = null;
+    window.addEventListener("scroll", function() {
+        if (!root.classList.contains("rf-scrolling")) { root.classList.add("rf-scrolling"); }
+        clearTimeout(timer);
+        timer = setTimeout(function() { root.classList.remove("rf-scrolling"); }, 200);
+    }, { passive: true });
+})();
+</script>
 <script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
 </html>

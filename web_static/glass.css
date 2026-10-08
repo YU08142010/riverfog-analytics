@@ -32,7 +32,7 @@
     --glass-bar: rgba(250, 251, 253, 0.34);
     --glass-edge: rgba(255, 255, 255, 0.16);
     --glass-hairline: rgba(20, 30, 50, 0.08);
-    --glass-filter: saturate(200%) blur(30px);
+    --glass-filter: saturate(170%) blur(18px);
     --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 0.5px var(--glass-hairline),
                     0 8px 28px rgba(30, 50, 90, 0.08);
     --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 0.5px var(--glass-hairline),
@@ -1220,3 +1220,8 @@ html.rf-zoom-open, html.rf-zoom-open body { overflow: hidden; }
     .layout > * { max-width: 100%; min-width: 0; }
     .layout-content { width: 100%; }
 }
+
+/* 軽量化(2026-10-08): スクロール中は背景の模様・霧・空の動きを一時停止する(上に重なるガラスの面のぼかしを
+   毎コマ計算し直さないように。止まっていても見た目はほぼ変わらない)。base.htmlがスクロール中だけ付ける。 */
+html.rf-scrolling .bg-art *, html.rf-scrolling .wx-scene, html.rf-scrolling .wx-scene *,
+html.rf-scrolling .wx-scene::after { animation-play-state: paused !important; }

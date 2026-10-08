@@ -146,7 +146,9 @@ def load_phenomena_wide_df(conn, station_names, since=None):
             wide[name] = pd.Series(dtype="object")
         return wide
     df["datetime"] = pd.to_datetime(df["datetime"])
-    df["value"] = df["code"].map(lambda c: None if pd.isna(c) else ("/" if int(c) == 0 else int(c)))
+    # コードの種類は少ないので、行ごとのlambda(約66万回、約2秒)ではなく対応表で変換する
+    codes = {c: ("/" if int(c) == 0 else int(c)) for c in df["code"].dropna().unique()}
+    df["value"] = df["code"].map(codes).astype(object).where(df["code"].notna(), None)
     wide = df.pivot(index="datetime", columns="station_name", values="value").reset_index()
     wide = wide.sort_values("datetime").reset_index(drop=True)
     for name in station_names:
