@@ -63,7 +63,7 @@
         </div>
         <button type="submit" class="button">シミュレートする</button>
         {% if station %}
-        <a href="{{ url_for('simulator_page', station=station) }}" class="button" style="background: var(--color-text-muted);">現在の実測値にリセット</a>
+        <a href="{{ url_for('simulator_page', station=station) }}" class="button cancel">現在の実測値にリセット</a>
         {% endif %}
     </form>
 </div>

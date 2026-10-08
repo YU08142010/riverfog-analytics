@@ -22,7 +22,7 @@
     --color-surface: #ffffff;
     --color-border: rgba(30, 40, 60, 0.10);
     --color-text: #1d1d1f;
-    --color-text-muted: #5c6370;
+    --color-text-muted: #4f5663;
     --radius-sm: 8px;
     --radius-md: 14px;
     --radius-lg: 18px;
@@ -1112,3 +1112,17 @@ img.full-graph { border: none; border-radius: 12px; }
 :root:not([data-theme="light"]) a.button.button-danger:hover, :root:not([data-theme="light"]) button.button.button-danger:hover { background: #9e2f24; }
 }
 .page-tabs a.button, .page-tabs a.button:hover { color: #fff; }
+
+/* 白い文字が明るい背景に乗って読みにくかった箇所(2026-10-08、両モード)。
+   グレーの「キャンセル」系ボタン(aタグはa.buttonの白文字が勝っていた)、金・銀・銅の順位バッジ、
+   連続ログインの札。ライトモードの補足文字(muted)も少し濃くした(上の変数)。 */
+a.button.cancel, button.button.cancel { color: var(--color-text); }
+.ranking-item.rank-1 .ranking-badge:not([class*="rank-style-"]) { color: #2b2205; }
+.ranking-item.rank-2 .ranking-badge:not([class*="rank-style-"]) { color: #1d1f25; }
+.ranking-item.rank-3 .ranking-badge:not([class*="rank-style-"]) { color: #24170a; }
+.ranking-streak { color: #241600; }
+/* ダークモードでは選択中の切り替えボタンの背景(--color-primary)が明るい水色になるため、濃い文字にする。 */
+:root[data-theme="dark"] .ranking-toggle-btn.active, :root[data-theme="dark"] .pf-seg button[aria-pressed="true"] { color: #0b1726; }
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) .ranking-toggle-btn.active, :root:not([data-theme="light"]) .pf-seg button[aria-pressed="true"] { color: #0b1726; }
+}
