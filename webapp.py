@@ -6091,8 +6091,12 @@ def public_about():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_path = request.values.get("next") or url_for("dashboard")
-    if not next_path.startswith("/") or next_path.startswith("//"):
-        next_path = url_for("dashboard")  # オープンリダイレクト対策
+    # オープンリダイレクト対策。ブラウザは"\"を"/"とみなし、タブ・改行は読み飛ばすため、
+    # "/\evil.com"や"/<TAB>/evil.com"も外部サイト("//evil.com")への移動になってしまう
+    # (2026-10-08の監査で指摘)。
+    if (not next_path.startswith("/") or next_path.startswith("//") or "\\" in next_path
+            or any(ord(c) < 0x20 or ord(c) == 0x7f for c in next_path)):
+        next_path = url_for("dashboard")
 
     error = None
     if request.method == "POST":
@@ -6107,7 +6111,13 @@ def login():
         conn = _users_conn()
         try:
             existing = users.get_user_by_email(conn, email)
-            if existing and existing["locked_at"]:
+            # 管理者アカウントは、公開URLから誰でも5回間違えるだけでロックでき、管理者自身も
+            # 入れなくなってしまう(解除できる人がいなくなる)。Tailscale内からのログインに限り、
+            # ロック中でも正しいパスワードなら入れるようにする(ロック自体は残すので、
+            # 公開URLからは引き続き入れない。解除はアカウント管理画面で行う)。
+            admin_internal = (existing is not None and existing["role"] == "admin"
+                              and not _is_funnel_request())
+            if existing and existing["locked_at"] and not admin_internal:
                 # 正しいパスワードでもロック中は一切ログインさせない(IPを変えても無意味にする)。
                 users.record_login_failure(conn, email, ip, user_agent, now_str)
                 error = "このアカウントはロックされています。管理者に解除を依頼してください。"
@@ -9353,8 +9363,14 @@ _PREVIEW_MAX_COLS = 30
 # 「その場で描画してよい」ものだけをここで安全側に絞り、それ以外は
 # ダウンロード(添付ヘッダー付き)にフォールバックする。プレビュー画面が
 # <img>/<embed>で読み込むのは画像とPDFのみ(shared_file_preview.html参照)。
+# その場表示(添付ヘッダーなし)を許す種類。以前は"image/"で始まれば何でも通していたため、
+# SVG(image/svg+xml、中にスクリプトを書ける)をアップロードして/files/<id>/rawを開かせると
+# このサイトの権限でスクリプトが動いてしまった(2026-10-08の監査で指摘)。
+SAFE_INLINE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"}
+
+
 def _is_safe_inline_content_type(content_type):
-    return content_type.startswith("image/") or content_type == "application/pdf"
+    return (content_type or "").split(";")[0].strip().lower() in SAFE_INLINE_CONTENT_TYPES
 
 
 @app.route("/files")
