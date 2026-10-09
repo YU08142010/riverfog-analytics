@@ -444,6 +444,26 @@ def load_low_confidence_set(path=CONFIDENCE_LOG_PATH):
     return set(zip(low["datetime"].astype(str), low["station"].astype(str)))
 
 
+# AIの二重判定(label_verify.py・label_verify_run.py)で「霧ではない」とされた川霧ラベルを学習から外すか。
+# 人の確認結果との照合(data/experiments/label_verify_check.json)で効果を確かめてから有効にする。
+EXCLUDE_DISPUTED_LABELS = False
+LABEL_VERIFY_PATH = BASE_DIR / "data" / "models" / "label_verify.csv"
+
+
+def load_disputed_set(path=LABEL_VERIFY_PATH):
+    """二重判定でverdict=none(確信度high/medium)だった(datetime文字列, 地点名)のset。"""
+    if not EXCLUDE_DISPUTED_LABELS or not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        log.warning("Failed to read label verification log (%s): %s", path, e)
+        return set()
+    df = df.drop_duplicates(subset=["datetime", "station"], keep="last")
+    bad = df[(df["verdict"] == "none") & df["confidence"].isin(["high", "medium"])]
+    return set(zip(bad["datetime"].astype(str), bad["station"].astype(str)))
+
+
 def load_backfilled_datetime_set(path=BACKFILL_LOG_PATH):
     """backfill_weather.pyが実測ではなく後から推定で埋めた日時のset。"""
     if not path.exists():
@@ -519,6 +539,10 @@ def _build_training_frame_uncached(main_df, phenom_df, phenom_cols, lat, lon, ca
     targets = build_location_class_targets(phenom_df, phenom_cols)
 
     low_confidence = load_low_confidence_set() - set(corrections)
+    disputed = load_disputed_set() - set(corrections)
+    if disputed:
+        log.info("Excluding %d label(s) the second AI check judged as not fog", len(disputed))
+        low_confidence |= disputed
     if low_confidence:
         dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
         low_by_station = {}

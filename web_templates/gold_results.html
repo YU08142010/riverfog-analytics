@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}正解セットの結果{% endblock %}
+{% macro pct(v) %}{{ "-" if v is none else "%.0f%%"|format(100 * v) }}{% endmacro %}
+{% block content %}
+{{ page_tabs([
+    {"label": "観測報告", "url": url_for('observation_reports'), "active": false},
+    {"label": "正解セット", "url": url_for('gold_page'), "active": false},
+    {"label": "正解セットの結果", "url": url_for('gold_results'), "active": true},
+]) }}
+<div class="card">
+    <h2>正解セットの結果</h2>
+    <p class="muted">
+        無作為に選んだ画像を人が判定した結果と、AIのラベル・予測を比べます。AIが霧と判定した画像は多めに選んでいるため、
+        全体の割合は選ばれやすさで重み付けして求めています。枚数が少ないうちは値が大きくぶれます(目安として100枚以上)。
+    </p>
+    <div class="stat-grid gold-stats">
+        <div><span class="muted">選んだ画像</span><b>{{ r.n_samples }}</b></div>
+        <div><span class="muted">判定済みの画像</span><b>{{ r.n_labeled_samples or 0 }}</b></div>
+        <div><span class="muted">判定の数</span><b>{{ r.n_labels }}</b></div>
+        <div><span class="muted">判定した人</span><b>{{ r.n_labelers }}</b></div>
+    </div>
+</div>
+
+{% if r.ai_label %}
+<div class="card">
+    <h3>AIのラベルの正しさ({{ r.ai_label.n }}枚)</h3>
+    <table class="obs-table gold-table">
+        <thead><tr><th></th><th>当たり(適合率)</th><th>拾えた割合(再現率)</th><th>F1</th></tr></thead>
+        <tbody>
+            <tr><th>川霧</th><td>{{ pct(r.ai_label.river.precision) }}</td><td>{{ pct(r.ai_label.river.recall) }}</td><td>{{ pct(r.ai_label.river.f1) }}</td></tr>
+            <tr><th>霧(川霧+全体霧)</th><td>{{ pct(r.ai_label.any_fog.precision) }}</td><td>{{ pct(r.ai_label.any_fog.recall) }}</td><td>{{ pct(r.ai_label.any_fog.f1) }}</td></tr>
+        </tbody>
+    </table>
+    <p class="muted">5つのまとまり(現象なし・川霧・全体霧・層雲・雨)で人と一致した割合(全体推定): <strong>{{ pct(r.ai_label.group_accuracy_weighted) }}</strong></p>
+    <h4>AI(行)と人(列)の判定の組み合わせ(枚数)</h4>
+    <table class="obs-table gold-table">
+        <thead><tr><th>AI＼人</th>{% for g in range(5) %}<th>{{ group_names[g] }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for a in range(5) %}
+        <tr><th>{{ group_names[a] }}</th>{% for h in range(5) %}{% set v = (r.ai_label.crosstab.get(h) or {}).get(a, 0) %}<td{% if a == h and v %} class="gold-diag"{% endif %}>{{ v }}</td>{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="muted">AIの確信度別の一致率:
+        {% for k, v in r.ai_label.by_confidence.items() %}{{ k }} {{ pct(v.agree) }}({{ v.n }}枚){{ "、" if not loop.last }}{% endfor %}</p>
+</div>
+{% endif %}
+
+{% if r.model %}
+<div class="card">
+    <h3>予測の本当の精度(川霧、{{ r.model.n }}枚)</h3>
+    <p class="muted">前日の夜の本番の予測を、人の判定(正解セット)とAIのラベルのそれぞれで答え合わせしたものです。分析ページの精度はAIのラベルで測っています。</p>
+    <table class="obs-table gold-table">
+        <thead><tr><th>答え合わせに使ったもの</th><th>適合率</th><th>再現率</th><th>F1</th></tr></thead>
+        <tbody>
+            <tr><th>人の判定</th><td>{{ pct(r.model.vs_human.precision) }}</td><td>{{ pct(r.model.vs_human.recall) }}</td><td>{{ pct(r.model.vs_human.f1) }}</td></tr>
+            <tr><th>AIのラベル</th><td>{{ pct(r.model.vs_ai_label.precision) }}</td><td>{{ pct(r.model.vs_ai_label.recall) }}</td><td>{{ pct(r.model.vs_ai_label.f1) }}</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card">
+    <h3>判定する人どうしの一致</h3>
+    {% if r.agreement %}
+    <p>2人が判定した{{ r.agreement.n }}枚で、5つのまとまりが一致した割合 <strong>{{ pct(r.agreement.group) }}</strong>、
+       川霧かどうかが一致した割合 <strong>{{ pct(r.agreement.river_fog) }}</strong>。</p>
+    {% else %}
+    <p class="muted">まだ2人が判定した画像がありません。</p>
+    {% endif %}
+    <p class="muted">意見が分かれた画像 {{ r.n_split or 0 }}枚・判定できないとされた画像 {{ r.n_unsure or 0 }}枚(どちらも上の集計には入れていません)。</p>
+</div>
+{% endblock %}

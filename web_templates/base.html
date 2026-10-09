@@ -625,7 +625,8 @@ function chartImageSrc(el, theme) {
     var card = el.closest(".card");
     var notitle = el.dataset.notitle === "1" ||
         (card && card.querySelector("h2, h3") && card.querySelectorAll(".chart-themed").length === 1);
-    var scale = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
+    // いつも2倍の解像度で描く(表示倍率125%のPCなどで、等倍の画像を引き伸ばしてぼやけていたため、2026-10-09)
+    var scale = 2;
     el.__rfW = chartImageWidth(el);
     return url + (url.indexOf("?") >= 0 ? "&" : "?") + "format=png&theme=" + theme + "&w=" + el.__rfW +
         "&scale=" + scale + "&notitle=" + (notitle ? 1 : 0);

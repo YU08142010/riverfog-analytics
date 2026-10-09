@@ -1469,3 +1469,24 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
     .set-toggle { flex-wrap: nowrap; }
 }/* .button・.set-inline等のdisplay指定がhidden属性に勝ってしまうため、設定画面ではhiddenを必ず効かせる */
 .settings-main [hidden] { display: none !important; }
+
+/* ===== 正解セット(/gold、2026-10-09) ===== */
+.gold-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); gap: 0.8rem; align-items: start; }
+.gold-grid figure { margin: 0; }
+.gold-grid img { width: 100%; height: auto; display: block; border-radius: var(--radius-sm, 8px); }
+.gold-main figcaption { font-weight: 600; margin-top: 0.3rem; }
+.gold-side { display: grid; gap: 0.5rem; }
+.gold-side figcaption { font-size: 0.75rem; margin-top: 0.15rem; }
+.gold-picker { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.9rem 0 0.7rem; }
+.gold-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.7rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--color-border); background: var(--glass-soft, rgba(127, 127, 127, 0.12)); color: inherit; font: inherit; font-size: 0.85rem; }
+.gold-btn:hover { background: var(--tint-bg-hover, rgba(74, 163, 255, 0.14)); }
+.gold-btn[aria-pressed="true"] { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary) inset; font-weight: 600; }
+.gold-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.gold-unsure { border-style: dashed; }
+.gold-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 0.6rem; }
+.gold-stats > div { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.6rem 0.8rem; border-radius: 12px; background: var(--glass-soft, rgba(127, 127, 127, 0.12)); }
+.gold-stats b { font-size: 1.4rem; }
+.gold-table td, .gold-table th { text-align: center; }
+.gold-table td.gold-diag { font-weight: 700; }
+@media (max-width: 760px) { .gold-grid { grid-template-columns: minmax(0, 1fr); } .gold-side { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

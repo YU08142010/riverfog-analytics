@@ -229,7 +229,7 @@ def render_png(fig_dict, theme="light", width=900, scale=1.0, notitle=False):
         return _render_png(decode_typed_arrays(fig_dict), theme, width, scale, notitle)
 
 
-def _render_png(fig_dict, theme, width, scale, notitle):
+def _render_png(fig_dict, theme, width, scale, notitle, extra=None):
     theme = "dark" if theme == "dark" else "light"
     pal = THEMES[theme]
     layout = dict(fig_dict.get("layout") or {})
@@ -238,6 +238,9 @@ def _render_png(fig_dict, theme, width, scale, notitle):
     H = int(layout.get("height") or 420)
     if W < 520:
         H = int(H * 0.92)
+
+    # 狭い幅で小さな図が3列以上並ぶ場合(気象条件のヒストグラム等)は、列を減らして縦に並べ直す(2026-10-09)
+    layout, H = _regrid_for_narrow(layout, W, H)
 
     # 軸の情報を集める
     axes_spec = {k: v for k, v in layout.items() if re.match(r"^[xy]axis\d*$", k)}
@@ -314,6 +317,10 @@ def _render_png(fig_dict, theme, width, scale, notitle):
         mt = max(mt, (need_t if legend_rows or title else 0) + 30)
     mb = max(36, min(mb, 90))
     ml = max(44, min(ml, 140))
+    if extra:  # 1回目に測った、文字のはみ出し分(_fit_texts)
+        mb += extra.get("b", 0)
+        ml += extra.get("l", 0)
+        H += int(extra.get("b", 0))
 
     fig = Figure(figsize=(W / 100, H / 100), dpi=100)
     FigureCanvasAgg(fig)
@@ -424,9 +431,214 @@ def _render_png(fig_dict, theme, width, scale, notitle):
                        frameon=False, fontsize=LEGEND_PX * PX, labelcolor=pal["fg"], handlelength=1.8, columnspacing=1.4,
                        handletextpad=0.5, borderaxespad=0, prop={"family": FONT, "size": LEGEND_PX * PX})
 
+    try:
+        need = _fit_texts(fig, mpl_axes)
+        # 目盛りの文字・縦軸の名前が下・左にはみ出したら、その分だけ余白を広げて1回だけ描き直す
+        if extra is None and (need["b"] or need["l"]):
+            return _render_png(fig_dict, theme, width, scale, notitle, extra=need)
+    except Exception as e:  # 調整に失敗しても、調整前の図は出す
+        log.warning("mpl_render: text fitting failed: %s", e)
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100 * scale, transparent=True)
     return buf.getvalue()
+
+
+# --- 狭い幅での並べ直しと文字のはみ出し・重なりの調整(2026-10-09) --------------------------------------------
+MIN_PANEL_PX = 165      # 小さな図1枚の幅がこれより狭くなるなら列を減らす
+MIN_FONT_RATIO = 0.72   # 重なり・はみ出しを避けるために文字を小さくする下限(元の大きさに対する割合)
+
+
+def _regrid_for_narrow(layout, W, H):
+    """xaxis/yaxisのdomainで格子状に並んだ図(make_subplots)を、幅が狭いときは列を減らして並べ直す。
+    図の位置に合わせて置かれた注記(各図の題名など、xref/yref=paper)も一緒に動かす。"""
+    axes = {k: v for k, v in layout.items() if re.match(r"^[xy]axis\d*$", k) and isinstance(v, dict)}
+    pairs = []
+    for k, v in axes.items():
+        if k.startswith("xaxis"):
+            yk = _axis_key(v.get("anchor") if str(v.get("anchor", "")).startswith("y") else "y" + k[5:], "y")
+            if yk in axes:
+                pairs.append((k, yk))
+    if len(pairs) < 3:
+        return layout, H
+    cells = []
+    for xk, yk in pairs:
+        xd, yd = axes[xk].get("domain"), axes[yk].get("domain")
+        if not xd or not yd:
+            return layout, H
+        cells.append((xk, yk, (float(xd[0]), float(xd[1])), (float(yd[0]), float(yd[1]))))
+    cols = sorted({round(c[2][0], 3) for c in cells})
+    rows = sorted({round(c[3][0], 3) for c in cells}, reverse=True)  # 上の段から
+    ncols = len(cols)
+    usable = W - 90
+    if ncols < 3 or usable / ncols >= MIN_PANEL_PX:
+        return layout, H
+    new_cols = max(1, min(ncols - 1, int(usable // MIN_PANEL_PX)))
+    cells.sort(key=lambda c: (rows.index(round(c[3][0], 3)), cols.index(round(c[2][0], 3))))
+    new_rows = math.ceil(len(cells) / new_cols)
+    new_H = int(H * new_rows / max(1, len(rows)) * (0.92 if new_cols == 1 else 1.0))
+    plot_h = max(200, new_H - 110)
+    hgap = 0.14 if new_cols > 1 else 0.0
+    vgap = min(0.2, 92 / plot_h)
+    cw = (1 - hgap * (new_cols - 1)) / new_cols
+    rh = (1 - vgap * (new_rows - 1)) / new_rows
+    out = dict(layout)
+    moves = []
+    for i, (xk, yk, (x0, x1), (y0, y1)) in enumerate(cells):
+        r, c = divmod(i, new_cols)
+        nx0 = c * (cw + hgap)
+        ny1 = 1 - r * (rh + vgap)
+        nx = (nx0, nx0 + cw)
+        ny = (ny1 - rh, ny1)
+        out[xk] = dict(axes[xk], domain=list(nx))
+        out[yk] = dict(axes[yk], domain=list(ny))
+        moves.append(((x0, x1), (y0, y1), nx, ny))
+    anns = []
+    for an in layout.get("annotations") or []:
+        an = dict(an)
+        if an.get("xref") == "paper" and an.get("yref") == "paper":
+            x, y = float(an.get("x", 0.5)), float(an.get("y", 0.5))
+            for (x0, x1), (y0, y1), nx, ny in moves:
+                if x0 - 1e-6 <= x <= x1 + 1e-6 and y0 - 1e-6 <= y <= y1 + 0.12:
+                    an["x"] = nx[0] + (x - x0) / (x1 - x0) * (nx[1] - nx[0])
+                    an["y"] = ny[1] + (y - y1) * (ny[1] - ny[0]) / (y1 - y0) if y > y1 else ny[0] + (y - y0) / (y1 - y0) * (ny[1] - ny[0])
+                    break
+        anns.append(an)
+    out["annotations"] = anns
+    return out, new_H
+
+
+def _wrap_label(s):
+    """括弧の前で改行する(「川霧なし(n=2635)」→「川霧なし\\n(n=2635)」)。改行できなければNone。"""
+    if "\n" in s:
+        return None
+    for mark in ("(", "（", "・", " "):
+        i = s.find(mark, 1)
+        if 0 < i < len(s) - 1:
+            return s[:i] + "\n" + s[i:] if mark in "(（" else s[:i + (1 if mark != " " else 0)] + "\n" + s[i + 1:]
+    return None
+
+
+def _overlaps(a, b, pad=2):
+    return not (a.x1 + pad <= b.x0 or b.x1 + pad <= a.x0 or a.y1 <= b.y0 or b.y1 <= a.y0)
+
+
+def _chunk_label(s, n):
+    """1行がn文字以下になるよう改行する(括弧の前で切れるならそこで切る)。"""
+    lines = []
+    for part in s.split("\n"):
+        while len(part) > n:
+            cut = max(part.rfind("(", 1, n + 1), part.rfind("（", 1, n + 1))
+            cut = cut if cut > 0 else n
+            # 英単語・数字の途中では切らない(切れる所が無ければ、その単語は1行に収める)
+            if part[cut - 1].isascii() and part[cut - 1].isalnum() and part[cut].isascii() and part[cut].isalnum():
+                back = cut
+                while back > 0 and part[back - 1].isascii() and part[back - 1].isalnum():
+                    back -= 1
+                if back > 0:
+                    cut = back
+                else:
+                    fwd = cut
+                    while fwd < len(part) and part[fwd].isascii() and part[fwd].isalnum():
+                        fwd += 1
+                    cut = fwd
+                    if cut >= len(part):
+                        break
+            lines.append(part[:cut]); part = part[cut:]
+        lines.append(part)
+    return "\n".join(lines)
+
+
+def _fit_texts(fig, mpl_axes):
+    """描き終えた図の文字が、隣と重なったり図の外にはみ出したりしないようにする。
+    - 横軸の目盛りの文字が重なる: 括弧の前で改行し、それでも入らなければ1枠に入る文字数で改行する
+      (最後の手段として斜めにする)
+    - 題名・注記・横軸の名前: 図の外にはみ出す、またはほかの文字と重なるなら少し小さくし、だめなら改行する
+    戻り値: 下・左の余白が足りない分(px)。呼び出し側は余白を広げて描き直す。"""
+    fig.draw_without_rendering()  # 目盛りの文字はここで決まる
+    renderer = fig.canvas.get_renderer()
+    fw, fh = fig.bbox.width, fig.bbox.height
+
+    # 目盛りの文字は描くたびにフォーマッタから作り直されるので、Textを直接書き換えずフォーマッタを差し替える
+    for ax in mpl_axes.values():
+        def visible_labels():
+            return [t for t in ax.get_xticklabels() if t.get_visible() and t.get_text()]
+        def crowded():
+            boxes = sorted((t.get_window_extent(renderer) for t in visible_labels()), key=lambda b: b.x0)
+            return any(boxes[i].x1 + 3 > boxes[i + 1].x0 for i in range(len(boxes) - 1))
+        labels = visible_labels()
+        if len(labels) < 2 or not crowded():
+            continue
+        texts = [t.get_text() for t in ax.get_xticklabels()]
+        slot = ax.get_window_extent(renderer).width / len(labels) * 0.94
+        ax.xaxis.set_major_locator(mticker.FixedLocator(ax.get_xticks()))
+        # 1) 括弧の前で改行して、実際の幅を測る
+        new = [(_wrap_label(s) or s) if s else s for s in texts]
+        ax.xaxis.set_major_formatter(mticker.FixedFormatter(new))
+        # 2) まだ1枠に入らない文字だけ、測った幅から1行の文字数を決めて改行する
+        for i, t in enumerate(ax.get_xticklabels()):
+            if i >= len(new) or not new[i]:
+                continue
+            width = t.get_window_extent(renderer).width
+            if width > slot:
+                longest = max(len(x) for x in new[i].split("\n"))
+                new[i] = _chunk_label(new[i], max(3, int(longest * slot / width)))
+        ax.xaxis.set_major_formatter(mticker.FixedFormatter(new))
+        # 3) それでも重なれば少し小さく、最後の手段として斜めにする
+        if crowded():
+            ax.tick_params(axis="x", labelsize=TICK_PX * PX * 0.86)
+        if crowded():
+            ax.tick_params(axis="x", labelrotation=30)
+            for t in ax.get_xticklabels():
+                t.set_ha("right"); t.set_rotation_mode("anchor")
+
+    # 題名・注記・横軸の名前(目盛りの文字と縦軸の名前は除く。縦軸の名前は余白を広げて対応する)
+    texts = list(fig.texts)
+    for ax in mpl_axes.values():
+        texts += [t for t in ax.texts]
+        texts += [ax.xaxis.label, ax.title]
+    texts = [t for t in texts if t.get_visible() and t.get_text().strip()]
+    base = {id(t): t.get_fontsize() for t in texts}
+    for _ in range(8):
+        boxes = {id(t): t.get_window_extent(renderer) for t in texts}
+        changed = False
+        for t in texts:
+            b = boxes[id(t)]
+            out_of_fig = b.x0 < -1 or b.x1 > fw + 1 or b.y1 > fh + 1
+            hit = any(u is not t and _overlaps(b, boxes[id(u)]) and abs(b.y0 - boxes[id(u)].y0) < b.height
+                      for u in texts if u.get_rotation() == t.get_rotation())
+            if not (out_of_fig or hit):
+                continue
+            if t.get_fontsize() > base[id(t)] * MIN_FONT_RATIO + 0.01:
+                t.set_fontsize(max(base[id(t)] * MIN_FONT_RATIO, t.get_fontsize() * 0.9))
+                changed = True
+            else:
+                w = _wrap_label(t.get_text())
+                if w:
+                    t.set_text(w)
+                    t.set_fontsize(base[id(t)] * 0.86)
+                    base[id(t)] = t.get_fontsize() / MIN_FONT_RATIO * 0.86  # 改行後はもう一段だけ縮めてよい
+                    changed = True
+        if not changed:
+            break
+    # それでも図の外にはみ出すもの(長い軸の名前など)は、図の内側に寄せる
+    for t in texts:
+        b = t.get_window_extent(renderer)
+        if b.x1 > fw or b.x0 < 0:
+            dx = (fw - b.x1 - 2) if b.x1 > fw else (-b.x0 + 2)
+            t.set_transform(t.get_transform() + mtransforms.ScaledTranslation(dx / fig.dpi, 0, fig.dpi_scale_trans))
+    # 下・左にはみ出す分(目盛りの文字・軸の名前)を測る
+    need_b = need_l = 0.0
+    for ax in mpl_axes.values():
+        try:
+            tb = ax.get_tightbbox(renderer)
+        except Exception:
+            continue
+        if tb is None:
+            continue
+        need_b = max(need_b, -tb.y0 + 3)
+        need_l = max(need_l, -tb.x0 + 3)
+    return {"b": need_b if need_b > 1 else 0.0, "l": need_l if need_l > 1 else 0.0}
 
 
 # --- トレース -------------------------------------------------------------------------------------

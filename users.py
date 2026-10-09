@@ -355,6 +355,24 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     failure_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE TABLE IF NOT EXISTS gold_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_name TEXT NOT NULL,
+    target_datetime TEXT NOT NULL,
+    stratum TEXT NOT NULL,
+    weight REAL NOT NULL,
+    ai_code INTEGER,
+    ai_confidence TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (station_name, target_datetime)
+);
+CREATE TABLE IF NOT EXISTS gold_labels (
+    sample_id INTEGER NOT NULL REFERENCES gold_samples(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code INTEGER NOT NULL,
+    labeled_at TEXT NOT NULL,
+    PRIMARY KEY (sample_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS push_sent (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,

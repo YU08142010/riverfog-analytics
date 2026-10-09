@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}正解セット{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "観測報告", "url": url_for('observation_reports'), "active": false},
+    {"label": "正解セット", "url": url_for('gold_page'), "active": true},
+    {"label": "正解セットの結果", "url": url_for('gold_results'), "active": false},
+]) }}
+<div class="card">
+    <h2>正解セット{% if sample %}(残り {{ remaining }}枚){% endif %}</h2>
+    <p class="muted">
+        毎日、日中の画像から無作為に選んだものを、AIの判定を見ずに判定してください。AIのラベルと予測が
+        本当はどれくらい当たっているかを測るための「正解」になります(1枚につき2人まで、互いの判定は見えません)。
+        いちばん大きい画像が判定する画像です。右側の3枚(1時間前・1時間後・同じカメラの見通しの良い時)は見比べ用です。
+        数字キー(0〜9、雨は「-」)で選び、Enterで保存できます。画像から判断できなければ「判定できない」を選んでください。
+        あなたの判定はこれまでに{{ mine }}枚です。
+    </p>
+</div>
+
+{% if sample %}
+<div class="card gold-card">
+    <h3 style="margin-top:0;">{{ sample.station_name }} <span class="muted" style="font-weight:400; font-size:0.9rem;">{{ sample.target_datetime[:16]|replace("-", "/") }}</span></h3>
+    <div class="gold-grid">
+        <div class="gold-main-col">
+        <figure class="gold-main">
+            {% if target.exists %}
+            {% set u = url_for('images_file', date=target.date, hhmm=target.hhmm, filename=sample.station_name ~ '.jpg') %}
+            <a href="{{ u }}" target="_blank" rel="noopener"><img src="{{ u }}" alt="判定する画像({{ target.time }})"></a>
+            {% endif %}
+            <figcaption>判定する画像 {{ target.time }}</figcaption>
+        </figure>
+        <form method="post" action="{{ url_for('gold_label', sample_id=sample.id) }}" class="gold-form" id="gold-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="code" id="gold-code" value="">
+            <div class="gold-picker" role="radiogroup" aria-label="現象">
+                {% for c in range(11) %}
+                <button type="button" class="gold-btn" data-code="{{ c }}" aria-pressed="false">
+                    <span class="phenom-dot" style="background:{{ phenom_style[c].bg }};"></span>{{ phenom_style[c].label if c else "現象なし" }}<span class="phenom-key">{{ "-" if c == 10 else c }}</span>
+                </button>
+                {% endfor %}
+                <button type="button" class="gold-btn gold-unsure" data-code="{{ unsure_code }}" aria-pressed="false">判定できない<span class="phenom-key">u</span></button>
+            </div>
+            <button type="submit" class="button" id="gold-submit" disabled>保存して次へ</button>
+        </form>
+        </div>
+        <div class="gold-side">
+            {% for img, label in [(prev, "1時間前"), (next, "1時間後"), (ref, "見通しの良い時")] %}
+            <figure>
+                {% if img and img.exists %}
+                {% set u = url_for('images_file', date=img.date, hhmm=img.hhmm, filename=sample.station_name ~ '.jpg') %}
+                <a href="{{ u }}" target="_blank" rel="noopener"><img src="{{ u }}" loading="lazy" alt="{{ label }}の画像"></a>
+                <figcaption class="muted">{{ label }}{% if img.date_label %}({{ img.date_label }} {{ img.time }}){% else %} {{ img.time }}{% endif %}</figcaption>
+                {% else %}
+                <div class="observation-report-noimage">{{ label }}: 画像なし</div>
+                {% endif %}
+            </figure>
+            {% endfor %}
+        </div>
+    </div>
+
+</div>
+<script>
+(function() {
+    var form = document.getElementById("gold-form"), input = document.getElementById("gold-code");
+    var submit = document.getElementById("gold-submit");
+    var btns = Array.prototype.slice.call(form.querySelectorAll(".gold-btn"));
+    function pick(code) {
+        btns.forEach(function(b) { b.setAttribute("aria-pressed", b.dataset.code === String(code) ? "true" : "false"); });
+        input.value = code; submit.disabled = false;
+    }
+    btns.forEach(function(b) { b.addEventListener("click", function() { pick(b.dataset.code); }); });
+    document.addEventListener("keydown", function(e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) { return; }
+        var tag = (e.target.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") { return; }
+        if (/^[0-9]$/.test(e.key)) { pick(e.key); e.preventDefault(); }
+        else if (e.key === "-") { pick("10"); e.preventDefault(); }
+        else if (e.key === "u" || e.key === "U") { pick("{{ unsure_code }}"); e.preventDefault(); }
+        else if (e.key === "Enter" && input.value !== "") { e.preventDefault(); submit.click(); }
+    });
+})();
+</script>
+{% else %}
+<div class="card"><div class="empty-state">いま判定できる画像はありません(毎日、前日の分が追加されます)。<a href="{{ url_for('gold_results') }}">結果を見る</a></div></div>
+{% endif %}
+{% endblock %}

@@ -11497,6 +11497,118 @@ def _warm_caches_forever():
         time.sleep(WARM_INTERVAL_SECONDS)
 
 
+# --- 正解セット(/gold、2026-10-09、gold_set.py) ------------------------------------------------------
+# 毎日無作為に選んだ画像を、AIの判定を見せずに観測者が判定する。AIのラベルと予測の「本当の精度」を測るため。
+import gold_set
+import label_verify
+
+_gold_ref_cache = {"data": None, "at": 0.0}
+
+
+def _gold_reference(station, dt_str):
+    """見比べ用の「見通しの良い時」の画像(label_verifyと同じ選び方、候補は1時間使い回す)。"""
+    now = time.monotonic()
+    if _gold_ref_cache["data"] is None or now - _gold_ref_cache["at"] > 3600:
+        _gold_ref_cache["data"], _gold_ref_cache["at"] = label_verify.load_reference_candidates(), now
+    return label_verify.pick_reference(_gold_ref_cache["data"], station, dt_str)
+
+
+def _gold_daylight(station, dt_str):
+    info = CAMERA_INFO.get(station, {})
+    lat, lon = info.get("lat"), info.get("lon")
+    if lat is None or lon is None:
+        return 6 <= int(dt_str[11:13]) <= 16
+    return fog_features_is_daylight(dt_str, lat, lon)
+
+
+def _gold_allowed_stations():
+    region = _observer_region_for_role(session.get("role"))
+    return None if region is None else {n for n in STATION_NAMES if STATION_REGION.get(n) == region}
+
+
+def _image_ref(station, dt):
+    """テンプレート用: 画像があれば{date, hhmm, label}。"""
+    date, hhmm = dt.strftime("%Y-%m-%d"), dt.strftime("%H%M")
+    return {"date": date, "hhmm": hhmm, "time": dt.strftime("%H:%M"),
+            "exists": (IMAGE_DIR / date / hhmm / f"{station}.jpg").is_file()}
+
+
+@app.route("/gold")
+@requires_observer
+def gold_page():
+    my_id = session.get("user_id")
+    allowed = _gold_allowed_stations()
+    conn = _users_conn()
+    try:
+        try:
+            gold_set.ensure_samples(conn, now_jst_naive().date(), _gold_daylight,
+                                    now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception as e:
+            log.warning("Gold set sampling failed: %s", e)
+        sample = gold_set.next_sample(conn, my_id, allowed)
+        remaining = gold_set.remaining_count(conn, my_id, allowed)
+        mine = conn.execute("SELECT COUNT(*) FROM gold_labels WHERE user_id = ?", (my_id,)).fetchone()[0]
+    finally:
+        conn.close()
+    ctx = {"sample": sample, "remaining": remaining, "mine": mine, "phenom_style": PHENOM_STYLE,
+           "unsure_code": gold_set.UNSURE_CODE}
+    if sample:
+        dt = datetime.strptime(sample["target_datetime"], "%Y-%m-%d %H:%M:%S")
+        ctx["target"] = _image_ref(sample["station_name"], dt)
+        ctx["prev"] = _image_ref(sample["station_name"], dt - timedelta(hours=1))
+        ctx["next"] = _image_ref(sample["station_name"], dt + timedelta(hours=1))
+        try:
+            ref = _gold_reference(sample["station_name"], sample["target_datetime"])
+        except Exception as e:
+            log.warning("Gold reference lookup failed: %s", e)
+            ref = None
+        ctx["ref"] = _image_ref(sample["station_name"], datetime.strptime(ref, "%Y-%m-%d %H:%M:%S")) if ref else None
+        if ctx["ref"]:
+            ctx["ref"]["date_label"] = ref[5:10].replace("-", "/")
+    return render_template("gold.html", **ctx)
+
+
+@app.route("/gold/<int:sample_id>/label", methods=["POST"])
+@requires_observer
+def gold_label(sample_id):
+    my_id = session.get("user_id")
+    code = request.form.get("code", type=int)
+    if code is None or not (code == gold_set.UNSURE_CODE or 0 <= code <= 10):
+        return _finish("gold_page", "現象を選んでください。", success=False)
+    conn = _users_conn()
+    try:
+        sample = gold_set.get_sample(conn, sample_id)
+        if sample is None:
+            abort(404)
+        _enforce_observer_region(sample["station_name"])
+        codes_by_station, corrections_by_station = _phenom_codes_for_datetime(sample["target_datetime"])
+        current = corrections_by_station.get(sample["station_name"], codes_by_station.get(sample["station_name"]))
+        now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+
+        def add_correction(station, dt, original, corrected, user_id, at):
+            users.add_phenomena_correction(conn, station, dt, original, corrected, user_id, at, source="human")
+            _record_audit("正解セットの判定で観測を訂正",
+                          f"{station} {dt}: {format_phenom_display(original)} → {format_phenom_display(corrected)}")
+        corrected = gold_set.save_label(conn, sample, my_id, code, now_str, current, add_correction)
+    finally:
+        conn.close()
+    return _finish("gold_page", "判定を保存しました" + ("(AIの判定と違ったため、観測も訂正しました)。" if corrected else "。"))
+
+
+@app.route("/gold/results")
+@requires_observer
+def gold_results():
+    conn = _users_conn()
+    try:
+        res = gold_set.results(conn)
+    finally:
+        conn.close()
+    return render_template("gold_results.html", r=res, group_names=GOLD_GROUP_NAMES)
+
+
+GOLD_GROUP_NAMES = {0: "現象なし", 1: "川霧", 2: "全体霧", 3: "層雲", 4: "霧雨・雨"}
+
+
 # --- Web Pushの定期判定(2026-10-09、push_notify.run_scheduled) ----------------------------------------
 # 川霧の朝夕のまとめ・「まもなく出やすい」・「観測した」・カメラ故障・管理者向けのお知らせを5分ごとに判定する。
 # url_forを使うため、ダミーのリクエストの文脈の中で動かす(セッションは空)。

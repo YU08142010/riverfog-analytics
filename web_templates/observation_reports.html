@@ -1,6 +1,12 @@
 {% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
 {% block title %}観測報告{% endblock %}
 {% block content %}
+{{ page_tabs([
+    {"label": "観測報告", "url": url_for('observation_reports'), "active": true},
+    {"label": "正解セット", "url": url_for('gold_page'), "active": false},
+    {"label": "正解セットの結果", "url": url_for('gold_results'), "active": false},
+]) }}
 <div class="card">
     <h2>観測報告(未対応 <span id="report-count">{{ reports|length }}</span>件)</h2>
     <p class="muted">
