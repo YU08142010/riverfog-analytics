@@ -2,10 +2,14 @@
    - 押した位置から広がる波紋(ripple)。ホストのoverflowを変えずに済むよう、
      ホスト全面に重ねた切り抜き用の<span>の中に波紋を描く。
    - ダーク/ライト切替のときだけ、色の変化をなめらかにする。
-   「動きを減らす」設定の利用者には何もしない。 */
+   「動きを減らす」設定の利用者(OSの設定、またはこのサイトの設定画面 = html.rf-reduce-motion)には何もしない。 */
+function rfReduceMotion() {
+    return (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ||
+        document.documentElement.classList.contains("rf-reduce-motion");
+}
 (function() {
     "use strict";
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
+    if (rfReduceMotion()) { return; }
 
     var SELECTOR = [
         "a.button", "button.button", "label.button",
@@ -49,7 +53,7 @@
 /* スクロールで浮かび上がるカード・数字のカウントアップ・タイムラプスの切り替え演出(2026-10-05)。 */
 (function() {
     "use strict";
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
+    if (rfReduceMotion()) { return; }
     if (!("IntersectionObserver" in window)) { return; }
 
     function ready(fn) {

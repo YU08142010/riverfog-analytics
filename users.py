@@ -338,6 +338,29 @@ CREATE TABLE IF NOT EXISTS shared_folders (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_shared_folders_parent_id ON shared_folders(parent_id);
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    device_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    last_success_at TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE TABLE IF NOT EXISTS push_sent (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
 """
 
 # 2026-08-29より前に作られたDBにはFOREIGN KEY制約が無いテーブルがある。
@@ -2813,7 +2836,104 @@ def delete_shared_folder(conn, folder_id):
         return True
 
 
+# --- 個人設定とWeb Push(2026-10-09、user_settings.py・push_notify.py) ---------------------------
+
+def get_user_settings_raw(conn, user_id):
+    """保存済みの設定JSON(文字列)。未保存なら"{}"。検証・既定値の補完はuser_settings.normalize。"""
+    row = conn.execute("SELECT data FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+    return row[0] if row else "{}"
+
+
+def all_user_settings_raw(conn):
+    return {uid: data for uid, data in conn.execute("SELECT user_id, data FROM user_settings").fetchall()}
+
+
+def save_user_settings(conn, user_id, data_json, updated_at):
+    with conn:
+        conn.execute(
+            "INSERT INTO user_settings (user_id, data, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+            (user_id, data_json, updated_at),
+        )
+
+
+def clear_presence(conn, user_id):
+    """「オンライン状態を表示しない」にした利用者の最終アクセス時刻を消す(以後は記録しない)。"""
+    with conn:
+        conn.execute("DELETE FROM user_presence WHERE user_id = ?", (user_id,))
+
+
+_PUSH_COLUMNS = "id, user_id, endpoint, p256dh, auth, device_label, created_at, last_success_at, failure_count"
+
+
+def _push_row(r):
+    return {"id": r[0], "user_id": r[1], "endpoint": r[2], "p256dh": r[3], "auth": r[4],
+            "device_label": r[5], "created_at": r[6], "last_success_at": r[7], "failure_count": r[8]}
+
+
+def save_push_subscription(conn, user_id, endpoint, p256dh, auth, device_label, created_at):
+    """同じendpoint(=同じブラウザ)を別の利用者が登録し直した場合は、新しい利用者のものに付け替える
+    (共用の端末でログインし直したとき、前の人宛の通知が届き続けないように)。"""
+    with conn:
+        conn.execute(
+            "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_label, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, "
+            "p256dh = excluded.p256dh, auth = excluded.auth, device_label = excluded.device_label, "
+            "failure_count = 0",
+            (user_id, endpoint, p256dh, auth, device_label, created_at),
+        )
+
+
+def list_push_subscriptions(conn, user_id):
+    rows = conn.execute(
+        f"SELECT {_PUSH_COLUMNS} FROM push_subscriptions WHERE user_id = ? ORDER BY id", (user_id,)
+    ).fetchall()
+    return [_push_row(r) for r in rows]
+
+
+def push_subscriber_ids(conn):
+    return [r[0] for r in conn.execute("SELECT DISTINCT user_id FROM push_subscriptions").fetchall()]
+
+
+def delete_push_subscription(conn, sub_id, user_id=None):
+    with conn:
+        if user_id is None:
+            conn.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub_id,))
+        else:
+            conn.execute("DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?", (sub_id, user_id))
+
+
+def delete_push_subscription_by_endpoint(conn, endpoint, user_id):
+    with conn:
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?", (endpoint, user_id))
+
+
+def record_push_result(conn, sub_id, ok, at):
+    with conn:
+        if ok:
+            conn.execute("UPDATE push_subscriptions SET last_success_at = ?, failure_count = 0 WHERE id = ?",
+                         (at, sub_id))
+        else:
+            conn.execute("UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE id = ?", (sub_id,))
+
+
+def claim_push_key(conn, user_id, key, at):
+    """同じ通知(key)を同じ利用者に二度送らないための記録。初めてならTrue(記録した)、既に送っていればFalse。"""
+    with conn:
+        cur = conn.execute("INSERT OR IGNORE INTO push_sent (user_id, key, sent_at) VALUES (?, ?, ?)",
+                           (user_id, key, at))
+        return cur.rowcount == 1
+
+
+def prune_push_sent(conn, before):
+    with conn:
+        conn.execute("DELETE FROM push_sent WHERE sent_at < ?", (before,))
+
+
 __all__ = [
+    "get_user_settings_raw", "all_user_settings_raw", "save_user_settings", "clear_presence",
+    "save_push_subscription", "list_push_subscriptions", "push_subscriber_ids", "delete_push_subscription",
+    "delete_push_subscription_by_endpoint", "record_push_result", "claim_push_key", "prune_push_sent",
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "get_users_by_ids", "set_role", "update_user", "update_profile", "delete_user",
     "count_admins", "email_taken",

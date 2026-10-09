@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% from "_station_checkboxes.html" import station_checkboxes %}
+{% block title %}設定{% endblock %}
+{% block content %}
+{% macro toggle(name, checked, label, hint="") %}
+<label class="set-row set-toggle">
+    <span class="set-row-text"><span class="set-row-label">{{ label }}</span>{% if hint %}<small class="muted">{{ hint }}</small>{% endif %}</span>
+    <input type="checkbox" name="{{ name }}" value="1" role="switch"{{ " checked" if checked }}>
+</label>
+{% endmacro %}
+{% macro seg_radio(name, options, current, label) %}
+<div class="set-row">
+    <span class="set-row-text"><span class="set-row-label" id="lbl-{{ name }}">{{ label }}</span></span>
+    <div class="seg seg-radio" role="radiogroup" aria-labelledby="lbl-{{ name }}">
+        {% for value, text in options %}
+        <label><input type="radio" name="{{ name }}" value="{{ value }}"{{ " checked" if current == value }}><span>{{ text }}</span></label>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+{% macro hour_select(name, current, options, label, none_label=None) %}
+<label class="set-row">
+    <span class="set-row-text"><span class="set-row-label">{{ label }}</span></span>
+    <select name="{{ name }}">
+        {% if none_label %}<option value=""{{ " selected" if current is none }}>{{ none_label }}</option>{% endif %}
+        {% for h in options %}<option value="{{ h }}"{{ " selected" if current == h }}>{{ h }}時</option>{% endfor %}
+    </select>
+</label>
+{% endmacro %}
+<div class="settings-layout">
+<nav class="settings-nav card" aria-label="設定の項目">
+    <a href="#push">通知</a>
+    <a href="#display">表示</a>
+    <a href="#privacy">プライバシー</a>
+    <a href="#account">アカウント</a>
+</nav>
+<div class="settings-main">
+
+<section class="card settings-card" id="push" aria-labelledby="h-push">
+    <h2 id="h-push">通知</h2>
+    <p class="muted">川霧の予報・観測や、届いたメッセージを、サイトを閉じていてもスマホ・PCの通知でお知らせします(Web Push)。受け取る端末ごとにオンにしてください。</p>
+
+    <div class="push-device" id="push-device">
+        <div class="push-device-state">
+            <strong id="push-state-title">この端末の状態を確認しています…</strong>
+            <small class="muted" id="push-state-detail"></small>
+        </div>
+        <div class="push-device-actions">
+            <button type="button" class="button" id="push-enable-btn" hidden>この端末で受け取る</button>
+            <button type="button" class="button cancel" id="push-disable-btn" hidden>この端末では受け取らない</button>
+            <form action="{{ url_for('push_test') }}" method="post" data-ajax class="push-test-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="button cancel" id="push-test-btn"{{ " disabled" if not devices }}>テスト通知を送る</button>
+            </form>
+        </div>
+    </div>
+
+    {% if devices %}
+    <h3 class="set-subhead">通知を受け取る端末({{ devices|length }}台)</h3>
+    <ul class="push-devices">
+        {% for d in devices %}
+        <li data-device-id="{{ d.id }}">
+            <span><strong>{{ d.device_label or "端末" }}</strong><span class="push-this" hidden>この端末</span><br>
+                <small class="muted">{{ d.created_at[:10] }}に登録{% if d.last_success_at %} ・ 最後に届けた日時 {{ d.last_success_at[5:16]|replace("-", "/") }}{% endif %}{% if d.failure_count %} ・ 届かなかった回数 {{ d.failure_count }}{% endif %}</small></span>
+            <form action="{{ url_for('push_device_delete', sub_id=d.id) }}" method="post" data-ajax data-ajax-reload="700">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="button cancel small-btn">解除</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <form action="{{ url_for('settings_save', section='push') }}" method="post" data-ajax class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <h3 class="set-subhead">対象の地点</h3>
+        {{ seg_radio("push_stations", [("favorites", "お気に入り地点"), ("all", "すべての地点"), ("custom", "地点を選ぶ")], s.push_stations, "川霧の通知を出す地点") }}
+        <p class="muted set-note" id="push-fav-note">
+            {% if favorite_stations %}お気に入り地点: {{ favorite_stations|join("・") }}
+            {% else %}お気に入り地点がまだ無いため、いまはすべての地点が対象です。{% endif %}
+            (<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィールで変更</a>)
+        </p>
+        <div class="push-custom" id="push-custom"{{ " hidden" if s.push_stations != "custom" }}>
+            {{ station_checkboxes(station_names, "push_custom_stations", s.push_custom_stations, station_region=station_region) }}
+        </div>
+
+        <h3 class="set-subhead">川霧</h3>
+        {{ hour_select("push_digest_morning", s.push_digest_morning, [5, 6, 7, 8], "朝のまとめ(今日の見込み)", "送らない") }}
+        {{ hour_select("push_digest_evening", s.push_digest_evening, [20, 21, 22], "夜のまとめ(明日の見込み)", "送らない") }}
+        {{ seg_radio("push_digest_level", [(3, "出やすい地点だけ"), (2, "やや出やすい地点も")], s.push_digest_level, "まとめに含める地点") }}
+        <p class="muted set-note">当てはまる地点が無い日は送りません。夜のまとめは、毎晩19時半ごろの予測の更新が終わってから送ります。</p>
+        {{ toggle("push_fog_soon", s.push_fog_soon, "まもなく川霧が出やすくなるとき", "毎時の観測で更新した予測で、3時間以内に「発生可能性 高」の時刻がある地点(地点ごとに1日1回)") }}
+        {{ toggle("push_fog_now", s.push_fog_now, "川霧を観測したとき", "毎時のカメラ画像のAI判定で川霧だった地点(地点ごとに1日1回)") }}
+        {{ toggle("push_camera", s.push_camera, "カメラ画像が届かないとき", "対象の地点のカメラが半日ほど続けて取得できていないとき") }}
+
+        <h3 class="set-subhead">メッセージ</h3>
+        {{ toggle("push_dm", s.push_dm, "DMが届いたとき") }}
+        {{ seg_radio("push_group", [("all", "すべて"), ("mention", "メンションだけ"), ("off", "通知しない")], s.push_group, "グループのメッセージ") }}
+        {{ toggle("push_preview", s.push_preview, "通知にメッセージの内容を表示する", "オフにすると「新しいメッセージが届きました」とだけ表示します(ロック画面で見られたくない場合)") }}
+
+        {% if is_admin %}
+        <h3 class="set-subhead">管理者</h3>
+        {{ toggle("push_admin", s.push_admin, "システムのお知らせ", "ディスク残量・毎時収集の停止・再起動の繰り返し・保留中の登録申請") }}
+        {% endif %}
+
+        <h3 class="set-subhead">静かな時間帯</h3>
+        {{ toggle("quiet_enabled", s.quiet_enabled, "この時間帯は通知しない", "時間帯が明けてもまだ当てはまる川霧の通知は、明けてから届きます") }}
+        <div class="set-inline" id="quiet-hours"{{ " hidden" if not s.quiet_enabled }}>
+            {{ hour_select("quiet_start", s.quiet_start, hours, "開始") }}
+            {{ hour_select("quiet_end", s.quiet_end, hours, "終了") }}
+        </div>
+
+        <button type="submit" class="button settings-save">通知の設定を保存</button>
+    </form>
+</section>
+
+<section class="card settings-card" id="display" aria-labelledby="h-display">
+    <h2 id="h-display">表示</h2>
+    <p class="muted">ここで選んだ表示は、このアカウントでログインしたどの端末にも反映されます。</p>
+    <form action="{{ url_for('settings_save', section='display') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {{ seg_radio("theme", [("device", "端末に合わせる"), ("light", "ライト"), ("dark", "ダーク")], s.theme, "テーマ") }}
+        {% if s.theme is none %}<p class="muted set-note">まだ選ばれていないため、いまは端末ごとに選んだテーマ(ヘッダーの月/太陽のボタン)で表示しています。</p>{% endif %}
+        {{ seg_radio("text_size", [("normal", "標準"), ("large", "大きめ"), ("xlarge", "特大")], s.text_size, "文字の大きさ") }}
+        <p class="muted set-note text-size-sample">あいうえお 川霧 6時 82%</p>
+        {{ toggle("reduce_motion", s.reduce_motion, "動きを減らす", "カードが浮かび上がる演出・数字のカウントアップ・ボタンの波紋などを止めます") }}
+        {{ toggle("calm_background", s.calm_background, "背景を動かさない", "地点ページ等の空の背景の霧・雨・雲の動きを止めます(電池の節約にも)") }}
+        <label class="set-row">
+            <span class="set-row-text"><span class="set-row-label">最初に開くページ</span><small class="muted">ログインした直後と、ホーム画面のアイコン・ブックマークから開いたとき</small></span>
+            <select name="start_page">
+                {% for value, text in [("dashboard", "ダッシュボード"), ("stations", "地点一覧"), ("map", "地図"), ("favorite", "お気に入りの最初の地点"), ("public", "公開ページ(予報)")] %}
+                <option value="{{ value }}"{{ " selected" if s.start_page == value }}>{{ text }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" class="button settings-save">表示の設定を保存</button>
+    </form>
+</section>
+
+<section class="card settings-card" id="privacy" aria-labelledby="h-privacy">
+    <h2 id="h-privacy">プライバシー</h2>
+    <form action="{{ url_for('settings_save', section='privacy') }}" method="post" data-ajax class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {{ toggle("show_online", s.show_online, "オンライン状態をほかの人に表示する", "オフにすると、メンバー一覧・DMで常にオフラインと表示され、最終アクセス日時も記録しません") }}
+        {{ toggle("mute_profile_sounds", s.mute_profile_sounds, "ほかの人のプロフィールの効果音を鳴らさない") }}
+        <button type="submit" class="button settings-save">プライバシーの設定を保存</button>
+    </form>
+</section>
+
+<section class="card settings-card" id="account" aria-labelledby="h-account">
+    <h2 id="h-account">アカウント</h2>
+    <ul class="settings-links">
+        <li><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール(自己紹介・お気に入り地点・プロフィール画像)</a></li>
+        <li><a href="{{ url_for('game_shop') }}">見た目のカスタマイズ(フレーム・称号・名前の色など、ポイントで交換)</a></li>
+        <li><a href="{{ url_for('logout') }}">ログアウト</a></li>
+    </ul>
+</section>
+
+</div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    "use strict";
+    // 対象の地点・静かな時間帯の表示切り替え
+    var custom = document.getElementById("push-custom");
+    document.querySelectorAll('input[name="push_stations"]').forEach(function(r) {
+        r.addEventListener("change", function() { custom.hidden = r.value !== "custom" || !r.checked; });
+    });
+    var quietBox = document.querySelector('input[name="quiet_enabled"]');
+    quietBox.addEventListener("change", function() { document.getElementById("quiet-hours").hidden = !quietBox.checked; });
+
+    // 文字の大きさの見本
+    var sample = document.querySelector(".text-size-sample");
+    function sampleSize() {
+        var v = (document.querySelector('input[name="text_size"]:checked') || {}).value;
+        sample.style.fontSize = v === "xlarge" ? "125%" : v === "large" ? "112.5%" : "";
+    }
+    document.querySelectorAll('input[name="text_size"]').forEach(function(r) { r.addEventListener("change", sampleSize); });
+
+    // この端末の通知(Web Push)
+    var P = window.RFPush;
+    var title = document.getElementById("push-state-title"), detail = document.getElementById("push-state-detail");
+    var enableBtn = document.getElementById("push-enable-btn"), disableBtn = document.getElementById("push-disable-btn");
+    var testBtn = document.getElementById("push-test-btn");
+    var VAPID = {{ vapid_key|tojson }}, PUBLIC_URL = {{ public_url|tojson }};
+    function markThisDevice() {
+        var id = null;
+        try { id = localStorage.getItem("rf-push-id"); } catch (e) {}
+        document.querySelectorAll(".push-devices li").forEach(function(li) {
+            li.querySelector(".push-this").hidden = !(id && li.getAttribute("data-device-id") === id);
+        });
+    }
+    function show(t, d, canEnable, canDisable) {
+        title.textContent = t; detail.textContent = d || "";
+        enableBtn.hidden = !canEnable; disableBtn.hidden = !canDisable;
+    }
+    function render() {
+        if (!P || !VAPID) { show("通知の準備ができていません", "時間をおいてもう一度開いてください。", false, false); return; }
+        if (!P.supported()) {
+            if (P.isIos() && !P.isStandalone()) {
+                show("iPhone・iPadでは、ホーム画面に追加したアプリから受け取れます",
+                     "共有ボタン(□に↑)→「ホーム画面に追加」で追加し、そのアイコンから開いてこの画面でオンにしてください(iOS 16.4以降)。", false, false);
+            } else if (!window.isSecureContext || location.origin !== PUBLIC_URL) {
+                show("このアドレスでは通知を使えません", PUBLIC_URL + " で開くと受け取れます(証明書の正しいHTTPSが必要なため)。", false, false);
+            } else {
+                show("このブラウザは通知に対応していません", "Chrome・Edge・Firefox・Safari(新しい版)をお使いください。", false, false);
+            }
+            return;
+        }
+        if (Notification.permission === "denied") {
+            show("このブラウザで通知がブロックされています", "アドレスバーの左のマーク(鍵など)→「通知」を「許可」にしてから、ページを再読み込みしてください。", false, false);
+            return;
+        }
+        P.currentSubscription().then(function(sub) {
+            var on = false;
+            try { on = !!sub && localStorage.getItem("rf-push") === "1"; } catch (e) { on = !!sub; }
+            if (on) {
+                show("この端末で通知を受け取っています", "下の「通知の設定」で、何を受け取るかを選べます。", false, true);
+            } else {
+                show("この端末ではまだ受け取っていません", location.origin !== PUBLIC_URL ? "うまくいかない場合は " + PUBLIC_URL + " で開いてお試しください。" : "", true, false);
+            }
+            markThisDevice();
+        });
+    }
+    enableBtn.addEventListener("click", function() {
+        enableBtn.disabled = true;
+        P.enable(VAPID).then(function(j) {
+            showToast(j.message || "この端末で通知を受け取れるようにしました。");
+            setTimeout(function() { location.reload(); }, 700);
+        }).catch(function(err) {
+            var m = err && err.message;
+            showToast(m === "denied" ? "通知が許可されませんでした。ブラウザの設定で許可してください。"
+                : m === "dismissed" ? "通知の許可が選ばれませんでした。もう一度お試しください。"
+                : "通知をオンにできませんでした(" + (m || "不明なエラー") + ")。" + (location.origin !== PUBLIC_URL ? PUBLIC_URL + " で開いてお試しください。" : ""), true);
+            render();
+        }).then(function() { enableBtn.disabled = false; });
+    });
+    disableBtn.addEventListener("click", function() {
+        disableBtn.disabled = true;
+        P.disable().then(function() {
+            showToast("この端末への通知を止めました。");
+            setTimeout(function() { location.reload(); }, 700);
+        }).catch(function() { showToast("止められませんでした。もう一度お試しください。", true); })
+          .then(function() { disableBtn.disabled = false; });
+    });
+    render();
+});
+</script>
+{% endblock %}

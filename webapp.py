@@ -26,7 +26,7 @@ import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
@@ -54,6 +54,8 @@ from common import (
 )
 import announcements
 import users
+import user_settings
+import push_notify
 import fog_data
 import fog_model
 import chart_style
@@ -838,7 +840,10 @@ def _require_login():
     try:
         user = users.get_user_by_id(conn, user_id)
         if user is not None:
-            _touch_presence_if_due(conn, user_id)
+            g.user_settings = user_settings.normalize(users.get_user_settings_raw(conn, user_id), STATION_NAMES)
+            # 「オンライン状態を表示しない」設定(設定画面)の人は、最終アクセス時刻を記録しない
+            if g.user_settings["show_online"]:
+                _touch_presence_if_due(conn, user_id)
     finally:
         conn.close()
     if user is None:
@@ -1458,6 +1463,222 @@ def _inject_notifications():
     def notifications_favorites_active():
         return bool(_current_user_favorite_stations())
     return {"notifications_data": notifications_data, "notifications_favorites_active": notifications_favorites_active}
+
+
+# ============================================================================
+# 個人設定(/settings)とWeb Push(2026-10-09)
+# 設定項目の定義はuser_settings.py、通知の送信はpush_notify.py。表示の設定(テーマ・文字の大きさ・
+# 動きを減らす等)はbase.htmlの<head>で描画前に当てる。
+# ============================================================================
+push_notify.init(USERS_DB_PATH, now_jst_naive)
+
+# 購読先(endpoint)として受け付けるプッシュサービス。サーバーがこのURLへPOSTするため、任意のURLを
+# 登録させると内部ネットワーク等へリクエストを送らせる踏み台(SSRF)にされてしまう。
+PUSH_ENDPOINT_HOST_RE = re.compile(
+    r"^(fcm\.googleapis\.com|android\.googleapis\.com|updates\.push\.services\.mozilla\.com"
+    r"|[a-z0-9-]+\.push\.services\.mozilla\.com|web\.push\.apple\.com|[a-z0-9-]+\.push\.apple\.com"
+    r"|[a-z0-9-]+\.notify\.windows\.com)$"
+)
+PUSH_KEY_RE = re.compile(r"^[A-Za-z0-9_\-=]{8,200}$")
+# 正規の証明書のあるURL(Tailscale Funnel)。Service Worker・Web Pushは証明書が正しいHTTPSでしか動かず、
+# :8443(自己署名の証明書)で開いている人にはこちらで開き直すよう案内する。
+PUBLIC_SITE_URL = push_notify.VAPID_SUB
+SETTINGS_SECTION_LABELS = {"display": "表示", "privacy": "プライバシー", "push": "通知"}
+
+
+def _current_user_settings():
+    """ログイン中の利用者の設定(未ログインなら既定値)。_require_loginがgに載せたものを使う。"""
+    s = g.get("user_settings")
+    if s is None:
+        s = user_settings.defaults()
+        user_id = session.get("user_id")
+        if user_id:
+            conn = _users_conn()
+            try:
+                s = user_settings.normalize(users.get_user_settings_raw(conn, user_id), STATION_NAMES)
+            finally:
+                conn.close()
+        g.user_settings = s
+    return s
+
+
+def _save_user_settings(user_id, new_settings):
+    conn = _users_conn()
+    try:
+        users.save_user_settings(conn, user_id, json.dumps(new_settings, ensure_ascii=False),
+                                 now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+        if not new_settings["show_online"]:
+            users.clear_presence(conn, user_id)
+    finally:
+        conn.close()
+    g.user_settings = new_settings
+
+
+def _start_page_url(settings, favorite_stations_csv):
+    """設定の「最初に開くページ」のURL。ダッシュボードのままならNone。"""
+    page = settings.get("start_page", "dashboard")
+    if page == "stations":
+        return url_for("stations_list")
+    if page == "map":
+        return url_for("map_page")
+    if page == "public":
+        return url_for("public_forecast")
+    if page == "favorite":
+        favorites = [s for s in (favorite_stations_csv or "").split(",") if s in STATION_NAMES]
+        return url_for("station_detail", name=favorites[0]) if favorites else url_for("stations_list")
+    return None
+
+
+@app.context_processor
+def _inject_user_prefs():
+    def user_prefs():
+        if not session.get("user_id"):
+            return None
+        try:
+            return _current_user_settings()
+        except Exception as e:
+            log.warning("Failed to load user settings: %s", e)
+            return None
+    return {"user_prefs": user_prefs}
+
+
+def _device_label(ua):
+    """購読した端末の表示名(設定画面の「通知を受け取る端末」の一覧用)。User-Agentからおおまかに作る。"""
+    ua = ua or ""
+    os_name = ("iPhone" if "iPhone" in ua else "iPad" if "iPad" in ua else "Android" if "Android" in ua
+               else "Windows" if "Windows" in ua else "Mac" if "Macintosh" in ua else "Linux" if "Linux" in ua else "端末")
+    browser = ("Edge" if "Edg/" in ua else "Firefox" if "Firefox/" in ua else "Chrome" if "Chrome/" in ua
+               else "Safari" if "Safari/" in ua else "ブラウザ")
+    return f"{os_name}・{browser}"
+
+
+@app.route("/settings")
+def settings_page():
+    my_id = session.get("user_id")
+    if not my_id:
+        return redirect(url_for("login", next=request.path))
+    conn = _users_conn()
+    try:
+        me = users.get_user_by_id(conn, my_id)
+        devices = users.list_push_subscriptions(conn, my_id)
+    finally:
+        conn.close()
+    try:
+        vapid_key = push_notify.vapid_public_key()
+    except Exception as e:
+        log.warning("Failed to load the VAPID key: %s", e)
+        vapid_key = None
+    favorites = [s for s in me["favorite_stations"].split(",") if s]
+    return render_template(
+        "settings.html", s=_current_user_settings(), devices=devices, vapid_key=vapid_key,
+        station_names=STATION_NAMES, station_region=STATION_REGION, favorite_stations=favorites,
+        is_admin=me["role"] == "admin", hours=user_settings.HOUR_CHOICES,
+        public_url=PUBLIC_SITE_URL,
+    )
+
+
+@app.route("/settings/<section>", methods=["POST"])
+def settings_save(section):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    if section not in user_settings.SECTIONS:
+        abort(404)
+    try:
+        new_settings = user_settings.from_form(request.form, section, _current_user_settings(), STATION_NAMES)
+    except ValueError:
+        return _finish("settings_page", "設定の値が正しくありません。ページを再読み込みしてからもう一度お試しください。",
+                       success=False)
+    _save_user_settings(my_id, new_settings)
+    return _finish("settings_page", f"{SETTINGS_SECTION_LABELS[section]}の設定を保存しました。")
+
+
+@app.route("/settings/quick", methods=["POST"])
+def settings_quick():
+    """ヘッダーのボタン(テーマ・文字の大きさ)から1項目だけ保存する。ほかの端末にも同じ設定が反映される。"""
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    key = request.form.get("key", "")
+    if key not in user_settings.QUICK_KEYS:
+        abort(400)
+    try:
+        value = user_settings.parse_value(key, request.form.get("value", ""))
+    except ValueError:
+        abort(400)
+    new_settings = dict(_current_user_settings())
+    new_settings[key] = value
+    _save_user_settings(my_id, new_settings)
+    return jsonify({"success": True})
+
+
+@app.route("/push/subscribe", methods=["POST"])
+def push_subscribe():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get("endpoint") or "")
+    keys = data.get("keys") or {}
+    p256dh, auth = str(keys.get("p256dh") or ""), str(keys.get("auth") or "")
+    parsed = urlparse(endpoint)
+    if (parsed.scheme != "https" or not PUSH_ENDPOINT_HOST_RE.match(parsed.hostname or "") or len(endpoint) > 1000
+            or not PUSH_KEY_RE.match(p256dh) or not PUSH_KEY_RE.match(auth)):
+        log.warning("Rejected a push subscription from user %s (host %s)", my_id, parsed.hostname)
+        return jsonify({"success": False, "message": "このブラウザの通知の送り先に対応していません。"}), 400
+    conn = _users_conn()
+    try:
+        users.save_push_subscription(conn, my_id, endpoint, p256dh, auth,
+                                     _device_label(request.headers.get("User-Agent")),
+                                     now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
+        sub_id = next((d["id"] for d in users.list_push_subscriptions(conn, my_id) if d["endpoint"] == endpoint), None)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "id": sub_id, "message": "この端末で通知を受け取れるようにしました。"})
+
+
+@app.route("/push/unsubscribe", methods=["POST"])
+def push_unsubscribe():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    data = request.get_json(silent=True) or {}
+    conn = _users_conn()
+    try:
+        users.delete_push_subscription_by_endpoint(conn, str(data.get("endpoint") or ""), my_id)
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message": "この端末への通知を止めました。"})
+
+
+@app.route("/push/devices/<int:sub_id>/delete", methods=["POST"])
+def push_device_delete(sub_id):
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    conn = _users_conn()
+    try:
+        users.delete_push_subscription(conn, sub_id, user_id=my_id)
+    finally:
+        conn.close()
+    return _finish("settings_page", "その端末への通知を止めました。")
+
+
+@app.route("/push/test", methods=["POST"])
+def push_test():
+    my_id = session.get("user_id")
+    if not my_id:
+        abort(403)
+    try:
+        sent = push_notify.deliver(my_id, "test", "テスト通知", "通知はこのように届きます。押すと設定画面を開きます。",
+                                   url_for("settings_page"), "test", ttl=600)
+    except Exception as e:
+        log.warning("Test push failed: %s", e)
+        sent = 0
+    if sent:
+        return _finish("settings_page", f"テスト通知を送りました({sent}台)。数秒で届きます。")
+    return _finish("settings_page", "テスト通知を送れませんでした。この端末で「通知を受け取る」をオンにしてからお試しください。",
+                   success=False)
 
 
 def requires_admin(view):
@@ -3968,6 +4189,14 @@ def _simulator_defaults(name):
 
 @app.route("/")
 def dashboard():
+    # 「最初に開くページ」(設定画面)。外から開いたとき(ホーム画面のアイコン・ブックマーク等で
+    # 参照元が無いか別サイト)だけ移る。サイト内のメニューからダッシュボードを開いたときはそのまま。
+    # ホスト名だけで比べる(:8443はnginxがポート無しのHostで渡してくるため、ポートまで比べると一致しない)
+    referrer_host = urlparse(request.referrer or "").hostname or ""
+    if referrer_host != request.host.split(":")[0] and not request.args:
+        start_url = _start_page_url(_current_user_settings(), (g.get("current_user") or {}).get("favorite_stations", ""))
+        if start_url:
+            return redirect(start_url)
     try:
         _check_economy_anomalies()
     except Exception as e:
@@ -4428,6 +4657,7 @@ def predictions_file(date, filename):
 # 存在しないendpointが混ざっても壊れないよう、url_forに失敗したものは黙って除く。
 SPOTLIGHT_PAGES = (
     ("ダッシュボード", "dashboard", "ホーム トップ"),
+    ("設定", "settings_page", "せってい 通知 プッシュ テーマ ダーク 文字 大きさ プライバシー settings"),
     ("地点一覧", "stations_list", "地点 一覧 カメラ"),
     ("地点比較", "compare_stations", "比較"),
     ("地図", "map_page", "マップ map"),
@@ -6220,8 +6450,12 @@ def login():
                     conn, user["id"], f"daily_login:{login_at[:10]}",
                     DAILY_LOGIN_BONUS_POINTS, login_at,
                 )
+                start_settings = user_settings.normalize(users.get_user_settings_raw(conn, user["id"]), STATION_NAMES)
             finally:
                 conn.close()
+            # 行き先の指定が無い(ダッシュボードへ行く)ときは、設定画面で選んだ「最初に開くページ」へ
+            if next_path == url_for("dashboard"):
+                next_path = _start_page_url(start_settings, user["favorite_stations"]) or next_path
             return redirect(next_path)
         _record_login_failure(ip)
         if existing:
@@ -7597,6 +7831,8 @@ def member_detail(user_id):
     avatar_bg_class = AVATAR_BG_BY_ID.get(target["equipped_avatar_bg"], {}).get("css_class", "")
     seasonal_class = SEASONAL_BY_ID.get(target["equipped_seasonal"], {}).get("css_class", "")
     profile_sound = PROFILE_SOUND_BY_ID.get(target["equipped_profile_sound"], {}).get("sound", "")
+    if _current_user_settings()["mute_profile_sounds"]:
+        profile_sound = ""  # 設定画面の「ほかの人のプロフィールの効果音を鳴らさない」
     return render_template(
         "member_detail.html",
         member=target,
@@ -8811,8 +9047,22 @@ def group_send():
         if reply_to_id is not None:
             reply_name_by_id = {u["id"]: u["name"] for u in all_users}
             reply_preview = _reply_preview_dict(users.get_group_message(conn, reply_to_id), reply_name_by_id)
+        push_ids = [uid for uid in users.push_subscriber_ids(conn) if uid != my_id]
+        push_settings_raw = users.all_user_settings_raw(conn) if push_ids else {}
     finally:
         conn.close()
+    try:
+        my_name = session.get("name", "")
+        for uid in push_ids:
+            mentioned = uid in mention_ids
+            push_notify.notify_async(
+                [uid], "mention" if mentioned else "group",
+                f"{my_name}さんがグループであなたをメンションしました" if mentioned else f"グループ: {my_name}さん",
+                push_notify.message_preview(push_settings_raw.get(uid, "{}"), body, bool(attachment_info)),
+                url_for("group_home"), "group", ttl=86400, urgency="high" if mentioned else "normal",
+            )
+    except Exception as e:
+        log.warning("Failed to queue group push notifications: %s", e)
     with _typing_state_lock:
         _typing_state.pop(("group", my_id), None)
     if _wants_json():
@@ -9199,8 +9449,17 @@ def dm_send(user_id):
         reply_preview = _reply_preview_dict(
             reply_msg, {my_id: session.get("name", ""), user_id: other["name"]},
         )
+        recipient_settings_raw = users.get_user_settings_raw(conn, user_id)
     finally:
         conn.close()
+    try:
+        push_notify.notify_async(
+            [user_id], "dm", f"{session.get('name', '')}さんからのメッセージ",
+            push_notify.message_preview(recipient_settings_raw, body, bool(attachment_info)),
+            url_for("dm_thread", user_id=my_id), f"dm-{my_id}", ttl=86400, urgency="high",
+        )
+    except Exception as e:
+        log.warning("Failed to queue the DM push notification: %s", e)
     with _typing_state_lock:
         _typing_state.pop((f"dm:{conversation_id}", my_id), None)
     if _wants_json():
@@ -11238,9 +11497,61 @@ def _warm_caches_forever():
         time.sleep(WARM_INTERVAL_SECONDS)
 
 
+# --- Web Pushの定期判定(2026-10-09、push_notify.run_scheduled) ----------------------------------------
+# 川霧の朝夕のまとめ・「まもなく出やすい」・「観測した」・カメラ故障・管理者向けのお知らせを5分ごとに判定する。
+# url_forを使うため、ダミーのリクエストの文脈の中で動かす(セッションは空)。
+PUSH_SCHEDULE_INTERVAL_SECONDS = 300
+
+
+def _push_admin_alerts():
+    overview = _admin_overview_cached()
+    alerts = []
+    if overview["disk_used_pct"] is not None and overview["disk_used_pct"] >= 85:
+        alerts.append(("disk", f"ディスク使用率が{overview['disk_used_pct']}%です", url_for("admin_disk")))
+    if not overview["collect_timer_active"]:
+        alerts.append(("collect_timer", "毎時収集タイマーが停止しています", url_for("admin_status")))
+    if overview["recent_restart_count"] >= RESTART_ALERT_THRESHOLD:
+        alerts.append(("restarts", f"直近{RESTART_ALERT_WINDOW_HOURS}時間でwebappが{overview['recent_restart_count']}回"
+                                   "起動しています", url_for("admin_log", key="webapp")))
+    if overview["pending_signups"]:
+        alerts.append(("signups", f"保留中の登録申請が{overview['pending_signups']}件あります", url_for("admin_accounts")))
+    return alerts
+
+
+def _push_schedule_once():
+    conn = _users_conn()
+    try:
+        if not users.push_subscriber_ids(conn):
+            return  # 通知を受け取る端末が1台も無ければ何も読まない
+    finally:
+        conn.close()
+    with app.test_request_context("/"):
+        ctx = {"station_names": STATION_NAMES, "fog_codes": set(SUMMARY_FOG_CODES)}
+        for key, fn in (("forecast", _public_forecast_safe), ("observations", _latest_observations),
+                        ("camera_failures", _stations_with_recent_camera_failures_cached),
+                        ("admin_alerts", _push_admin_alerts)):
+            try:
+                ctx[key] = fn()
+            except Exception as e:
+                log.warning("Push schedule: failed to load %s: %s", key, e)
+                ctx[key] = None
+        push_notify.run_scheduled(ctx)
+
+
+def _push_schedule_forever():
+    time.sleep(60)
+    while True:
+        try:
+            _push_schedule_once()
+        except Exception:
+            log.exception("Push schedule failed")
+        time.sleep(PUSH_SCHEDULE_INTERVAL_SECONDS)
+
+
 if __name__ == "__main__":
     from waitress import serve
     threading.Thread(target=_warm_caches_forever, name="cache-warmer", daemon=True).start()
+    threading.Thread(target=_push_schedule_forever, name="push-scheduler", daemon=True).start()
     # 8080番は外部公開用にnginxが受け、Cockpit(9090番、別オリジン)と同一オリジンで
     # リバースプロキシするために127.0.0.1:8081をローカル専用で使う(直接の外部公開はしない)。
     # trusted_proxyを設定しないと、waitressはX-Forwarded-For等のヘッダーを黙って

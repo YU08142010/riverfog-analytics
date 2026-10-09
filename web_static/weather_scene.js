@@ -25,7 +25,10 @@
     var fogRGB = (style.getPropertyValue("--wx-fog") || "255, 255, 255").trim();
     var fogA = parseFloat(style.getPropertyValue("--wx-fog-alpha")) || 0;
     var cloudA = parseFloat(style.getPropertyValue("--wx-cloud-alpha")) || 0;
-    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 設定画面の「動きを減らす」「背景を動かさない」(html.rf-reduce-motion / rf-calm-bg)も同じ扱い
+    var rootCls = document.documentElement.classList;
+    var reduceMotion = (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ||
+        rootCls.contains("rf-reduce-motion") || rootCls.contains("rf-calm-bg");
     var SCALE = 0.5;
     var W = 0, H = 0, unit = 1;
 

@@ -228,6 +228,7 @@
         </div>
         <button type="submit" class="button" style="margin-top:1rem;">プロフィールを保存</button>
     </form>
+    <p class="muted" style="font-size:0.85rem; margin-top:0.8rem;">お気に入り地点の川霧をスマホに通知する・表示やプライバシーを変えるには <a href="{{ url_for('settings_page') }}">設定</a> へ。</p>
     {% else %}
     <p style="white-space:pre-wrap;">{{ member.bio if member.bio else "(自己紹介は未設定です)" }}</p>
     {% if favorite_stations %}

@@ -149,6 +149,26 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
   オン/オフと前回の未読数はブラウザのlocalStorage。`web_static/sw.js`は通知を出すためだけの最小のService Worker
   (キャッシュしない、オンの時だけ登録)。ブラウザを閉じていると届かない(Web Pushではない)。
 
+## 個人設定と通知(Web Push)(2026-10-09〜)
+
+- **設定画面 `/settings`**(ヘッダーの歯車)。項目の定義は `user_settings.py` の `SETTINGS`(既定値と取りうる値)で、
+  users.db の `user_settings` に利用者ごとにJSON1行で保存する。項目を足すときは `SETTINGS` と `SECTIONS` に足し、
+  settings.html にフォームの行を足すだけ。不正値・定義から消えた項目は読み込み時に捨てる。
+  - 表示(テーマ・文字の大きさ・動きを減らす・背景を動かさない)は base.html の `<head>` の `window.RF_PREFS` で描画前に当てる。
+    テーマと文字の大きさは既定がNone(未設定)で、その間は従来どおり端末のlocalStorageに従う。ヘッダーのボタンで変えると
+    `/settings/quick` でサーバーにも保存する。
+  - 「最初に開くページ」はログイン直後と、参照元が外(ホーム画面のアイコン等)の `/` で効く。
+  - 「オンライン状態を表示しない」は最終アクセス時刻を記録しない(`_require_login`)。
+- **Web Push**: `push_notify.py`(pywebpush)。VAPIDの秘密鍵は `data/push_vapid_private.pem`(git管理外、無ければ自動生成。
+  作り直すと全員の購読が無効になる)。購読は `push_subscriptions`、送信済みの記録は `push_sent`(14日で消す)。
+  - DM・グループは送信時に `notify_async`。川霧の朝夕のまとめ・まもなく出やすい・観測した・カメラ・管理者向けは
+    webapp の裏のスレッド `push-scheduler` が5分ごとに `run_scheduled` で判定する(購読が0件なら何もしない)。
+  - 購読先は正規のプッシュサービス(FCM・Mozilla・Apple・WNS)のURLだけ受け付ける(`PUSH_ENDPOINT_HOST_RE`、SSRF対策)。
+  - Service Worker は証明書が正しいHTTPSでしか動かないため、通知は公開URL(Funnel)で開いたときだけ使える
+    (:8443の自己署名では不可)。iPhone・iPadはホーム画面に追加したアプリからのみ(iOS 16.4以降)。
+  - テストは本物のプッシュサービスに送らず、`push_subscriptions` に `http://127.0.0.1:<port>/` の偽の受信口を直接入れ、
+    受け取った本文を `http_ece.decrypt` で復号して確かめる(ルート経由では127.0.0.1は拒否される)。
+
 ## 試して採らなかった改良(2026-10-08、その6)
 
 直近6週を2週×3でずらし、過去の予報(lead 0、JMA+ECMWFの平均)を入力に比べた
