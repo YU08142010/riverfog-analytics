@@ -4060,6 +4060,34 @@ def observations_dates():
     )
 
 
+_DAILY_FOG_COUNTS_CACHE = {"at": 0.0, "value": {}}
+DAILY_FOG_COUNTS_CACHE_SECONDS = 600
+
+
+def _daily_fog_counts():
+    """日付ごとの、川霧(現象コード1〜3)をその日に1回でも観測した地点の数({"YYYY-MM-DD": 地点数}、0の日は省く)。
+    観測・画像・予測の日付カレンダーで、霧の多い日ほど色を濃くするのに使う(_date_month_groups.html)。
+    読み込みが重いので10分だけ覚えておく。失敗したら空(カレンダーは色分けなしで出る)。"""
+    now = time.time()
+    if now - _DAILY_FOG_COUNTS_CACHE["at"] < DAILY_FOG_COUNTS_CACHE_SECONDS:
+        return _DAILY_FOG_COUNTS_CACHE["value"]
+    value = {}
+    try:
+        import pandas as pd
+        _, phenom_df, station_names = fog_data.load_river_fog_data()
+        cols = [c for c in phenom_df.columns if c in set(station_names)]
+        codes = phenom_df[cols].apply(pd.to_numeric, errors="coerce")
+        counts = codes.isin([1, 2, 3]).groupby(phenom_df["datetime"].dt.strftime("%Y-%m-%d")).any().sum(axis=1)
+        value = {d: int(n) for d, n in counts.items() if n > 0}
+    except Exception as e:
+        log.warning("Failed to count fog stations per day: %s", e)
+    _DAILY_FOG_COUNTS_CACHE.update(at=now, value=value)
+    return value
+
+
+app.jinja_env.globals["daily_fog_counts"] = _daily_fog_counts
+
+
 def _num_or_none(value):
     """表示用: 数値ならfloat、欠測(None/NaN/NaT)ならNone。iterrows()の行は日時列と
     混在したobject型になり、欠測がNaNではなくNaTになることがある。テンプレートの
@@ -4565,6 +4593,7 @@ def stations_list():
     return render_template(
         "stations_list.html", station_names=STATION_NAMES, current_by_name=current_by_name,
         station_region=STATION_REGION, station_cards=cards, observed_at=observed_at,
+        favorite_stations=_current_user_favorite_stations(),
     )
 
 
@@ -4587,16 +4616,20 @@ def compare_stations():
     entries = []
     for name in selected:
         latest_pred_date, forecast_file = _station_latest_forecast_file(name)
+        latest_images = _station_timelapse_images(name, max_items=1)
         entries.append({
             "name": name,
+            "region": STATION_REGION.get(name),
             "current": current_by_name.get(name),
             "latest_pred_date": latest_pred_date,
             "forecast_file": forecast_file,
             "accuracy": accuracy_by_station.get(name),
+            "days": _station_days(name),
+            "image": latest_images[-1] if latest_images else None,
         })
 
     return render_template(
-        "compare.html", station_names=STATION_NAMES, selected=selected, entries=entries,
+        "compare.html", station_names=STATION_NAMES, selected=selected, entries=entries, station_region=STATION_REGION,
         observations_datetime=observations["datetime"] if observations else None,
         current_by_name=current_by_name, active_names=selected,
     )

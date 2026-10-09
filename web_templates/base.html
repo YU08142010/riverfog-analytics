@@ -22,6 +22,8 @@
 <script>
 window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
 (function() {
+    // 文字の大きさ(標準/大きめ、2026-10-09)。描画前に付けて、読み込み時に大きさが変わって見えないようにする。
+    try { if (localStorage.getItem("rf-text") === "large") { document.documentElement.classList.add("rf-text-large"); } } catch (e) {}
     try {
         var saved = localStorage.getItem("theme");
         if (saved === "light" || saved === "dark") {
@@ -103,6 +105,9 @@ window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
     #fs-toggle-btn[aria-pressed="true"] .fs-i-expand { display: none; }
     #fs-toggle-btn[aria-pressed="true"] .fs-i-shrink { display: block; }
     </style>
+    <button type="button" class="theme-toggle theme-toggle-icon text-size-btn" id="text-size-btn" aria-pressed="false" aria-label="文字を大きくする" title="文字の大きさ(標準/大きめ)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19l4.5-12L12 19M4.7 14.5h5.6M14 19l3.2-8.5L20.5 19M15.1 16.2h4.3"/></svg>
+    </button>
     <button type="button" class="theme-toggle theme-toggle-icon" id="theme-toggle-btn" aria-label="ダーク/ライト切替" title="ダーク/ライト切替">
         <svg class="ti-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/></svg>
         <svg class="ti-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg>
@@ -221,6 +226,24 @@ window.addEventListener("pageshow", function(e) {
         e.preventDefault();
         nav.scrollLeft += e.deltaY;
     }, { passive: false });
+})();
+
+(function() {
+    var btn = document.getElementById("text-size-btn");
+    if (!btn) { return; }
+    function sync() {
+        var on = document.documentElement.classList.contains("rf-text-large");
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        btn.setAttribute("aria-label", on ? "文字を標準の大きさに戻す" : "文字を大きくする");
+    }
+    btn.addEventListener("click", function() {
+        var on = document.documentElement.classList.toggle("rf-text-large");
+        try { localStorage.setItem("rf-text", on ? "large" : "normal"); } catch (e) {}
+        sync();
+        window.dispatchEvent(new Event("resize"));  // ヘッダーのメニューの折り返し(その他▾)を測り直させる
+        if (window.showToast) { window.showToast(on ? "文字を大きめにしました" : "文字を標準の大きさに戻しました"); }
+    });
+    sync();
 })();
 
 document.getElementById("theme-toggle-btn").addEventListener("click", function() {
@@ -948,5 +971,53 @@ document.addEventListener("submit", function(e) {
 })();
 </script>
 <script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
+<div class="a2hs" id="a2hs" role="dialog" aria-label="ホーム画面に追加" hidden>
+    <div class="a2hs-text">
+        <strong>ホーム画面に追加できます</strong>
+        <span id="a2hs-how">ブラウザのメニューから「ホーム画面に追加」を選ぶと、アプリのように全画面で開けます。</span>
+    </div>
+    <button type="button" class="button" id="a2hs-install" hidden>追加する</button>
+    <button type="button" class="a2hs-close" id="a2hs-close" aria-label="閉じる">×</button>
+</div>
+<script>
+/* スマホで開いたとき、「ホーム画面に追加」できることを一度だけ案内する(2026-10-09)。
+   3回目以降の表示で出し、閉じる・追加するのどちらかでもう出さない。すでにホーム画面から開いている時は出さない。
+   Android等(beforeinstallprompt が来るブラウザ)では「追加する」ボタンで直接追加でき、iPhoneは共有ボタンからの手順を出す。 */
+(function() {
+    var box = document.getElementById("a2hs");
+    if (!box) { return; }
+    var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone;
+    var narrow = window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+    if (standalone || !narrow) { return; }
+    var views = 0;
+    try {
+        if (localStorage.getItem("rf-a2hs") === "done") { return; }
+        views = (parseInt(localStorage.getItem("rf-a2hs-views"), 10) || 0) + 1;
+        localStorage.setItem("rf-a2hs-views", String(views));
+    } catch (e) { return; }
+    if (views < 3) { return; }
+    var deferred = null;
+    function done() {
+        box.classList.remove("open");
+        setTimeout(function() { box.hidden = true; }, 250);
+        try { localStorage.setItem("rf-a2hs", "done"); } catch (e) {}
+    }
+    if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {
+        document.getElementById("a2hs-how").textContent = "画面下の共有ボタン(□に↑)から「ホーム画面に追加」を選ぶと、アプリのように全画面で開けます。";
+    }
+    window.addEventListener("beforeinstallprompt", function(e) {
+        e.preventDefault();
+        deferred = e;
+        document.getElementById("a2hs-install").hidden = false;
+    });
+    document.getElementById("a2hs-install").addEventListener("click", function() {
+        if (!deferred) { return; }
+        deferred.prompt();
+        deferred.userChoice.then(done, done);
+    });
+    document.getElementById("a2hs-close").addEventListener("click", done);
+    setTimeout(function() { box.hidden = false; requestAnimationFrame(function() { box.classList.add("open"); }); }, 1500);
+})();
+</script>
 </body>
 </html>

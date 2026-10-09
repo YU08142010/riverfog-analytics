@@ -15,6 +15,17 @@
     <h2>地点一覧</h2>
     {% if station_names %}
     <input type="text" id="station-search" class="search-box" placeholder="地点名で絞り込み..." aria-label="地点名で絞り込み">
+    <div class="station-list-tools">
+        <div class="seg" role="group" aria-label="並び順">
+            <button type="button" class="seg-btn" data-sort="default" aria-pressed="true">標準の順</button>
+            <button type="button" class="seg-btn" data-sort="level" aria-pressed="false">今日の出やすさ順</button>
+        </div>
+        <div class="seg" role="group" aria-label="表示する地点">
+            <button type="button" class="seg-btn" data-show="all" aria-pressed="true">すべて</button>
+            <button type="button" class="seg-btn" data-show="fav" aria-pressed="false"{% if not favorite_stations %} title="お気に入り地点はプロフィールで設定できます"{% endif %}>お気に入り</button>
+            <button type="button" class="seg-btn" data-show="fog" aria-pressed="false">霧を観測中</button>
+        </div>
+    </div>
     <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
     {% for region_label in ["只見川", "会津"] %}
     {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
@@ -23,7 +34,8 @@
     <ul class="wx-cards station-tiles-region">
         {% for name in region_names %}
         {% set c = station_cards[name] %}
-        <li data-name="{{ name }}">
+        <li data-name="{{ name }}" data-order="{{ loop.index0 }}" data-level="{{ c.today_level }}"
+            data-fog="{{ 1 if c.wx.kind in ('riverfog', 'fog') else 0 }}" data-fav="{{ 1 if name in favorite_stations else 0 }}">
             <a class="wx-card wx-{{ c.wx.phase }} wx-{{ c.wx.kind }} wx-lv{{ c.wx.level }}" href="{{ url_for('station_detail', name=name) }}">
                 <span class="wx-card-name">{{ name }}</span>
                 <span class="wx-card-temp">{% if c.temp is not none and c.temp == c.temp %}{{ "%.0f"|format(c.temp) }}°{% endif %}</span>
@@ -38,30 +50,66 @@
     {% endfor %}
     <p class="muted" id="station-empty" hidden>該当する地点がありません。</p>
     <script>
+    /* 地点名の絞り込みに加えて、並び順(標準/今日の川霧の出やすさ順)と表示する地点(すべて/お気に入り/霧を観測中)を
+       切り替える。選んだ並び順・表示はこの端末に覚えておく。 */
     (function() {
         var input = document.getElementById("station-search");
-        var lists = document.querySelectorAll(".station-tiles-region");
-        var items = document.querySelectorAll(".station-tiles-region > li");
+        var lists = Array.prototype.slice.call(document.querySelectorAll(".station-tiles-region"));
+        var items = Array.prototype.slice.call(document.querySelectorAll(".station-tiles-region > li"));
         var countLabel = document.getElementById("station-count");
         var emptyLabel = document.getElementById("station-empty");
         var total = items.length;
-        wireListFilter(
-            input,
-            items,
-            function(li) { return li.dataset.name; },
-            function(shown) {
-                countLabel.textContent = input.value.trim() ? shown + " / " + total + "地点" : total + "地点";
-                emptyLabel.hidden = shown !== 0;
-                lists.forEach(function(list) {
-                    var hasVisible = Array.prototype.slice.call(list.querySelectorAll(":scope > li")).some(function(li) { return !li.hidden; });
-                    var heading = list.previousElementSibling;
-                    if (heading && heading.classList.contains("station-grid-region-label")) {
-                        heading.hidden = !hasVisible;
+        var state = { sort: "default", show: "all" };
+        try {
+            var saved = JSON.parse(localStorage.getItem("rf-station-list") || "{}");
+            if (saved.sort === "level") { state.sort = "level"; }
+            if (saved.show === "fav" || saved.show === "fog") { state.show = saved.show; }
+        } catch (e) {}
+        function apply() {
+            var q = input.value.trim().toLowerCase();
+            var shown = 0;
+            items.forEach(function(li) {
+                var ok = !q || li.dataset.name.toLowerCase().indexOf(q) !== -1;
+                if (state.show === "fav") { ok = ok && li.dataset.fav === "1"; }
+                if (state.show === "fog") { ok = ok && li.dataset.fog === "1"; }
+                li.hidden = !ok;
+                if (ok) { shown++; }
+            });
+            lists.forEach(function(list) {
+                var lis = Array.prototype.slice.call(list.children);
+                lis.sort(function(a, b) {
+                    if (state.sort === "level") {
+                        var d = (+b.dataset.level) - (+a.dataset.level);
+                        if (d) { return d; }
                     }
-                    list.hidden = !hasVisible;
+                    return (+a.dataset.order) - (+b.dataset.order);
                 });
-            }
-        );
+                lis.forEach(function(li) { list.appendChild(li); });
+                var hasVisible = lis.some(function(li) { return !li.hidden; });
+                var heading = list.previousElementSibling;
+                if (heading && heading.classList.contains("station-grid-region-label")) { heading.hidden = !hasVisible; }
+                list.hidden = !hasVisible;
+            });
+            var filtered = q || state.show !== "all";
+            countLabel.textContent = filtered ? shown + " / " + total + "地点" : total + "地点";
+            emptyLabel.textContent = state.show === "fav" && !items.some(function(li) { return li.dataset.fav === "1"; })
+                ? "お気に入り地点がまだありません(プロフィールで設定できます)。"
+                : state.show === "fog" && !q ? "いま霧を観測している地点はありません。" : "該当する地点がありません。";
+            emptyLabel.hidden = shown !== 0;
+            document.querySelectorAll(".station-list-tools .seg-btn").forEach(function(b) {
+                var on = b.dataset.sort ? b.dataset.sort === state.sort : b.dataset.show === state.show;
+                b.setAttribute("aria-pressed", on ? "true" : "false");
+            });
+        }
+        document.querySelectorAll(".station-list-tools .seg-btn").forEach(function(b) {
+            b.addEventListener("click", function() {
+                if (b.dataset.sort) { state.sort = b.dataset.sort; } else { state.show = b.dataset.show; }
+                try { localStorage.setItem("rf-station-list", JSON.stringify(state)); } catch (e) {}
+                apply();
+            });
+        });
+        input.addEventListener("input", apply);
+        apply();
     })();
     </script>
     {% else %}

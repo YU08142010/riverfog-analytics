@@ -1234,7 +1234,7 @@ body::before, .bg-art, .wx-scene {
     top: -15vh; bottom: auto; left: 0; right: 0;
     height: calc(100vh + 30vh); height: calc(100lvh + 30vh);
 }
-html:has(.wx-scene.wx-day) { background: #6aa6e2; }
+html:has(.wx-scene.wx-day) { background: #5a98d6; }
 html:has(.wx-scene.wx-day.wx-fog), html:has(.wx-scene.wx-day.wx-riverfog.wx-lv3) { background: #a9b8c6; }
 html:has(.wx-scene.wx-day.wx-cloud) { background: #93a9bd; }
 html:has(.wx-scene.wx-day.wx-rain) { background: #8c9aa8; }
@@ -1242,3 +1242,148 @@ html:has(.wx-scene.wx-dawn), html:has(.wx-scene.wx-dusk) { background: #8f7f9c; 
 html:has(.wx-scene.wx-night) { background: #142046; }
 :root[data-theme="dark"]:has(.wx-scene) { background: #0d121c; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):has(.wx-scene) { background: #0d121c; } }
+
+/* 切り替えボタンの組(地点一覧の並び順・表示の切り替えなど、2026-10-09) */
+.station-list-tools { display: flex; flex-wrap: wrap; gap: 0.5rem 0.8rem; margin: 0.2rem 0 0.6rem; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 999px; background: var(--glass-soft, rgba(127, 127, 127, 0.12)); border: 1px solid var(--color-border, rgba(127, 127, 127, 0.25)); }
+.seg-btn {
+    appearance: none; border: 0; background: transparent; color: var(--color-text, inherit); font: inherit; font-size: 0.85rem;
+    padding: 0.35rem 0.85rem; border-radius: 999px; cursor: pointer; min-height: 2rem;
+}
+.seg-btn:hover { background: var(--tint-bg-hover, rgba(74, 163, 255, 0.14)); }
+.seg-btn[aria-pressed="true"] { background: var(--color-primary); color: #fff; font-weight: 600; }
+:root[data-theme="dark"] .seg-btn[aria-pressed="true"] { color: #0b1726; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seg-btn[aria-pressed="true"] { color: #0b1726; } }
+.seg-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+/* 観測報告: 画像を大きく3枚並べ、処理中のカードを目立たせる(2026-10-09) */
+.observation-report-images { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0.8rem; }
+.observation-report-image { width: auto; }
+.observation-report-noimage { width: 100%; }
+.observation-report-card { scroll-margin-top: 5rem; transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+.observation-report-card.is-current { box-shadow: var(--glass-shadow, 0 6px 18px rgba(0, 0, 0, 0.12)), 0 0 0 2px var(--color-primary); }
+.observation-report-card.is-leaving { opacity: 0; transform: translateX(24px); }
+.observation-report-card:focus { outline: none; }
+/* ==========================================================================
+   文字の見づらさの点検(2026-10-09、全ページをライト/ダークで自動チェック)で見つかった所の修正。
+   ライトモードだけ色を濃くする所は、変数をライト用に決めてダーク側で元に戻す形にしている。
+   ========================================================================== */
+:root {
+    --fx-muted-on-sky: #3f4652;
+    --fx-cal-sun: #c0392b; --fx-cal-sat: #1f63b0; --fx-cal-has: #1d5fae;
+    --fx-link-strong: #0850a8; --fx-header-text: #353c48; --fx-lv-dot: #2f3640;
+    --fx-warning-text: #8a5a00;
+}
+:root[data-theme="dark"] {
+    --fx-muted-on-sky: var(--color-text-muted);
+    --fx-cal-sun: #ff8a80; --fx-cal-sat: #7dbdff; --fx-cal-has: #7dbdff;
+    --fx-link-strong: var(--color-primary); --fx-header-text: var(--color-text-muted); --fx-lv-dot: var(--color-text-muted);
+    --fx-warning-text: var(--color-warning);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --fx-muted-on-sky: var(--color-text-muted);
+        --fx-cal-sun: #ff8a80; --fx-cal-sat: #7dbdff; --fx-cal-has: #7dbdff;
+        --fx-link-strong: var(--color-primary); --fx-header-text: var(--color-text-muted); --fx-lv-dot: var(--color-text-muted);
+        --fx-warning-text: var(--color-warning);
+    }
+}
+/* カレンダーの日・土の見出しと、データのある日の数字 */
+.rfcal-week .sun, .rfcal-day.sun b { color: var(--fx-cal-sun); }
+.rfcal-week .sat, .rfcal-day.sat b { color: var(--fx-cal-sat); }
+.rfcal-day.has b { color: var(--fx-cal-has); }
+/* 空の背景の上に重なるヘッダーの文字(ライトモードで薄かった) */
+.wx-scene ~ header nav a:not(.active):not(.pf-login), body:has(.wx-scene) header nav a:not(.active):not(.pf-login), body:has(.wx-scene) .pf-brand-text span,
+body:has(.wx-scene) header .nav-more-btn, body:has(.wx-scene) header > a,
+body:has(.wx-scene) header .spotlight-trigger span { color: var(--fx-header-text); }
+/* 透けたカードの上のリンク(ログイン画面、ダッシュボードの画像の地点名) */
+.auth-card p a, figure figcaption a { color: var(--fx-link-strong); }
+/* 黄色系の文字(エラーログのWARNING、お気に入りの星、只見観測者の役割表示) */
+.role-tag.tadami_observer, .star-toggle-btn, td .log-warning { color: var(--fx-warning-text); }
+/* 地点ページの時間ごとの出やすさ: 「低」の丸と、今の時間のカードの小さな文字 */
+.wx-hourly .lvdot.lv1 { color: var(--fx-lv-dot); }
+.wx-hourly .wx-hour.now small { opacity: 1; }
+/* チャットの時刻・「(編集済み)」(全体を薄くしすぎていた) */
+.dm-bubble-time { opacity: 0.88; }
+/* ランキング3位の銅色の札(白い文字が読みにくかった) */
+.ranking-item.rank-3 .ranking-badge.rank-style-neon, .ranking-item.rank-3 .ranking-badge:not([class*="rank-style-"]) { background: #8c6a35; color: #fff; }
+/* 地点のチップ・地図の表の色付きセル(白い文字が明るい青の上に乗る) */
+:is(.station-chip, td, .phenom-btn):is([style*="color:#fff"], [style*="color: #fff"], [style*="color:white"], [style*="color: white"], [style*="color: rgb(255, 255, 255)"]) { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+
+/* 晴れた昼の空の上の白い文字(地点名・気温・見出し)。空はweather_scene.cssで少し濃くし、ここでは文字に影を付ける
+   (霧・曇りで空が白っぽい日は文字を濃い色にしているので対象外) */
+.wx-scene.wx-day:not(.wx-fog):not(.wx-cloud):not(.wx-riverfog.wx-lv3) ~ main :is(.wx-hero, .breadcrumb, .breadcrumb a, .pf-hero h1, .pf-hero p, .pf-back),
+.wx-scene.wx-day:not(.wx-fog):not(.wx-cloud):not(.wx-riverfog.wx-lv3) ~ main > p.pf-muted {
+    text-shadow: 0 1px 2px rgba(8, 28, 56, 0.55), 0 0 18px rgba(8, 28, 56, 0.35);
+}
+.wx-scene.wx-day:not(.wx-fog):not(.wx-cloud):not(.wx-riverfog.wx-lv3) ~ main .wx-hero-stat { background: rgba(10, 36, 72, 0.24); border-color: rgba(255, 255, 255, 0.38); }
+.wx-scene.wx-day:not(.wx-fog):not(.wx-cloud):not(.wx-riverfog.wx-lv3) ~ main a.wx-hero-stat:hover { background: rgba(10, 36, 72, 0.34); }
+/* カレンダーの日を、川霧を観測した地点数で色分けする(多いほど濃い青、2026-10-09) */
+.rfcal-day.has.fog1 { background: rgba(47, 127, 216, 0.22); }
+.rfcal-day.has.fog2 { background: rgba(47, 127, 216, 0.40); }
+.rfcal-day.has.fog3 { background: rgba(26, 88, 160, 0.86); }
+.rfcal-day.has.fog4 { background: rgba(18, 70, 140, 0.92); }
+.rfcal-day.has.fog3 b, .rfcal-day.has.fog4 b { color: #fff !important; }
+.rfcal-day.has.fog1:hover, .rfcal-day.has.fog2:hover, .rfcal-day.has.fog3:hover, .rfcal-day.has.fog4:hover { filter: brightness(1.08); }
+.rfcal-heat-legend { display: flex; align-items: center; gap: 4px; margin-top: 0.5rem; font-size: 0.72rem; color: var(--color-text-muted); }
+.rfcal-heat-legend i { display: inline-block; width: 14px; height: 14px; min-height: 0; padding: 0; border-radius: 4px; pointer-events: none; }
+.rfcal-heat-legend span:first-child { margin-right: 4px; }
+.rfcal-heat-legend span:last-child { margin-left: 4px; }
+/* 文字の大きさ「大きめ」(ヘッダーのAaボタン、2026-10-09)。remで指定した所がまとめて大きくなる */
+html.rf-text-large { font-size: 112.5%; }
+.text-size-btn[aria-pressed="true"] { color: var(--color-primary); background: var(--tint-bg); }
+/* 「ホーム画面に追加」の案内(スマホで3回目以降に一度だけ、base.html) */
+.a2hs {
+    position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 900;
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.8rem 0.9rem; border-radius: 16px;
+    background: var(--glass-pop, rgba(255, 255, 255, 0.92)); color: var(--color-text);
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+    box-shadow: 0 10px 30px rgba(10, 20, 40, 0.25); border: 1px solid var(--color-border);
+    transform: translateY(140%); transition: transform 0.35s var(--spring, ease);
+}
+.a2hs.open { transform: none; }
+.a2hs[hidden] { display: none; }
+.a2hs-text { flex: 1; min-width: 0; font-size: 0.85rem; line-height: 1.5; }
+.a2hs-text strong { display: block; font-size: 0.92rem; }
+.a2hs-close { appearance: none; border: 0; background: transparent; color: var(--color-text-muted); font-size: 1.3rem; line-height: 1; padding: 0.3rem 0.5rem; cursor: pointer; min-width: 2.2rem; min-height: 2.2rem; }
+@media (prefers-reduced-motion: reduce) { .a2hs { transition: none; } }:root[data-theme="dark"] .rfcal-day.has.fog1 { background: rgba(74, 163, 255, 0.20); }
+:root[data-theme="dark"] .rfcal-day.has.fog2 { background: rgba(74, 163, 255, 0.36); }
+:root[data-theme="dark"] .rfcal-day.has.fog3 { background: rgba(74, 163, 255, 0.58); }
+:root[data-theme="dark"] .rfcal-day.has.fog4 { background: rgba(125, 189, 255, 0.92); }
+:root[data-theme="dark"] .rfcal-day.has.fog4 b { color: #0b1726 !important; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .rfcal-day.has.fog1 { background: rgba(74, 163, 255, 0.20); }
+    :root:not([data-theme="light"]) .rfcal-day.has.fog2 { background: rgba(74, 163, 255, 0.36); }
+    :root:not([data-theme="light"]) .rfcal-day.has.fog3 { background: rgba(74, 163, 255, 0.58); }
+    :root:not([data-theme="light"]) .rfcal-day.has.fog4 { background: rgba(125, 189, 255, 0.92); }
+    :root:not([data-theme="light"]) .rfcal-day.has.fog4 b { color: #0b1726 !important; }
+}
+/* 空の背景のページ(地点・ダッシュボード)のカード: 空を濃くしたぶんカードも暗く見えたので、ライトモードでは少し白くし、
+   薄い灰色の文字を濃くする(ダークモードは元のまま、weather_scene.cssの指定が優先される) */
+.wx-scene ~ main :is(.card, .sidebar-panel) :is(.muted, small, .wx-hour-day, .sidebar-group-label-static, th, .empty-state) { color: var(--fx-muted-on-sky); }
+.wx-scene ~ main .wx-hour.now small { color: inherit; }
+.wx-scene ~ main .phenom-secondary-toggle-btn { color: var(--fx-link-strong); }
+.wx-scene.wx-day ~ main .wx-hero-sub, .wx-scene.wx-day ~ main .wx-hero-stat span { opacity: 1; }
+/* 観測報告の「却下 x」のキー表示と、色付きの現象ボタンの白い文字 */
+.button-danger .phenom-key { opacity: 0.92; }
+
+/* 読み込み中の画像(ダッシュボードのカメラ画像・観測報告の画像・タイムラプス): 読み込まれるまで、場所だけ薄い面で
+   取っておく(読み込み後に下の内容がずれない、2026-10-09)。動く光沢は重くなるので付けない */
+figure img[loading="lazy"], .observation-report-image img, img.timelapse-img {
+    aspect-ratio: auto 4 / 3; background: var(--glass-soft, rgba(127, 127, 127, 0.12));
+}
+/* 地点比較: 選んだ地点を横に並べる(狭い画面では縦に、2026-10-09) */
+.compare-picker { margin-top: 0.4rem; }
+.compare-picker > summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; align-items: start; }
+.compare-col { margin: 0; min-width: 0; }
+.compare-name { margin: 0 0 0.3rem; display: flex; align-items: baseline; gap: 0.5rem; }
+.compare-name small { font-size: 0.78rem; font-weight: 400; }
+.compare-now { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0 0 0.7rem; font-size: 0.85rem; }
+.compare-chip { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-weight: 600; background: var(--glass-soft); }
+.compare-image { margin: 0 0 0.7rem; }
+.compare-image img { width: 100%; height: auto; display: block; border-radius: var(--radius-sm, 8px); }
+.compare-image figcaption { font-size: 0.75rem; margin-top: 0.25rem; }
+.compare-days { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin-bottom: 0.7rem; text-align: center; }
+.compare-day { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; font-size: 0.8rem; }
+.compare-day .wx-day-dot { width: 2rem; height: 2rem; font-size: 0.9rem; }
+.compare-day small { font-size: 0.7rem; min-height: 1em; }

@@ -24,7 +24,7 @@
 /* ---- 時間帯ごとの空 ------------------------------------------------------- */
 /* 日中の空は下の方ほど白に近づけすぎると、透けたカードと合わさって画面が白飛びして見えた(2026-10-09)ので、
    下の方も青みを残す。霧・曇りの空も同じ理由で一段落とす。 */
-.wx-day   { --wx-sky-top: #3a86d8; --wx-sky-mid: #6aa6e2; --wx-sky-bottom: #9cc4ea; --wx-glow: 255, 248, 220; }
+.wx-day   { --wx-sky-top: #2f78c8; --wx-sky-mid: #5a98d6; --wx-sky-bottom: #94bde6; --wx-glow: 255, 248, 220; }
 .wx-dawn  { --wx-sky-top: #48609e; --wx-sky-mid: #d99a9a; --wx-sky-bottom: #f6d2a8; --wx-glow: 255, 205, 150; }
 .wx-dusk  { --wx-sky-top: #2e3f7a; --wx-sky-mid: #b4708c; --wx-sky-bottom: #f0a878; --wx-glow: 255, 170, 120; }
 .wx-night { --wx-sky-top: #070b1d; --wx-sky-mid: #142046; --wx-sky-bottom: #26355f; --wx-glow: 190, 210, 255; --wx-fog: 190, 200, 225; }
@@ -200,7 +200,7 @@
 /* 背景を見せるため、地点ページのカードはふだんより透けさせる(2026-10-07にさらに透明に。
    文字の読みやすさは、glass.cssの強めのぼかし(--glass-filter)で保つ)。 */
 .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card {
-    background: rgba(255, 255, 255, 0.46);
+    background: rgba(255, 255, 255, 0.56);  /* 2026-10-09: 空を濃くしたぶん0.46→0.56(文字の読みやすさのため) */
 }
 :root[data-theme="dark"] .wx-scene ~ main .card,
 :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,

@@ -50,7 +50,8 @@
     }
 
     /* カレンダー本体。opts: marks({日付: [種類]}), selected, today, month("YYYY-MM-DD"のどれか),
-       onPick(日付, イベント), href(日付→URL。あればリンクにする), showDots, label */
+       onPick(日付, イベント), href(日付→URL。あればリンクにする), showDots, label,
+       heat({日付: 川霧を観測した地点数}。あれば地点数に応じて日の色を濃くする、2026-10-09) */
     function create(container, opts) {
         opts = opts || {};
         var marks = opts.marks || {};
@@ -82,6 +83,14 @@
                 legend.insertAdjacentHTML("beforeend", '<span><i class="rfcal-dot ' + KINDS[k].cls + '"></i>' + KINDS[k].label + "</span>");
             });
             root.appendChild(legend);
+        }
+        if (opts.heat) {
+            var heatLegend = document.createElement("div");
+            heatLegend.className = "rfcal-heat-legend";
+            heatLegend.innerHTML = "<span>川霧の地点数</span><i class=\"rfcal-day has\"></i><i class=\"rfcal-day has fog1\"></i>" +
+                "<i class=\"rfcal-day has fog2\"></i><i class=\"rfcal-day has fog3\"></i><i class=\"rfcal-day has fog4\"></i><span>多い</span>";
+            heatLegend.setAttribute("aria-hidden", "true");
+            root.appendChild(heatLegend);
         }
         container.appendChild(root);
         var title = root.querySelector(".rfcal-title");
@@ -130,6 +139,13 @@
                     dots.className = "rfcal-dots";
                     kinds.forEach(function(k) { dots.insertAdjacentHTML("beforeend", '<i class="rfcal-dot ' + KINDS[k].cls + '"></i>'); });
                     el.appendChild(dots);
+                }
+                // 川霧の地点数で色の濃さを変える(opts.heat: {日付: 地点数})
+                var fogN = opts.heat && inMonth && kinds ? opts.heat[s] || 0 : 0;
+                if (fogN) {
+                    el.classList.add("fog" + (fogN >= 11 ? 4 : fogN >= 6 ? 3 : fogN >= 3 ? 2 : 1));
+                    el.setAttribute("aria-label", el.getAttribute("aria-label") + " 川霧" + fogN + "地点");
+                    el.title = "川霧 " + fogN + "地点";
                 }
                 if (el.tagName !== "SPAN") { el.tabIndex = s === focusDate ? 0 : -1; }
                 row.appendChild(el);
@@ -274,7 +290,9 @@
         if (!dates.length) { return; }
         var marks = {}, kind = el.dataset.kind || "observations";
         dates.forEach(function(d) { marks[d] = [kind]; });
-        create(el, { marks: marks, href: hrefFrom(el.dataset.href), label: el.dataset.label || "日付を選ぶ" });
+        var heat = null;
+        try { heat = el.dataset.fog ? JSON.parse(el.dataset.fog) : null; } catch (e) { heat = null; }
+        create(el, { marks: marks, heat: heat, href: hrefFrom(el.dataset.href), label: el.dataset.label || "日付を選ぶ" });
     }
     function initButton(btn) {
         btn.setAttribute("aria-haspopup", "dialog");

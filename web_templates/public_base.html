@@ -26,7 +26,10 @@
     --pf-surface: #ffffff;
     --pf-border: #dbe3ea;
     --pf-text: #1c2733;
-    --pf-muted: #5d6b78;
+    --pf-muted: #46525e;  /* 2026-10-09: 空の背景+透けたカードの上で薄かったので濃くした(元 #5d6b78) */
+    --pf-on-sky: #1c2733;
+    --pf-on-sky-link: #0a2a40;
+    --pf-vfa: #123f5e;
     --pf-primary: #1a5276;
     --pf-header-1: #123c58;
     --pf-header-2: #2a6f97;
@@ -48,6 +51,9 @@
         --pf-border: #2c3944;
         --pf-text: #e6edf3;
         --pf-muted: #97a6b4;
+    --pf-on-sky: #97a6b4;
+    --pf-on-sky-link: #7fb3d9;
+    --pf-vfa: var(--pf-lv3);
         --pf-primary: #7fb3dc;
         --pf-header-1: #0d2433;
         --pf-header-2: #1b4a66;
@@ -67,6 +73,9 @@
     --pf-border: #2c3944;
     --pf-text: #e6edf3;
     --pf-muted: #97a6b4;
+    --pf-on-sky: #97a6b4;
+    --pf-on-sky-link: #7fb3d9;
+    --pf-vfa: var(--pf-lv3);
     --pf-primary: #7fb3dc;
     --pf-header-1: #0d2433;
     --pf-header-2: #1b4a66;
@@ -183,7 +192,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 .pf-footer { border-top: 1px solid var(--pf-border); padding-top: 1.1rem; display: grid; gap: 0.6rem 2rem;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 .pf-footer p { margin: 0; line-height: 1.7; }
-.pf-footer .pf-footer-meta { grid-column: 1 / -1; opacity: 0.8; }
+.pf-footer .pf-footer-meta { grid-column: 1 / -1; }
+/* フッターと日付の小さな注記は空の背景の上に直接のるので、ライトモードでは濃い文字にする(2026-10-09) */
+.pf-footer { color: var(--pf-on-sky); }
+.pf-footer a { color: var(--pf-on-sky-link); }
+.pf-pill small { color: var(--pf-on-sky); }
 @media (max-width: 760px) { .pf-footer { grid-template-columns: minmax(0, 1fr); } }
 /* 数字は桁をそろえる */
 .pf-card :where(td, th, b, strong) { font-variant-numeric: tabular-nums; }

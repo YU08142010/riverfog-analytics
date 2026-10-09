@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_page_tabs.html" import page_tabs %}
+{% from "_station_checkboxes.html" import station_checkboxes %}
 {% block title %}地点比較{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block content %}
@@ -11,66 +12,72 @@
 ]) }}
 <div class="card">
     <h2>地点比較</h2>
-    <p><a href="{{ url_for('stations_list') }}">&laquo; 地点一覧に戻る(選び直す)</a></p>
     {% if observations_datetime %}
-    <p class="muted">最新観測: {{ observations_datetime.strftime("%Y/%m/%d %H:%M") }}</p>
+    <p class="muted">最新観測: {{ observations_datetime.strftime("%Y/%m/%d %H:%M") }}。選んだ地点の最新のカメラ画像・この先3日の見込み・予測グラフを横に並べて表示します。</p>
     {% endif %}
+    {# 2026-10-09: 地点一覧に戻らなくても、このページで地点を選び直せるようにした #}
+    <details class="compare-picker"{% if not entries %} open{% endif %}>
+        <summary>地点を選び直す({{ selected|length }}地点を選択中)</summary>
+        <form action="{{ url_for('compare_stations') }}" method="get" id="compare-form">
+            {{ station_checkboxes(station_names, "station_cb", checked_names=selected, station_region=station_region) }}
+            <input type="hidden" name="stations" id="compare-stations-field">
+            <button type="submit" class="button" style="margin-top:1rem;">比較する</button>
+        </form>
+    </details>
+    <script>
+    document.getElementById("compare-form").addEventListener("submit", function() {
+        var checked = Array.prototype.slice.call(document.querySelectorAll('input[name="station_cb"]:checked'))
+            .map(function(cb) { return cb.value; });
+        document.getElementById("compare-stations-field").value = checked.join(",");
+    });
+    </script>
 </div>
 
 {% if not entries %}
 <div class="card">
-    <div class="empty-state">{{ icon("empty") }}<span>比較する地点が選択されていません。地点一覧から選び直してください。</span></div>
+    <div class="empty-state">{{ icon("empty") }}<span>比較する地点が選択されていません。上の「地点を選び直す」から選んでください。</span></div>
 </div>
 {% else %}
-<div class="table-scroll">
-<table class="obs-table" style="width:100%;">
-    <thead>
-    <tr>
-        <th>地点</th>
-        <th>現在の現象</th>
-        <th>予測グラフ</th>
-        <th>的中率</th>
-    </tr>
-    </thead>
-    <tbody>
+<div class="compare-grid">
     {% for e in entries %}
-    <tr>
-        <td><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a></td>
-        <td style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }};">
-            {{ e.current.label if e.current else "-" }}
-        </td>
-        <td>
-            {% if e.forecast_file %}
-            <a href="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}">グラフを見る</a>
-            {% else %}
-            -
-            {% endif %}
-        </td>
-        <td>
+    <section class="card compare-col">
+        <h3 class="compare-name"><a href="{{ url_for('station_detail', name=e.name) }}">{{ e.name }}</a>
+            {% if e.region %}<small class="muted">{{ e.region }}</small>{% endif %}</h3>
+        <p class="compare-now">
+            <span class="compare-chip" style="{{ 'background:' + e.current.color + '; color:' + e.current.text_color if e.current else '' }}">{{ e.current.label if e.current else "観測なし" }}</span>
             {% if e.accuracy and e.accuracy.n %}
-            {{ "%.1f"|format(100.0 * e.accuracy.correct / e.accuracy.n) }}%
-            <span class="muted">({{ e.accuracy.correct }}/{{ e.accuracy.n }})</span>
-            {% else %}
-            -
+            <span class="muted">的中率 {{ "%.1f"|format(100.0 * e.accuracy.correct / e.accuracy.n) }}%({{ e.accuracy.correct }}/{{ e.accuracy.n }})</span>
             {% endif %}
-        </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-</div>
-
-<div class="card">
-    <h2>予測グラフの並び</h2>
-    {% for e in entries %}
-    {% if e.forecast_file %}
-    <h3>{{ e.name }}</h3>
-    {% if e.forecast_file.endswith('.html') %}
-    <p style="margin-bottom:1rem;"><a class="button" href="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" target="_blank" rel="noopener">開く</a></p>
-    {% else %}
-    <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" style="margin-bottom:1rem;" loading="lazy" alt="{{ e.name }}の予測グラフ">
-    {% endif %}
-    {% endif %}
+        </p>
+        <figure class="compare-image">
+            {% if e.image and not e.image.unavailable %}
+            {% set image_url = url_for('images_file', date=e.image.date, hhmm=e.image.hhmm, filename=e.image.file) %}
+            <a href="{{ image_url }}" target="_blank" rel="noopener"><img src="{{ image_url }}" loading="lazy" alt="{{ e.name }}の最新のカメラ画像"></a>
+            <figcaption class="muted">{{ e.image.date[5:7]|int }}/{{ e.image.date[8:10]|int }} {{ e.image.hhmm[:2] }}:{{ e.image.hhmm[2:] }} のカメラ画像</figcaption>
+            {% else %}
+            <div class="observation-report-noimage">最新のカメラ画像なし</div>
+            {% endif %}
+        </figure>
+        {% if e.days %}
+        <div class="compare-days">
+            {% for d in e.days %}
+            <div class="compare-day">
+                <span class="compare-day-label">{{ d.label }}</span>
+                <span class="wx-day-dot lv{{ d.level }}">{{ d.short }}</span>
+                <small class="muted">{{ d.span or "" }}</small>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if e.forecast_file and e.forecast_file.endswith('.html') %}
+        <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ e.name }}の予測グラフ" data-notitle="1"
+             data-chart-url="{{ url_for('predictions_figure', date=e.latest_pred_date, filename=e.forecast_file) }}"></div></div>
+        {% elif e.forecast_file %}
+        <img class="full-graph" src="{{ url_for('predictions_file', date=e.latest_pred_date, filename=e.forecast_file) }}" loading="lazy" alt="{{ e.name }}の予測グラフ">
+        {% else %}
+        <p class="muted">予測グラフはまだありません。</p>
+        {% endif %}
+    </section>
     {% endfor %}
 </div>
 {% endif %}

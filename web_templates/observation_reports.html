@@ -2,7 +2,7 @@
 {% block title %}観測報告{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>観測報告(未対応 {{ reports|length }}件)</h2>
+    <h2>観測報告(未対応 <span id="report-count">{{ reports|length }}</span>件)</h2>
     <p class="muted">
         利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測と食い違う1時間だけの
         孤立したブレをシステムが自動検知した内容の確認待ちキューです。どちらも対象時刻の前後1時間ずつを
@@ -16,12 +16,13 @@
         「Enter」キーで訂正を確定、「x」キーで却下できます。
         同時に発生している別の現象(例: 雨と川霧が同時)があれば「+ もう1つの現象を追加」で追加でき、
         追加後はShift+数字キーでも2つ目を選べます。
+        <strong>J / K</strong> キーで次・前の報告に移れます。訂正・却下した報告はその場で消え、次の報告に自動で移ります。
     </p>
 </div>
 
 {% if reports %}
 {% for r in reports %}
-<div class="card observation-report-card">
+<div class="card observation-report-card" tabindex="-1">
     <div class="observation-report-head">
         <div>
             <h3 style="margin:0;">
@@ -70,7 +71,7 @@
     {% endif %}
 
     <div class="observation-report-actions">
-        <form method="post" action="{{ url_for('observation_report_resolve', report_id=r.id) }}" data-ajax data-ajax-reload
+        <form method="post" action="{{ url_for('observation_report_resolve', report_id=r.id) }}" data-ajax
               class="phenom-picker-form" data-current-code="{{ r.reported_code_primary }}"
               data-current-code2="{{ r.reported_code_secondary if r.reported_code_secondary is not none else '' }}"
               data-phenom-style='{{ phenom_style | tojson }}'
@@ -105,17 +106,66 @@
             </div>
             <input type="hidden" name="corrected_code2" class="phenom-picker-value-2" value="">
         </form>
-        <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('observation_report_dismiss', report_id=r.id) }}" data-ajax data-ajax-reload>
+        <form id="observation-report-dismiss-{{ r.id }}" method="post" action="{{ url_for('observation_report_dismiss', report_id=r.id) }}" data-ajax>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="button button-danger">却下<span class="phenom-key">x</span></button>
         </form>
     </div>
 </div>
 {% endfor %}
-{% else %}
-<div class="card"><p class="muted">未対応の報告はありません。</p></div>
 {% endif %}
+<div class="card" id="report-empty"{% if reports %} hidden{% endif %}><p class="muted">未対応の報告はありません。</p></div>
 {% if reports %}
 {% include "_phenom_picker_assets.html" %}
+<script>
+/* 報告を1件ずつ素早く処理する(2026-10-09)。訂正・却下に成功したカードはページを読み直さずにその場で消し、
+   次のカードへフォーカスを移す(フォーカスがあればそのまま数字キー・Enter・xで続けて処理できる)。
+   J/Kで次・前のカードへ移る。 */
+(function() {
+    function cards() { return Array.prototype.slice.call(document.querySelectorAll(".observation-report-card")); }
+    function focusCard(card) {
+        if (!card) { return; }
+        cards().forEach(function(c) { c.classList.toggle("is-current", c === card); });
+        var target = card.querySelector(".phenom-picker-categories .phenom-btn.active") || card.querySelector(".phenom-btn") || card;
+        target.focus({ preventScroll: true });
+        card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    function currentCard() {
+        var a = document.activeElement && document.activeElement.closest && document.activeElement.closest(".observation-report-card");
+        return a || document.querySelector(".observation-report-card.is-current");
+    }
+    document.addEventListener("ajaxformsuccess", function(e) {
+        var card = e.detail.form.closest(".observation-report-card");
+        if (!card) { return; }
+        var list = cards(), i = list.indexOf(card);
+        var next = list[i + 1] || list[i - 1] || null;
+        card.classList.add("is-leaving");
+        setTimeout(function() {
+            card.remove();
+            var left = cards().length;
+            var cnt = document.getElementById("report-count");
+            if (cnt) { cnt.textContent = left; }
+            document.getElementById("report-empty").hidden = left !== 0;
+            focusCard(next);
+        }, 220);
+    });
+    document.addEventListener("keydown", function(e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) { return; }
+        var tag = (e.target.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) { return; }
+        var k = e.key.toLowerCase();
+        if (k !== "j" && k !== "k") { return; }
+        var list = cards(); if (!list.length) { return; }
+        var i = list.indexOf(currentCard());
+        var to = k === "j" ? (i < 0 ? 0 : Math.min(list.length - 1, i + 1)) : (i < 0 ? 0 : Math.max(0, i - 1));
+        e.preventDefault();
+        focusCard(list[to]);
+    });
+    document.addEventListener("focusin", function(e) {
+        var c = e.target.closest && e.target.closest(".observation-report-card");
+        if (c) { cards().forEach(function(x) { x.classList.toggle("is-current", x === c); }); }
+    });
+})();
+</script>
 {% endif %}
 {% endblock %}

@@ -3,16 +3,18 @@
    マークアップが個別にコピーされていた。
    dates(日付の一覧)とkindを渡すと、上にカレンダー(web_static/calendar.js)を出し、
    月ごとの一覧は「一覧で見る」の中に畳む。 #}
-{% macro date_month_groups(date_groups, endpoint, empty_message, dates=None, kind=None) %}
+{% macro date_month_groups(date_groups, endpoint, empty_message, dates=None, kind=None, fog_counts=None) %}
 {% if date_groups %}
 {% if dates %}
 {% set latest = dates|max %}
+{% if fog_counts is none %}{% set fog_counts = daily_fog_counts() %}{% endif %}
 <div class="date-browser">
     <div class="date-browser-cal" data-calendar-inline data-kind="{{ kind or '' }}"
          data-href="{{ url_for(endpoint, date='0000-00-00') }}" data-dates='{{ dates|tojson }}'
+         {% if fog_counts %}data-fog='{{ fog_counts|tojson }}'{% endif %}
          data-label="日付を選ぶ"><noscript><p class="muted">カレンダーの表示にはJavaScriptが必要です。下の一覧から選んでください。</p></noscript></div>
     <div class="date-browser-side">
-        <p class="muted date-browser-hint">色の付いた日にデータがあります。押すとその日のページを開きます。</p>
+        <p class="muted date-browser-hint">色の付いた日にデータがあります。押すとその日のページを開きます。{% if fog_counts %}青が濃い日ほど、川霧を観測した地点が多い日です。{% endif %}</p>
         <a class="date-browser-latest" href="{{ url_for(endpoint, date=latest) }}">
             <span>最新</span><b>{{ latest[5:7]|int }}月{{ latest[8:10]|int }}日</b><small>{{ latest[:4] }}年</small>
         </a>
