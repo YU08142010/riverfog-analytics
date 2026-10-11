@@ -130,7 +130,7 @@
 {% macro bars(items, unit, current=None) %}
 {% set ns = namespace(mx=0) %}
 {% for it in items %}{% if it.rate is not none and it.rate > ns.mx %}{% set ns.mx = it.rate %}{% endif %}{% endfor %}
-<div class="pf-bars" role="img" aria-label="{{ unit }}ごとの川霧の割合">
+<div class="pf-bars" role="img" aria-label="{{ unit }}ごとの{{ fog_word(name) }}の割合">
     {% for it in items %}
     <div class="pf-bar{% if it.key == current %} pf-cur{% endif %}" title="{{ it.key }}{{ unit }}: {{ '%.1f%%'|format(it.rate * 100) if it.rate is not none else 'データ不足' }}(判定{{ it.n }}件)">
         {% if it.rate is not none %}
@@ -148,7 +148,7 @@
 <div class="pf-card">
     <h2>過去の発生傾向</h2>
     {% if stats and stats.n %}
-    <p style="margin-top:0;">日中の判定 <b>{{ "{:,}".format(stats.n) }}</b> 件のうち、川霧ありは <b>{{ "{:,}".format(stats.n_fog) }}</b> 件(発生率 <b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)である。</p>
+    <p style="margin-top:0;">日中の判定 <b>{{ "{:,}".format(stats.n) }}</b> 件のうち、{{ fog_word(name) }}ありは <b>{{ "{:,}".format(stats.n_fog) }}</b> 件(発生率 <b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)である。</p>
     <div class="pf-two">
         <div>
             <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">月別発生率(%)</h3>
@@ -159,7 +159,7 @@
             {{ bars(stats.by_hour, "時", now_hour) }}
         </div>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">数値は各月・各時刻の川霧発生率(%)。判定件数が{{ min_n }}件未満の区分は「-」とした。2026年8月以前は、別手法で収集し目視で確認した記録である。</p>
+    <p class="pf-muted" style="margin-bottom:0;">数値は各月・各時刻の{{ fog_word(name) }}の発生率(%)。判定件数が{{ min_n }}件未満の区分は「-」とした。2026年8月以前は、別手法で収集し目視で確認した記録である。</p>
     {% else %}
     <p class="pf-muted">集計は準備中である。</p>
     {% endif %}

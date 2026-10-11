@@ -27,6 +27,49 @@ SUMMARY_FOG_CODES = {1, 2, 3}  # 「川霧」とみなすコード（川霧F1・
 # ズレる問題があり、川霧(1〜3)のみに統一した。これによりアラート・ダッシュボード集計・
 # モデル評価指標もすべて川霧基準になる(全体霧単独の日はアラート対象外になる)。
 
+# --- 地域ごとの予測の対象(2026-10-11) ---------------------------------------------
+# 会津は盆地で、霧の多くがカメラ画像の判定で全体霧(4〜6)になり、川霧(1〜3)だけでは画像の0.5%しか無く
+# 予測が成り立たなかった(会津のAP 0.036、2026-10-08)。会津だけ、全体霧も含めた「霧」を予測の対象にする。
+# 学習の目的変数(fog_model)・答え合わせ(prediction_log・分析ページ)・公開ページの「いま霧」・通知が
+# target_codes()を使う。REGION_TARGET_ENABLEDをFalseにすると、全地域が川霧だけに戻る。
+REGION_TARGET_CODES = {"会津": frozenset({1, 2, 3, 4, 5, 6})}
+# 2026-10-11の比較(aizu_target_check.py): 会津を霧全体にして会津だけの別モデルにすると、会津のAPは0.017→0.20になるが、
+# 「地点×時刻の過去の発生率」だけの予測(AP 0.23)にまだ及ばない(会津のデータが2026-09からで、学習の行が少ない)。
+# 毎月1日に比べ直し、会津のモデルが過去の発生率を上回るようになったら有効にする。
+REGION_TARGET_ENABLED = False
+_station_regions = None
+
+
+def station_region(station):
+    global _station_regions
+    if _station_regions is None:
+        try:
+            from common import load_camera_regions
+            _station_regions = load_camera_regions()
+        except Exception:
+            _station_regions = {}
+    return _station_regions.get(station)
+
+
+def target_codes(station=None):
+    """その地点で「予測の対象の霧」とみなす現象コード(主コード)。"""
+    if REGION_TARGET_ENABLED and station is not None:
+        codes = REGION_TARGET_CODES.get(station_region(station))
+        if codes:
+            return codes
+    return SUMMARY_FOG_CODES
+
+
+def target_word(station=None):
+    """画面の言葉: 予測の対象が全体霧も含む地点は「霧」、それ以外は「川霧」。"""
+    return "霧" if target_codes(station) is not SUMMARY_FOG_CODES else "川霧"
+
+
+def wide_target_stations(station_names):
+    """全体霧も対象にしている地点の名前(答え合わせのSQLで使う)。"""
+    return [n for n in station_names if target_codes(n) is not SUMMARY_FOG_CODES]
+
+
 # --- 2コード同時観測(2026-09対応) -----------------------------------------------
 # 1つの観測に現象コードを最大2つまで同時記録できる(例:雨が降りながら川霧も出ている等)。
 # 順序が意味を持つ: 家族グループは{0} < {1,2,3} < {4,5,6} < {7,8} < {9,10}の順に

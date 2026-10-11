@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}今朝の川霧{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "一覧", "url": url_for('stations_list'), "active": false},
+    {"label": "比較", "url": url_for('compare_stations'), "active": false},
+    {"label": "地図", "url": url_for('map_page'), "active": false},
+    {"label": "今朝の川霧", "url": url_for('gallery_page'), "active": true},
+]) }}
+<div class="card">
+    <div class="gallery-head">
+        <h2>{{ date_label }}の朝の川霧</h2>
+        <nav class="gallery-nav" aria-label="日付">
+            <a class="button cancel small-btn" href="{{ url_for('gallery_page', date=prev_date) }}">← 前の日</a>
+            {% if next_date %}<a class="button cancel small-btn" href="{{ url_for('gallery_page', date=next_date) }}">次の日 →</a>{% endif %}
+        </nav>
+    </div>
+    <p class="muted">5〜11時に川霧が写っていた画像を、地点ごとに1枚、霧がよく出ている順に並べています(カメラ画像のAI判定。かすみ度は晴れた日の同じカメラの画像と比べた値)。</p>
+</div>
+{% if items %}
+<div class="gallery-grid">
+    {% for it in items %}
+    {% set img = url_for('images_file', date=date, hhmm=it.hhmm, filename=it.station ~ '.jpg') %}
+    <figure class="card gallery-item{{ ' is-top' if loop.first }}">
+        <a href="{{ img }}" target="_blank" rel="noopener"><img src="{{ img }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像({{ it.label }})"></a>
+        <figcaption>
+            <span class="gallery-title"><a href="{{ url_for('station_detail', name=it.station) }}">{{ it.station }}</a>
+                <small class="muted">{{ it.region }} ・ {{ it.hhmm[:2]|int }}:{{ it.hhmm[2:] }}</small></span>
+            <span class="gallery-meta">
+                <span class="gallery-chip">{{ it.label }}</span>
+                {% if it.score is not none %}<span class="muted">かすみ度 {{ it.score }}</span>{% endif %}
+                {% if has_video %}<a href="{{ url_for('station_timelapse_video', name=it.station, date=date) }}" target="_blank" rel="noopener">この日の動画</a>{% endif %}
+            </span>
+        </figcaption>
+    </figure>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card"><div class="empty-state">この日の朝は、川霧が写っていた画像がありません。</div></div>
+{% endif %}
+{% endblock %}

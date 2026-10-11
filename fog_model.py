@@ -66,6 +66,7 @@ from sklearn.metrics import average_precision_score, confusion_matrix, f1_score,
 
 from common import BASE_DIR, JST, load_camera_regions, request_with_dns_fallback
 import fog_data
+import fog_features
 import station_weather
 import fog_tree_viz
 
@@ -373,10 +374,11 @@ def normalize_model_type_label(model_type):
     return model_type.replace("hybrid", "RF+XGBoost")
 
 
-def is_fog_code(value):
-    """現象コード(2コード同時観測のパック値を含む)が川霧(SUMMARY_FOG_CODES)かどうか。
-    川霧は家族グループの並び上、2コード同時でも必ず主コード(数値の小さい方)側に入る。
-    二値の予測値(1=川霧あり、0=川霧なし)にもそのまま使える(1は川霧コードに含まれる)。"""
+def is_fog_code(value, station=None):
+    """現象コード(2コード同時観測のパック値を含む)が予測の対象の霧かどうか。stationを渡すと、
+    その地点の対象(fog_features.target_codes。会津は全体霧も含む)で判定する。省略時は川霧(SUMMARY_FOG_CODES)。
+    霧は家族グループの並び上、2コード同時でも必ず主コード(数値の小さい方)側に入る。
+    二値の予測値(1=霧あり、0=霧なし)にもそのまま使える(1はどの対象にも含まれる)。"""
     if value is None:
         return False
     try:
@@ -386,7 +388,7 @@ def is_fog_code(value):
     except (TypeError, ValueError):
         return False
     primary = code // 100 if code > 10 else code
-    return primary in SUMMARY_FOG_CODES
+    return primary in (fog_features.target_codes(station) if station is not None else SUMMARY_FOG_CODES)
 
 
 # --- 評価指標 -------------------------------------------------------------------------
@@ -601,7 +603,8 @@ def _build_training_frame_uncached(main_df, phenom_df, phenom_cols, lat, lon, ca
         if df.empty:
             continue
         part = df[weather_features].copy()
-        part["__y"] = df[col].isin(SUMMARY_FOG_CODES).astype(int).to_numpy()
+        # 予測の対象: 川霧(1〜3)。会津など全体霧も対象の地域は4〜6も含める(fog_features.target_codes)
+        part["__y"] = df[col].isin(fog_features.target_codes(col)).astype(int).to_numpy()
         part["__datetime"] = df["datetime"].to_numpy()
         part["__station"] = col
         frames.append(part)

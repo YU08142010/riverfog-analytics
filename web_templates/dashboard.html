@@ -247,6 +247,23 @@ document.addEventListener("ajaxformsuccess", function(e) {
     {% endif %}
 </div>
 
+{% set mg = morning_gallery(3) %}
+{% if mg["items"] %}
+<div class="card">
+    <h2>{{ "今朝" if mg.today else "昨日の朝" }}の川霧</h2>
+    <div class="dash-gallery">
+        {% for it in mg["items"] %}
+        {% set img = url_for('images_file', date=mg.date, hhmm=it.hhmm, filename=it.station ~ '.jpg') %}
+        <figure>
+            <a href="{{ url_for('station_detail', name=it.station) }}"><img src="{{ img }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像({{ it.label }})"></a>
+            <figcaption><strong>{{ it.station }}</strong> <span class="muted">{{ it.hhmm[:2]|int }}:{{ it.hhmm[2:] }} ・ {{ it.label }}</span></figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+    <p style="margin:0.6rem 0 0;"><a href="{{ url_for('gallery_page', date=mg.date) }}">ほかの地点も見る →</a></p>
+</div>
+{% endif %}
+
 <div class="card">
     <h2>最新のカメラ画像</h2>
     {% if latest_image_date and latest_image_hour %}

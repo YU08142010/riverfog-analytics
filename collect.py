@@ -442,6 +442,71 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+# --- 判定例(few-shot、2026-10-11) ---------------------------------------------------------------
+# 正解セット(gold_set.py)で人が判定した画像を、判定の手本としてプロンプトの先頭に添える。
+# .envのGEMINI_FEWSHOT=1で有効(既定はオフ)。効果は fewshot_check.py で正解セットの画像を判定し直して確かめる。
+FEWSHOT_PLAN = ((1, 2), (2, 1), (3, 1), (5, 1), (0, 2), (7, 1))   # (まとまりの代表コード, 枚数): 川霧を厚めに
+FEWSHOT_GROUPS = {0: {0}, 1: {1}, 2: {2}, 3: {3}, 5: {4, 5, 6}, 7: {7, 8}}
+
+
+def fewshot_examples(exclude=None, max_total=8):
+    """人の判定が一致した(または1人だけが判定した)正解セットの画像から、判定例 [(コード, ラベル文, 画像bytes)]。
+    excludeの(地点, 日時)は使わない(評価のときに、判定する画像そのものを手本に入れないため)。"""
+    import sqlite3
+    db = BASE_DIR / "data" / "users.db"
+    if not db.exists():
+        return []
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT s.station_name, s.target_datetime, GROUP_CONCAT(l.code) FROM gold_samples s "
+            "JOIN gold_labels l ON l.sample_id = s.id WHERE l.code >= 0 GROUP BY s.id ORDER BY s.target_datetime DESC"
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+    pool = {}
+    for station, dt, codes in rows:
+        if exclude and (station, dt) in exclude:
+            continue
+        cs = {int(c) for c in codes.split(",")}
+        prim = {c // 100 if c > 10 else c for c in cs}
+        if len(prim) != 1:
+            continue  # 人の間で分かれた画像は手本にしない
+        p = prim.pop()
+        path = IMAGE_ARCHIVE_DIR / dt[:10] / (dt[11:13] + dt[14:16]) / f"{station}.jpg"
+        if path.is_file():
+            pool.setdefault(p, []).append((station, dt, path, p))
+    out, used_stations = [], set()
+    for rep, n in FEWSHOT_PLAN:
+        cands = [x for c in FEWSHOT_GROUPS[rep] for x in pool.get(c, [])]
+        # まだ使っていない地点を先に、新しい日付から
+        cands.sort(key=lambda x: x[1], reverse=True)
+        cands.sort(key=lambda x: x[0] in used_stations)
+        for station, dt, path, code in cands[:n]:
+            try:
+                out.append((code, PHENOM_LABELS.get(code, "現象なし") if code else "現象なし", resize_image(path.read_bytes())))
+                used_stations.add(station)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Few-shot example skipped (%s %s): %s", station, dt, e)
+        if len(out) >= max_total:
+            break
+    return out[:max_total]
+
+
+def _fewshot_contents(examples):
+    from google.genai import types
+    if not examples:
+        return []
+    parts = ["以下は、人が同じ基準で判定した手本です(判定する対象ではありません)。見え方の基準の参考にしてください。"]
+    for i, (code, label, data) in enumerate(examples, start=1):
+        parts.append(f"手本{i}: 人の判定はコード{code}「{label}」")
+        parts.append(types.Part.from_bytes(data=data, mime_type="image/jpeg"))
+    parts.append("ここからが判定する画像です。")
+    return parts
+
+
 def _phenom_label_for_prompt(code):
     # codeは2コード同時観測(2026-09対応)のパック済み値のこともあるため、
     # fog_features.phenom_labelで主・副コードを結合したラベルにする。
@@ -687,6 +752,14 @@ def classify_images(cameras, images_by_name, weather=None, run_time=None):
     # 既定ではヒントを付けない。従来の挙動に戻す場合は.envにGEMINI_WEATHER_HINT=1を設定する。
     weather_context = _weather_context_text(weather) if os.environ.get("GEMINI_WEATHER_HINT", "0") == "1" else ""
     contents, index_to_name = _build_contents(list(resized_by_name.items()), weather_context=weather_context)
+    if os.environ.get("GEMINI_FEWSHOT", "0") == "1":
+        try:
+            shots = _fewshot_contents(fewshot_examples())
+            if shots:
+                contents = shots + contents
+                log.info("Added %d few-shot example image(s) from the gold set", sum(1 for p in shots if not isinstance(p, str)))
+        except Exception as e:  # noqa: BLE001  手本が作れなくても判定は続ける
+            log.warning("Few-shot examples skipped: %s", e)
     primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     parsed = _classify_with_model(contents, primary_model, api_keys)
     if parsed is None:

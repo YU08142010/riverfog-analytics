@@ -22,7 +22,7 @@
 </div>
 {% endif %}
 {% if station_days %}
-<div class="wx-days" role="list" aria-label="この先3日の川霧の見込み">
+<div class="wx-days" role="list" aria-label="この先3日の{{ fog_word(name) }}の見込み">
     {% for d in station_days %}
     <div class="card wx-day-card lv{{ d.level }}" role="listitem">
         <div class="wx-day-head"><b>{{ d.label }}</b><small>{{ d.date }}</small></div>
@@ -35,8 +35,8 @@
 {% endif %}
 {% if hourly %}
 <div class="card">
-    <h2>時間ごとの川霧の出やすさ</h2>
-    <div class="wx-hourly" role="list" aria-label="時間ごとの川霧の出やすさ">
+    <h2>時間ごとの{{ fog_word(name) }}の出やすさ</h2>
+    <div class="wx-hourly" role="list" aria-label="時間ごとの{{ fog_word(name) }}の出やすさ">
         {% for h in hourly %}
         {% if h.day %}<span class="wx-hour-day">{{ h.day }}</span>{% endif %}
         <div class="wx-hour{{ ' now' if h.now }}" role="listitem" title="{{ h.label }}: {{ {3: '出やすい', 2: 'やや出やすい', 1: '出にくい'}[h.level] }}">
@@ -60,6 +60,10 @@
     <div class="station-chip" style="display:inline-block; background:{{ current.color }}; color:{{ current.text_color }}; padding:0.6rem 1rem; font-size:0.95rem;">
         現在の現象: {{ current.label }}
     </div>
+    {% set hz = haze_latest(name) %}
+    {% if hz and hz.score is not none %}
+    <span class="haze-badge" title="晴れた日の同じカメラの画像と比べた、輪郭の失われ方と白っぽさ(0〜100、画像処理で計算。{{ hz.datetime[11:16] }}の画像)">かすみ度 <b>{{ hz.score }}</b></span>
+    {% endif %}
     {% if current.code is not none and session.get("user_id") %}
     {% if can_correct %}
     <form method="post" action="{{ url_for('station_correct_observation', name=name) }}" data-ajax
@@ -257,8 +261,8 @@
             </p>
             <table class="obs-table" style="width:auto;">
                 <tbody>
-                <tr><td>予測</td><td>{{ "川霧あり" if feature_snapshot.predicted_fog else "川霧なし" }}</td></tr>
-                <tr><td>川霧確率</td><td>{{ "%.1f"|format(feature_snapshot.predicted_fog_prob * 100) }}%</td></tr>
+                <tr><td>予測</td><td>{{ fog_word(name) ~ ("あり" if feature_snapshot.predicted_fog else "なし") }}</td></tr>
+                <tr><td>{{ fog_word(name) }}確率</td><td>{{ "%.1f"|format(feature_snapshot.predicted_fog_prob * 100) }}%</td></tr>
                 <tr><td>判定しきい値</td><td>{{ "%.2f"|format(feature_snapshot.fog_threshold) if feature_snapshot.fog_threshold is not none else "-" }}</td></tr>
                 <tr><td>モデル種別</td><td>{{ feature_snapshot.model_type or "-" }}</td></tr>
                 </tbody>
@@ -302,6 +306,7 @@
         <button type="button" class="button" id="tl-prev">&laquo; 前</button>
         <button type="button" class="button" id="tl-play">再生</button>
         <button type="button" class="button" id="tl-next">次 &raquo;</button>
+        <a class="button cancel" id="tl-video" href="#" target="_blank" rel="noopener" hidden>この日を動画で見る</a>
     </div>
     <script>
     (function() {
@@ -342,6 +347,8 @@
             cap.textContent = items[idx].caption + " (" + (idx + 1) + "/" + items.length + ")";
             scrubber.max = String(items.length - 1);
             scrubber.value = String(idx);
+            var vid = document.getElementById("tl-video");
+            if (vid && currentDate) { vid.href = {{ url_for('station_timelapse_video', name=name, date='0000-00-00')|tojson }}.replace("0000-00-00", currentDate); vid.hidden = false; }
         }
 
         document.getElementById("tl-prev").addEventListener("click", function() { show(idx - 1); });

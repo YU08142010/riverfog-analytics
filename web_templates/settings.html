@@ -93,6 +93,7 @@
         {{ toggle("push_fog_soon", s.push_fog_soon, "まもなく川霧が出やすくなるとき", "毎時の観測で更新した予測で、3時間以内に「発生可能性 高」の時刻がある地点(地点ごとに1日1回)") }}
         {{ toggle("push_fog_now", s.push_fog_now, "川霧を観測したとき", "毎時のカメラ画像のAI判定で川霧だった地点(地点ごとに1日1回)") }}
         {{ toggle("push_camera", s.push_camera, "カメラ画像が届かないとき", "対象の地点のカメラが半日ほど続けて取得できていないとき") }}
+        {{ toggle("push_monthly_report", s.push_monthly_report, "月ごとのレポート", "毎月1日の朝、前の月の川霧の観測と予測の成績のまとめ(PDF)ができたとき") }}
 
         <h3 class="set-subhead">メッセージ</h3>
         {{ toggle("push_dm", s.push_dm, "DMが届いたとき") }}

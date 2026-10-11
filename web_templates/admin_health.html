@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}システムの健康{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>システムの健康(毎朝6:40の確認)</h2>
+    <p class="muted">前の晩から朝までの、予測・毎時の収集・Geminiの判定・ディスク・バックアップ・夜間の巡回テスト(2:20)・
+        ウェブのサービスを確かめた結果です(health_report.py・smoke_test.py)。問題があったときは、通知を受け取っている管理者に届きます。</p>
+    {% if report %}
+    <p><strong>{{ report.checked_at[:16] }}</strong> の確認:
+        {% if report.issues %}<span class="health-bad">{{ report.issues|length }}件の問題</span>{% else %}<span class="health-good">問題なし</span>{% endif %}</p>
+    {% if report.issues %}<ul class="health-list bad">{% for i in report.issues %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% if report.ok %}<ul class="health-list">{% for i in report.ok %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% else %}
+    <p class="muted">まだ確認の結果がありません。</p>
+    {% endif %}
+</div>
+<div class="card">
+    <h3>夜間の巡回テスト</h3>
+    {% if smoke %}
+    <p>{{ smoke.checked_at[:16] }}: {{ smoke.n }}ページを開き、開けなかったページ {{ smoke.failed|length }}件、
+        15秒以上かかったページ {{ smoke.slow|length }}件(最も遅いもの {{ smoke.max_sec }}秒)。</p>
+    {% if smoke.failed or smoke.slow %}
+    <table class="obs-table">
+        <thead><tr><th>ページ</th><th>結果</th><th>秒</th></tr></thead>
+        <tbody>
+        {% for r in smoke.failed + smoke.slow %}
+        <tr><td style="word-break:break-all;">{{ r.path }}</td><td>{{ r.status if r.status else "応答なし" }}{{ "" if r.ok else "(失敗)" }}</td><td>{{ r.sec }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% else %}
+    <p class="muted">まだ巡回テストの結果がありません。</p>
+    {% endif %}
+</div>
+{% endblock %}

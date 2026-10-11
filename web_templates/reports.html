@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}月ごとのレポート{% endblock %}
+{% macro pct(v) %}{{ "-" if v is none else "%.0f%%"|format(100 * v) }}{% endmacro %}
+{% block content %}
+<div class="card">
+    <h2>月ごとのレポート</h2>
+    <p class="muted">毎月1日の朝に、前の月の川霧の観測(カメラ画像のAI判定、人の訂正を反映)と、前日夜の予測の成績をPDFにまとめています。
+        できたときに通知を受け取るには、<a href="{{ url_for('settings_page') }}#push">設定</a>の「月ごとのレポート」をオンにしてください。</p>
+</div>
+{% if reports %}
+<div class="report-list">
+    {% for r in reports %}
+    {% set perf = r.performance.get('全体', {}) %}
+    <section class="card report-item">
+        <h3>{{ r.label }}</h3>
+        <div class="report-stats">
+            <div><span class="muted">川霧を観測した日</span><b>{{ r.fog_days_any }}<small> / {{ r.n_days }}日</small></b></div>
+            <div><span class="muted">予測の適合率</span><b>{{ pct(perf.precision) }}</b></div>
+            <div><span class="muted">予測の再現率</span><b>{{ pct(perf.recall) }}</b></div>
+        </div>
+        {% if r.top_stations %}<p class="muted">多かった地点: {% for t in r.top_stations[:5] %}{{ t.station }}({{ t.days }}日){{ "・" if not loop.last }}{% endfor %}</p>{% endif %}
+        <p class="report-actions">
+            <a class="button" href="{{ url_for('report_pdf', month=r.month) }}" target="_blank" rel="noopener">PDFを開く</a>
+            <a class="button cancel" href="{{ url_for('report_pdf', month=r.month, download=1) }}">保存</a>
+            <small class="muted">{{ r.generated_at }}に作成</small>
+        </p>
+    </section>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだレポートがありません(毎月1日の朝に作られます)。</div></div>
+{% endif %}
+{% endblock %}

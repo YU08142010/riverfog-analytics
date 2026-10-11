@@ -10,6 +10,7 @@
     {"label": "一覧", "url": url_for('stations_list'), "active": request.path.startswith('/stations')},
     {"label": "比較", "url": url_for('compare_stations'), "active": request.path.startswith('/compare')},
     {"label": "地図", "url": url_for('map_page'), "active": request.path.startswith('/map')},
+    {"label": "今朝の川霧", "url": url_for('gallery_page'), "active": false},
 ]) }}
 <div class="card">
     <h2>地点一覧</h2>

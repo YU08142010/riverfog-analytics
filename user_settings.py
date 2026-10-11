@@ -32,6 +32,7 @@ SETTINGS = {
     "push_fog_soon": {"default": True, "type": bool},
     "push_fog_now": {"default": True, "type": bool},
     "push_camera": {"default": False, "type": bool},
+    "push_monthly_report": {"default": True, "type": bool},
     "push_dm": {"default": True, "type": bool},
     "push_group": {"default": "mention", "choices": ["all", "mention", "off"]},
     "push_preview": {"default": True, "type": bool},
@@ -115,7 +116,7 @@ SECTIONS = {
     "display": ["theme", "text_size", "reduce_motion", "calm_background", "start_page"],
     "privacy": ["show_online", "mute_profile_sounds"],
     "push": ["push_stations", "push_custom_stations", "push_digest_morning", "push_digest_evening",
-             "push_digest_level", "push_fog_soon", "push_fog_now", "push_camera", "push_dm", "push_group",
+             "push_digest_level", "push_fog_soon", "push_fog_now", "push_camera", "push_monthly_report", "push_dm", "push_group",
              "push_preview", "push_admin", "quiet_enabled", "quiet_start", "quiet_end"],
 }
 

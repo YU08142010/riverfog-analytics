@@ -193,6 +193,41 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
   下・左にはみ出す分は余白を広げて1回だけ描き直す)。目盛りの文字は描くたびにフォーマッタから作り直されるので、
   Textを直接書き換えずFixedFormatterを差し替えること。ブラウザはいつも2倍の解像度で要求する(base.htmlのchartImageSrc)。
 
+## 運用の見守り・画像の活用・月報(2026-10-11〜)
+
+crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_before_20261011.txt`)。
+- **夜間の巡回テスト** `smoke_test.py`(毎日02:20): 使い捨ての管理者 zz-smoke@example.invalid を作り(最後に必ず消す)、
+  主要ページ・全地点のページ・公開ページ・分析ページのグラフ画像を開いて、ステータスと秒数を `data/health/smoke.json` に書く。
+- **朝の健康チェック** `health_report.py`(毎日06:40): 昨晩の予測・毎時の収集の回数・Geminiのクォータ超過/全キー失敗・
+  ディスク・バックアップ・巡回テスト・サービスを確かめ、`data/health/latest.json` に書く。問題があれば、通知を受け取っている
+  管理者に送る(`ALERT_WEBHOOK_URL`があればそこにも)。画面は `/admin/health`。`--dry-run`で送らずに確認できる。
+- **かすみ度** `haze_index.py`・`haze_run.py`(毎時40分に新しい画像、毎晩23:10に過去分。`/tmp/rf_haze.lock`): 同じカメラの
+  「見通しの良い時」の画像(label_verifyと同じ選び方)と比べた、輝度の散らばりの比・輪郭(ラプラシアン)の比・ダークチャネルの差・
+  明るさの差を `data/haze.db` に保存。かすみ度(0〜100)は `haze_index.score()`(輪郭の比だけ。2026-10-11の照合で霧のラベルとのAUCは霧全体0.77・川霧0.69。
+  ラベルの良し悪しを単独で決めるほどの強さは無い)。地点ページに直近3時間の値を出し、ギャラリーの
+  並び順に使う。霧のラベルとの照合は `haze_run.py --check`(`data/experiments/haze_check.json`)。
+- **今朝の川霧** `gallery.py`・`/gallery`(地点のタブ、ダッシュボードのカード): その日5〜11時に川霧(人の訂正を反映、二重判定で
+  霧なし・highは除く)が写っていた画像を地点ごとに1枚、かすみ度の高い順に。
+- **タイムラプス動画** `timelapse.py`・`/stations/<地点>/timelapse/<日付>.mp4`: その日の毎時の画像をクロスフェードでつないだMP4
+  (12fps・幅960、ffmpegはpipのimageio-ffmpeg同梱)。`data/timelapse/<日付>/<地点>_<枚数>.mp4` に保存して使い回し、画像が増えたら
+  作り直す。地点ページのタイムラプスとギャラリーから開ける。
+- **月ごとのレポート** `monthly_report.py`(毎月1日07:10、前月分)・`/reports`: 川霧を観測した日数(地点別・地域別)・日ごとの
+  観測地点数・時刻別の割合・前日夜の本番の予測の成績(地域別。後からやり直した予測は数えない)・その月のいちばん霧が出ていた朝を
+  `data/reports/<YYYY-MM>.pdf`(と要約の.json)にし、設定画面の「月ごとのレポート」がオンの人に通知する。
+- **判定例(few-shot)** `collect.fewshot_examples`: 正解セットで人の判定がそろった画像を手本としてGeminiの指示の先頭に添える。
+  `.env`の`GEMINI_FEWSHOT=1`で有効(既定はオフ)。効果は `fewshot_check.py`(正解セットの画像を手本あり/なしで判定し直す)。
+- **境界層・逆転の強さの再検証** `bl_recheck.py`: 10/22 23:30に1回だけ(印 `data/experiments/bl_recheck.done`)。過去の予報を入力に
+  直近6週を2週×3で比べ、`data/experiments/bl_recheck.json` に書いて管理者に通知する。`--force`は試し(印を付けず、
+  `bl_recheck_trial.json` に書く)。
+- **地域ごとの予測の対象** `fog_features.REGION_TARGET_CODES`・`REGION_TARGET_ENABLED`(既定はFalse): Trueにすると会津は全体霧
+  (4〜6)も対象になり、学習の目的変数・答え合わせ(prediction_logの的中SQL・分析ページ)・公開ページの「いま霧」・通知が切り替わる。
+  比較は `aizu_target_check.py`(`data/experiments/aizu_target_check*.json`、毎月2日01:00に案Cを比べ直して管理者に通知)。
+  有効にすると、predict.pyは全地点共通のモデルを従来どおり川霧で学習して只見川に使い、会津は会津の地点だけで霧全体を学習した
+  別のモデルで予測する。2026-10-11の評価期間(直近3週、予報入力): 共通モデルのまま会津だけ対象を広げると只見川が悪化(AP 0.200→0.187)、
+  地域別の別モデルなら会津AP 0.017→0.204だが、会津は「地点×時刻の過去の発生率」(AP 0.230)にまだ及ばない(会津のデータは
+  2026-09から)。そのため無効のまま。apply_regression_guardは先頭の地点のモデルしか見ないので、有効にするなら会津のモデルにも
+  同じ確認を足すこと。
+
 ## 試して採らなかった改良(2026-10-08、その6)
 
 直近6週を2週×3でずらし、過去の予報(lead 0、JMA+ECMWFの平均)を入力に比べた

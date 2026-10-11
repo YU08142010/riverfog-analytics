@@ -24,6 +24,7 @@ from common import (
     load_camera_coords, load_camera_regions, now_jst_naive, representative_coords, send_alert,
 )
 import fog_data
+import fog_features
 import fog_graphs
 import fog_model
 import prediction_log
@@ -215,13 +216,42 @@ def main():
         log.info("Marked %d prediction row(s) as daytime/night-time", n_marked)
 
     prev_state = fog_model.load_model_state()
-    models = fog_model.train_shared_model(
-        main_df, phenom_df, station_names, lat, lon,
-        camera_coords=camera_coords, weather_conn=weather_conn, prev_state=prev_state,
-    )
+    # 全地点共通のモデルは、これまでどおり全地域を川霧(1〜3)で学習する(只見川の予測にはこれを使う)。
+    target_enabled = fog_features.REGION_TARGET_ENABLED
+    fog_features.REGION_TARGET_ENABLED = False
+    try:
+        models = fog_model.train_shared_model(
+            main_df, phenom_df, station_names, lat, lon,
+            camera_coords=camera_coords, weather_conn=weather_conn, prev_state=prev_state,
+        )
+    finally:
+        fog_features.REGION_TARGET_ENABLED = target_enabled
     if not models:
         log.warning("No model could be trained (not enough data yet); skipping forecast/graphs")
         return
+    # 地域ごとの予測の対象(2026-10-11〜、fog_features.REGION_TARGET_CODES): 会津は全体霧も含む「霧」を、
+    # 会津の地点だけで学習した別のモデルで予測する。同じ評価期間での比較(aizu_target_check.py)で、
+    # 会津は共通モデルに混ぜるより別モデルの方が良く(AP 0.173→0.204)、只見川は共通モデルのままが良かった。
+    if target_enabled:
+        regions_now = load_camera_regions()
+        for region in fog_features.REGION_TARGET_CODES:
+            cols = [n for n in station_names if regions_now.get(n) == region]
+            if not cols:
+                continue
+            fog_model._FRAME_CACHE["inputs"] = None  # 正解が変わるので組み立て直す
+            try:
+                region_models = fog_model.train_shared_model(
+                    main_df, phenom_df, cols, lat, lon,
+                    camera_coords=camera_coords, weather_conn=weather_conn, prev_state=prev_state,
+                )
+            except Exception:
+                log.exception("Region model (%s) failed; keeping the shared model for it", region)
+                region_models = {}
+            if region_models:
+                for st in region_models:
+                    region_models[st]["target_region"] = region
+                models.update(region_models)
+                log.info("Region model for %s (all fog incl. wide fog): %d station(s)", region, len(region_models))
 
     rolled_back = fog_model.apply_regression_guard(models, prev_state=prev_state)
     if rolled_back:

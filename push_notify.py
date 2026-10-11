@@ -122,6 +122,8 @@ def kind_enabled(settings, kind, role):
         return settings["push_fog_now"]
     if kind == "camera":
         return settings["push_camera"]
+    if kind == "report":
+        return settings["push_monthly_report"]
     if kind == "digest":
         return settings["push_digest_morning"] is not None or settings["push_digest_evening"] is not None
     if kind == "admin":
@@ -285,7 +287,8 @@ def run_scheduled(ctx):
     obs = ctx.get("observations")
     fog_now = []
     if obs and obs.get("datetime") is not None and now - obs["datetime"] <= timedelta(minutes=NOW_MAX_AGE_MINUTES):
-        fog_now = [s["name"] for s in obs["stations"] if s.get("code") in ctx["fog_codes"]]
+        by_station = ctx.get("fog_codes_by_station") or {}
+        fog_now = [s["name"] for s in obs["stations"] if s.get("code") in by_station.get(s["name"], ctx["fog_codes"])]
         obs_hour = obs["datetime"].hour
     run_at = (forecast or {}).get("run_at") or ""
 
@@ -321,7 +324,8 @@ def run_scheduled(ctx):
         if s["push_fog_now"] and fog_now:
             names = [n for n in targets if n in fog_now]
             if names:
-                jobs.append(("fog_now", [f"now:{today}:{n}" for n in names], "川霧を観測しました",
+                wide = any(len((ctx.get("fog_codes_by_station") or {}).get(n, ())) > 3 for n in names)
+                jobs.append(("fog_now", [f"now:{today}:{n}" for n in names], "霧を観測しました" if wide else "川霧を観測しました",
                              f"{_join_names(names)}({obs_hour}時のカメラ画像)", station_url(names[0]), "fog-now", "high"))
 
         if s["push_camera"]:

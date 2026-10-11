@@ -1490,3 +1490,36 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .gold-table td, .gold-table th { text-align: center; }
 .gold-table td.gold-diag { font-weight: 700; }
 @media (max-width: 760px) { .gold-grid { grid-template-columns: minmax(0, 1fr); } .gold-side { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* ===== 今朝の川霧ギャラリー・月ごとのレポート・システムの健康(2026-10-11) ===== */
+.gallery-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.gallery-head h2 { margin: 0; }
+.gallery-nav { display: flex; gap: 0.4rem; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 1rem; }
+.gallery-item { margin: 0; padding: 0.6rem; overflow: hidden; }
+.gallery-item img { width: 100%; height: auto; display: block; border-radius: 10px; aspect-ratio: auto 4 / 3; background: var(--glass-soft); }
+.gallery-item.is-top { grid-column: 1 / -1; }
+.gallery-item figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.4rem; padding: 0.5rem 0.2rem 0.1rem; }
+.gallery-title a { font-weight: 600; }
+.gallery-title small { margin-left: 0.4rem; }
+.gallery-meta { display: inline-flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; font-size: 0.85rem; }
+.gallery-chip { padding: 0.1rem 0.55rem; border-radius: 999px; background: var(--color-primary); color: #fff; font-size: 0.78rem; font-weight: 600; }
+:root[data-theme="dark"] .gallery-chip { color: #0b1726; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .gallery-chip { color: #0b1726; } }
+.dash-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 0.7rem; }
+.dash-gallery figure { margin: 0; }
+.dash-gallery img { width: 100%; height: auto; display: block; border-radius: 10px; aspect-ratio: auto 4 / 3; background: var(--glass-soft); }
+.dash-gallery figcaption { font-size: 0.82rem; margin-top: 0.25rem; }
+.report-list { display: grid; gap: 1rem; }
+.report-item h3 { margin-top: 0; }
+.report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.6rem; }
+.report-stats > div { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.55rem 0.8rem; border-radius: 12px; background: var(--glass-soft, rgba(127, 127, 127, 0.12)); }
+.report-stats b { font-size: 1.35rem; }
+.report-stats small { font-size: 0.8rem; font-weight: 400; }
+.report-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.report-actions .button { margin: 0; }
+.health-good { color: var(--color-success, #1e8e3e); font-weight: 700; }
+.health-bad { color: var(--color-danger); font-weight: 700; }
+.health-list { margin: 0.3rem 0 0.8rem; padding-left: 1.2rem; line-height: 1.8; }
+.health-list.bad li { color: var(--color-danger); }.haze-badge { display: inline-block; margin-left: 0.5rem; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.85rem;
+    background: var(--glass-soft, rgba(127, 127, 127, 0.14)); border: 1px solid var(--color-border); vertical-align: middle; }
+.haze-badge b { font-size: 1rem; }

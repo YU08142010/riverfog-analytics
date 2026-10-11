@@ -3827,7 +3827,7 @@ def _accuracy_by_weather_safe():
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
             rows = conn.execute(
-                "SELECT target_datetime, predicted_code, actual_code FROM predictions "
+                "SELECT target_datetime, predicted_code, actual_code, station FROM predictions "
                 "WHERE actual_code IS NOT NULL AND model_type LIKE ? AND COALESCE(daylight, 1) = 1",
                 (prediction_log.CURRENT_MODEL_LIKE,),
             ).fetchall()
@@ -3842,12 +3842,12 @@ def _accuracy_by_weather_safe():
         }
         precip_buckets = {}
         temp_buckets = {}
-        for target_dt, predicted_code, actual_code in rows:
+        for target_dt, predicted_code, actual_code, station in rows:
             weather_row = weather_by_dt.get(target_dt)
             if weather_row is None:
                 continue
             # 的中 = 「川霧かどうか」が一致(prediction_log.pyの説明参照)。
-            correct = 1 if fog_model.is_fog_code(predicted_code) == fog_model.is_fog_code(actual_code) else 0
+            correct = 1 if fog_model.is_fog_code(predicted_code) == fog_model.is_fog_code(actual_code, station) else 0
             precip = weather_row[COL_PRECIP]
             precip_key = "降水あり" if precip is not None and precip > 0 else "降水なし"
             precip_buckets.setdefault(precip_key, {"n": 0, "correct": 0})
@@ -3959,7 +3959,7 @@ def _accuracy_region_summary_safe():
         n = sum(r["n"] for r in rows)
         correct = sum(
             r["n"] for r in rows
-            if fog_model.is_fog_code(r["predicted_code"]) == fog_model.is_fog_code(r["actual_code"])
+            if fog_model.is_fog_code(r["predicted_code"]) == fog_model.is_fog_code(r["actual_code"], r.get("station"))
         )
         result.append({"region": region, "n": n, "correct": correct, **_fog_confusion_stats(rows)})
     return result
@@ -3973,7 +3973,7 @@ def _confusion_matrix_from_pairs(pairs):
     for row in pairs:
         if row["predicted_code"] is None or row["actual_code"] is None:
             continue
-        a = int(fog_model.is_fog_code(row["actual_code"]))
+        a = int(fog_model.is_fog_code(row["actual_code"], row.get("station")))
         p = int(fog_model.is_fog_code(row["predicted_code"]))
         matrix[a, p] += row["n"]
     if not matrix.sum():
@@ -4658,6 +4658,8 @@ def predictions_file(date, filename):
 SPOTLIGHT_PAGES = (
     ("ダッシュボード", "dashboard", "ホーム トップ"),
     ("設定", "settings_page", "せってい 通知 プッシュ テーマ ダーク 文字 大きさ プライバシー settings"),
+    ("今朝の川霧", "gallery_page", "ギャラリー 写真 けさ 朝 gallery"),
+    ("月ごとのレポート", "reports_page", "レポート 報告 PDF 月報 report"),
     ("地点一覧", "stations_list", "地点 一覧 カメラ"),
     ("地点比較", "compare_stations", "比較"),
     ("地図", "map_page", "マップ map"),
@@ -4686,6 +4688,7 @@ SPOTLIGHT_PAGES = (
 )
 SPOTLIGHT_ADMIN_PAGES = (
     ("管理者トップ", "admin_home", "管理 ログ"),
+    ("システムの健康", "admin_health", "健康 チェック 巡回 テスト health"),
     ("エラー/警告", "admin_errors", "エラー 警告"),
     ("サービス状態", "admin_status", "サービス 状態 稼働"),
     ("モデル状況", "admin_models", "モデル 学習"),
@@ -6145,7 +6148,7 @@ def _build_public_forecast():
             "lat": info.get("lat"),
             "lon": info.get("lon"),
             "days": day_levels,
-            "now": {"label": obs["label"], "fog": obs.get("code") in SUMMARY_FOG_CODES, "code": obs.get("code"),
+            "now": {"label": obs["label"], "fog": obs.get("code") in fog_features.target_codes(name), "code": obs.get("code"),
                     "at": obs.get("at")} if obs else None,
         })
 
@@ -6180,12 +6183,12 @@ def _build_public_forecast():
 PUBLIC_VERIFY_DAYS = 7             # 予測と観測の照合を出す直近の日数
 
 
-def _code_is_fog(code):
+def _code_is_fog(code, station=None):
     """実測の現象コード(2コード同時観測はパック値)が川霧かどうか。prediction_log._fog_sqlと同じ判定。"""
     if code is None:
         return None
     code = int(code)
-    return (code // 100 if code > 10 else code) in SUMMARY_FOG_CODES
+    return (code // 100 if code > 10 else code) in fog_features.target_codes(station)
 
 
 def _build_public_verification(conn, today):
@@ -6214,7 +6217,7 @@ def _build_public_verification(conn, today):
         counts = {"hit": 0, "fa": 0, "miss": 0, "cn": 0}
         cells = {}
         for station, target_dt, pred, actual in rows:
-            p_fog, a_fog = int(pred or 0) == 1, _code_is_fog(actual)
+            p_fog, a_fog = int(pred or 0) == 1, _code_is_fog(actual, station)
             kind = "hit" if p_fog and a_fog else "fa" if p_fog else "miss" if a_fog else "cn"
             counts[kind] += 1
             if kind != "cn":
@@ -11609,6 +11612,129 @@ def gold_results():
 GOLD_GROUP_NAMES = {0: "現象なし", 1: "川霧", 2: "全体霧", 3: "層雲", 4: "霧雨・雨"}
 
 
+# --- 今朝の川霧ギャラリー・タイムラプス動画・月ごとのレポート・システムの健康(2026-10-11) -------------------------
+import gallery
+import haze_index
+import timelapse
+
+REPORTS_DIR = BASE_DIR / "data" / "reports"
+HEALTH_DIR = BASE_DIR / "data" / "health"
+GALLERY_CACHE_SECONDS = 300
+_gallery_cache = {}
+
+
+def _gallery_items(date_str):
+    now = time.monotonic()
+    hit = _gallery_cache.get(date_str)
+    if hit and now - hit[0] < GALLERY_CACHE_SECONDS:
+        return hit[1]
+    try:
+        items = gallery.morning_fog(date_str)
+    except Exception as e:
+        log.warning("Gallery failed for %s: %s", date_str, e)
+        items = []
+    for it in items:
+        it["label"] = PHENOM_LABELS.get(it["code"], "川霧")
+        it["region"] = STATION_REGION.get(it["station"], "")
+    _gallery_cache[date_str] = (now, items)
+    return items
+
+
+@app.context_processor
+def _inject_gallery():
+    def morning_gallery(limit=3):
+        today = now_jst_naive()
+        # 11時までは今朝の分がまだ揃っていないので、出ている分だけ。0件なら前日の分
+        items = _gallery_items(today.strftime("%Y-%m-%d"))
+        if not items:
+            return {"date": (today - timedelta(days=1)).strftime("%Y-%m-%d"), "items": _gallery_items(
+                (today - timedelta(days=1)).strftime("%Y-%m-%d"))[:limit], "today": False}
+        return {"date": today.strftime("%Y-%m-%d"), "items": items[:limit], "today": True}
+
+    def haze_latest(name):
+        try:
+            rows = haze_index.latest_for_station(name)
+        except Exception:
+            return None
+        # 直近3時間以内の画像の値だけ出す(古い値を「いま」の値に見せない)
+        if rows and rows[0]["datetime"] >= (now_jst_naive() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"):
+            return rows[0]
+        return None
+    return {"morning_gallery": morning_gallery, "haze_latest": haze_latest,
+            "fog_word": fog_features.target_word}  # 会津など全体霧も対象の地点は「霧」、ほかは「川霧」
+
+
+@app.route("/gallery")
+def gallery_page():
+    date_str = request.args.get("date") or now_jst_naive().strftime("%Y-%m-%d")
+    date_str = _validate_date(date_str)
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    today = now_jst_naive().date()
+    items = _gallery_items(date_str)
+    return render_template(
+        "gallery.html", date=date_str, items=items, date_label=f"{d.month}月{d.day}日({'月火水木金土日'[d.weekday()]})",
+        prev_date=(d - timedelta(days=1)).strftime("%Y-%m-%d"),
+        next_date=(d + timedelta(days=1)).strftime("%Y-%m-%d") if d.date() < today else None,
+        has_video=timelapse.ffmpeg_path() is not None,
+    )
+
+
+@app.route("/stations/<name>/timelapse/<date>.mp4")
+def station_timelapse_video(name, date):
+    name = _validate_station(name)
+    date = _validate_date(date)
+    try:
+        path = timelapse.build(name, date)
+    except Exception as e:
+        log.warning("Timelapse video failed for %s %s: %s", name, date, e)
+        path = None
+    if path is None:
+        abort(404)
+    resp = send_file(path, mimetype="video/mp4", conditional=True,
+                     download_name=f"{name}_{date}.mp4", as_attachment=request.args.get("download") == "1")
+    resp.headers["Cache-Control"] = "private, max-age=600"
+    return resp
+
+
+def _reports_list():
+    out = []
+    for p in sorted(REPORTS_DIR.glob("*.json"), reverse=True):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (REPORTS_DIR / f"{d['month']}.pdf").is_file():
+            out.append(d)
+    return out
+
+
+@app.route("/reports")
+def reports_page():
+    return render_template("reports.html", reports=_reports_list())
+
+
+@app.route("/reports/<month>.pdf")
+def report_pdf(month):
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        abort(404)
+    path = REPORTS_DIR / f"{month}.pdf"
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype="application/pdf", download_name=f"川霧レポート_{month}.pdf",
+                     as_attachment=request.args.get("download") == "1")
+
+
+@app.route("/admin/health")
+@requires_admin
+def admin_health():
+    def read(name):
+        try:
+            return json.loads((HEALTH_DIR / name).read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return render_template("admin_health.html", report=read("latest.json"), smoke=read("smoke.json"))
+
+
 # --- Web Pushの定期判定(2026-10-09、push_notify.run_scheduled) ----------------------------------------
 # 川霧の朝夕のまとめ・「まもなく出やすい」・「観測した」・カメラ故障・管理者向けのお知らせを5分ごとに判定する。
 # url_forを使うため、ダミーのリクエストの文脈の中で動かす(セッションは空)。
@@ -11638,7 +11764,8 @@ def _push_schedule_once():
     finally:
         conn.close()
     with app.test_request_context("/"):
-        ctx = {"station_names": STATION_NAMES, "fog_codes": set(SUMMARY_FOG_CODES)}
+        ctx = {"station_names": STATION_NAMES, "fog_codes": set(SUMMARY_FOG_CODES),
+               "fog_codes_by_station": {n: set(fog_features.target_codes(n)) for n in STATION_NAMES}}
         for key, fn in (("forecast", _public_forecast_safe), ("observations", _latest_observations),
                         ("camera_failures", _stations_with_recent_camera_failures_cached),
                         ("admin_alerts", _push_admin_alerts)):

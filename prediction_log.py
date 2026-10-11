@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_predictions_pending
 #   (0〜10、2コード同時観測はパック値)のまま残っている。
 # actual_code: 実測の現象コード(0〜10、2コード同時観測は「小さい方*100+大きい方」のパック値。
 #   fog_features.encode_phenom_codes参照)。
-# 的中の判定は、新旧どちらの行も「川霧かどうか」が一致したかで行う(_CORRECT_SQL)。
+# 的中の判定は、新旧どちらの行も「川霧かどうか」が一致したかで行う(_correct_sql())。
 # 二値の1は川霧コード(SUMMARY_FOG_CODES)に含まれ、0は含まれないため、同じ判定式が
 # 旧方式の現象コードにも二値の予測にもそのまま使える。
 _FOG_CODES_SQL = ", ".join(str(c) for c in sorted(fog_features.SUMMARY_FOG_CODES))
@@ -45,7 +45,27 @@ def _fog_sql(col):
     return f"((CASE WHEN {col} > 10 THEN {col} / 100 ELSE {col} END) IN ({_FOG_CODES_SQL}))"
 
 
-_CORRECT_SQL = f"CASE WHEN {_fog_sql('predicted_code')} = {_fog_sql('actual_code')} THEN 1 ELSE 0 END"
+def _actual_fog_sql(col="actual_code", station_col="station"):
+    """実測が「予測の対象の霧」かどうか(1/0)。会津など全体霧も対象の地点(fog_features.target_codes)は4〜6も含める。"""
+    wide = fog_features.wide_target_stations(_all_station_names())
+    if not wide:
+        return _fog_sql(col)
+    names = ", ".join("'" + n.replace("'", "''") + "'" for n in wide)
+    prim = f"(CASE WHEN {col} > 10 THEN {col} / 100 ELSE {col} END)"
+    return f"(CASE WHEN {station_col} IN ({names}) THEN {prim} IN (1, 2, 3, 4, 5, 6) ELSE {prim} IN ({_FOG_CODES_SQL}) END)"
+
+
+def _all_station_names():
+    try:
+        from fog_data import load_station_names
+        return load_station_names()
+    except Exception:
+        return []
+
+
+def _correct_sql():
+    """的中(1/0)のSQL式。予測は二値(1=霧あり)なので、実測の側だけ地点ごとの対象で判定する。"""
+    return f"CASE WHEN {_fog_sql('predicted_code')} = {_actual_fog_sql()} THEN 1 ELSE 0 END"
 
 # 精度の集計の対象にするモデル(model_typeのLIKEパターン)。現行モデル(全地点共通の二値
 # LightGBM)の本番の予測と、旧モデルが予測していた過去の日時を現行モデルで予測し直した行
@@ -146,7 +166,7 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
     where += " AND COALESCE(daylight, 1) = 1"
 
     overall = conn.execute(
-        f"""SELECT COUNT(*), SUM({_CORRECT_SQL})
+        f"""SELECT COUNT(*), SUM({_correct_sql()})
             FROM predictions {where}""", params,
     ).fetchone()
 
@@ -154,7 +174,7 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
     # 先の日付ほど当たりにくい予測の割合(答え合わせが済んだ時期によって変わる)で値が動くため。
     # 再予測(過去分のやり直し、[再予測])の件数も分けて返し、本番の予測と区別できるようにする。
     next_day = conn.execute(
-        f"""SELECT COUNT(*), SUM({_CORRECT_SQL}), SUM(CASE WHEN model_type LIKE '%[再予測]' THEN 1 ELSE 0 END)
+        f"""SELECT COUNT(*), SUM({_correct_sql()}), SUM(CASE WHEN model_type LIKE '%[再予測]' THEN 1 ELSE 0 END)
             FROM predictions {where} AND lead_hours < 24""", params,
     ).fetchone()
     n_hindcast = conn.execute(
@@ -163,13 +183,13 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
 
     by_lead_bucket = conn.execute(
         f"""SELECT CAST(lead_hours / 24 AS INTEGER) AS lead_day,
-                   COUNT(*), SUM({_CORRECT_SQL})
+                   COUNT(*), SUM({_correct_sql()})
             FROM predictions {where}
             GROUP BY lead_day ORDER BY lead_day""", params,
     ).fetchall()
 
     by_station = conn.execute(
-        f"""SELECT station, COUNT(*), SUM({_CORRECT_SQL})
+        f"""SELECT station, COUNT(*), SUM({_correct_sql()})
             FROM predictions {where}
             GROUP BY station ORDER BY station""", params,
     ).fetchall()
@@ -199,7 +219,7 @@ def accuracy_trend(conn, station=None, model_like=CURRENT_MODEL_LIKE):
 
     rows = conn.execute(
         f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
-                   SUM({_CORRECT_SQL})
+                   SUM({_correct_sql()})
             FROM predictions {where}
             GROUP BY d ORDER BY d""", params,
     ).fetchall()
