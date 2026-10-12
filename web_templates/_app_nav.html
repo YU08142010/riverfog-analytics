@@ -1,0 +1,18 @@
+{# サイト全体のメニュー(2026-10-12)。PCでは左のサイドバー、スマホ・タブレットでは「メニュー」のシートに同じものを出す。
+   groupsはbase.htmlで1回だけ組み立てる(未読数などの問い合わせを1回にするため)。
+   各項目: label, url, icon, active, badge(数。0なら出さない), badge_key(画面を開いたまま数を更新するもの) #}
+{% from "_icons.html" import icon %}
+{% macro nav_groups(groups, where) -%}
+{% for g in groups if g["items"] %}
+<div class="app-nav-group">
+    {% if g.title %}<div class="app-nav-title">{{ g.title }}</div>{% endif %}
+    {% for it in g["items"] %}
+    <a href="{{ it.url }}" class="app-nav-link{{ ' active' if it.active }}{{ ' app-nav-sheet-only' if it.sheet_only }}"{{ ' aria-current="page"' if it.active }} title="{{ it.label }}"{% if it.external %} target="_blank" rel="noopener"{% endif %}>
+        <span class="app-nav-icon">{{ icon(it.icon, size=19) }}</span>
+        <span class="app-nav-label">{{ it.label }}</span>
+        {% if it.badge_key or it.badge %}<span class="app-nav-badge" data-badge="{{ it.badge_key or '' }}" {{ "" if it.badge else "hidden" }}>{{ it.badge }}</span>{% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% endfor %}
+{%- endmacro %}

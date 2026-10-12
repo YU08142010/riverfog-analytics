@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}川霧観測・予測{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
@@ -39,6 +39,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     if (P.theme === "light" || P.theme === "dark") { root.setAttribute("data-theme", P.theme); }
     if (P.reduce_motion) { root.classList.add("rf-reduce-motion"); }
     if (P.calm_background) { root.classList.add("rf-calm-bg"); }
+    try { if (localStorage.getItem("rf-side-collapsed") === "1") { root.classList.add("rf-side-collapsed"); } } catch (e) {}
     // 文字の大きさ(標準/大きめ/特大、2026-10-09)。描画前に付けて、読み込み時に大きさが変わって見えないようにする。
     try {
         var ts = localStorage.getItem("rf-text");
@@ -81,37 +82,88 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     <span class="bg-mist m2"></span><span class="bg-mist m3"></span>
 </div>
 {% endblock %}
-<header>
-    <h1>川霧観測・予測</h1>
-    <a href="{{ url_for('changelog_page') }}" style="color:rgba(255,255,255,0.8); font-size:0.8rem; align-self:flex-end; margin-bottom:0.2rem; text-decoration:none;" title="更新履歴を見る">v{{ app_version }}</a>
-    <button type="button" class="nav-toggle" id="nav-toggle-btn" aria-label="メニュー" aria-expanded="false">
-        {{ icon("menu", size=20) }}
+{# --- メニュー(2026-10-12に作り直し): PCは左のサイドバー、狭い画面は下のタブバー+「メニュー」のシート --- #}
+{% from "_app_nav.html" import nav_groups %}
+{% set _p = request.path %}
+{% set _role = session.get('role') %}
+{% set _obs_role = _role in ('admin', 'observer', 'aizu_observer', 'tadami_observer') %}
+{% set obs_pending = pending_observation_report_count() if _obs_role else 0 %}
+{% set photo_pending = pending_photo_count() if _obs_role else 0 %}
+{% set community_unread = (dm_unread_count() + group_unread_count()) if session.get('user_id') else 0 %}
+{% set _analysis = (_p.startswith('/graphs') or _p.startswith('/river-fog-histogram') or _p.startswith('/accuracy') or (_p.startswith('/report') and not _p.startswith('/reports'))) %}
+{% set app_nav = [
+    {"title": none, "items": [
+        {"label": "ホーム", "url": url_for('dashboard'), "icon": "dashboard", "active": _p == url_for('dashboard')},
+    ]},
+    {"title": "観測", "items": [
+        {"label": "地点一覧", "url": url_for('stations_list'), "icon": "stations", "active": _p.startswith('/stations') or _p.startswith('/compare')},
+        {"label": "地図", "url": url_for('map_page'), "icon": "map", "active": _p.startswith('/map')},
+        {"label": "今朝の川霧", "url": url_for('gallery_page'), "icon": "sunrise", "active": _p.startswith('/gallery')},
+        {"label": "流れ図・見頃", "url": url_for('flow_page'), "icon": "calendar", "active": _p.startswith('/flow')},
+        {"label": "みんなの写真", "url": url_for('photos_page'), "icon": "camera", "active": _p == url_for('photos_page') or (_p.startswith('/photos/') and not _p.startswith('/photos/review'))},
+    ]},
+    {"title": "予報・分析", "items": [
+        {"label": "予報(公開ページ)", "url": url_for('public_forecast'), "icon": "forecast", "active": false},
+        {"label": "シミュレーター", "url": url_for('simulator_page'), "icon": "simulator", "active": _p.startswith(url_for('simulator_page'))},
+        {"label": "分析", "url": url_for('weather_fog_graph_page'), "icon": "accuracy", "active": _analysis},
+        {"label": "月ごとのレポート", "url": url_for('reports_page'), "icon": "report", "active": _p.startswith('/reports')},
+        {"label": "観測アーカイブ", "url": url_for('observations_dates'), "icon": "data", "active": _p.startswith('/observations') or _p.startswith('/images') or _p.startswith('/predictions')},
+        {"label": "研究用の書き出し", "url": url_for('export_page'), "icon": "db", "active": _p.startswith('/export')},
+    ]},
+    {"title": "観測の確認", "items": ([
+        {"label": "観測報告", "url": url_for('observation_reports'), "icon": "error", "active": _p.startswith('/observation_reports'), "badge": obs_pending},
+        {"label": "写真の確認", "url": url_for('photos_review'), "icon": "shield", "active": _p.startswith('/photos/review'), "badge": photo_pending},
+        {"label": "正解セット", "url": url_for('gold_page'), "icon": "star", "active": _p.startswith('/gold')},
+    ] if _obs_role else [])},
+    {"title": "コミュニティ", "items": ([
+        {"label": "メンバー・メッセージ", "url": url_for('members_list'), "icon": "members", "active": _p.startswith('/members') or _p.startswith('/messages') or _p.startswith('/files') or _p.startswith('/group'), "badge": community_unread, "badge_key": "community"},
+        {"label": "ゲーム", "url": url_for('game_home'), "icon": "game", "active": _p.startswith('/game')},
+        {"label": "AIチャット", "url": url_for('chat_page'), "icon": "chat", "active": _p.startswith(url_for('chat_page'))},
+    ] if session.get('user_id') else [])},
+    {"title": "その他", "items": ([
+        {"label": "設定", "url": url_for('settings_page'), "icon": "settings", "active": _p.startswith('/settings')},
+    ] if session.get('user_id') else []) + [
+        {"label": "更新履歴", "url": url_for('changelog_page'), "icon": "log", "active": _p.startswith(url_for('changelog_page'))},
+    ] + ([
+        {"label": "ログアウト", "url": url_for('logout'), "icon": "close", "active": false, "sheet_only": true},
+    ] if session.get('user_id') else []) + [
+    ] + ([
+        {"label": "管理者", "url": url_for('admin_home'), "icon": "admin", "active": _p.startswith('/admin')},
+    ] if _role == 'admin' and not is_funnel_request() else [])},
+] %}
+{% set _menu_badge = obs_pending + photo_pending + community_unread %}
+<nav class="app-side" id="app-side" aria-label="メインメニュー">
+    <a class="app-side-brand" href="{{ url_for('dashboard') }}">
+        <img src="{{ url_for('static', filename='favicon.svg') }}" alt="" width="28" height="28">
+        <span class="app-nav-label">川霧観測・予測</span>
+    </a>
+    <div class="app-side-scroll">{{ nav_groups(app_nav, "side") }}</div>
+    <button type="button" class="app-side-collapse" id="app-side-collapse" aria-label="メニューを細くする" title="メニューを細くする/広げる">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+        <span class="app-nav-label">メニューを細くする</span>
     </button>
-    <nav id="main-nav">
-        <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == url_for('dashboard') else '' }}">{{ icon("dashboard") }}ダッシュボード</a>
-        <a href="{{ url_for('stations_list') }}" class="{{ 'active' if request.path.startswith('/stations') or request.path.startswith('/compare') or request.path.startswith('/map') else '' }}">{{ icon("stations") }}地点</a>
-        {% if session.get('role') in ('admin', 'observer', 'aizu_observer', 'tadami_observer') %}
-        {% set obs_pending = pending_observation_report_count() %}
-        <a href="{{ url_for('observation_reports') }}" class="{{ 'active' if request.path.startswith('/observation_reports') else '' }}">{{ icon("error") }}観測報告<span class="nav-unread-badge" {{ "" if obs_pending else "hidden" }}>{{ obs_pending }}</span></a>
-        {% endif %}
-        <a href="{{ url_for('simulator_page') }}" class="{{ 'active' if request.path.startswith(url_for('simulator_page')) else '' }}">{{ icon("simulator") }}シミュレーター</a>
-        <a href="{{ url_for('observations_dates') }}" class="{{ 'active' if request.path.startswith('/observations') or request.path.startswith('/images') or request.path.startswith('/predictions') else '' }}">{{ icon("data") }}観測アーカイブ</a>
-        <a href="{{ url_for('weather_fog_graph_page') }}" class="{{ 'active' if request.path.startswith('/graphs') or request.path.startswith('/river-fog-histogram') or request.path.startswith('/accuracy') or request.path.startswith('/report') else '' }}">{{ icon("report") }}分析</a>
-        {% if session.get('user_id') %}
-        <a href="{{ url_for('members_list') }}" class="{{ 'active' if request.path.startswith('/members') or request.path.startswith('/messages') or request.path.startswith('/files') or request.path.startswith('/group') else '' }}">{{ icon("members") }}コミュニティ{% set community_unread = dm_unread_count() + group_unread_count() %}<span class="nav-unread-badge" id="nav-community-badge" {{ "" if community_unread else "hidden" }}>{{ community_unread }}</span></a>
-        <a href="{{ url_for('game_home') }}" class="{{ 'active' if request.path.startswith('/game') else '' }}">{{ icon("game") }}ゲーム</a>
-        <a href="{{ url_for('chat_page') }}" class="{{ 'active' if request.path.startswith(url_for('chat_page')) else '' }}">{{ icon("chat") }}AIチャット</a>
-        {% endif %}
-        <a href="{{ url_for('public_forecast') }}">{{ icon("stations") }}公開ページ</a>
-        {% if session.get('role') == 'admin' and not is_funnel_request() %}
-        <a href="{{ url_for('admin_home') }}" class="{{ 'active' if request.path.startswith('/admin') else '' }}">{{ icon("admin") }}管理者</a>
-        {% endif %}
-    </nav>
-    {# 画面幅に入りきらないメニューは「その他」にまとめる(下のスクリプト。901px以上のときだけ) #}
-    <div class="nav-more" id="nav-more" hidden>
-        <button type="button" class="nav-more-btn" id="nav-more-btn" aria-haspopup="true" aria-expanded="false" aria-controls="nav-more-menu">その他<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-        <div class="nav-more-menu" id="nav-more-menu" hidden></div>
+</nav>
+<nav class="app-tabbar" aria-label="主なページ">
+    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if _p == url_for('dashboard') }}">{{ icon("dashboard", size=22) }}<span>ホーム</span></a>
+    <a href="{{ url_for('stations_list') }}" class="{{ 'active' if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}">{{ icon("stations", size=22) }}<span>地点</span></a>
+    <a href="{{ url_for('flow_page', mode='fc') }}" class="{{ 'active' if _p.startswith('/flow') }}">{{ icon("calendar", size=22) }}<span>見頃</span></a>
+    <a href="{{ url_for('photos_page') }}" class="{{ 'active' if _p.startswith('/photos') or _p.startswith('/gallery') }}">{{ icon("camera", size=22) }}<span>写真</span></a>
+    <button type="button" id="app-sheet-open" aria-haspopup="dialog" aria-controls="app-sheet" aria-expanded="false">{{ icon("menu", size=22) }}<span>メニュー</span><span class="app-tab-dot" data-badge-dot {{ "" if _menu_badge else "hidden" }}></span></button>
+</nav>
+<div class="app-sheet" id="app-sheet" hidden>
+    <div class="app-sheet-backdrop" data-sheet-close></div>
+    <div class="app-sheet-panel" role="dialog" aria-modal="true" aria-label="メニュー" tabindex="-1">
+        <div class="app-sheet-head">
+            <span class="app-sheet-grip" aria-hidden="true"></span>
+            <strong>メニュー</strong>
+            <button type="button" class="app-sheet-close" data-sheet-close aria-label="閉じる">{{ icon("close", size=18) }}</button>
+        </div>
+        <div class="app-sheet-body">{{ nav_groups(app_nav, "sheet") }}</div>
     </div>
+</div>
+<header>
+    <h1><a href="{{ url_for('dashboard') }}" class="app-header-brand">川霧観測・予測</a></h1>
+    <a href="{{ url_for('changelog_page') }}" class="app-version" title="更新履歴を見る">v{{ app_version }}</a>
     <button type="button" class="spotlight-trigger" data-spotlight-open aria-label="検索(Ctrl+K)" title="検索(Ctrl+K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>検索</span><kbd>Ctrl K</kbd></button>
     {# 全画面表示(発表・展示でスクリーンに映す用)。見た目は通知ボタンと同じ。対応しない環境では出さない #}
     <span class="notif-bell-wrap fs-wrap" id="fs-wrap" hidden>
@@ -166,9 +218,9 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
             {% else %}
             <span style="width:1.6rem; height:1.6rem; border-radius:50%; background:rgba(255,255,255,0.25); display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:600;">{{ session.get('name', '?')[0] }}</span>
             {% endif %}
-            {{ session.get('name') }}さん
+            <span class="header-user-name">{{ session.get('name') }}さん</span>
         </a>
-        <a href="{{ url_for('logout') }}" style="color:#fff;">ログアウト</a>
+        <a href="{{ url_for('logout') }}" class="header-logout" style="color:#fff;">ログアウト</a>
     </span>
     {% else %}
     <a href="{{ url_for('login') }}" class="button">ログイン</a>
@@ -177,7 +229,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 <main>
 {% block breadcrumb %}
 <ul class="breadcrumb">
-    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('dashboard') }}">ホーム</a></li>
     {% if request.path.startswith('/admin') and request.path != url_for('admin_home') %}
     <li><a href="{{ url_for('admin_home') }}">管理者</a></li>
     {% elif request.path.startswith('/compare') or request.path.startswith('/map') %}
@@ -239,20 +291,6 @@ window.addEventListener("pageshow", function(e) {
     if (e.persisted) { window.location.reload(); }
 });
 
-// トップバーのナビはoverflow-xで横スクロールするが、トラックパッドの横スワイプが
-// 無い環境(マウス+キーボードのみ)だと操作しづらいため、縦方向のマウスホイールを
-// 横スクロールに変換する(ナビ自体が縦にはみ出ることは無いので、縦スクロールを
-// 奪っても副作用は無い)。
-(function() {
-    var nav = document.getElementById("main-nav");
-    if (!nav) { return; }
-    nav.addEventListener("wheel", function(e) {
-        if (e.deltaY === 0 || nav.scrollWidth <= nav.clientWidth) { return; }
-        e.preventDefault();
-        nav.scrollLeft += e.deltaY;
-    }, { passive: false });
-})();
-
 // ヘッダーのボタンで変えたテーマ・文字の大きさを、ログイン中ならサーバーにも保存する(他の端末にも反映)。
 window.rfSaveQuickSetting = function(key, value) {
     {% if session.get('user_id') %}
@@ -307,74 +345,60 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
 
 // 全画面表示のボタンと、全画面のままページを移る仕組みは web_static/fs_shell.js(公開ページと共通)。
 
-// ハンバーガーメニュー(狭い画面でナビを折りたたむ)。
+// メニュー(2026-10-12)。PC: 左のサイドバーを細くする/広げる(この端末に覚える)。狭い画面: 下の「メニュー」でシートを開く。
 (function() {
-    var btn = document.getElementById("nav-toggle-btn");
-    var nav = document.getElementById("main-nav");
-    // 幅の広い画面でメニューが1行に入りきらないとき(2026-10-08以前は横スクロールで、右端の項目が
-    // 「シミュ…」のように切れて見えていた)、入りきらない分を後ろから「その他」に移す。いま開いている
-    // ページの項目は移さない。幅が変わるたびに全部戻してから並べ直す。
-    (function() {
-        var more = document.getElementById("nav-more");
-        var moreBtn = document.getElementById("nav-more-btn");
-        var menu = document.getElementById("nav-more-menu");
-        if (!more || !moreBtn || !menu) { return; }
-        var links = Array.prototype.filter.call(nav.children, function(el) { return el.tagName === "A"; });
-        var wide = window.matchMedia("(min-width: 901px)");
-        function setOpen(open) {
-            menu.hidden = !open;
-            moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    var root = document.documentElement;
+    var collapse = document.getElementById("app-side-collapse");
+    function syncCollapse() {
+        var on = root.classList.contains("rf-side-collapsed");
+        collapse.setAttribute("aria-label", on ? "メニューを広げる" : "メニューを細くする");
+        collapse.querySelector(".app-nav-label").textContent = on ? "メニューを広げる" : "メニューを細くする";
+    }
+    if (collapse) {
+        collapse.addEventListener("click", function() {
+            var on = root.classList.toggle("rf-side-collapsed");
+            try { localStorage.setItem("rf-side-collapsed", on ? "1" : "0"); } catch (e) {}
+            syncCollapse();
+            window.dispatchEvent(new Event("resize"));  // 地図・グラフの幅を測り直させる
+        });
+        syncCollapse();
+    }
+    var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
+    if (!sheet || !openBtn) { return; }
+    var panel = sheet.querySelector(".app-sheet-panel");
+    function setOpen(open) {
+        if (open) {
+            sheet.hidden = false;
+            requestAnimationFrame(function() { sheet.classList.add("open"); });
+            root.classList.add("rf-sheet-open");
+            var cur = panel.querySelector(".app-nav-link.active") || panel;
+            panel.focus();
+            if (cur !== panel) { cur.scrollIntoView({block: "center"}); }
+        } else {
+            sheet.classList.remove("open");
+            root.classList.remove("rf-sheet-open");
+            setTimeout(function() { if (!sheet.classList.contains("open")) { sheet.hidden = true; } }, 220);
         }
-        function layout() {
-            setOpen(false);
-            links.forEach(function(a) { nav.appendChild(a); });
-            more.hidden = true;
-            more.classList.remove("has-active");
-            if (!wide.matches || nav.scrollWidth <= nav.clientWidth + 1) { return; }
-            more.hidden = false;  // 「その他」自体の幅のぶん、さらに狭くなる
-            for (var i = links.length - 1; i >= 0 && nav.scrollWidth > nav.clientWidth + 1; i--) {
-                if (links[i].classList.contains("active")) { continue; }
-                menu.insertBefore(links[i], menu.firstChild);
-            }
-            // 移しすぎた分を戻す(開いているページの項目を飛ばして移したため、まだ入る余白が残ることがある)
-            links.filter(function(a) { return a.parentNode === menu; }).some(function(a) {
-                var idx = links.indexOf(a), next = null;
-                for (var j = idx + 1; j < links.length; j++) { if (links[j].parentNode === nav) { next = links[j]; break; } }
-                nav.insertBefore(a, next);
-                if (nav.scrollWidth > nav.clientWidth + 1) { menu.insertBefore(a, menu.firstChild); return true; }
-                return false;
-            });
-            more.hidden = !menu.querySelector("a");
-        }
-        var timer = null;
-        window.addEventListener("resize", function() { clearTimeout(timer); timer = setTimeout(layout, 120); });
-        if (document.fonts && document.fonts.ready) { document.fonts.ready.then(layout); }
-        layout();
-        moreBtn.addEventListener("click", function(e) {
-            e.stopPropagation();
-            setOpen(menu.hidden);
-            // キーボードで開いた時だけ先頭の項目へ(マウスで開いた時に枠が出ないように)
-            if (!menu.hidden && e.detail === 0) { var first = menu.querySelector("a"); if (first) { first.focus(); } }
-        });
-        document.addEventListener("click", function(e) {
-            if (!menu.hidden && !more.contains(e.target)) { setOpen(false); }
-        });
-        document.addEventListener("keydown", function(e) {
-            if (e.key === "Escape" && !menu.hidden) { setOpen(false); moreBtn.focus(); }
-        });
-    })();
-    btn.addEventListener("click", function() {
-        var open = nav.classList.toggle("open");
-        btn.setAttribute("aria-expanded", open ? "true" : "false");
-    });
-    nav.querySelectorAll("a").forEach(function(a) {
-        a.addEventListener("click", function() {
-            nav.classList.remove("open");
-            btn.setAttribute("aria-expanded", "false");
-        });
+        openBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    openBtn.addEventListener("click", function() { setOpen(sheet.hidden); });
+    sheet.addEventListener("click", function(e) { if (e.target.closest("[data-sheet-close]")) { setOpen(false); openBtn.focus(); } });
+    document.addEventListener("keydown", function(e) { if (e.key === "Escape" && !sheet.hidden) { setOpen(false); openBtn.focus(); } });
+    // 下に引いて閉じる
+    var startY = null;
+    panel.addEventListener("touchstart", function(e) { if (panel.querySelector(".app-sheet-body").scrollTop <= 0) { startY = e.touches[0].clientY; } }, {passive: true});
+    panel.addEventListener("touchmove", function(e) {
+        if (startY === null) { return; }
+        var dy = Math.max(0, e.touches[0].clientY - startY);
+        panel.style.transform = dy ? "translateY(" + dy + "px)" : "";
+    }, {passive: true});
+    panel.addEventListener("touchend", function(e) {
+        if (startY === null) { return; }
+        var dy = e.changedTouches[0].clientY - startY;
+        startY = null; panel.style.transform = "";
+        if (dy > 90) { setOpen(false); }
     });
 })();
-
 // トップに戻るボタン(一定量スクロールしたら表示)。
 (function() {
     var btn = document.getElementById("back-to-top-btn");
@@ -874,7 +898,7 @@ document.addEventListener("submit", function(e) {
     // 実際に開いている間しか更新されなかった(各スレッド固有のポーリングでしか
     // 反映されないため)。他のページを見ている間も反映されるよう、ページ共通で
     // 軽量なステータスAPIを定期的に叩く。
-    var communityBadge = document.getElementById("nav-community-badge");
+    var communityBadges = document.querySelectorAll('[data-badge="community"]'), menuDot = document.querySelector("[data-badge-dot]");
     function watchedUserIds() {
         var ids = {};
         document.querySelectorAll("[data-user-id]").forEach(function(el) {
@@ -974,11 +998,9 @@ document.addEventListener("submit", function(e) {
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 checkChatNotice(data);
-                if (communityBadge) {
-                    var total = (data.dm_unread || 0) + (data.group_unread || 0);
-                    communityBadge.textContent = total;
-                    communityBadge.hidden = !total;
-                }
+                var total = (data.dm_unread || 0) + (data.group_unread || 0);
+                communityBadges.forEach(function(b) { b.textContent = total; b.hidden = !total; });
+                if (menuDot) { menuDot.hidden = !(total || {{ obs_pending + photo_pending }}); }
                 var online = {};
                 (data.online_user_ids || []).forEach(function(id) { online[id] = true; });
                 document.querySelectorAll("[data-user-id]").forEach(function(el) {

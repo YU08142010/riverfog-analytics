@@ -5,7 +5,7 @@
 {% block title %}{{ member.name }}(メンバー){% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
-    <li><a href="{{ url_for('dashboard') }}">ダッシュボード</a></li>
+    <li><a href="{{ url_for('dashboard') }}">ホーム</a></li>
     <li><a href="{{ url_for('members_list') }}">メンバー</a></li>
     <li>{{ member.name }}</li>
 </ul>

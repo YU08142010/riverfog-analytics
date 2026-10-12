@@ -1,27 +1,151 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% from "_wx_icon.html" import wx_icon %}
-{% block title %}ダッシュボード{% endblock %}
+{% block title %}ホーム{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
 <div class="{{ dashboard_theme_class or '' }}">
 {% set ov = overview_weather_scene() %}
-<div class="wx-hero">
-    <div class="wx-hero-name">只見川・会津 いまの川霧</div>
-    {% if ov.n_total %}
-    <div class="wx-hero-temp">{{ ov.n_riverfog }}<span style="font-size:0.32em; font-weight:400;"> 地点</span></div>
-    <div class="wx-hero-cond">{{ wx_icon(ov.wx) }}{{ "で川霧を観測中" if ov.n_riverfog else "川霧は観測されていません" }}</div>
-    <div class="wx-hero-sub">{{ ov.observed_at }} の観測 ・ {{ ov.n_total }}地点{% if ov.observed_in_dark %} ・ 日没後の暗い画像の判定のため参考{% endif %}</div>
-    {% else %}
-    <div class="wx-hero-cond">最新の観測がありません</div>
-    {% endif %}
-    <div class="wx-hero-stats">
-        <div class="wx-hero-stat"><b>{{ alerts|length }}</b><span>今後24時間の川霧予測</span></div>
-        <div class="wx-hero-stat"><b>{{ ov.n_fog }}</b><span>全体霧の地点</span></div>
-        <a class="wx-hero-stat" href="{{ url_for('public_forecast') }}"><b>3日</b><span>出やすさ(公開ページ)</span></a>
+{% if home %}
+{# ホーム(2026-10-12): 地図が中心。「いま/1時間後/今日/明日」を切り替え、右(狭い画面では下)にまとめを出す。 #}
+<section class="home-hero" aria-label="いまの川霧と見込み">
+    <div class="home-map-card card">
+        <div class="home-map-bar">
+            <div class="seg home-mode" role="group" aria-label="地図に出すもの">
+                <button type="button" class="seg-btn" data-mode="now" aria-pressed="true">いま{% if home.observed_at %}<small>{{ home.observed_at }}</small>{% endif %}</button>
+                {% if home.soon_hour is not none %}<button type="button" class="seg-btn" data-mode="p1" aria-pressed="false">1時間後<small>{{ home.soon_hour }}時</small></button>{% endif %}
+                {% for d in home.days[:2] %}<button type="button" class="seg-btn" data-mode="lv{{ loop.index0 }}" aria-pressed="false">{{ d.label }}<small>{{ d.date_label }}</small></button>{% endfor %}
+            </div>
+            <div class="home-legend" id="home-legend" aria-live="polite"></div>
+        </div>
+        <div id="home-map" class="home-map" role="application" aria-label="地点の地図(一覧は「地点一覧」から)"></div>
     </div>
-</div>
-
+    <aside class="home-panel">
+        {% set ov = overview_weather_scene() %}
+        <div class="card home-now">
+            <div class="home-now-head">
+                <span class="home-now-num">{{ home.fog_now|length }}</span>
+                <span class="home-now-unit">地点で<br>{{ "霧を観測中" if home.fog_now else "霧は観測されていません" }}</span>
+            </div>
+            <p class="muted home-now-sub">{% if home.observed_at %}{{ home.observed_at }}のカメラ画像のAI判定 ・ {{ home.points|length }}地点{% else %}最新の観測がありません{% endif %}{% if ov.observed_in_dark %} ・ 暗い時間の画像のため参考{% endif %}</p>
+            {% if home.fog_now %}
+            <div class="home-chips">{% for p in home.fog_now %}<a href="{{ p.url }}" class="home-chip" data-focus="{{ p.name }}"><span class="home-dot" style="background:{{ p.color }}"></span>{{ p.name }}<small>{{ p.now }}</small></a>{% endfor %}</div>
+            {% endif %}
+        </div>
+        {% if home.soon_hour is not none %}
+        <div class="card home-soon">
+            <h2>{{ home.soon_hour }}時ごろに出ていそう<span class="home-tag">試験中</span></h2>
+            {% if home.soon %}
+            <ul class="home-list">{% for p in home.soon %}<li><a href="{{ p.url }}" data-focus="{{ p.name }}">{{ p.name }}</a><span class="home-bar"><span style="width:{{ (p.p1 * 100)|round|int }}%"></span></span><b>{{ "%.0f"|format(p.p1 * 100) }}%</b></li>{% endfor %}</ul>
+            {% else %}
+            <p class="muted">見込みの高い地点はありません(画像と近くのアメダスの実測から)。</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="card home-alerts">
+            <h2>今後24時間の予測</h2>
+            {% if home.alerts %}
+            <p><b class="home-big">{{ home.alerts|length }}</b>件({{ home.alerts|map(attribute="station")|unique|list|length }}地点)で川霧の予測があります。</p>
+            <ul class="home-list">{% for a in home.alerts[:3] %}<li><a href="{{ url_for('station_detail', name=a.station) }}" data-focus="{{ a.station }}">{{ a.station }}</a><span class="muted">{{ a.target_datetime[5:16]|replace("-", "/") }}</span><b>{{ "%.0f"|format(a.predicted_fog_prob * 100) if a.predicted_fog_prob is not none else "-" }}%</b></li>{% endfor %}</ul>
+            {% else %}
+            <p class="muted">今後24時間に川霧の予測はありません。</p>
+            {% endif %}
+            {% if home.tomorrow_high %}<p class="home-note">明日「出やすい」: {{ home.tomorrow_high[:5]|join("・") }}{% if home.tomorrow_high|length > 5 %} ほか{{ home.tomorrow_high|length - 5 }}地点{% endif %}</p>{% endif %}
+            <p class="home-links"><a href="{{ url_for('flow_page', mode='fc') }}">見頃カレンダー</a><a href="{{ url_for('public_forecast') }}">3日間の予報</a></p>
+        </div>
+        {% set mg = morning_gallery(4) %}
+        {% if mg["items"] %}
+        <div class="card home-photos">
+            <h2>{{ "今朝" if mg.today else "昨日の朝" }}の川霧</h2>
+            <div class="home-strip">
+                {% for it in mg["items"] %}
+                <a href="{{ url_for('station_detail', name=it.station) }}" title="{{ it.station }} {{ it.hhmm[:2]|int }}時"><img src="{{ url_for('images_file', date=mg.date, hhmm=it.hhmm, filename=it.station ~ '.jpg') }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像"><span>{{ it.station }}</span></a>
+                {% endfor %}
+            </div>
+            <p class="home-links"><a href="{{ url_for('gallery_page') }}">今朝の川霧をもっと見る</a><a href="{{ url_for('photos_page') }}">みんなの写真</a></p>
+        </div>
+        {% endif %}
+    </aside>
+</section>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function() {
+    var el = document.getElementById("home-map");
+    if (typeof L === "undefined") { el.classList.add("home-map-error"); el.textContent = "地図を読み込めませんでした。「地点一覧」からご覧ください。"; return; }
+    var points = {{ home.points|tojson }};
+    var ncThr = {{ (home.nc_threshold or 0.5)|tojson }};
+    var css = getComputedStyle(document.documentElement);
+    function v(name, fb) { return (css.getPropertyValue(name) || "").trim() || fb; }
+    var LV = [v("--flow-none", "#eef2f6"), v("--flow-lv1", "#dbe8f6"), v("--flow-lv2", "#8fbbe9"), v("--flow-lv3", "#2a6fc4")];
+    var map = L.map(el, {zoomControl: true, scrollWheelZoom: false, tap: true});
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+    el.addEventListener("click", function() { map.scrollWheelZoom.enable(); }, {once: true});
+    var markers = {}, bounds = [];
+    function popup(p) {
+        var w = document.createElement("div"), b = document.createElement("strong");
+        b.textContent = p.name; w.appendChild(b);
+        function line(t) { w.appendChild(document.createElement("br")); w.appendChild(document.createTextNode(t)); }
+        line("いま: " + (p.now || "データなし"));
+        if (p.p1 !== null) { line("1時間後: " + Math.round(p.p1 * 100) + "%"); }
+        if (p.alert) { line("予測あり: " + p.alert.slice(5, 16).replace("-", "/")); }
+        w.appendChild(document.createElement("br"));
+        var a = document.createElement("a"); a.href = p.url; a.textContent = "地点のページへ"; w.appendChild(a);
+        return w;
+    }
+    points.forEach(function(p) {
+        var m = L.circleMarker([p.lat, p.lon], {radius: 8, weight: 1.5, color: "#2c3e50", fillOpacity: 0.92});
+        m.bindPopup(popup(p)); m.bindTooltip(p.name, {direction: "top", offset: [0, -6]});
+        m.addTo(map); markers[p.name] = m; bounds.push([p.lat, p.lon]);
+    });
+    if (bounds.length) { map.fitBounds(bounds, {padding: [28, 28]}); } else { map.setView([37.35, 139.32], 10); }
+    var legend = document.getElementById("home-legend");
+    function setLegend(items) {
+        legend.textContent = "";
+        items.forEach(function(it) {
+            var s = document.createElement("span"), d = document.createElement("i");
+            d.style.background = it[0]; s.appendChild(d); s.appendChild(document.createTextNode(it[1])); legend.appendChild(s);
+        });
+    }
+    function style(mode) {
+        points.forEach(function(p) {
+            var m = markers[p.name], fill = "#bdc3c7", r = 8, ring = "#2c3e50", w = 1.5;
+            if (mode === "now") {
+                fill = p.color; r = p.fog ? 11 : 8;
+                if (p.alert) { ring = "#c0392b"; w = 3; }
+            } else if (mode === "p1") {
+                if (p.p1 === null) { fill = LV[0]; } else { var lv = p.p1 >= ncThr * 2 ? 3 : p.p1 >= ncThr ? 2 : p.p1 >= ncThr / 2 ? 1 : 0; fill = LV[lv]; r = 7 + lv * 1.5; }
+            } else {
+                var i = mode === "lv0" ? 0 : 1, l = p.lv[i] || 0; fill = LV[l]; r = 7 + l * 1.5;
+            }
+            m.setStyle({fillColor: fill, color: ring, weight: w}); m.setRadius(r);
+        });
+        if (mode === "now") { setLegend([["#2a6fc4", "川霧など霧"], ["#bdc3c7", "データなし"], ["transparent", "赤い縁: 24時間以内に予測あり"]]); legend.lastChild.firstChild.style.boxShadow = "inset 0 0 0 2px #c0392b"; }
+        else if (mode === "p1") { setLegend([[LV[3], "出ていそう(高)"], [LV[2], "出ていそう"], [LV[1], "少し"], [LV[0], "低い・なし"]]); }
+        else { setLegend([[LV[3], "出やすい"], [LV[2], "やや出やすい"], [LV[1], "出にくい"], [LV[0], "予測なし"]]); }
+    }
+    var btns = document.querySelectorAll(".home-mode .seg-btn");
+    btns.forEach(function(b) {
+        b.addEventListener("click", function() {
+            btns.forEach(function(x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+            style(b.dataset.mode);
+            try { sessionStorage.setItem("rf-home-mode", b.dataset.mode); } catch (e) {}
+        });
+    });
+    var saved = null; try { saved = sessionStorage.getItem("rf-home-mode"); } catch (e) {}
+    var start = saved && document.querySelector('.home-mode [data-mode="' + saved + '"]');
+    if (start) { start.click(); } else { style("now"); }
+    // まとめの地点名にマウスを乗せる・フォーカスすると、地図のその地点を示す
+    document.querySelectorAll(".home-panel [data-focus]").forEach(function(a) {
+        function show() { var m = markers[a.dataset.focus]; if (m) { m.openTooltip(); m.bringToFront(); } }
+        function hide() { var m = markers[a.dataset.focus]; if (m) { m.closeTooltip(); } }
+        a.addEventListener("mouseenter", show); a.addEventListener("focus", show);
+        a.addEventListener("mouseleave", hide); a.addEventListener("blur", hide);
+    });
+    window.addEventListener("resize", function() { map.invalidateSize(); });
+})();
+</script>
+{% endif %}
 {% for ann in announcements_list %}
 <div class="card" style="border-left: 5px solid var(--color-primary); background: var(--color-primary-light);">
     <h2>お知らせ</h2>
@@ -56,88 +180,6 @@ document.addEventListener("ajaxformsuccess", function(e) {
     p.textContent = "回答済みです。ご協力ありがとうございました。";
     form.replaceWith(p);
 });
-</script>
-
-<div class="card">
-    <h2>サイト内検索</h2>
-    <p class="muted">地点名、日付(例: 2026-08-27 / 20260827)、または機能名(例: 精度、アカウント管理)を入力すると、関連ページへのリンクが表示されます。</p>
-    <input type="text" id="global-search" class="search-box" style="max-width:480px;" placeholder="地点名・日付・機能名で検索..." aria-label="サイト内検索">
-    <div id="global-search-results" style="margin-top:0.7rem; display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
-</div>
-<script>
-(function() {
-    var stationNames = {{ station_names|tojson }};
-    var isAdmin = {{ (session.get('role') == 'admin')|tojson }};
-    var input = document.getElementById("global-search");
-    var results = document.getElementById("global-search-results");
-
-    var pages = [
-        {label: "ダッシュボード", href: "{{ url_for('dashboard') }}"},
-        {label: "地点一覧", href: "{{ url_for('stations_list') }}"},
-        {label: "地点比較", href: "{{ url_for('compare_stations') }}"},
-        {label: "観測データ", href: "{{ url_for('observations_dates') }}"},
-        {label: "カメラ画像", href: "{{ url_for('images_dates') }}"},
-        {label: "予測結果", href: "{{ url_for('predictions_dates') }}"},
-        {label: "予測精度", href: "{{ url_for('accuracy_page') }}"}
-    ];
-    var adminPages = [
-        {label: "管理者トップ / ログ", href: "{{ url_for('admin_home') }}"},
-        {label: "エラー/警告", href: "{{ url_for('admin_errors') }}"},
-        {label: "サービス状態", href: "{{ url_for('admin_status') }}"},
-        {label: "モデル状況", href: "{{ url_for('admin_models') }}"},
-        {label: "カメラ稼働率", href: "{{ url_for('admin_camera_health') }}"},
-        {label: "Gemini状況", href: "{{ url_for('admin_gemini') }}"},
-        {label: "精度レポート", href: "{{ url_for('admin_accuracy_report') }}"},
-        {label: "ディスク使用量", href: "{{ url_for('admin_disk') }}"},
-        {label: "DB管理", href: "{{ url_for('admin_db') }}"},
-        {label: "環境変数", href: "{{ url_for('admin_env') }}"},
-        {label: "設定", href: "{{ url_for('admin_settings') }}"},
-        {label: "メンテナンス", href: "{{ url_for('admin_maintenance') }}"},
-        {label: "お知らせ/アンケート", href: "{{ url_for('admin_announcements') }}"},
-        {label: "アカウント管理", href: "{{ url_for('admin_accounts') }}"}
-    ];
-    if (isAdmin) { pages = pages.concat(adminPages); }
-
-    function normalizeDate(q) {
-        var m = q.match(/^(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})$/);
-        if (m) { return m[1] + "-" + m[2] + "-" + m[3]; }
-        return null;
-    }
-    function addLink(text, href) {
-        var a = document.createElement("a");
-        a.className = "button";
-        a.href = href;
-        a.textContent = text;
-        results.appendChild(a);
-    }
-
-    input.addEventListener("input", function() {
-        var q = input.value.trim();
-        results.innerHTML = "";
-        if (!q) { return; }
-
-        var matched = stationNames.filter(function(n) { return n.indexOf(q) !== -1; }).slice(0, 8);
-        matched.forEach(function(name) { addLink("地点: " + name, "/stations/" + encodeURIComponent(name)); });
-
-        var qLower = q.toLowerCase();
-        var matchedPages = pages.filter(function(p) { return p.label.toLowerCase().indexOf(qLower) !== -1; }).slice(0, 8);
-        matchedPages.forEach(function(p) { addLink(p.label, p.href); });
-
-        var date = normalizeDate(q);
-        if (date) {
-            addLink(date + " の観測データ", "/observations/" + date);
-            addLink(date + " のカメラ画像", "/images/" + date);
-            addLink(date + " の予測結果", "/predictions/" + date);
-        }
-
-        if (!matched.length && !matchedPages.length && !date) {
-            var p = document.createElement("p");
-            p.className = "muted";
-            p.textContent = "該当するページが見つかりません。";
-            results.appendChild(p);
-        }
-    });
-})();
 </script>
 
 {% set alert_preview_n = 5 %}

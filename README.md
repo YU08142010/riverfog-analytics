@@ -121,6 +121,15 @@ Python の実行は必ず `/opt/river-fog/.venv/bin/python` を使う。裸の `
 - 右クリックメニューは `data-context-menu="<menu-id>"` を要素に付けるだけで汎用的に使える(`base.html` の仕組み)。メニュー本体は `hidden` な `.context-menu` の `<div>` として用意し、中の `<button data-context-action="...">` を押すと `contextmenuaction` カスタムイベントが飛ぶので、ページ側でそれを購読して処理する。既存の実装例は `web_templates/shared_files.html`。
 - CSRF: 非AJAXフォームには必ず `<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">` を入れる。ミスマッチ時は `/` にリダイレクトされる(テストスクリプトでこの手のエラーが出たら、まず cookie jar の使い回しミスを疑うこと。特に `-b`/`-c` を全リクエストに揃えて付けているか確認する)。
 
+- **メニュー(2026-10-12に作り直し)**: 項目は `base.html` の `app_nav`(グループの一覧)で1か所だけ定義し、`_app_nav.html` の `nav_groups` で
+  PC(幅1100px以上)の左サイドバー `.app-side`(細くできる。状態は端末の `localStorage["rf-side-collapsed"]`)と、狭い画面の「メニュー」シート
+  `.app-sheet` の両方に出す。狭い画面は下にタブバー `.app-tabbar`(ホーム・地点・見頃・写真・メニュー)。**新しいページをメニューに足すときは
+  `app_nav` に1行足す**(`active` の条件も書く。未読などの数は `badge`、画面を開いたまま更新する数は `badge_key`)。狭い画面のヘッダーでは
+  版数・全画面・文字の大きさ・設定・名前・ログアウトを隠す(設定とログアウトはシートにある)。
+- **ホーム(`/`)**: 地図が中心(`webapp._home_map_data`)。「いま/1時間後/今日/明日」を切り替え、横(狭い画面では上下)に いまの霧・
+  1時間後の見込み・24時間の予測・今朝の写真を出す。幅500px未満の画面の確認は、生のEdgeが500px未満にできないため、作業用の
+  `shotsp.ps1`(幅390pxのiframeに入れて撮る)を使った。
+
 ## テストの作法
 
 このプロジェクトに自動テストスイートは無い。動作確認は毎回、使い捨てアカウントを作って curl または実ブラウザで一連の操作を再現する方式で行う。

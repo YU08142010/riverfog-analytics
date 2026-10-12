@@ -4187,6 +4187,59 @@ def _simulator_defaults(name):
 # ============================================================================
 
 
+def _home_map_data():
+    """ホーム(地図が中心、2026-10-12)の地図と横のまとめ。地点ごとに いま(最新の観測)・1時間後(short_nowcast)・
+    今日/明日の出やすさ(公開ページと同じ段階 0〜3)・24時間以内の予測アラートを持たせ、画面で切り替える。"""
+    observations = _latest_observations()
+    now_by_name = {s["name"]: s for s in (observations or {}).get("stations", [])}
+    alerts = _upcoming_fog_alerts_safe()
+    alert_first = {}
+    for a in alerts:
+        alert_first.setdefault(a["station"], a["target_datetime"])
+    forecast = _public_forecast_safe() or {}
+    fc_by_name = {s["name"]: s for s in forecast.get("stations") or []}
+    try:
+        import short_nowcast
+        nc = short_nowcast.latest()
+    except Exception as e:
+        log.warning("Home: short nowcast unavailable: %s", e)
+        nc = None
+    nc_hour = None
+    if nc:
+        nc_hour = (datetime.strptime(nc["issued_at"], "%Y-%m-%d %H:%M:%S") + timedelta(hours=1)).hour
+    points = []
+    for name in STATION_NAMES:
+        info = CAMERA_INFO.get(name, {})
+        if info.get("lat") is None:
+            continue
+        cur = now_by_name.get(name)
+        fc = fc_by_name.get(name) or {}
+        days = fc.get("days") or []
+        p1 = (nc or {}).get("stations", {}).get(name, {}).get(str(nc_hour)) if nc_hour is not None else None
+        points.append({
+            "name": name, "region": STATION_REGION.get(name) or "", "lat": info["lat"], "lon": info["lon"],
+            "url": url_for("station_detail", name=name),
+            "now": cur["label"] if cur else None, "color": cur["color"] if cur else "#bdc3c7",
+            "fog": bool(cur and cur.get("code") in fog_features.target_codes(name)),
+            "alert": alert_first.get(name),
+            "p1": round(p1, 3) if p1 is not None else None,
+            "lv": [d["max"] for d in days[:2]],
+        })
+    fog_now = [p for p in points if p["fog"]]
+    soon = sorted((p for p in points if p["p1"] is not None and not p["fog"]), key=lambda p: -p["p1"])
+    push_thr = (nc or {}).get("push_threshold")
+    return {
+        "points": points,
+        "fog_now": fog_now,
+        "observed_at": observations["datetime"].strftime("%H:%M") if observations else None,
+        "soon": [p for p in soon if push_thr is not None and p["p1"] >= push_thr][:5],
+        "soon_hour": nc_hour, "nc_threshold": (nc or {}).get("threshold"), "nc_push_threshold": push_thr,
+        "alerts": alerts,
+        "days": forecast.get("days") or [],
+        "tomorrow_high": [p["name"] for p in points if len(p["lv"]) > 1 and p["lv"][1] >= 3],
+    }
+
+
 @app.route("/")
 def dashboard():
     # 「最初に開くページ」(設定画面)。外から開いたとき(ホーム画面のアイコン・ブックマーク等で
@@ -4254,8 +4307,14 @@ def dashboard():
             theme = DASHBOARD_THEME_BY_ID.get(me.get("equipped_dashboard_theme", ""))
             if theme:
                 dashboard_theme_class = theme["css_class"]
+    try:
+        home = _home_map_data()
+    except Exception as e:
+        log.warning("Home map data failed: %s", e)
+        home = None
     return render_template(
         "dashboard.html",
+        home=home,
         dashboard_theme_class=dashboard_theme_class,
         observations=_latest_observations(),
         accuracy=_accuracy_summary_safe(),
@@ -4656,7 +4715,7 @@ def predictions_file(date, filename):
 # 検索の候補(ページ・地点・管理画面・日付ページのURLの型)をbase.htmlにJSONで埋め込む。
 # 存在しないendpointが混ざっても壊れないよう、url_forに失敗したものは黙って除く。
 SPOTLIGHT_PAGES = (
-    ("ダッシュボード", "dashboard", "ホーム トップ"),
+    ("ホーム(地図・いまの川霧)", "dashboard", "ホーム トップ ダッシュボード 地図"),
     ("設定", "settings_page", "せってい 通知 プッシュ テーマ ダーク 文字 大きさ プライバシー settings"),
     ("今朝の川霧", "gallery_page", "ギャラリー 写真 けさ 朝 gallery"),
     ("川霧の流れ図・見頃カレンダー", "flow_page", "流れ 広がり 見頃 みごろ カレンダー 時刻 アニメーション flow"),
@@ -11974,10 +12033,26 @@ def station_own_judge(name):
         return None
 
 
+def pending_photo_count():
+    """メニューのバッジ用: 確認待ちの写真の件数(会津観測者/只見観測者は担当地域分だけ)。"""
+    role = session.get("role")
+    if not _can_manage_observation_reports(role):
+        return 0
+    conn = _users_conn()
+    try:
+        region = _observer_region_for_role(role)
+        if region is None:
+            return users.count_pending_citizen_photos(conn)
+        rows = users.list_citizen_photos(conn, status="pending", station_names=_STATION_NAMES_BY_REGION.get(region, []))
+        return len(rows)
+    finally:
+        conn.close()
+
+
 @app.context_processor
 def _inject_citizen_photos():
     return {"station_citizen_photos": station_citizen_photos, "station_short_nowcast": station_short_nowcast,
-            "station_own_judge": station_own_judge}
+            "station_own_judge": station_own_judge, "pending_photo_count": pending_photo_count}
 
 
 @app.route("/photos")
