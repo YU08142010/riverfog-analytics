@@ -282,6 +282,30 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   取る。鍵 `rf_backup_ed25519` は `~/.ssh/authorized_keys` で `restrict,command="/usr/lib/openssh/sftp-server -R"`(読み取り専用の
   SFTPだけ)に制限してある。結果は `RiverFogBackup\status.json`・`logs\`。
 
+## 確率の正直さ・写真での答え合わせ・季節の見張り・オフライン・保存の計画(2026-10-12〜)
+
+- **確率の正直さ** `prediction_log.reliability_bins`・`/accuracy/reliability_chart.json`(分析ページ): 前日夜の本番の予測の確率を区切りごとに、
+  実際に霧だった割合と比べる。2026-10-12時点: 40%未満はほぼ正直(例: 平均24% → 実際31%)、40%以上は42件で実際は5%ほど(高い確率が言いすぎ)。
+- **写真での予報の答え合わせ** `citizen_photos.forecast_checks`: 承認済みで地点の近くの写真の撮影時刻を、前日夜の予測と照合(的中・空振り・見逃し)。
+  `/photos` と月ごとのレポート(2ページ目)に出す。カメラのAI判定による本来の採点には混ぜない。
+- **季節の見張り** `drift_watch.py`(毎週月曜07:30)・`data/health/drift.json`: 前日夜の予測を週ごとに採点し、直近2週の川霧F1が
+  それより前(最大6週、霧が少なければ学習時の評価期間)の0.6倍未満、または予測の確率の平均と実際の割合が2倍以上ずれたら管理者に通知。
+  直近2週に霧が15件以上あるときだけ判定する。
+- **ホームのキャッシュ** `_home_map_data_cached`: 地図のデータは全員同じなので1分使い回す。
+- **電波の弱い場所** `web_static/offline_sw.js` を `/offline-sw.js`(範囲 "/"、ログイン中だけ登録)として配信: ホーム・地点・見頃・今朝の川霧・
+  写真・地図のページはネット優先で取りつつ端末に保存し、つながらない(6秒)ときは保存したものを出す。CSS・JSは保存してすぐ出す。
+  カメラ画像は最後に見た120枚まで。ログイン画面を開くと保存したページ・画像を消す。通知用の `/web_static/sw.js` とは別の登録で、通知には関係しない。
+  このサイトのCSPではService Workerから他のサイトを取りに行けないため、Leafletは `web_static/vendor/leaflet/`(1.9.4)に置いて、地図のページはそれを読む。
+  圏外での写真の投稿は `web_static/offline_queue.js` が端末(IndexedDB)に保存し、つながったときにどのページからでも送る(撮影時刻が空なら写真のファイルの時刻を入れる)。
+- **地点ページのタブ**: 各カードの `data-st-tab`(now / forecast / photos / records)で振り分け、上に固定のタブと地点の状態。`#forecast` などで開ける。
+  JavaScriptが無いときは全部出る。
+- **使いやすさ**: 本文へのスキップリンク、メニューのシートの中でTabが外に出ない、細いメニューでも項目名を読み上げる、タブバーの aria-current。
+- **保存の計画** `storage_plan.py`(毎日06:30)・`data/health/storage.json`: 画像の増え方(2026-10-12: 1日約62MB)からディスクが90%に届く日数
+  (約560日)を出し、120日を切ったら通知。PCのバックアップの報告(`/api/backup-manifest`、`.env` の `RF_BACKUP_TOKEN`、Funnelからは404)が
+  3日来なければ通知。180日より古い画像は、PCの報告で枚数・大きさが同じ日だけ間引ける(`.env` に `RF_IMAGE_THIN=1` を入れたときだけ。既定は数えるだけ)。
+  PC側の `RiverFogBackup\pull.ps1` は取り終えたら `token.txt` で報告する。
+- 地点ページの大きな気温の数字は、表示のときに0から数え上がる(ui_motion.jsのcountUp)。画面の確認の画像で4°や3°に見えたのはその途中。
+
 ## 試して採らなかった改良(2026-10-08、その6)
 
 直近6週を2週×3でずらし、過去の予報(lead 0、JMA+ECMWFの平均)を入力に比べた

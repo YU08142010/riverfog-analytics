@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 <script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
+{% if session.get('user_id') %}<script src="{{ url_for('static', filename='offline_queue.js') }}?v={{ app_version|default('') }}" defer></script>{% endif %}
 {% block extra_head %}{% endblock %}
 <script>
 window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
@@ -60,7 +61,9 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 })();
 </script>
 </head>
-<body>
+<body{% if session.get('user_id') %} data-photo-submit="{{ url_for('photo_submit') }}" data-csrf="{{ csrf_token() }}"{% endif %}>
+<a class="skip-link" href="#main-content">本文へ移動</a>
+<div class="offline-bar" id="offline-bar" role="status" hidden>ネットにつながっていません。最後に開いたときの内容を表示しています。</div>
 {% block body_background %}
 {# 空の背景(_weather_scene.html)を持たないページの背景: 夜明けの川の谷(色の光・稜線・流れの線・漂う霧)。
    飾りだけなので読み上げない。見た目はglass.cssの「背景の絵」の節。 #}
@@ -144,10 +147,10 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     </button>
 </nav>
 <nav class="app-tabbar" aria-label="主なページ">
-    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if _p == url_for('dashboard') }}">{{ icon("dashboard", size=22) }}<span>ホーム</span></a>
-    <a href="{{ url_for('stations_list') }}" class="{{ 'active' if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}">{{ icon("stations", size=22) }}<span>地点</span></a>
-    <a href="{{ url_for('flow_page', mode='fc') }}" class="{{ 'active' if _p.startswith('/flow') }}">{{ icon("calendar", size=22) }}<span>見頃</span></a>
-    <a href="{{ url_for('photos_page') }}" class="{{ 'active' if _p.startswith('/photos') or _p.startswith('/gallery') }}">{{ icon("camera", size=22) }}<span>写真</span></a>
+    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if _p == url_for('dashboard') }}"{{ ' aria-current="page"'|safe if _p == url_for('dashboard') }}>{{ icon("dashboard", size=22) }}<span>ホーム</span></a>
+    <a href="{{ url_for('stations_list') }}" class="{{ 'active' if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}"{{ ' aria-current="page"'|safe if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}>{{ icon("stations", size=22) }}<span>地点</span></a>
+    <a href="{{ url_for('flow_page', mode='fc') }}" class="{{ 'active' if _p.startswith('/flow') }}"{{ ' aria-current="page"'|safe if _p.startswith('/flow') }}>{{ icon("calendar", size=22) }}<span>見頃</span></a>
+    <a href="{{ url_for('photos_page') }}" class="{{ 'active' if _p.startswith('/photos') or _p.startswith('/gallery') }}"{{ ' aria-current="page"'|safe if _p.startswith('/photos') or _p.startswith('/gallery') }}>{{ icon("camera", size=22) }}<span>写真</span></a>
     <button type="button" id="app-sheet-open" aria-haspopup="dialog" aria-controls="app-sheet" aria-expanded="false">{{ icon("menu", size=22) }}<span>メニュー</span><span class="app-tab-dot" data-badge-dot {{ "" if _menu_badge else "hidden" }}></span></button>
 </nav>
 <div class="app-sheet" id="app-sheet" hidden>
@@ -226,7 +229,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     <a href="{{ url_for('login') }}" class="button">ログイン</a>
     {% endif %}
 </header>
-<main>
+<main id="main-content" tabindex="-1">
 {% block breadcrumb %}
 <ul class="breadcrumb">
     <li><a href="{{ url_for('dashboard') }}">ホーム</a></li>
@@ -382,6 +385,14 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         openBtn.setAttribute("aria-expanded", open ? "true" : "false");
     }
     openBtn.addEventListener("click", function() { setOpen(sheet.hidden); });
+    panel.addEventListener("keydown", function(e) {
+        if (e.key !== "Tab") { return; }
+        var f = panel.querySelectorAll("a[href], button:not([disabled])");
+        if (!f.length) { return; }
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { last.focus(); e.preventDefault(); }
+        else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    });
     sheet.addEventListener("click", function(e) { if (e.target.closest("[data-sheet-close]")) { setOpen(false); openBtn.focus(); } });
     document.addEventListener("keydown", function(e) { if (e.key === "Escape" && !sheet.hidden) { setOpen(false); openBtn.focus(); } });
     // 下に引いて閉じる
@@ -398,6 +409,19 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         startY = null; panel.style.transform = "";
         if (dy > 90) { setOpen(false); }
     });
+})();
+// 電波の弱い場所(2026-10-12): オフラインの帯と、ページを保存するService Worker(/offline-sw.js、ログイン中だけ)。
+(function() {
+    var bar = document.getElementById("offline-bar");
+    function sync() { if (bar) { bar.hidden = navigator.onLine; } }
+    window.addEventListener("online", sync); window.addEventListener("offline", sync); sync();
+    {% if session.get('user_id') %}
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+        window.addEventListener("load", function() {
+            navigator.serviceWorker.register("{{ url_for('offline_service_worker') }}", {scope: "/"}).catch(function() {});
+        });
+    }
+    {% endif %}
 })();
 // トップに戻るボタン(一定量スクロールしたら表示)。
 (function() {

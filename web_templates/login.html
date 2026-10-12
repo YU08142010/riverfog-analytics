@@ -1,5 +1,9 @@
 {% extends "base_auth.html" %}
-{% block title %}ログイン{% endblock %}
+{% block title %}ログイン<script>
+// ログアウトしたら、この端末に保存したページ・画像を消す(共用の端末で次の人に見えないように)
+try { if (window.caches) { caches.delete("rf-pages-v1"); caches.delete("rf-images-v1"); } } catch (e) {}
+</script>
+{% endblock %}
 {% block content %}
     <h2 style="margin-top:0;">ログイン</h2>
     {% if error %}
@@ -22,4 +26,8 @@
     </form>
     <p class="muted" style="margin-top:1rem;">アカウントをお持ちでない方は <a href="{{ url_for('signup') }}">こちら</a> から登録を申請できます。</p>
     <p class="muted" style="margin-top:0.6rem;"><a href="{{ url_for('public_forecast') }}">← 川霧の出やすさ(公開ページ)に戻る</a></p>
+<script>
+// ログアウトしたら、この端末に保存したページ・画像を消す(共用の端末で次の人に見えないように)
+try { if (window.caches) { caches.delete("rf-pages-v1"); caches.delete("rf-images-v1"); } } catch (e) {}
+</script>
 {% endblock %}

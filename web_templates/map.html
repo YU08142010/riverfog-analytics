@@ -4,7 +4,7 @@
 {% block title %}地図{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">
 {% endblock %}
 {% block content %}
 {{ page_tabs([
@@ -77,7 +77,7 @@
 </table>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var mapDiv = document.getElementById("station-map");

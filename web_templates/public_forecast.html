@@ -2,7 +2,7 @@
 {% block title %}発生予測{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">
 <style>
 .pf-hero h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
 .pf-hero p { margin: 0; }
@@ -360,7 +360,7 @@
 {% endif %}
 <script id="pf-data" type="application/json">{{ data|tojson }}</script>
 <script id="pf-levels" type="application/json">{{ levels|tojson }}</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var data = JSON.parse(document.getElementById("pf-data").textContent);

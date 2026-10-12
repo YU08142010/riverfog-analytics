@@ -48,6 +48,7 @@
         </label>
         <p class="muted" style="font-size:0.8rem;margin:0;">位置は「いまの位置を使う」→ 写真の位置情報 → 選んだ地点、の順に使います(地点を選んだ場合はその地点になります)。</p>
         <button type="submit" class="button">投稿する</button>
+        <p class="muted" id="photo-queue-note" hidden style="margin:0;"></p>
     </form>
 </div>
 {% else %}
@@ -97,7 +98,38 @@
     <div class="empty-state">まだ承認された写真はありません。</div>
     {% endif %}
 </div>
-<script>
+{% if checks %}
+<div class="card">
+    <h3>写真での予報の答え合わせ</h3>
+    <p class="muted">承認された写真(地点の近くで撮ったもの)の撮影時刻について、前日の夜に出した本番の予測と比べています。カメラのAI判定とは別の、人の目での答え合わせです。
+        的中 {{ check_counts.hit }}・空振り {{ check_counts.fa }}・見逃し {{ check_counts.miss }}・霧なしで一致 {{ check_counts.cn }}(写真の枚数が少ないうちは参考程度に)。</p>
+    <div class="table-scroll"><table class="obs-table" style="width:auto;">
+        <thead><tr><th>撮影</th><th>地点</th><th>写真</th><th>前日夜の予測</th><th>結果</th></tr></thead>
+        <tbody>
+        {% for c in checks %}
+        <tr><td>{{ c.taken_at[5:16]|replace("-", "/") }}</td><td><a href="{{ url_for('station_detail', name=c.station_name) }}">{{ c.station_name }}</a></td>
+            <td>{{ "霧あり" if c.photo_fog else "霧なし" }}</td>
+            <td>{{ "出やすい" if c.predicted else "出にくい" }}{% if c.prob is not none %}({{ "%.0f"|format(c.prob * 100) }}%){% endif %}</td>
+            <td>{{ {"hit": "的中", "fa": "空振り", "miss": "見逃し", "cn": "一致(霧なし)"}[c.kind] }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endif %}<script>
+// 圏外のときは、写真をこの端末に保存して、つながったら送る(offline_queue.js)
+(function() {
+    var form = document.querySelector(".photo-form");
+    if (!form) { return; }
+    form.addEventListener("submit", function(e) {
+        if (navigator.onLine || !window.rfQueuePhoto) { return; }
+        e.preventDefault();
+        window.rfQueuePhoto(form).then(function() {
+            form.reset();
+            if (window.showToast) { window.showToast("いまは圏外なので、この端末に保存しました。つながったら自動で送ります。"); }
+        }).catch(function() { if (window.showToast) { window.showToast("保存できませんでした。つながってからもう一度お試しください。", true); } });
+    });
+})();
+</script><script>
 (function() {
     var btn = document.getElementById("photo-geo");
     if (!btn) { return; }

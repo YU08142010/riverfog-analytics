@@ -47,7 +47,7 @@
 .pf-card > h2 { display: flex; align-items: center; gap: 0.5rem; }
 .pf-card > h2::before { content: ""; width: 4px; height: 1.05em; border-radius: 2px; background: linear-gradient(var(--pf-lv3), var(--pf-lv2)); }
 </style>
-{% if lat is not none and lon is not none %}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">{% endif %}
+{% if lat is not none and lon is not none %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">{% endif %}
 {% endblock %}
 {% block body_background %}{% with wx = weather_scene(name, station.now.code if station and station.now else None) %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
@@ -111,7 +111,7 @@
 {% endif %}
 </div>
 {% if lat is not none and lon is not none %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var box = document.getElementById("pf-st-map");

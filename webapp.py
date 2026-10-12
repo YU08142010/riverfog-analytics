@@ -10,6 +10,7 @@ import hmac
 import io
 import json
 import logging
+import math
 import logging.handlers
 import os
 import random
@@ -746,7 +747,7 @@ MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
 # /forecastは一般向けの公開ページ(_build_public_forecast参照)。
 PUBLIC_PREFIX = "/forecast"
-LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX)
+LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX, "/api/backup-manifest")
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
 # 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
@@ -889,7 +890,7 @@ def _is_online(last_active_str):
 
 CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # CSRFチェックの対象外にするパス。/web_staticは静的ファイルの配信のみでフォーム送信はない。
-CSRF_EXEMPT_PREFIXES = ("/web_static",)
+CSRF_EXEMPT_PREFIXES = ("/web_static", "/api/backup-manifest")  # backup-manifestはセッションではなくトークンで確かめる
 
 
 def _get_or_create_csrf_token():
@@ -4240,6 +4241,23 @@ def _home_map_data():
     }
 
 
+_home_cache = {"at": 0.0, "value": None}
+_home_cache_lock = threading.Lock()
+HOME_CACHE_SECONDS = 60
+
+
+def _home_map_data_cached():
+    """ホームの地図のデータは全員同じ(ログインの有無や役割で変わらない)なので、1分だけ使い回す
+    (観測は毎時、1時間後の見込みも毎時なので、1分遅れても見え方は変わらない)。"""
+    now = time.monotonic()
+    with _home_cache_lock:
+        if _home_cache["value"] is not None and now - _home_cache["at"] < HOME_CACHE_SECONDS:
+            return _home_cache["value"]
+    value = _home_map_data()
+    with _home_cache_lock:
+        _home_cache.update(at=time.monotonic(), value=value)
+    return value
+
 @app.route("/")
 def dashboard():
     # 「最初に開くページ」(設定画面)。外から開いたとき(ホーム画面のアイコン・ブックマーク等で
@@ -4308,7 +4326,7 @@ def dashboard():
             if theme:
                 dashboard_theme_class = theme["css_class"]
     try:
-        home = _home_map_data()
+        home = _home_map_data_cached()
     except Exception as e:
         log.warning("Home map data failed: %s", e)
         home = None
@@ -5984,6 +6002,56 @@ def accuracy_threshold_chart():
     data = _cached_chart_json("accuracy_threshold_chart", [DB_PATH], render)
     return Response(data, mimetype="application/json")
 
+
+def _render_reliability_plotly(bins):
+    """「確率の正直さ」(2026-10-12): 横に予測の確率、縦に実際に霧だった割合。点が斜めの線に近いほど、
+    「30%」と言ったときに本当に3割ほど出ている(確率をそのまま信じてよい)。点の大きさは件数。"""
+    data, annotations = [], []
+    if bins:
+        top = max(0.3, max(max(b["mean_prob"], b["observed"]) for b in bins) * 1.15)
+        top = min(1.0, top)
+        data.append(go.Scatter(x=[0, top], y=[0, top], mode="lines", name="ぴったり(予測の確率=実際の割合)",
+                               line={"color": "#8a8f98", "width": 1.2, "dash": "dash"}, hoverinfo="skip"))
+        sizes = [8 + 22 * (math.log10(b["n"]) / math.log10(max(x["n"] for x in bins) or 10) if b["n"] > 1 else 0) for b in bins]
+        data.append(go.Scatter(
+            x=[b["mean_prob"] for b in bins], y=[b["observed"] for b in bins], mode="lines+markers", name="本番の予測(前日夜)",
+            line={"color": "#2a78d6", "width": 1.6}, marker={"size": sizes, "color": "#2a78d6", "line": {"color": "#fff", "width": 1}},
+            text=[f"予測{b['lo'] * 100:.0f}〜{b['hi'] * 100:.0f}%: {b['n']:,}件、平均{b['mean_prob'] * 100:.1f}% → 実際{b['observed'] * 100:.1f}%"
+                  for b in bins],
+            hovertemplate="%{text}<extra></extra>",
+        ))
+        xr, yr = [0, top], [0, top]
+    else:
+        xr, yr = [0, 1], [0, 1]
+        annotations.append({"text": "データがありません", "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False})
+    layout = {
+        "xaxis": {"title": {"text": "予測の確率"}, "range": xr, "tickformat": ".0%"},
+        "yaxis": {"title": {"text": "実際に霧だった割合"}, "range": yr, "tickformat": ".0%", "scaleanchor": "x", "scaleratio": 1},
+        "margin": {"t": 24, "r": 20, "b": 50, "l": 60},
+        "legend": {"x": 0, "y": 1, "xanchor": "left", "yanchor": "top", "font": {"size": 11}},
+        "paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)", "annotations": annotations,
+    }
+    return _chart_json(go.Figure(data=data, layout=layout))
+
+
+def _reliability_bins_safe():
+    if not DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            return prediction_log.reliability_bins(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("Failed to compute reliability bins: %s", e)
+        return []
+
+
+@app.route("/accuracy/reliability_chart.json")
+def accuracy_reliability_chart():
+    data = _cached_chart_json("accuracy_reliability_chart", [DB_PATH], lambda: _render_reliability_plotly(_reliability_bins_safe()))
+    return Response(data, mimetype="application/json")
 
 # 以下5つは元々/admin/models配下(管理者専用)にあった学習時(検証データ)のチャート。
 # 本番予測ログ(prediction_log)ベースの上記チャートと違い、fog_model.load_model_state()
@@ -12055,6 +12123,43 @@ def _inject_citizen_photos():
             "station_own_judge": station_own_judge, "pending_photo_count": pending_photo_count}
 
 
+@app.route("/api/backup-manifest", methods=["POST"])
+def backup_manifest():
+    """このPC(Windows)へのバックアップの報告(2026-10-12、RiverFogBackup/pull.ps1 が取り終えたあとに送る)。
+    PCが持っている毎日のZIPの名前と、カメラ画像の日付ごとの枚数・大きさ。storage_plan.pyが、PCに確実にある古い日の画像だけを
+    サーバーから間引く判断と、「PCへのバックアップが止まっていないか」の確認に使う。
+    ログインではなく .env の RF_BACKUP_TOKEN で確かめ、公開URL(Funnel)からは受け付けない。トークンが無ければ404。"""
+    token = os.environ.get("RF_BACKUP_TOKEN") or ""
+    if not token or _is_funnel_request():
+        abort(404)
+    if not hmac.compare_digest(request.headers.get("X-RF-Backup-Token", ""), token):
+        abort(403)
+    data = request.get_json(silent=True) or {}
+    days = data.get("image_days") or {}
+    zips = data.get("zips") or []
+    if not isinstance(days, dict) or not isinstance(zips, list) or len(days) > 5000 or len(zips) > 5000:
+        abort(400)
+    clean_days = {}
+    for d, v in days.items():
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(d)) and isinstance(v, dict):
+            clean_days[d] = {"files": int(v.get("files") or 0), "bytes": int(v.get("bytes") or 0)}
+    clean_zips = [z for z in zips if isinstance(z, str) and re.fullmatch(r"river-fog-backup_\d{8}_\d{6}\.zip", z)]
+    out = {"received_at": now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"), "host": str(data.get("host") or "")[:60],
+           "image_days": clean_days, "zips": sorted(clean_zips)}
+    HEALTH_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = HEALTH_DIR / "offsite_manifest.json.tmp"
+    tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(HEALTH_DIR / "offsite_manifest.json")
+    return jsonify({"ok": True, "days": len(clean_days), "zips": len(clean_zips)})
+
+@app.route("/offline-sw.js")
+def offline_service_worker():
+    """電波の弱い場所でも見られるようにするService Worker(web_static/offline_sw.js)。範囲を "/" にするため、
+    /web_static/ ではなくサイトの直下から配信する(Service Workerは置いた場所より上の範囲を扱えない)。"""
+    resp = send_from_directory(BASE_DIR / "web_static", "offline_sw.js", mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
 @app.route("/photos")
 def photos_page():
     my_id = session.get("user_id")
@@ -12065,8 +12170,14 @@ def photos_page():
         pending = users.count_pending_citizen_photos(conn) if _can_manage_observation_reports(session.get("role")) else 0
     finally:
         conn.close()
+    try:
+        checks, check_counts = citizen_photos.forecast_checks(approved)
+    except Exception as e:
+        log.warning("Photo forecast checks failed: %s", e)
+        checks, check_counts = [], {}
     return render_template(
         "photos.html", approved=_photo_decorate(approved), mine=_photo_decorate(mine), pending_count=pending,
+        checks=checks[:20], check_counts=check_counts,
         station_names=STATION_NAMES, station_region=STATION_REGION, codes=citizen_photos.CODES,
         now_local=now_jst_naive().strftime("%Y-%m-%dT%H:%M"), reward=citizen_photos.REWARD_POINTS,
     )
@@ -12270,7 +12381,7 @@ def admin_health():
             return json.loads((HEALTH_DIR / name).read_text(encoding="utf-8"))
         except Exception:
             return None
-    return render_template("admin_health.html", report=read("latest.json"), smoke=read("smoke.json"), camera=read("camera_check.json"))
+    return render_template("admin_health.html", report=read("latest.json"), smoke=read("smoke.json"), camera=read("camera_check.json"), drift=read("drift.json"), storage=read("storage.json"))
 
 
 # --- Web Pushの定期判定(2026-10-09、push_notify.run_scheduled) ----------------------------------------
@@ -12291,7 +12402,25 @@ def _push_admin_alerts():
                                    "起動しています", url_for("admin_log", key="webapp")))
     if overview["pending_signups"]:
         alerts.append(("signups", f"保留中の登録申請が{overview['pending_signups']}件あります", url_for("admin_accounts")))
-    # カメラの異常の自動検知(camera_check.py、毎日15:30)。その日の結果だけ(1件ごとに1日1回)。
+    # 保存の計画(storage_plan.py、毎日06:30): ディスクがいっぱいになる見込み・PCへのバックアップの止まり
+    try:
+        sp = json.loads((HEALTH_DIR / "storage.json").read_text(encoding="utf-8"))
+        if sp.get("checked_at", "")[:10] == now_jst_naive().strftime("%Y-%m-%d"):
+            for a in sp.get("alerts") or []:
+                alerts.append((f"storage-{a['kind']}", a["message"], url_for("admin_health")))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log.warning("Storage plan result unreadable: %s", e)    # 予測の当たり方の見張り(drift_watch.py、毎週月曜)。その週の結果だけ。
+    try:
+        dw = json.loads((HEALTH_DIR / "drift.json").read_text(encoding="utf-8"))
+        if dw.get("checked_at", "")[:10] >= (now_jst_naive() - timedelta(days=6)).strftime("%Y-%m-%d"):
+            for a in dw.get("alerts") or []:
+                alerts.append((f"drift-{a['kind']}", a["message"], url_for("admin_health")))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log.warning("Drift watch result unreadable: %s", e)    # カメラの異常の自動検知(camera_check.py、毎日15:30)。その日の結果だけ(1件ごとに1日1回)。
     try:
         cc = json.loads((HEALTH_DIR / "camera_check.json").read_text(encoding="utf-8"))
         if cc.get("date") == now_jst_naive().strftime("%Y-%m-%d"):

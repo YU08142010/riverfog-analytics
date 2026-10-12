@@ -2,7 +2,7 @@
 {% from "_icons.html" import icon %}
 {% from "_wx_icon.html" import wx_icon %}
 {% block title %}ホーム{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
 <div class="{{ dashboard_theme_class or '' }}">
@@ -68,7 +68,7 @@
         {% endif %}
     </aside>
 </section>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var el = document.getElementById("home-map");

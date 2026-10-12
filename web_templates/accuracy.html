@@ -105,6 +105,13 @@
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="しきい値ごとのprecision/recall/F1グラフ" data-chart-url="{{ url_for('accuracy_threshold_chart') }}"></div></div>
 </div>
 
+<div class="card">
+    <h2>確率の正直さ(前日夜の予測)</h2>
+    <p class="muted">前日の夜に出した本番の予測を確率ごとにまとめ、実際に霧だった割合と比べています。点が斜めの破線に近いほど、
+        「30%」と出たときに本当に3割ほど霧が出ている(確率をそのまま信じてよい)ということです。破線より下なら確率が高く出すぎ(出ると言いすぎ)、
+        上なら低く出すぎです。点の大きさは件数で、件数の少ない点はぶれやすいので参考程度に見てください。</p>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="予測の確率と実際に霧だった割合の比較グラフ" data-chart-url="{{ url_for('accuracy_reliability_chart') }}" style="max-width:620px;"></div></div>
+</div>
 {% if summary and by_station %}
 <div class="card">
     <h2>地点別の的中率</h2>

@@ -93,6 +93,44 @@ def nearest_station(lat, lon, camera_info, names):
     return best
 
 
+def forecast_checks(photos):
+    """写真での予報の答え合わせ(2026-10-12)。承認済みで地点の近く(NEAR_KM以内、または地点を選んで投稿)の写真ごとに、
+    撮った時刻(時)のその地点の前日夜の本番の予測(対象の日の0時より前で最新、再予測は除く)と照合する。
+    カメラの判定とは別の、人の目での答え合わせ。写真の「霧」は地点ごとの予測の対象(fog_features.target_codes)。
+    戻り値: (各写真に kind=hit/fa/miss/cn・prob を付けたリスト(予測が無いものは除く), {kind: 件数})"""
+    import sqlite3
+    import fog_features
+    import prediction_log
+    from common import BASE_DIR as _B
+    db = _B / "data" / "predictions.db"
+    out, counts = [], {"hit": 0, "fa": 0, "miss": 0, "cn": 0}
+    if not db.exists():
+        return out, counts
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        for p in photos:
+            if p.get("status") != "approved" or not p.get("station_name"):
+                continue
+            if p.get("distance_km") is not None and p["distance_km"] > NEAR_KM:
+                continue
+            target = p["taken_at"][:13] + ":00:00"
+            r = conn.execute(
+                "SELECT predicted_code, predicted_fog_prob FROM predictions WHERE station = ? AND target_datetime = ? "
+                "AND model_type LIKE ? AND model_type NOT LIKE '%[再予測]' AND run_at < ? ORDER BY run_at DESC LIMIT 1",
+                (p["station_name"], target, prediction_log.CURRENT_MODEL_LIKE, target[:10] + " 00:00:00"),
+            ).fetchone()
+            if r is None:
+                continue
+            pred = int(r[0] or 0) == 1
+            fog = p["code"] in fog_features.target_codes(p["station_name"])
+            kind = "hit" if pred and fog else "fa" if pred else "miss" if fog else "cn"
+            counts[kind] += 1
+            out.append(dict(p, kind=kind, prob=r[1], predicted=pred, photo_fog=fog))
+    finally:
+        conn.close()
+    return out, counts
+
+
 def delete_files(photo_id):
     for suffix in ("", "_t"):
         (PHOTO_DIR / f"{photo_id}{suffix}.jpg").unlink(missing_ok=True)

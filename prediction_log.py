@@ -283,6 +283,37 @@ def fog_prob_bucket_counts(conn, since=None, station=None, model_like=CURRENT_MO
     return [{"prob": b, "actual_code": a, "n": n} for b, a, n in rows]
 
 
+RELIABILITY_EDGES = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.01)
+
+
+def reliability_bins(conn, since=None, model_like=CURRENT_MODEL_LIKE):
+    """「確率の正直さ」(2026-10-12): 前日夜の本番の予測(対象の日の0時より前で最新の実行、再予測は除く、日中だけ)の
+    確率を区切り(RELIABILITY_EDGES)ごとにまとめ、その区切りの平均の予測確率と、実際に霧(地点ごとの対象)だった割合。
+    戻り値: [{"lo", "hi", "n", "mean_prob", "observed"}, ...](件数0の区切りは省く)"""
+    where = ["actual_code IS NOT NULL", "predicted_fog_prob IS NOT NULL", "COALESCE(daylight, 1) = 1",
+             "model_type NOT LIKE '%[再予測]'", "run_at < substr(target_datetime, 1, 10) || ' 00:00:00'"]
+    params = []
+    if model_like:
+        where.append("model_type LIKE ?")
+        params.append(model_like)
+    if since:
+        where.append("target_datetime >= ?")
+        params.append(since)
+    rows = conn.execute(
+        f"""WITH r AS (
+                SELECT station, target_datetime, predicted_fog_prob AS p, {_actual_fog_sql()} AS y,
+                       ROW_NUMBER() OVER (PARTITION BY station, target_datetime ORDER BY run_at DESC) AS k
+                FROM predictions WHERE {" AND ".join(where)})
+            SELECT p, y FROM r WHERE k = 1""", params,
+    ).fetchall()
+    out = []
+    for lo, hi in zip(RELIABILITY_EDGES, RELIABILITY_EDGES[1:]):
+        sel = [(p, y) for p, y in rows if lo <= p < hi]
+        if sel:
+            out.append({"lo": lo, "hi": min(hi, 1.0), "n": len(sel), "mean_prob": sum(p for p, _ in sel) / len(sel),
+                        "observed": sum(1 for _, y in sel if y) / len(sel)})
+    return out
+
 def upcoming_fog_alerts(conn, from_dt_str, to_dt_str, fog_codes):
     """from_dt_str〜to_dt_strの間で「川霧」と予測されている地点・時刻を返す
     (二値の予測では1=川霧あり。旧方式の現象コードの行は主コードが川霧かで判定する)。

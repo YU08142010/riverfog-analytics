@@ -34,6 +34,41 @@
     {% endif %}
 </div>
 <div class="card">
+    <h3>保存の計画(ディスク・PCへのバックアップ)</h3>
+    {% if storage %}
+    <p>{{ storage.checked_at[:16] }}: ディスク {{ storage.disk.used_pct }}% 使用(空き {{ storage.disk.free_gb }}GB / {{ storage.disk.total_gb }}GB)。
+        カメラ画像 {{ storage.images.days }}日分・{{ storage.images.gb }}GB、1日あたり約{{ storage.images.per_day_mb }}MB。
+        {% if storage.days_to_full is not none %}このままだと約{{ storage.days_to_full }}日で{{ storage.full_pct }}%に届きます。{% endif %}</p>
+    {% if storage.offsite %}
+    <p>PCへのバックアップ: 最後の報告 {{ storage.offsite.received_at[:16] }}{% if storage.offsite.host %}({{ storage.offsite.host }}){% endif %}。
+        毎日のZIP {{ storage.offsite.zips }}個(最新 {{ storage.offsite.latest_zip or "-" }})、カメラ画像はサーバーの{{ storage.offsite.image_days_on_server }}日分のうち
+        {{ storage.offsite.image_days_identical }}日分がPCに同じ内容であります。</p>
+    {% else %}
+    <p class="muted">PCへのバックアップの報告はまだありません(PCの RiverFogBackup\pull.ps1 が取り終えると届きます)。</p>
+    {% endif %}
+    <p class="muted">古い画像の間引き: {{ "有効" if storage.thin.enabled else "無効(.env の RF_IMAGE_THIN=1 で有効)" }}。{{ storage.thin.keep_days }}日より古い{{ storage.thin.older_days }}日分のうち、
+        PCに同じ内容があって消せるのは{{ storage.thin.removable }}日分{% if storage.thin.removed %}(今回 {{ storage.thin.removed|length }}日分を消しました){% endif %}。</p>
+    {% if storage.alerts %}<ul class="health-list">{% for a in storage.alerts %}<li>{{ a.message }}</li>{% endfor %}</ul>{% endif %}
+    {% else %}
+    <p class="muted">まだ確認の結果がありません(毎朝6:30に作ります)。</p>
+    {% endif %}
+</div><div class="card">
+    <h3>予測の当たり方の見張り(季節の変わり目)</h3>
+    {% if drift %}
+    <p class="muted">{{ drift.checked_at[:16] }}: 前日夜の本番の予測を週ごとに採点し、それより前の成績(川霧F1 {{ "%.2f"|format(drift.baseline_f1) if drift.baseline_f1 else "-" }}、{{ drift.baseline_source or "" }})と比べています。
+        直近2週に霧が{{ drift.min_fog }}件以上あるときだけ判定します。冬は「けあらし」など性質の違う霧になるため、落ち方を早めに知るためのものです。</p>
+    {% if drift.alerts %}<ul class="health-list">{% for a in drift.alerts %}<li>{{ a.message }}</li>{% endfor %}</ul>{% else %}<p>大きな変化は見つかりませんでした。</p>{% endif %}
+    {% if drift.weeks %}
+    <div class="table-scroll"><table class="obs-table" style="width:auto;">
+        <thead><tr><th>週</th><th>照合</th><th>霧</th><th>的中</th><th>空振り</th><th>見逃し</th><th>F1</th><th>予測の平均</th><th>実際の割合</th></tr></thead>
+        <tbody>{% for w in drift.weeks %}<tr><td>{{ w.start[5:]|replace("-", "/") }}〜</td><td>{{ w.n }}</td><td>{{ w.fog }}</td><td>{{ w.hit }}</td><td>{{ w.false_alarm }}</td><td>{{ w.miss }}</td>
+            <td>{{ "%.2f"|format(w.f1) }}</td><td>{{ "%.1f%%"|format(w.mean_prob * 100) if w.mean_prob is not none else "-" }}</td><td>{{ "%.1f%%"|format(w.observed * 100) if w.observed is not none else "-" }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% else %}
+    <p class="muted">まだ確認の結果がありません(毎週月曜の朝に作ります)。</p>
+    {% endif %}
+</div><div class="card">
     <h3>カメラの異常の自動検知</h3>
     {% if camera %}
     <p class="muted">{{ camera.checked_at[:16] }}: AIの判定が「現象なし」だった昼(10〜14時)の画像を、その地点の5〜1週間前の画像と比べています。

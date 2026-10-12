@@ -33,8 +33,18 @@
     {% endfor %}
 </div>
 {% endif %}
-{% if hourly %}
-<div class="card">
+{# 地点ページのタブ(2026-10-12): 縦に長いカードを「いま/予報/写真/記録」に分ける。各カードの data-st-tab で振り分け、
+   JavaScriptが無いときは全部を出す。上に地点の名前といまの状態を固定で出す。 #}
+<nav class="st-tabs" id="st-tabs" aria-label="{{ name }}のページの中の切り替え" hidden>
+    <span class="st-tabs-status"><b>{{ name }}</b>{% if current %}<span>{{ current.label }}{% if station_weather_latest and station_weather_latest.temp is not none and station_weather_latest.temp == station_weather_latest.temp %} ・ {{ "%.0f"|format(station_weather_latest.temp) }}℃{% endif %}</span>{% endif %}</span>
+    <div class="seg" role="group" aria-label="表示する内容">
+        <button type="button" class="seg-btn" data-tab="now" aria-pressed="true">いま</button>
+        <button type="button" class="seg-btn" data-tab="forecast" aria-pressed="false">予報</button>
+        <button type="button" class="seg-btn" data-tab="photos" aria-pressed="false">写真</button>
+        <button type="button" class="seg-btn" data-tab="records" aria-pressed="false">記録</button>
+    </div>
+</nav>{% if hourly %}
+<div class="card" data-st-tab="forecast">
     <h2>時間ごとの{{ fog_word(name) }}の出やすさ</h2>
     <div class="wx-hourly" role="list" aria-label="時間ごとの{{ fog_word(name) }}の出やすさ">
         {% for h in hourly %}
@@ -49,7 +59,7 @@
     <p class="muted" style="margin:0.3rem 0 0;">高=出やすい・中=やや出やすい・低=出にくい(公開ページと同じ3段階)。夜間は対象外です。</p>
 </div>
 {% endif %}
-<div class="card">
+<div class="card" data-st-tab="now">
     <h2>{{ name }}</h2>
     {% if name in lens_haze_stations %}
     <p class="muted" style="margin-top:-0.4rem;">この地点のカメラはレンズがわずかに曇っていることが多く、画像全体がかすんで「全体霧」と判定されやすい地点です。全体霧の判定は参考としてご覧ください(川霧の判定・予測には大きな影響はありません)。</p>
@@ -147,7 +157,7 @@
     {% endif %}
 </div>
 
-<div class="card">
+<div class="card" data-st-tab="now">
     <h2>最新の気象情報</h2>
     {% if station_weather_latest %}
     <p class="muted">
@@ -205,7 +215,7 @@
 
 {% set am = amedas_for(name) %}
 {% if am and am.obs %}
-<div class="card">
+<div class="card" data-st-tab="now">
     <h2>最寄りのアメダス(実測)</h2>
     <p class="muted">気象庁のアメダス「{{ am.station }}」(この地点から約{{ "%.0f"|format(am.km) }}km{% if am.alt is not none %}、標高{{ am.alt }}m{% endif %})の{{ am.obs.datetime[5:16]|replace("-", "/") }}の実測値です。
         上の「最新の気象情報」は地点の座標での計算値(Open-Meteo)で、こちらは地上で実際に測った値です(場所が少し離れています)。</p>
@@ -223,7 +233,7 @@
 {% set sn = station_short_nowcast(name) %}
 {% set oj = station_own_judge(name) %}
 {% if sn or oj %}
-<div class="card">
+<div class="card" data-st-tab="now">
     <h2>この後3時間・もう一つの判定(試験中)</h2>
     <p class="muted">いつもの予報・判定とは別に、試験的に出しているものです。いつもの予報・判定は変わりません。</p>
     {% if sn %}
@@ -250,7 +260,7 @@
 
 {% set cps = station_citizen_photos(name) %}
 {% if cps %}
-<div class="card">
+<div class="card" data-st-tab="photos">
     <h2>みんなの観測写真</h2>
     <p class="muted">この地点の近くで利用者が撮った写真(直近2週間、確認済み)。<a href="{{ url_for('photos_page') }}">すべての写真・投稿</a></p>
     <div class="photo-grid">
@@ -267,7 +277,7 @@
 
 {# 並び(2026-10-07): 縦に長い予測グラフと短いグラフを横に並べると、短い方の下に大きな空きができて
    いたため、予測グラフ・的中率の推移は横幅いっぱいにし、同じくらいの大きさの2つだけを横に並べる。 #}
-<div class="card">
+<div class="card" data-st-tab="forecast">
     <h2>今後の予測グラフ</h2>
     {% if forecast_file %}
     <p class="muted">{{ latest_pred_date }}</p>
@@ -281,12 +291,12 @@
     {% endif %}
 </div>
 
-<div class="card">
+<div class="card" data-st-tab="records">
     <h2>的中率の推移</h2>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ name }}の的中率推移グラフ" data-chart-url="{{ url_for('station_chart', name=name) }}"></div></div>
 </div>
 
-<div class="content-grid-2 is-even">
+<div class="content-grid-2 is-even" data-st-tab="records">
 <div class="card">
     <h2>学習時のモデル精度推移</h2>
     <p class="muted">再学習のたびの、この地点のaccuracy・川霧F1(学習に使っていない評価期間での値)の推移。</p>
@@ -300,7 +310,7 @@
 </div>
 </div>
 
-<div class="card">
+<div class="card" data-st-tab="records">
     <h2>採用モデルの決定木(代表1本)</h2>
     <p class="muted">
         採用中のモデル(全地点共通の二値LightGBM)が実際に使っている木の深さ・複雑さの雰囲気を示す図です。
@@ -312,7 +322,7 @@
 </div>
 
 {% if feature_snapshot and feature_snapshot.predicted_fog is defined %}
-<div class="card">
+<div class="card" data-st-tab="forecast">
     <details>
         <summary style="cursor:pointer; font-weight:600;">予測の内訳(技術詳細)を見る</summary>
         <div style="margin-top:0.8rem;">
@@ -345,7 +355,7 @@
 </div>
 {% endif %}
 
-<div class="card">
+<div class="card" data-st-tab="photos">
     <h2>画像タイムラプス</h2>
     {% if timelapse %}
     <div style="text-align:center;">
@@ -491,7 +501,7 @@
     {% endif %}
 </div>
 
-<div class="card">
+<div class="card" data-st-tab="records">
     <h2 id="comment-count">コメント({{ comments|length }}件)</h2>
     <div id="comment-list" style="display:flex; flex-direction:column; gap:0.7rem; margin-bottom:1rem;" {{ "hidden" if not comments }}>
         {% for c in comments %}
@@ -575,6 +585,44 @@
             }
         }
     });
+})();
+</script>
+<script>
+(function() {
+    var nav = document.getElementById("st-tabs");
+    if (!nav) { return; }
+    var btns = nav.querySelectorAll("[data-tab]"), cards = document.querySelectorAll("[data-st-tab]");
+    var KEY = "rf-station-tab";
+    nav.hidden = false;
+    function show(tab, scroll) {
+        btns.forEach(function(b) {
+            var on = b.dataset.tab === tab;
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        cards.forEach(function(c) { c.hidden = c.dataset.stTab !== tab; });
+        try { sessionStorage.setItem(KEY, tab); } catch (e) {}
+        if (history.replaceState) { history.replaceState(null, "", location.pathname + location.search + "#" + tab); }
+        if (scroll) {
+            var top = nav.getBoundingClientRect().top + window.scrollY - 70;
+            if (window.scrollY > top) { window.scrollTo({top: top}); }
+        }
+        // 隠れていたグラフ・地図の幅を測り直させる
+        window.dispatchEvent(new Event("resize"));
+    }
+    btns.forEach(function(b) { b.addEventListener("click", function() { show(b.dataset.tab, true); }); });
+    nav.querySelector(".seg").addEventListener("keydown", function(e) {
+        var list = Array.prototype.slice.call(btns), i = list.indexOf(document.activeElement);
+        if (i < 0 || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) { return; }
+        var j = (i + (e.key === "ArrowRight" ? 1 : list.length - 1)) % list.length;
+        list[j].focus(); list[j].click(); e.preventDefault();
+    });
+    // 初めのタブ: URLの#(#forecast など、またはページの中の要素のid)→ このタブで前に見ていたもの → いま
+    var h = location.hash.slice(1), start = "now";
+    if (["now", "forecast", "photos", "records"].indexOf(h) >= 0) { start = h; }
+    else if (h) { var el = document.getElementById(h), card = el && el.closest("[data-st-tab]"); if (card) { start = card.dataset.stTab; } }
+    else { try { start = sessionStorage.getItem(KEY) || "now"; } catch (e) {} }
+    show(start, false);
+    if (h && document.getElementById(h)) { document.getElementById(h).scrollIntoView(); }
 })();
 </script>
 {% endblock %}
