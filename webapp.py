@@ -12195,7 +12195,7 @@ def admin_health():
             return json.loads((HEALTH_DIR / name).read_text(encoding="utf-8"))
         except Exception:
             return None
-    return render_template("admin_health.html", report=read("latest.json"), smoke=read("smoke.json"))
+    return render_template("admin_health.html", report=read("latest.json"), smoke=read("smoke.json"), camera=read("camera_check.json"))
 
 
 # --- Web Pushの定期判定(2026-10-09、push_notify.run_scheduled) ----------------------------------------
@@ -12216,7 +12216,22 @@ def _push_admin_alerts():
                                    "起動しています", url_for("admin_log", key="webapp")))
     if overview["pending_signups"]:
         alerts.append(("signups", f"保留中の登録申請が{overview['pending_signups']}件あります", url_for("admin_accounts")))
+    # カメラの異常の自動検知(camera_check.py、毎日15:30)。その日の結果だけ(1件ごとに1日1回)。
+    try:
+        cc = json.loads((HEALTH_DIR / "camera_check.json").read_text(encoding="utf-8"))
+        if cc.get("date") == now_jst_naive().strftime("%Y-%m-%d"):
+            for a in cc.get("alerts") or []:
+                alerts.append((f"camcheck-{a['kind']}-{a['station']}", a["message"], url_for("admin_health")))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log.warning("Camera check result unreadable: %s", e)
     return alerts
+
+
+def _short_nowcast_latest():
+    import short_nowcast
+    return short_nowcast.latest()
 
 
 def _push_schedule_once():
@@ -12231,7 +12246,7 @@ def _push_schedule_once():
                "fog_codes_by_station": {n: set(fog_features.target_codes(n)) for n in STATION_NAMES}}
         for key, fn in (("forecast", _public_forecast_safe), ("observations", _latest_observations),
                         ("camera_failures", _stations_with_recent_camera_failures_cached),
-                        ("admin_alerts", _push_admin_alerts)):
+                        ("admin_alerts", _push_admin_alerts), ("nowcast", _short_nowcast_latest)):
             try:
                 ctx[key] = fn()
             except Exception as e:

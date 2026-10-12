@@ -33,4 +33,19 @@
     <p class="muted">まだ巡回テストの結果がありません。</p>
     {% endif %}
 </div>
+<div class="card">
+    <h3>カメラの異常の自動検知</h3>
+    {% if camera %}
+    <p class="muted">{{ camera.checked_at[:16] }}: AIの判定が「現象なし」だった昼(10〜14時)の画像を、その地点の5〜1週間前の画像と比べています。
+        直近2日続けて「構図がふだんと合わない」「晴れていてもぼやけている」場合と、同じ画像が3回以上続いた場合に知らせます(管理者に通知)。
+        比べられた地点 {{ camera.stations.values()|selectattr("align_base", "defined")|list|length }} / {{ camera.stations|length }}。</p>
+    {% if camera.alerts %}
+    <ul class="health-list">{% for a in camera.alerts %}<li><a href="{{ url_for('station_detail', name=a.station) }}">{{ a.message }}</a></li>{% endfor %}</ul>
+    {% else %}
+    <p>異常は見つかりませんでした。</p>
+    {% endif %}
+    {% else %}
+    <p class="muted">まだ確認の結果がありません。</p>
+    {% endif %}
+</div>
 {% endblock %}

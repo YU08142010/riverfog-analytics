@@ -186,6 +186,23 @@ def _best_threshold(y, p):
     return best[1]
 
 
+PUSH_MIN_PRECISION = 0.35
+PUSH_MIN_TP = 5
+
+
+def _push_threshold(y, p):
+    """通知用(1時間後だけ): 検証期間で「当たる割合」がPUSH_MIN_PRECISION以上になる、いちばん低いしきい値。
+    当たりがPUSH_MIN_TP件未満しか残らないなら、通知はしない(None)。"""
+    for t in np.arange(0.05, 0.95, 0.01):
+        pred = p >= t
+        tp, fp = int((pred & (y == 1)).sum()), int((pred & (y == 0)).sum())
+        if tp < PUSH_MIN_TP:
+            return None
+        if tp / (tp + fp) >= PUSH_MIN_PRECISION:
+            return round(float(t), 2)
+    return None
+
+
 def _metrics(y, p, thr):
     from sklearn.metrics import average_precision_score
     pred = p >= thr
@@ -222,7 +239,10 @@ def train():
              val["y"].sum(), len(test), test["y"].sum())
     rates, g = _station_rates(inner)
     m = _fit(inner, rates, g)
-    thr = _best_threshold(val["y"].to_numpy(), _proba(m, val, rates, g))
+    p_val = _proba(m, val, rates, g)
+    thr = _best_threshold(val["y"].to_numpy(), p_val)
+    v1 = (val["lead"] == 1).to_numpy()
+    push_thr = _push_threshold(val["y"].to_numpy()[v1], p_val[v1])
     train_df = rows[rows["dt"] < test_start]
     rates2, g2 = _station_rates(train_df)
     m2 = _fit(train_df, rates2, g2)
@@ -247,13 +267,17 @@ def train():
             "model_same_rows_as_production": _metrics(y[ok], p[ok], thr),
             "production_forecast": _metrics(y[ok], prod[ok], prod_thr),
         }
+    k1 = (test["lead"] == 1).to_numpy()
+    res["push_threshold"] = push_thr
+    res["push_test"] = _metrics(y[k1], p[k1], push_thr) if push_thr is not None else None
     imp = dict(zip(FEATURES, (m2.booster_.feature_importance("gain") / max(1, m2.booster_.feature_importance("gain").sum())).round(4)))
     res["importance"] = dict(sorted(imp.items(), key=lambda kv: -kv[1])[:10])
     CHECK_PATH.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     # 本番用: 全期間で学習し直す(しきい値は検証期間で決めたもの)
     rates3, g3 = _station_rates(rows)
     final = _fit(rows, rates3, g3)
-    joblib.dump({"model": final, "rates": rates3, "global": g3, "threshold": thr, "trained_at": res["generated_at"],
+    joblib.dump({"model": final, "rates": rates3, "global": g3, "threshold": thr, "push_threshold": push_thr,
+                 "trained_at": res["generated_at"],
                  "check": res["by_lead"]}, MODEL_PATH)
     log.info("short nowcast: %s", json.dumps(res["by_lead"], ensure_ascii=False))
     return res
@@ -278,7 +302,8 @@ def predict():
     for (s, lead, target), prob in zip(zip(rows["station"], rows["lead"], rows["target_dt"]), p):
         out.setdefault(s, {})[str(int(target.hour))] = round(float(prob), 3)
     LATEST_PATH.write_text(json.dumps({"issued_at": t.strftime("%Y-%m-%d %H:%M:%S"), "threshold": st["threshold"],
-                                       "stations": out}, ensure_ascii=False), encoding="utf-8")
+                                       "push_threshold": st.get("push_threshold"), "stations": out},
+                                      ensure_ascii=False), encoding="utf-8")
     log.info("short nowcast issued at %s for %d station(s)", t, len(out))
 
 

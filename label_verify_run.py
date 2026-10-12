@@ -53,6 +53,14 @@ def candidates():
     rows = [(s, d, int(c)) for d, s, c in zip(ph["datetime"], ph["station_name"], ph["code"])
             if (s, d) not in touched and (s, d) not in done and lv.image_path(s, d).exists()]
     rows.sort(key=lambda r: r[1], reverse=True)  # 新しいものから
+    # 自前の画像判定(own_judge.py)が「霧なし」と食い違ったものを先に回す(2026-10-12)
+    try:
+        import own_judge
+        first = own_judge.disagreement_keys(BACKFILL_FROM)
+    except Exception as e:  # noqa: BLE001
+        log.warning("own_judge disagreements unavailable: %s", e)
+        first = set()
+    rows.sort(key=lambda r: (r[0], r[1]) not in first)
     return rows
 
 

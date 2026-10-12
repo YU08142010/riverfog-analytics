@@ -61,11 +61,12 @@ def fetch_history(coords, start, end):
                 try:
                     payload = fm._get_forecast_with_retry(params, timeout=120, url=fm.OPEN_METEO_HISTORICAL_FORECAST_URL).json()
                     break
-                except Exception as e:  # noqa: BLE001  利用上限(429)なら1分待ってやり直す
-                    if "429" not in str(e) or attempt == 5:
+                except Exception as e:  # noqa: BLE001  利用上限(429)なら1分、空の応答などの一時的な失敗なら15秒待ってやり直す
+                    if attempt == 5:
                         raise
-                    log.warning("Rate limited by Open-Meteo; waiting 60s (%d/5)", attempt + 1)
-                    time.sleep(60)
+                    wait = 60 if "429" in str(e) else 15
+                    log.warning("Open-Meteo fetch failed (%s); waiting %ds (%d/5)", str(e)[:80], wait, attempt + 1)
+                    time.sleep(wait)
             time.sleep(2)
             if isinstance(payload, dict):
                 payload = [payload]

@@ -9,6 +9,7 @@ LightGBMだけで動く(APIを使わない)。
   当たり方(川霧の適合率・再現率。同じ画像のGeminiの元の判定とも比べる)を data/experiments/own_judge_check.json に書く。
 - 判定(--run、毎時): 新しい画像の特徴量を計算して data/own_judge.db に保存し、判定(各まとまりの確率)を付ける。
   過去分の特徴量も少しずつ埋める(--limit)。地点ページの「もう一つの判定」に出す。
+  Geminiと自信を持って食い違った画像は観測報告の確認待ちに積む(flag_disagreements、1日6件まで)。
 """
 import argparse
 import csv
@@ -247,6 +248,91 @@ def judge_recent(hours=6):
     log.info("judged %d image(s)", len(d))
 
 
+# --- Geminiとの食い違いを確認待ちに回す(2026-10-12) -------------------------------------------------
+# この判定はGeminiのラベルで学習しているので、自信を持って食い違う画像は「Geminiのラベルが怪しい」候補になる
+# (単独で正しいわけではない)。観測報告の確認待ち(source="auto_detected")に、理由を添えて1日DISAGREE_DAILY_MAX件まで積む。
+# Geminiが川霧と言った画像の食い違いは、AIの二重判定(label_verify_run.py)でも先に回す(disagreement_keys)。
+DISAGREE_RULES = [  # (Geminiのまとまりの条件, この判定のまとまり, しきい値, 説明)
+    (lambda g: g != 1, 1, 0.6, "川霧の見落とし"),
+    (lambda g: g == 1, 0, 0.7, "川霧の誤判定"),
+    (lambda g: g == 0, 2, 0.8, "全体霧の見落とし"),
+]
+DISAGREE_DAILY_MAX = 6
+
+
+def _disagreements(since):
+    """直近の判定のうち、Geminiのラベル(人が訂正済みのものは除く)と自信を持って食い違うもの。"""
+    c = connect(ro=True)
+    try:
+        rows = c.execute("SELECT datetime, station, probs FROM judge WHERE datetime >= ?", (since,)).fetchall()
+    finally:
+        c.close()
+    if not rows:
+        return []
+    w = sqlite3.connect(f"file:{lv.WEATHER_DB}?mode=ro", uri=True)
+    try:
+        codes = {(s, d): code for d, s, code in w.execute(
+            "SELECT datetime, station_name, code FROM phenomena WHERE datetime >= ? AND code IS NOT NULL", (since,))}
+    finally:
+        w.close()
+    u = sqlite3.connect(f"file:{lv.USERS_DB}?mode=ro", uri=True)
+    try:
+        touched = {(s, d) for s, d in u.execute(
+            "SELECT station_name, target_datetime FROM phenomena_corrections WHERE target_datetime >= ?", (since,))}
+    finally:
+        u.close()
+    out = []
+    for dt, station, probs in rows:
+        code = codes.get((station, dt))
+        g = _group(int(code)) if code is not None else None
+        if g is None or (station, dt) in touched:
+            continue
+        probs = json.loads(probs)
+        for cond, own, thr, label in DISAGREE_RULES:
+            if cond(g) and probs[own] >= thr:
+                out.append({"datetime": dt, "station": station, "code": int(code), "gemini": GROUPS[g], "own": GROUPS[own],
+                            "prob": probs[own], "kind": label})
+                break
+    out.sort(key=lambda r: -r["prob"])
+    return out
+
+
+def disagreement_keys(since):
+    """label_verify_run.py用: 食い違いのある(地点, 日時)。"""
+    try:
+        return {(r["station"], r["datetime"]) for r in _disagreements(since)}
+    except Exception as e:  # noqa: BLE001
+        log.warning("disagreement lookup failed: %s", e)
+        return set()
+
+
+def flag_disagreements(hours=6):
+    """食い違いを観測報告の確認待ちに積む。戻り値: 積んだ件数。"""
+    import users
+    now = datetime.now(JST).replace(tzinfo=None)
+    found = _disagreements((now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S"))
+    if not found:
+        return 0
+    conn = users.connect(lv.USERS_DB)
+    try:
+        today = now.strftime("%Y-%m-%d")
+        used = conn.execute("SELECT COUNT(*) FROM observation_reports WHERE source = 'auto_detected' AND reason LIKE '自前の画像判定%' "
+                            "AND reported_at >= ?", (today + " 00:00:00",)).fetchone()[0]
+        n = 0
+        for r in found:
+            if used + n >= DISAGREE_DAILY_MAX:
+                break
+            reason = (f"自前の画像判定は「{r['own']}」({r['prob'] * 100:.0f}%)で、AIの判定(「{r['gemini']}」)と食い違っています"
+                      f"({r['kind']}の疑い)。")
+            if users.create_observation_report(conn, r["station"], r["datetime"], r["code"], None, now.strftime("%Y-%m-%d %H:%M:%S"),
+                                               source="auto_detected", importance="low", reason=reason):
+                n += 1
+    finally:
+        conn.close()
+    log.info("flagged %d disagreement(s) of %d", n, len(found))
+    return n
+
+
 def latest_for(station):
     """地点ページ用: 直近3時間以内の判定 {"datetime", "label", "prob"}。"""
     if not DB.exists():
@@ -281,5 +367,6 @@ if __name__ == "__main__":
     if args.run:
         compute_features(args.limit)
         judge_recent()
+        flag_disagreements()
     if args.train:
         train()

@@ -17,7 +17,7 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -120,6 +120,8 @@ def kind_enabled(settings, kind, role):
         return settings["push_fog_soon"]
     if kind == "fog_now":
         return settings["push_fog_now"]
+    if kind == "fog_nowcast":
+        return settings["push_fog_nowcast"]
     if kind == "camera":
         return settings["push_camera"]
     if kind == "report":
@@ -263,6 +265,27 @@ def _soon_stations(forecast, targets, now):
     return out
 
 
+def _nowcast_hits(nowcast, now):
+    """short_nowcast.latest()の値から、1時間後の見込みが通知用のしきい値以上の地点 → (時, 確率)。
+    その1時間後(画像の時刻+1時間)を過ぎた・しきい値が無い(検証で当たる割合が足りなかった)なら空。
+    cronで毎時18分ごろに発表されるので、通知はその時刻の40分ほど前になる。"""
+    if not nowcast or nowcast.get("push_threshold") is None:
+        return {}
+    try:
+        issued = datetime.strptime(nowcast["issued_at"], "%Y-%m-%d %H:%M:%S")
+    except (KeyError, ValueError):
+        return {}
+    if now >= issued + timedelta(hours=1):
+        return {}
+    h1 = (issued + timedelta(hours=1)).hour
+    out = {}
+    for name, hours in (nowcast.get("stations") or {}).items():
+        p = hours.get(str(h1))
+        if p is not None and p >= nowcast["push_threshold"]:
+            out[name] = (h1, p)
+    return out
+
+
 def run_scheduled(ctx):
     """裏のスレッドから5分ごとに呼ぶ。ctx(webapp.pyが組み立てる):
     forecast(_public_forecast_safe()の値), observations(_latest_observations()), fog_codes,
@@ -291,6 +314,7 @@ def run_scheduled(ctx):
         fog_now = [s["name"] for s in obs["stations"] if s.get("code") in by_station.get(s["name"], ctx["fog_codes"])]
         obs_hour = obs["datetime"].hour
     run_at = (forecast or {}).get("run_at") or ""
+    nowcast_hits = _nowcast_hits(ctx.get("nowcast"), now)
 
     for uid in ids:
         user = members.get(uid)
@@ -320,6 +344,15 @@ def run_scheduled(ctx):
                 names = sorted(soon, key=lambda n: (soon[n], station_names.index(n)))
                 jobs.append(("fog_soon", [f"soon:{today}:{n}" for n in names], "まもなく川霧が出やすくなります",
                              f"{_join_names(names)}({soon[names[0]]}時ごろ〜)", station_url(names[0]), "fog-soon", "high"))
+
+        if s["push_fog_nowcast"]:
+            names = [n for n in targets if n in nowcast_hits and n not in fog_now]
+            if names:
+                names.sort(key=lambda n: -nowcast_hits[n][1])
+                h = nowcast_hits[names[0]][0]
+                jobs.append(("fog_nowcast", [f"nowcast:{today}:{n}" for n in names], "1時間以内に川霧が出ていそうです",
+                             f"{_join_names(names)}({h}時ごろ、画像と実測から・試験中)", station_url(names[0]),
+                             "fog-nowcast", "high"))
 
         if s["push_fog_now"] and fog_now:
             names = [n for n in targets if n in fog_now]
