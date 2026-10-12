@@ -114,8 +114,8 @@ OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 # 予報取得は1回失敗しただけでその日の予測・グラフ・記録が丸ごとスキップされてしまうため、
 # collect.pyの実況取得と同様に短いリトライを入れる。
-FORECAST_FETCH_RETRIES = 2
-FORECAST_FETCH_RETRY_DELAY_SEC = 3
+FORECAST_FETCH_RETRIES = 5  # 2026-10-13: サーバーのDNSが時々数十秒失敗するため、2回・3秒から5回・30秒に
+FORECAST_FETCH_RETRY_DELAY_SEC = 30
 
 # collect.pyが実況値取得に使っているOpen-Meteoの変数名 -> 学習データと同じ列名・単位への変換
 _FORECAST_VARS = {
