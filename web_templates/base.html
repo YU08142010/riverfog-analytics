@@ -41,6 +41,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     if (P.reduce_motion) { root.classList.add("rf-reduce-motion"); }
     if (P.calm_background) { root.classList.add("rf-calm-bg"); }
     try { if (localStorage.getItem("rf-side-collapsed") === "1") { root.classList.add("rf-side-collapsed"); } } catch (e) {}
+    try { if (localStorage.getItem("rf-side-hidden") === "1") { root.classList.add("rf-side-hidden"); } if (localStorage.getItem("rf-stlist-hidden") === "1") { root.classList.add("rf-stlist-hidden"); } } catch (e) {}
     // 文字の大きさ(標準/大きめ/特大、2026-10-09)。描画前に付けて、読み込み時に大きさが変わって見えないようにする。
     try {
         var ts = localStorage.getItem("rf-text");
@@ -165,6 +166,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     </div>
 </div>
 <header>
+    <button type="button" class="app-side-toggle" id="app-side-toggle" aria-controls="app-side" aria-expanded="true" aria-label="メニューを閉じる" title="メニューを閉じる/開く">{{ icon("menu", size=20) }}</button>
     <h1><a href="{{ url_for('dashboard') }}" class="app-header-brand">川霧観測・予測</a></h1>
     <a href="{{ url_for('changelog_page') }}" class="app-version" title="更新履歴を見る">v{{ app_version }}</a>
     <button type="button" class="spotlight-trigger" data-spotlight-open aria-label="検索(Ctrl+K)" title="検索(Ctrl+K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>検索</span><kbd>Ctrl K</kbd></button>
@@ -253,6 +255,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 <div class="layout">
 <aside class="sidebar">{%- block sidebar -%}{%- endblock -%}</aside>
 <div class="layout-content">
+<button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-expanded="true">地点の一覧を隠す</button>
 {% block content %}{% endblock %}
 </div>
 </div>
@@ -366,7 +369,26 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         });
         syncCollapse();
     }
-    var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
+    // メニューを閉じる/開く(PC、2026-10-12)。閉じるとサイドバーを画面の外に出し、本文を広く使う。この端末に覚える。
+    function toggler(btn, cls, key, labels, after) {
+        if (!btn) { return; }
+        function sync() {
+            var hidden = root.classList.contains(cls);
+            btn.setAttribute("aria-expanded", hidden ? "false" : "true");
+            if (labels.aria) { btn.setAttribute("aria-label", hidden ? labels.show : labels.hide); }
+            else { btn.textContent = hidden ? labels.show : labels.hide; }
+        }
+        btn.addEventListener("click", function() {
+            var hidden = root.classList.toggle(cls);
+            try { localStorage.setItem(key, hidden ? "1" : "0"); } catch (e) {}
+            sync();
+            setTimeout(function() { window.dispatchEvent(new Event("resize")); }, 250);
+            if (after) { after(hidden); }
+        });
+        sync();
+    }
+    toggler(document.getElementById("app-side-toggle"), "rf-side-hidden", "rf-side-hidden", {aria: true, show: "メニューを開く", hide: "メニューを閉じる"});
+    toggler(document.getElementById("sidebar-toggle"), "rf-stlist-hidden", "rf-stlist-hidden", {show: "地点の一覧を出す", hide: "地点の一覧を隠す"});    var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
     if (!sheet || !openBtn) { return; }
     var panel = sheet.querySelector(".app-sheet-panel");
     function setOpen(open) {

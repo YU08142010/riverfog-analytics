@@ -1826,3 +1826,41 @@ a.station-chip { display: block; text-decoration: none; }
 a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); box-shadow: 0 0 0 2px var(--color-primary); outline: none; }
 :root:not([data-theme="dark"]) { --glass-bg: rgba(255, 255, 255, 0.88); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --glass-bg: rgba(30, 33, 42, 0.82); } }
+
+/* サイドバーをしまう(2026-10-12) */
+.app-side-toggle { display: none; }
+.sidebar-toggle { display: none; }
+@media (min-width: 1100px) {
+    .app-side-toggle {
+        display: inline-flex; align-items: center; justify-content: center; width: 2.3rem; height: 2.3rem; border: none; border-radius: 999px;
+        background: var(--control-bg); color: var(--color-text); cursor: pointer; flex: 0 0 auto;
+    }
+    .app-side-toggle:hover { background: var(--color-primary-lighter); }
+    .app-side-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .app-side-toggle .icon { margin: 0; }
+    .app-side { transition: width 0.2s var(--ease-out, ease), transform 0.22s var(--ease-out, ease); }
+    :root.rf-side-hidden { --side-w: 0px; }
+    .rf-side-hidden .app-side { transform: translateX(-100%); visibility: hidden; transition: transform 0.22s var(--ease-out, ease), visibility 0s 0.22s; }
+    .rf-side-hidden header .app-header-brand { display: inline; }
+}
+/* 地点の一覧(ページの左の一覧): 一覧のあるページだけボタンを出す */
+.layout:has(> .sidebar:not(:empty)) .sidebar-toggle {
+    display: inline-flex; align-items: center; gap: 0.3rem; margin: 0 0 0.6rem; padding: 0.3rem 0.8rem; border: none; border-radius: 999px;
+    background: var(--control-bg); color: var(--color-text); font: inherit; font-size: 0.82rem; cursor: pointer;
+}
+.sidebar-toggle:hover { background: var(--color-primary-lighter); }
+.sidebar-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rf-stlist-hidden .layout > .sidebar { display: none !important; }
+/* 見やすさ(2026-10-12): 空の背景のページ(ホーム・地点)のカードは、背景を見せるためにわざと透けさせていた
+   (weather_scene.css)が、文字が読みにくいとの声があったため、ほかのページと同じくらいの濃さにする。 */
+.wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.88) !important; }
+:root[data-theme="dark"] .wx-scene ~ main .card,
+:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(28, 31, 40, 0.86) !important; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .wx-scene ~ main .card,
+    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(28, 31, 40, 0.86) !important; }
+}
+.wx-scene ~ main :is(.card, .sidebar-panel) :is(.muted, small, .wx-hour-day, .sidebar-group-label-static, th, .empty-state) { color: var(--color-text-muted); }
+.sidebar-toggle, .layout:has(> .sidebar:not(:empty)) .sidebar-toggle { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
