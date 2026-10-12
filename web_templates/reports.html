@@ -5,7 +5,8 @@
 <div class="card">
     <h2>月ごとのレポート</h2>
     <p class="muted">毎月1日の朝に、前の月の川霧の観測(カメラ画像のAI判定、人の訂正を反映)と、前日夜の予測の成績をPDFにまとめています。
-        できたときに通知を受け取るには、<a href="{{ url_for('settings_page') }}#push">設定</a>の「月ごとのレポート」をオンにしてください。</p>
+        できたときに通知を受け取るには、<a href="{{ url_for('settings_page') }}#push">設定</a>の「月ごとのレポート」をオンにしてください。
+        期間・地点を選んで生のデータ(CSV・画像)をまとめて取り出すには<a href="{{ url_for('export_page') }}">研究用の書き出し</a>へ。</p>
 </div>
 {% if reports %}
 <div class="report-list">

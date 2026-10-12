@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}{{ "川霧の流れ図" if mode == "obs" else "見頃カレンダー" }}{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "一覧", "url": url_for('stations_list'), "active": false},
+    {"label": "比較", "url": url_for('compare_stations'), "active": false},
+    {"label": "地図", "url": url_for('map_page'), "active": false},
+    {"label": "今朝の川霧", "url": url_for('gallery_page'), "active": false},
+    {"label": "流れ図・見頃", "url": url_for('flow_page'), "active": true},
+    {"label": "みんなの写真", "url": url_for('photos_page'), "active": false},
+]) }}
+<div class="card">
+    <div class="flow-head">
+        <h2>{% if mode == "obs" %}川霧の流れ図 <small class="muted">{{ date_label }}</small>{% else %}見頃カレンダー <small class="muted">{{ day.label ~ " " ~ day.date_label if day else "" }}</small>{% endif %}</h2>
+        <div class="flow-controls">
+            <div class="seg" role="group" aria-label="表示">
+                <a class="seg-btn" aria-pressed="{{ 'true' if mode == 'obs' else 'false' }}" href="{{ url_for('flow_page', region=region, mode='obs') }}">観測(過去の日)</a>
+                <a class="seg-btn" aria-pressed="{{ 'true' if mode == 'fc' else 'false' }}" href="{{ url_for('flow_page', region=region, mode='fc') }}">見頃(予報)</a>
+            </div>
+            <div class="seg" role="group" aria-label="地域">
+                {% for r in ["只見川", "会津"] %}
+                <a class="seg-btn" aria-pressed="{{ 'true' if region == r else 'false' }}" href="{{ url_for('flow_page', region=r, mode=mode, date=date if mode == 'obs' else none, day=day_index if mode == 'fc' else none) }}">{{ r }}</a>
+                {% endfor %}
+            </div>
+            {% if mode == "obs" %}
+            <div class="seg" role="group" aria-label="日付">
+                <a class="seg-btn" href="{{ url_for('flow_page', region=region, mode='obs', date=prev_date) }}">← 前の日</a>
+                {% if next_date %}<a class="seg-btn" href="{{ url_for('flow_page', region=region, mode='obs', date=next_date) }}">次の日 →</a>{% endif %}
+            </div>
+            {% else %}
+            <div class="seg" role="group" aria-label="日">
+                {% for i, lbl in [(0, "今日"), (1, "明日"), (2, "明後日")] %}
+                <a class="seg-btn" aria-pressed="{{ 'true' if day_index == i else 'false' }}" href="{{ url_for('flow_page', region=region, mode='fc', day=i) }}">{{ lbl }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <p class="muted flow-note">
+        {% if mode == "obs" %}
+        カメラ画像のAI判定(人の訂正を反映)を、地点(行)×時刻(列)で色分けしています。下の地図とスライダーで、霧がどう広がって消えたかを追えます。
+        マスを押すとその時刻の画像が開きます。灰色の斜線は日の出前・日の入り後(暗くて判定できない時刻)です。
+        {% else %}
+        前日夜の予測(当日は毎時の観測で更新したもの)から、時刻ごとの川霧の出やすさを色分けしています。濃い青ほど出やすい時刻です。
+        {% endif %}
+        地点の並びは{% if region == "只見川" %}「伊南川と支流(南→北、伊南川合流部で只見川に合流)」→「只見川の本流(上流→下流)」{% else %}南→北{% endif %}です(川の流路のデータではなく、位置から並べた目安)。
+    </p>
+</div>
+
+{% if mode == "fc" and best %}
+<div class="card">
+    <h3 style="margin-top:0;">{{ day.label if day else "" }}の見頃({{ best|length }}地点)</h3>
+    <ul class="flow-best">
+        {% for b in best %}
+        <li><a href="{{ url_for('station_detail', name=b.name) }}">{{ b.name }}</a>
+            <span class="muted">{{ b.first }}時{% if b.last != b.first %}〜{{ b.last }}時{% endif %}</span></li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="flow-layout">
+    <div class="card flow-map-card">
+        <svg id="flow-map" class="flow-map" viewBox="0 0 300 300" role="img" aria-label="地点の地図(色はスライダーの時刻)"></svg>
+        <div class="flow-player">
+            <button type="button" class="button cancel small-btn" id="flow-play">▶ 再生</button>
+            <input type="range" id="flow-hour" min="{{ hours[0] }}" max="{{ hours[-1] }}" value="{{ 7 }}" aria-label="時刻">
+            <b id="flow-hour-label">7時</b>
+        </div>
+        <div class="flow-legend" id="flow-legend"></div>
+    </div>
+    <div class="card flow-grid-card">
+        <div class="flow-grid-wrap">
+            <table class="flow-grid" id="flow-grid">
+                <thead><tr><th class="flow-name">地点</th>{% for h in hours %}<th data-h="{{ h }}">{{ h }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                {% for label, names in sections %}
+                <tr class="flow-section"><th colspan="{{ hours|length + 1 }}">{{ label }}</th></tr>
+                {% for n in names %}
+                <tr data-name="{{ n }}"><th class="flow-name"><a href="{{ url_for('station_detail', name=n) }}">{{ n }}</a></th>
+                    {% for h in hours %}
+                    {% set c = cells[n][h] %}
+                    {% if mode == "obs" %}
+                    {% set img = url_for('images_file', date=date, hhmm='%02d00'|format(h), filename=n ~ '.jpg') if c.i else none %}
+                    <td data-h="{{ h }}" class="fc-obs {{ 'is-dark' if not c.d }}" data-c="{{ c.c if c.c is not none else '' }}" title="{{ n }} {{ h }}時: {{ c.l }}{{ '(暗い時刻)' if not c.d }}">{% if img %}<a href="{{ img }}" target="_blank" rel="noopener" aria-label="{{ n }} {{ h }}時の画像"></a>{% endif %}</td>
+                    {% else %}
+                    <td data-h="{{ h }}" class="fc-lv lv{{ c.lv }}" data-lv="{{ c.lv }}" title="{{ n }} {{ h }}時: {{ ['予測なし', '出にくい', 'やや出やすい', '出やすい'][c.lv] }}"></td>
+                    {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var MODE = {{ mode|tojson }}, COORDS = {{ coords|tojson }}, PC = {{ phenom_colors|tojson }};
+    var hours = {{ hours|tojson }};
+    var grid = document.getElementById("flow-grid"), svg = document.getElementById("flow-map");
+    var slider = document.getElementById("flow-hour"), hourLabel = document.getElementById("flow-hour-label");
+    var playBtn = document.getElementById("flow-play"), timer = null;
+    // 観測: 現象の色(川霧1〜3・全体霧4〜6は濃さ、層雲・雨はその色、現象なしは薄い)。予報: 出やすさの3段階
+    function obsColor(c) {
+        if (c === "" || c === undefined) { return null; }
+        c = +c;
+        if (c === 0) { return "var(--flow-none)"; }
+        return PC[c] || "#999";
+    }
+    var LV = {0: "var(--flow-none)", 1: "var(--flow-lv1)", 2: "var(--flow-lv2)", 3: "var(--flow-lv3)"};
+    grid.querySelectorAll("td").forEach(function(td) {
+        var col = MODE === "obs" ? obsColor(td.dataset.c) : LV[td.dataset.lv];
+        if (col) { td.style.background = col; }
+    });
+    // 地図: 緯度経度を枠に収める(北が上)
+    var names = Object.keys(COORDS).filter(function(n) { return COORDS[n][0] !== null; });
+    var lats = names.map(function(n) { return COORDS[n][0]; }), lons = names.map(function(n) { return COORDS[n][1]; });
+    var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
+    var minLon = Math.min.apply(null, lons), maxLon = Math.max.apply(null, lons);
+    var midLat = (minLat + maxLat) / 2, kx = Math.cos(midLat * Math.PI / 180);
+    var spanX = (maxLon - minLon) * kx || 0.01, spanY = (maxLat - minLat) || 0.01, scale = 260 / Math.max(spanX, spanY);
+    var ox = (300 - spanX * scale) / 2, oy = (300 - spanY * scale) / 2;
+    var NS = "http://www.w3.org/2000/svg", dots = {};
+    names.forEach(function(n) {
+        var x = ox + (COORDS[n][1] - minLon) * kx * scale, y = 300 - oy - (COORDS[n][0] - minLat) * scale;
+        var c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1)); c.setAttribute("r", "6");
+        c.setAttribute("class", "flow-dot");
+        var t = document.createElementNS(NS, "title"); t.textContent = n; c.appendChild(t);
+        svg.appendChild(c); dots[n] = c;
+    });
+    function cellOf(name, h) { return grid.querySelector('tr[data-name="' + CSS.escape(name) + '"] td[data-h="' + h + '"]'); }
+    function show(h) {
+        h = +h; slider.value = h; hourLabel.textContent = h + "時";
+        grid.querySelectorAll("th[data-h], td[data-h]").forEach(function(el) { el.classList.toggle("is-now", +el.dataset.h === h); });
+        names.forEach(function(n) {
+            var td = cellOf(n, h), col = td ? td.style.background : "";
+            dots[n].style.fill = col || "transparent";
+            dots[n].style.strokeDasharray = col ? "" : "2 2";
+            var t = dots[n].querySelector("title"); t.textContent = n + " " + h + "時: " + (td ? (td.getAttribute("title") || "").split(": ").pop() : "");
+        });
+    }
+    slider.addEventListener("input", function() { stop(); show(slider.value); });
+    function stop() { if (timer) { clearInterval(timer); timer = null; playBtn.textContent = "▶ 再生"; } }
+    playBtn.addEventListener("click", function() {
+        if (timer) { stop(); return; }
+        playBtn.textContent = "■ 停止";
+        timer = setInterval(function() { var h = +slider.value + 1; show(h > hours[hours.length - 1] ? hours[0] : h); }, 700);
+    });
+    grid.querySelectorAll("th[data-h]").forEach(function(th) { th.addEventListener("click", function() { stop(); show(th.dataset.h); }); });
+    // 凡例
+    var legend = document.getElementById("flow-legend"), items;
+    if (MODE === "obs") {
+        items = [["var(--flow-none)", "現象なし"], [PC[1], "薄い川霧"], [PC[2], "川霧"], [PC[3], "濃い川霧"], [PC[5], "全体霧"],
+                 [PC[7], "層雲"], [PC[10], "雨"], ["transparent", "画像なし"]];
+    } else {
+        items = [["var(--flow-lv3)", "出やすい"], ["var(--flow-lv2)", "やや出やすい"], ["var(--flow-lv1)", "出にくい"], ["var(--flow-none)", "予測なし"]];
+    }
+    items.forEach(function(it) {
+        var s = document.createElement("span"); s.className = "flow-key";
+        s.innerHTML = '<i style="background:' + it[0] + '"></i>' + it[1]; legend.appendChild(s);
+    });
+    show({{ 7 if mode == "obs" else (best[0].first if best else 7) }});
+})();
+</script>
+{% endblock %}

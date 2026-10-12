@@ -1523,3 +1523,66 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .health-list.bad li { color: var(--color-danger); }.haze-badge { display: inline-block; margin-left: 0.5rem; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.85rem;
     background: var(--glass-soft, rgba(127, 127, 127, 0.14)); border: 1px solid var(--color-border); vertical-align: middle; }
 .haze-badge b { font-size: 1rem; }
+/* ===== 川霧の流れ図・見頃カレンダー(/flow、2026-10-12) ===== */
+:root { --flow-none: #eef2f6; --flow-missing: #c9ced6; --flow-lv1: #dbe8f6; --flow-lv2: #8fbbe9; --flow-lv3: #2a6fc4; }
+:root[data-theme="dark"] { --flow-none: #26303c; --flow-missing: #4a5260; --flow-lv1: #2a3d55; --flow-lv2: #3f6fa8; --flow-lv3: #7fb8ff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --flow-none: #26303c; --flow-missing: #4a5260; --flow-lv1: #2a3d55; --flow-lv2: #3f6fa8; --flow-lv3: #7fb8ff; } }
+.flow-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.6rem; }
+.flow-head h2 { margin: 0; }
+.flow-head h2 small { font-weight: 400; font-size: 0.9rem; margin-left: 0.3rem; }
+.flow-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.flow-controls .seg-btn { text-decoration: none; color: inherit; }
+.flow-note { font-size: 0.82rem; margin-bottom: 0; }
+.flow-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.flow-map-card { position: sticky; top: calc(var(--header-h, 60px) + 0.8rem); margin: 0; }
+.flow-map { width: 100%; height: auto; display: block; background: var(--glass-soft, rgba(127, 127, 127, 0.08)); border-radius: 12px; }
+.flow-dot { stroke: rgba(0, 0, 0, 0.35); stroke-width: 1; transition: fill 0.25s ease; }
+.flow-player { display: flex; align-items: center; gap: 0.5rem; margin: 0.6rem 0; }
+.flow-player input[type="range"] { flex: 1; }
+.flow-player .button { margin: 0; white-space: nowrap; }
+.flow-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font-size: 0.78rem; }
+.flow-key { display: inline-flex; align-items: center; gap: 0.3rem; }
+.flow-key i { width: 0.9rem; height: 0.9rem; border-radius: 3px; display: inline-block; border: 1px solid rgba(127, 127, 127, 0.4); }
+.flow-grid-card { margin: 0; min-width: 0; }
+.flow-grid-wrap { overflow-x: auto; }
+.flow-grid { border-collapse: separate; border-spacing: 2px; font-size: 0.78rem; }
+.flow-grid th[data-h] { font-weight: 500; color: var(--color-text-muted); cursor: pointer; min-width: 1.6rem; text-align: center; }
+.flow-grid th.is-now { color: var(--color-primary); font-weight: 700; }
+.flow-grid .flow-name { text-align: left; white-space: nowrap; padding-right: 0.5rem; position: sticky; left: 0; background: var(--color-surface, inherit); z-index: 1; font-weight: 500; }
+.flow-grid .flow-name a { color: inherit; text-decoration: none; }
+.flow-grid .flow-section th { text-align: left; padding-top: 0.6rem; font-size: 0.75rem; color: var(--color-text-muted); }
+.flow-grid td { width: 1.6rem; height: 1.25rem; border-radius: 3px; background: transparent; box-shadow: inset 0 0 0 1px var(--flow-missing); position: relative; }  /* 画像なし: 塗らずに枠だけ(全体霧の灰色と見分ける) */
+.flow-grid td a { position: absolute; inset: 0; }
+.flow-grid td.is-dark { background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.18) 0 3px, transparent 3px 6px) !important; }
+.flow-grid td.is-now { outline: 2px solid var(--color-primary); outline-offset: 0; }
+.flow-best { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.3rem 1rem; }
+@media (max-width: 760px) { .flow-layout { grid-template-columns: minmax(0, 1fr); } .flow-map-card { position: static; } .flow-map { max-width: 360px; margin: 0 auto; } }.export-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0; }
+.export-row input[type="date"] { margin-left: 0.4rem; }
+.export-parts { border: 1px solid var(--color-border); border-radius: 12px; padding: 0.6rem 0.9rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem; align-items: center; }
+.export-parts legend { padding: 0 0.3rem; font-weight: 600; }
+.export-img-hours select { width: auto; }
+/* 市民観測(写真投稿)・この後3時間(2026-10-12) */
+.photo-form { display: grid; gap: 0.7rem; max-width: 40rem; }
+.photo-form label { display: grid; gap: 0.25rem; }
+.photo-place { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; }
+.photo-place label { flex: 1 1 14rem; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: 0.8rem; }
+.photo-item { margin: 0; display: grid; gap: 0.35rem; }
+.photo-item img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; display: block; }
+.photo-item figcaption { display: grid; gap: 0.2rem; font-size: 0.85rem; }
+.photo-item form { margin: 0; }
+.photo-comment { font-size: 0.85rem; overflow-wrap: anywhere; }
+.photo-status { display: inline-block; font-size: 0.75rem; padding: 0.05rem 0.5rem; border-radius: 999px; background: var(--color-bg); }
+.photo-status.is-approved { background: color-mix(in srgb, #2e9d5b 22%, transparent); }
+.photo-status.is-rejected { background: color-mix(in srgb, #d14b4b 22%, transparent); }
+.photo-review { display: grid; grid-template-columns: minmax(0, 18rem) 1fr; gap: 1rem; align-items: start; }
+.photo-review img { width: 100%; border-radius: 10px; display: block; }
+.photo-review-form { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.photo-review-form input[type=text] { flex: 1 1 12rem; }
+@media (max-width: 640px) { .photo-review { grid-template-columns: 1fr; } }
+.nowcast-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.6rem; }
+.nowcast-cell { display: grid; justify-items: center; gap: 0.1rem; padding: 0.5rem; border-radius: 10px; background: var(--color-bg); }
+.nowcast-cell.is-likely { background: color-mix(in srgb, #4a8fd6 26%, transparent); }
+.nowcast-hour { font-size: 0.85rem; }
+.nowcast-prob { font-size: 1.3rem; font-weight: 700; }
+.nowcast-word { font-size: 0.75rem; }.nowcast-cell.is-ref { opacity: 0.7; }

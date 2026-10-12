@@ -203,6 +203,68 @@
     {% endif %}
 </div>
 
+{% set am = amedas_for(name) %}
+{% if am and am.obs %}
+<div class="card">
+    <h2>最寄りのアメダス(実測)</h2>
+    <p class="muted">気象庁のアメダス「{{ am.station }}」(この地点から約{{ "%.0f"|format(am.km) }}km{% if am.alt is not none %}、標高{{ am.alt }}m{% endif %})の{{ am.obs.datetime[5:16]|replace("-", "/") }}の実測値です。
+        上の「最新の気象情報」は地点の座標での計算値(Open-Meteo)で、こちらは地上で実際に測った値です(場所が少し離れています)。</p>
+    <div class="weather-info-grid">
+        {% for label, key, fmt in [("気温", "temp", "%.1f℃"), ("湿度", "humidity", "%.0f%%"), ("露点温度", "dew_point", "%.1f℃"), ("風速", "wind", "%.1fm/s"), ("降水量(1時間)", "precip", "%.1fmm"), ("日照(1時間)", "sun", "%.1f時間")] %}
+        <div class="weather-info-item">
+            <div class="weather-info-label">{{ label }}</div>
+            <div class="weather-info-value">{{ fmt|format(am.obs[key]) if am.obs[key] is not none else "-" }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% set sn = station_short_nowcast(name) %}
+{% set oj = station_own_judge(name) %}
+{% if sn or oj %}
+<div class="card">
+    <h2>この後3時間・もう一つの判定(試験中)</h2>
+    <p class="muted">いつもの予報・判定とは別に、試験的に出しているものです。いつもの予報・判定は変わりません。</p>
+    {% if sn %}
+    <h3 class="set-subhead">この後3時間の{{ fog_word(name) }}(画像と実測から)</h3>
+    <p class="muted" style="font-size:0.8rem;">{{ sn.issued_at[11:16] }}のカメラ画像の判定・かすみ度と近くのアメダスの実測から、1〜3時間後に{{ fog_word(name) }}が写っている見込みを出しています。
+        試した期間では1時間後はいつもの予報より当たりやすく、2〜3時間後はいつもの予報と同じくらいかそれ以下だったため、2〜3時間後は参考程度に見てください。</p>
+    <div class="nowcast-row">
+        {% for h in sn.hours %}
+        <div class="nowcast-cell{{ ' is-likely' if h.likely }}{{ ' is-ref' if h.lead > 1 }}">
+            <span class="nowcast-hour">{{ h.hour }}時{{ "(参考)" if h.lead > 1 }}</span>
+            <span class="nowcast-prob">{{ "%.0f"|format(h.prob * 100) }}%</span>
+            <span class="nowcast-word">{{ "出ていそう" if h.likely else "出ていなさそう" }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% if oj %}
+    <h3 class="set-subhead">もう一つの判定(自前の画像判定)</h3>
+    <p>{{ oj.datetime[11:16] }}の画像: <strong>{{ oj.label }}</strong> <span class="muted">({{ "%.0f"|format(oj.prob * 100) }}%)</span></p>
+    <p class="muted" style="font-size:0.8rem;">AI(Gemini)とは別に、このサイトで学習した小さなモデルが、晴れた日の同じカメラの画像と見比べて判定したものです。AIの判定と違うときは、どちらかが間違えている可能性があります。{% if oj.agreement %}試した期間でのAIの判定との一致率は{{ "%.0f"|format(oj.agreement * 100) }}%で、川霧かどうかの見分けはまだ苦手です。{% endif %}</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{% set cps = station_citizen_photos(name) %}
+{% if cps %}
+<div class="card">
+    <h2>みんなの観測写真</h2>
+    <p class="muted">この地点の近くで利用者が撮った写真(直近2週間、確認済み)。<a href="{{ url_for('photos_page') }}">すべての写真・投稿</a></p>
+    <div class="photo-grid">
+        {% for p in cps %}
+        <figure class="photo-item">
+            <a href="{{ url_for('photo_file', photo_id=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('photo_thumb', photo_id=p.id) }}" loading="lazy" alt="{{ p.code_label }}の写真"></a>
+            <figcaption><span class="gallery-chip">{{ p.code_label }}</span> <small class="muted">{{ p.taken_at[5:16]|replace("-", "/") }} ・ {{ p.poster }}</small>
+                {% if p.comment %}<span class="photo-comment">{{ p.comment }}</span>{% endif %}</figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {# 並び(2026-10-07): 縦に長い予測グラフと短いグラフを横に並べると、短い方の下に大きな空きができて
    いたため、予測グラフ・的中率の推移は横幅いっぱいにし、同じくらいの大きさの2つだけを横に並べる。 #}
 <div class="card">

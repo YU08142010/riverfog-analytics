@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_page_tabs.html" import page_tabs %}
+{% block title %}写真の確認{% endblock %}
+{% block content %}
+{{ page_tabs([
+    {"label": "観測報告", "url": url_for('observation_reports'), "active": false},
+    {"label": "写真の確認", "url": url_for('photos_review'), "active": true},
+    {"label": "正解セット", "url": url_for('gold_page'), "active": false},
+    {"label": "正解セットの結果", "url": url_for('gold_results'), "active": false},
+]) }}
+<div class="card">
+    <h2>投稿された写真の確認({{ photos|length }}件)</h2>
+    <p class="muted">利用者が投稿した写真です。霧の観測として見せてよいものを承認してください(承認すると投稿者に{{ reward }}pt)。
+        人の顔や車のナンバーがはっきり写っているもの、関係の無い写真、場所や時刻が明らかに違うものは却下してください。
+        {% if session.get("role") not in ("admin", "observer") %}担当地域の写真だけを表示しています。{% endif %}</p>
+</div>
+{% for p in photos %}
+<div class="card photo-review">
+    <a href="{{ url_for('photo_file', photo_id=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('photo_thumb', photo_id=p.id) }}" alt="投稿#{{ p.id }}の写真"></a>
+    <div class="photo-review-body">
+        <h3 style="margin:0;">{{ p.station_name }} <span class="gallery-chip">{{ p.code_label }}</span></h3>
+        <p class="muted" style="margin:0.2rem 0;">撮影 {{ p.taken_at[:16] }} ・ 投稿 {{ p.created_at[:16] }} ・ {{ p.poster }}
+            {% if p.distance_km is not none %} ・ 地点から{{ "%.1f"|format(p.distance_km) }}km{% if not p.near %}(遠いため地点ページには出ません){% endif %}{% else %} ・ 位置情報なし(地点を選んで投稿){% endif %}
+            ・ {{ p.width }}×{{ p.height }}</p>
+        {% if p.comment %}<p class="photo-comment">{{ p.comment }}</p>{% endif %}
+        <p><a href="{{ url_for('station_detail', name=p.station_name) }}" target="_blank" rel="noopener">この地点のカメラ画像を見る</a></p>
+        <form method="post" action="{{ url_for('photo_review_action', photo_id=p.id) }}" class="photo-review-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="note" maxlength="200" placeholder="却下の理由(投稿者に表示)">
+            <button type="submit" name="action" value="approve" class="button small-btn">承認</button>
+            <button type="submit" name="action" value="reject" class="button cancel small-btn">却下</button>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">確認待ちの写真はありません。</div></div>
+{% endfor %}
+{% endblock %}

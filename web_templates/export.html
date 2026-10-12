@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_station_checkboxes.html" import station_checkboxes %}
+{% block title %}研究用の書き出し{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>研究用の書き出し</h2>
+    <p class="muted">期間と地点を選んで、観測(カメラ画像の判定、人の訂正を反映)・地点の気象・予測の記録・かすみ度・カメラ画像を1つのZIPにまとめます。
+        各ファイルの列の意味と注意点は、ZIPの中の README.txt に書いてあります。期間は{{ max_days }}日まで、画像は{{ max_images }}枚までです。</p>
+    <form method="post" action="{{ url_for('export_page') }}" class="export-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="export-row">
+            <label>開始日 <input type="date" name="start" value="{{ start }}" required></label>
+            <label>終了日 <input type="date" name="end" value="{{ end }}" required></label>
+        </div>
+        <fieldset class="export-parts">
+            <legend>含めるもの</legend>
+            <label><input type="checkbox" checked disabled> 観測(現象の判定、毎時)</label>
+            {% for key, label in parts %}
+            <label><input type="checkbox" name="part_{{ key }}" value="1"{{ " checked" if key != "images" }}> {{ label }}</label>
+            {% endfor %}
+            <span class="export-img-hours">画像の時間帯:
+                <select name="img_from">{% for h in range(4, 20) %}<option value="{{ h }}"{{ " selected" if h == 5 }}>{{ h }}時</option>{% endfor %}</select>〜
+                <select name="img_to">{% for h in range(4, 20) %}<option value="{{ h }}"{{ " selected" if h == 10 }}>{{ h }}時</option>{% endfor %}</select>
+            </span>
+        </fieldset>
+        <h3 class="set-subhead">地点</h3>
+        <p><button type="button" class="button cancel small-btn" id="export-all">すべて選ぶ</button>
+           <button type="button" class="button cancel small-btn" id="export-none">すべて外す</button></p>
+        {{ station_checkboxes(station_names, "stations", station_names, station_region=station_region) }}
+        <button type="submit" class="button" style="margin-top:1rem;">ZIPを作ってダウンロード</button>
+        <p class="muted" style="font-size:0.8rem;">画像を含めると、作るのに少し時間がかかります(数十秒)。カメラ画像の再配布・公開は、提供元(国土交通省「川の防災情報」)の利用条件を確認してください。</p>
+    </form>
+</div>
+<script>
+(function() {
+    function setAll(v) { document.querySelectorAll('input[name="stations"]').forEach(function(c) { c.checked = v; }); }
+    document.getElementById("export-all").addEventListener("click", function() { setAll(true); });
+    document.getElementById("export-none").addEventListener("click", function() { setAll(false); });
+})();
+</script>
+{% endblock %}
