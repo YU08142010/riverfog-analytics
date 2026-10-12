@@ -281,6 +281,8 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   8:00・13:00・21:00、ログオン中のみ)が、毎日のZIP(`backups/`、新しい60個を残す)と `data/images/` の日付フォルダ(無い日と直近3日)を
   取る。鍵 `rf_backup_ed25519` は `~/.ssh/authorized_keys` で `restrict,command="/usr/lib/openssh/sftp-server -R"`(読み取り専用の
   SFTPだけ)に制限してある。結果は `RiverFogBackup\status.json`・`logs\`。
+  2026-10-12に鍵を登録(書き込み・コマンドは拒否されることを確認)。サーバーからの送り出しは約0.2MB/s(Tailscaleは直結)で、初回(約3.3GB)は数時間、
+  以後は1日約100MBで10分ほど。画像の日付フォルダは .part に取ってから名前を変える(途中で止まった日を取得済みと見なさない)。タスクの制限時間は12時間。
 
 ## 確率の正直さ・写真での答え合わせ・季節の見張り・オフライン・保存の計画(2026-10-12〜)
 
