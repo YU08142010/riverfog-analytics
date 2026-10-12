@@ -1791,3 +1791,38 @@ main:focus { outline: none; }
         display: block; position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
 }
+/* ==========================================================================
+   見やすさの手直し(2026-10-12、利用者から「見づらい」): 後ろの空の絵が透けすぎて文字が読みにくかったため、
+   カード・メニューの面を濃くし、薄い灰色の文字を濃くし、メニューの文字を少し大きくする。
+   ========================================================================== */
+:root {
+    --glass-bg: rgba(255, 255, 255, 0.78);
+    --glass-bg-strong: rgba(255, 255, 255, 0.90);
+    --glass-bar: rgba(250, 251, 253, 0.86);
+    --color-text-muted: #3d434d;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --glass-bg: rgba(30, 33, 42, 0.82);
+        --glass-bg-strong: rgba(34, 37, 46, 0.92);
+        --glass-bar: rgba(24, 26, 33, 0.88);
+        --color-text-muted: #d2d6de;
+    }
+}
+:root[data-theme="dark"] {
+    --glass-bg: rgba(30, 33, 42, 0.82);
+    --glass-bg-strong: rgba(34, 37, 46, 0.92);
+    --glass-bar: rgba(24, 26, 33, 0.88);
+    --color-text-muted: #d2d6de;
+}
+.app-nav-link { font-size: 0.95rem; }
+.app-nav-title { font-size: 0.76rem; color: var(--color-text); opacity: 0.75; }
+.app-tabbar a, .app-tabbar button { font-size: 0.74rem; }
+.home-legend { font-size: 0.84rem; color: var(--color-text); }
+.home-mode .seg-btn { font-size: 0.92rem; }
+.home-mode .seg-btn small { font-size: 0.72rem; opacity: 0.9; }
+.home-list li { font-size: 0.92rem; }
+a.station-chip { display: block; text-decoration: none; }
+a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); box-shadow: 0 0 0 2px var(--color-primary); outline: none; }
+:root:not([data-theme="dark"]) { --glass-bg: rgba(255, 255, 255, 0.88); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --glass-bg: rgba(30, 33, 42, 0.82); } }
