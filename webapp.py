@@ -3111,6 +3111,23 @@ CHAT_SYSTEM_INSTRUCTION = (
     "自動ロールバック等)といった、システムの仕組みや機械学習全般に関する質問には、"
     "上記の前提知識・渡された数値データ・一般的な機械学習の知識をもとに答えて構わない。\n"
     "\n"
+    "【研究・論文に関する質問への答え方(2026-10-13追加)】\n"
+    "- 研究の評価の数字は、下の「研究の評価と実験の結果」にある値を使い、必ず『どの期間・何を採点した値か』を添える。"
+    "渡されていない数字は作らない。\n"
+    "- 用語: F1=適合率と再現率の調和平均(0〜1、川霧のような少ない現象の当たり方を見る)。適合率(precision)=『出る』と"
+    "予測したうち当たった割合(低いと空振りが多い)。再現率(recall)=実際に出た霧のうち予測できていた割合(低いと見逃しが多い)。"
+    "Brierスコア=確率の二乗誤差(小さいほど良い)。AP=霧の出やすい時刻を上位に並べる力。気候値=天気予報を使わず、地点×時刻ごとの"
+    "過去の発生率をそのまま確率とみなす予測(予測の実力を測る基準)。スキルスコア=1−(モデルのBrier÷気候値のBrier)。"
+    "SHAP値=各特徴量が予測をどれだけ動かしたかの寄与。湿数=気温と露点温度の差(=特徴量の『気温露点差』)。\n"
+    "- 不均衡データ: 川霧は全体の数%しかないため、常に『なし』と答えるだけで正答率が非常に高くなる。正答率は性能の指標にならず、"
+    "F1・Brier・気候値との比較で評価する、と説明する。\n"
+    "- 数字が違う理由を聞かれたら: 『評価期間の値』は、学習に使っていない直近の期間を、過去に実際に出された予報を入力にして"
+    "地点×時刻ごとに1回だけ採点したもの(論文・モデル比較向け)。分析ページの累計(リードタイム別・地域別の的中率など)は、"
+    "毎晩出してきた予報をあとから照合した累計で、同じ時刻を何度も数え、過去の日を予測し直した『再予測』も含む。"
+    "『前日夜の予報』の値は、対象の日の前の晩に出た予報だけを数えた実運用の当たり方。\n"
+    "- 研究としての良い点と課題を聞かれたら、数字にもとづいて両方を正直に答える(例: 気候値より空振りが少ない一方、再現率が低い)。\n"
+    "- 採点の仕方が違う値どうし(評価期間・前日夜の予報・分析ページの累計)を並べて『向上した』『より良い』と比べない。並べるときは、条件が違うことを添える。\n"
+    "\n"
     "【このサーバーについて(常に正しい前提知識として使ってよい)】\n"
     "- 本システムは、学校に設置されている2012年モデルのMacBook Pro(Apple MacBookPro9,2、"
     "Intel Core i7-3520M @2.90GHz、メモリ約7GB、ストレージ54GB)上でUbuntu Linuxを動かして"
@@ -3130,6 +3147,105 @@ CHAT_SYSTEM_INSTRUCTION = (
     "「この機能は川霧観測・予測に関する質問向けです」と丁寧に答える。"
 )
 
+
+_research_ctx_cache = {"at": 0.0, "text": ""}
+RESEARCH_CTX_SECONDS = 600
+
+
+def _build_research_context():
+    """AIチャット用(2026-10-13): 研究で聞かれそうな評価の数字と実験の結果を、出典(期間・採点の仕方)つきの文章にする。"""
+    now = time.monotonic()
+    if _research_ctx_cache["text"] and now - _research_ctx_cache["at"] < RESEARCH_CTX_SECONDS:
+        return _research_ctx_cache["text"]
+    lines = ["【研究の評価と実験の結果】(数字はこの一覧の値だけを使うこと)"]
+    pct = lambda v: "-" if v is None else f"{100.0 * v:.1f}%"  # noqa: E731
+    num = lambda v, d=3: "-" if v is None else f"{v:.{d}f}"  # noqa: E731
+    try:
+        state = fog_model.load_model_state() or {}
+        gm = fog_model.shared_global_metrics(state) or {}
+        m, c = gm.get("model") or {}, gm.get("climatology") or {}
+        if m:
+            n, nf = m.get("n") or 0, m.get("n_fog") or 0
+            lines.append(f"- 評価期間 {str(gm.get('test_start'))[:10]}〜{str(gm.get('test_end'))[:10]}(学習に使っていない直近の期間、過去の予報を入力、"
+                         f"全{len(state)}地点・地点×時刻ごとに1回採点): {n}件中 川霧{nf}件({pct(nf / n if n else None)})。"
+                         f"常に『なし』と答えた場合の正答率 {pct(1 - nf / n if n else None)}。")
+            lines.append(f"- LightGBM(本番): F1 {num(m.get('f1'))}、適合率 {num(m.get('precision'))}、再現率 {num(m.get('recall'))}、正答率 {pct(m.get('accuracy'))}、"
+                         f"Brier {num(m.get('brier'), 4)}、AP {num(m.get('ap'))}、空振り{m.get('fp')}件・見逃し{m.get('fn')}件・的中{m.get('tp')}件。")
+            lines.append(f"- 気候値: F1 {num(c.get('f1'))}、適合率 {num(c.get('precision'))}、再現率 {num(c.get('recall'))}、Brier {num(c.get('brier'), 4)}、"
+                         f"AP {num(c.get('ap'))}、空振り{c.get('fp')}件・見逃し{c.get('fn')}件。"
+                         + (f"スキルスコア(Brier) {1 - m['brier'] / c['brier']:.2f}。" if m.get("brier") and c.get("brier") else ""))
+            cmp_ = gm.get("comparison") or {}
+            rx = cmp_.get("rf_xgboost") or {}
+            if rx:
+                ci = cmp_.get("f1_diff_ci") or [None, None]
+                lines.append(f"- 比較(Random Forest+XGBoostのアンサンブル、同じ評価期間): F1 {num(rx.get('f1'))}、適合率 {num(rx.get('precision'))}、"
+                             f"再現率 {num(rx.get('recall'))}、Brier {num(rx.get('brier'), 4)}、AP {num(rx.get('ap'))}。"
+                             f"LightGBMとのF1の差 {num(cmp_.get('f1_diff'))}(95%区間 {num(ci[0])}〜{num(ci[1])}"
+                             f"{'、0を含むので有意な差なし' if ci[0] is not None and ci[0] < 0 < ci[1] else ''})。")
+            lines.append(f"- 学習データ: {str(gm.get('train_start'))[:10]}〜{str(gm.get('train_end'))[:10]}、{gm.get('n_train')}件(うち川霧{gm.get('n_train_fog')}件)。"
+                         f"しきい値 {gm.get('threshold')}。全地点で1つのモデル。")
+            # 地域別(評価期間の地点ごとの結果を地域で合計)
+            import numpy as np
+            for region in ("只見川", "会津"):
+                ys, ps = [], []
+                for name, info in state.items():
+                    if STATION_REGION.get(name) == region and info.get("y_test") is not None and info.get("y_pred") is not None:
+                        ys.append(np.asarray(info["y_test"], int)); ps.append(np.asarray(info["y_pred"], int))
+                if ys:
+                    y, yp = np.concatenate(ys), np.concatenate(ps)
+                    tp, fp, fn = int(((yp == 1) & (y == 1)).sum()), int(((yp == 1) & (y == 0)).sum()), int(((yp == 0) & (y == 1)).sum())
+                    f1 = 2 * tp / (2 * tp + fp + fn) if tp else 0.0
+                    lines.append(f"- 評価期間の{region}だけ({len(ys)}地点): {len(y)}件中 川霧{int(y.sum())}件、F1 {f1:.3f}"
+                                 f"(適合率 {num(tp / (tp + fp) if tp + fp else None)}、再現率 {num(tp / (tp + fn) if tp + fn else None)})。")
+            imp = gm.get("importance") or {}
+            if imp.get("features"):
+                lines.append("- 特徴量の寄与(SHAP、評価期間、全地点): " + "、".join(f"{k}({v * 100:.0f}%)" for k, v in imp["features"][:8]) + "。")
+            if imp.get("groups"):
+                lines.append("- まとまりごとの寄与: " + "、".join(f"{k}({v * 100:.0f}%)" for k, v in imp["groups"]) + "。")
+    except Exception as e:
+        log.warning("Research context (model) failed: %s", e)
+
+    def read(rel):
+        try:
+            return json.loads((BASE_DIR / "data" / rel).read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    d = read("health/drift.json")
+    if d and d.get("recent_2w"):
+        r = d["recent_2w"]
+        lines.append(f"- 実運用(前日夜に出した本番の予報だけ、直近2週間、{d['checked_at'][:10]}時点): {r['n']}件中 川霧{r['fog']}件、F1 {num(r['f1'])}"
+                     f"(適合率 {num(r['precision'])}、再現率 {num(r['recall'])})。")
+    cal = read("experiments/calibration_check.json")
+    if cal:
+        lines.append(f"- 確率の補正の比較({cal['generated_at'][:10]}、本番は変えていない): Brier 補正なし {cal['raw']['brier']}、Platt {cal['platt_scores']['brier']}、"
+                     f"isotonic {cal['isotonic_scores']['brier']}。40%以上の予報が外れたのは主に10/12・10/13の朝で、霧が出ていても『全体霧』と判定された"
+                     "(会津の対象は川霧だけ)例やレンズの水滴の例があり、確率の補正では直らないため採用しなかった。")
+    az = read("experiments/aizu_target_check.json")
+    if az:
+        parts = []
+        for k, label in (("A_river_only", "A いま(川霧だけ)"), ("B_aizu_all_fog", "B 会津だけ霧全体(共通モデル)"), ("C_separate_models", "C 地域別の別モデル")):
+            v = az.get(k)
+            if v:
+                br = v.get("by_region") or {}
+                parts.append(label + ": " + "、".join(f"{rg} AP {num((br.get(rg) or {}).get('ap'))}" for rg in ("只見川", "会津")))
+        if parts:
+            lines.append(f"- 会津の予測の対象の比較({az['generated_at'][:10]}): " + " / ".join(parts) + "。会津は川霧だけを対象にしたまま(REGION_TARGET_ENABLED=False)。")
+    am = read("experiments/amedas_check.json")
+    if am and am.get("overall"):
+        o = am["overall"]
+        lines.append(f"- アメダスの実測を特徴量に足す比較({am['generated_at'][:10]}): AP {o['A']['ap']}→{o['B']['ap']}、判定『{am.get('verdict')}』。")
+    sn = read("experiments/short_nowcast_check.json")
+    if sn and (sn.get("by_lead") or {}).get("1"):
+        l1 = sn["by_lead"]["1"]
+        lines.append(f"- この後3時間の別予測(画像の判定・かすみ度・アメダスから、{sn['generated_at'][:10]}): 1時間後のAP {l1['model']['ap']}"
+                     f"(そのまま続くと仮定した予測 {l1['persistence']['ap']}、同じ行での本番の予報 {l1['production_forecast']['ap']})。2〜3時間後は本番の予報と同程度以下。")
+    oj = read("experiments/own_judge_check.json")
+    if oj and oj.get("test_vs_gemini_labels"):
+        lines.append(f"- 自前の画像判定(もう一つの判定): Geminiの判定との一致率 {pct(oj['test_vs_gemini_labels'].get('agreement'))}。川霧の見分けはまだ弱い。")
+    lines.append("- 未導入のデータ: 水温(気水温差)・凝結核。湿数(気温露点差)は特徴量に入っている。")
+    text = "\n".join(lines)
+    _research_ctx_cache.update(at=now, text=text)
+    return text
 
 def _build_chat_context():
     """現在の観測・予測状況・サーバー状態をテキストにまとめる(チャットのシステムプロンプトに含める)。"""
@@ -3429,7 +3545,7 @@ def chat_ask():
 
     model = os.environ.get("GEMINI_MODEL", collect.DEFAULT_GEMINI_MODEL)
     config = types.GenerateContentConfig(
-        system_instruction=CHAT_SYSTEM_INSTRUCTION + "\n\n" + _build_chat_context(),
+        system_instruction=CHAT_SYSTEM_INSTRUCTION + "\n\n" + _build_chat_context() + "\n\n" + _build_research_context(),
         temperature=0.3,
     )
     conn = chat_log.connect(CHAT_DB_PATH)

@@ -18,7 +18,14 @@
         {% endif %}
         {% endfor %}
         {% else %}
-        <p class="muted" style="font-size:0.82rem;">只見川・会津地方の川霧の現在の状況や見通しについて質問できます(Geminiによる自動応答です)。</p>
+        <p class="muted" style="font-size:0.82rem;">只見川・会津地方の川霧の現在の状況や見通しのほか、予測モデルの評価や研究の内容についても質問できます(Geminiによる自動応答です)。</p>
+        <div class="chat-examples" id="chat-examples" aria-label="質問の例(押すと入力欄に入ります)">
+            {% for q in ["今日は川霧が出そうですか？", "評価期間でのモデルのF1はいくつ？", "気候値とは何ですか？", "なぜ正答率ではなくF1で評価するの？",
+                         "LightGBMとアンサンブルの比較の結果は？", "分析ページのF1と評価期間のF1が違うのはなぜ？", "予測に一番効いている特徴量は？",
+                         "このモデルの良い点と課題は？"] %}
+            <button type="button" class="chat-example">{{ q }}</button>
+            {% endfor %}
+        </div>
         {% endif %}
     </div>
     <form id="chat-form" class="chat-form">
@@ -38,6 +45,10 @@
     var remainingLabel = document.getElementById("chat-remaining");
     var conversationIdField = document.getElementById("chat-conversation-id");
     var titleDisplay = document.getElementById("chat-title-display");
+    // 質問の例(2026-10-13): 押すと入力欄に入れる(すぐには送らない。書き足してから送れるように)
+    document.querySelectorAll(".chat-example").forEach(function(b) {
+        b.addEventListener("click", function() { input.value = b.textContent.trim(); input.focus(); });
+    });
     var sidebarList = document.querySelector(".chat-sidebar-list");
 
     function refreshRemaining() {

@@ -2036,3 +2036,9 @@ header { background: var(--glass-bar) !important; }
 /* 設定の「背景を動かさない」・スクロール中は、背景の絵(_landscape.html)の霧も止める(2026-10-13) */
 html.rf-calm-bg .ls-fog, html.rf-scrolling .ls-fog { animation-play-state: paused !important; }
 html.rf-calm-bg .ls-fog { animation: none !important; }
+
+/* AIチャットの質問の例(2026-10-13) */
+.chat-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }
+.chat-example { border: none; border-radius: 999px; padding: 0.4rem 0.85rem; background: var(--control-bg); color: var(--color-text); font: inherit; font-size: 0.84rem; cursor: pointer; }
+.chat-example:hover { background: var(--color-primary-lighter); }
+.chat-example:focus-visible { outline: none; box-shadow: var(--focus-ring); }
