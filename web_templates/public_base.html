@@ -250,6 +250,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 {% block content %}{% endblock %}
 </main>
 <footer class="pf-footer">
+    <p><strong>本サイトの内容(予測・カメラ画像・データ・画面のスクリーンショット)を、許可なくSNS・Webサイト等に公開・転載しないこと。</strong></p>
     <p>本ページは研究段階の川霧予測モデルによる試験的な計算結果であり、気象庁の予報ではない。予測には誤りが含まれるため、行動の判断に用いる場合は利用者の責任において判断されたい。</p>
     <p>気象データ: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)・気象庁<br>河川カメラ: 国土交通省「川の防災情報」<br>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>(淡色地図)</p>
     <p class="pf-footer-meta">只見川・会津地方 川霧発生予測(試験公開){% if app_version %} v{{ app_version }}{% endif %}</p>
@@ -272,6 +273,63 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 // ページ全体の全画面表示(発表や展示でスクリーンに映す用)は web_static/fs_shell.js(研究用サイトと共通)。
 // 全画面のままページを移っても解除されない。
 </script>
-<script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
+{# 最初に開いたときの注意(2026-10-12): 許可なくネット上に公開・転載しないでほしい旨。同意するとこの端末に覚え、
+   次からは出さない(文面を変えたら PF_NOTICE_KEY の末尾を上げると、もう一度出る)。覚えられない環境では毎回出す。 #}
+<div class="pf-notice" id="pf-notice" role="dialog" aria-modal="true" aria-labelledby="pf-notice-title" aria-describedby="pf-notice-body" hidden>
+    <div class="pf-notice-box">
+        <h2 id="pf-notice-title">ご利用の前に</h2>
+        <div id="pf-notice-body">
+            <p><strong>このサイトの内容を、許可なくネット上に公開しないでください。</strong></p>
+            <p>掲載している予測・カメラ画像・データ、この画面のスクリーンショットを、SNS・ブログ・Webサイトなどに投稿・転載することはお控えください。</p>
+            <p class="pf-notice-sub">このサイトは研究のための試験公開です。予測は研究段階の計算結果で、誤りを含みます。</p>
+        </div>
+        <button type="button" class="pf-notice-ok" id="pf-notice-ok">同意して見る</button>
+    </div>
+</div>
+<style>
+.pf-notice { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(8, 14, 26, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.pf-notice[hidden] { display: none; }
+.pf-notice-box { width: min(32rem, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 1.4rem 1.4rem 1.2rem; border-radius: 18px;
+    background: #ffffff; color: #1d1d1f; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); line-height: 1.75; }
+.pf-notice-box h2 { margin: 0 0 0.6rem; font-size: 1.15rem; }
+.pf-notice-box p { margin: 0 0 0.7rem; font-size: 0.95rem; }
+.pf-notice-box strong { color: #b3261e; }
+.pf-notice-sub { color: #4f5663; font-size: 0.85rem !important; }
+.pf-notice-ok { display: block; width: 100%; margin-top: 0.4rem; padding: 0.75rem 1rem; border: none; border-radius: 999px; background: #0a64d2; color: #fff;
+    font: inherit; font-weight: 700; font-size: 1rem; cursor: pointer; }
+.pf-notice-ok:hover { background: #0751ad; }
+.pf-notice-ok:focus-visible { outline: none; box-shadow: 0 0 0 3.5px rgba(10, 100, 210, 0.4); }
+:root[data-theme="dark"] .pf-notice-box { background: #1e2027; color: #f2f2f5; }
+:root[data-theme="dark"] .pf-notice-box strong { color: #ff8a80; }
+:root[data-theme="dark"] .pf-notice-sub { color: #c4c8d0; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .pf-notice-box { background: #1e2027; color: #f2f2f5; }
+    :root:not([data-theme="light"]) .pf-notice-box strong { color: #ff8a80; }
+    :root:not([data-theme="light"]) .pf-notice-sub { color: #c4c8d0; }
+}
+.pf-noscroll { overflow: hidden; }
+</style>
+<script>
+(function() {
+    var PF_NOTICE_KEY = "rf-pub-notice-v1";
+    var box = document.getElementById("pf-notice"), ok = document.getElementById("pf-notice-ok");
+    var seen = false;
+    try { seen = localStorage.getItem(PF_NOTICE_KEY) === "1"; } catch (e) {}
+    if (seen) { return; }
+    var before = document.activeElement;
+    box.hidden = false;
+    document.documentElement.classList.add("pf-noscroll");
+    ok.focus();
+    // 同意するまで後ろの画面は操作できないので、Tabもこのボタンの中に留める
+    box.addEventListener("keydown", function(e) { if (e.key === "Tab") { e.preventDefault(); ok.focus(); } });
+    ok.addEventListener("click", function() {
+        try { localStorage.setItem(PF_NOTICE_KEY, "1"); } catch (e) {}
+        box.hidden = true;
+        document.documentElement.classList.remove("pf-noscroll");
+        if (before && before.focus) { before.focus(); }
+    });
+})();
+</script><script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
 </body>
 </html>
