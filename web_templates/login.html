@@ -1,9 +1,5 @@
 {% extends "base_auth.html" %}
-{% block title %}ログイン<script>
-// ログアウトしたら、この端末に保存したページ・画像を消す(共用の端末で次の人に見えないように)
-try { if (window.caches) { caches.delete("rf-pages-v1"); caches.delete("rf-images-v1"); } } catch (e) {}
-</script>
-{% endblock %}
+{% block title %}ログイン{% endblock %}
 {% block content %}
     <h2 style="margin-top:0;">ログイン</h2>
     {% if error %}
