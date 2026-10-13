@@ -10,6 +10,7 @@ SETTINGSに足すだけでよい。保存済みのJSONに無い項目は既定�
 勝手に上書きしないため)。設定画面かヘッダーのボタンで一度選ぶと、全端末で同じになる。
 """
 import json
+import re
 
 HOUR_CHOICES = list(range(24))
 
@@ -20,6 +21,10 @@ SETTINGS = {
     "reduce_motion": {"default": False, "type": bool},
     "calm_background": {"default": False, "type": bool},
     "start_page": {"default": "dashboard", "choices": ["dashboard", "stations", "map", "favorite", "public"]},
+    # --- メニュー(2026-10-13) ---
+    "nav_position": {"default": "side", "choices": ["side", "top"]},  # PCでのメニューの場所(左/上)
+    "nav_order": {"default": [], "type": "ids"},   # 項目の並び(空なら最初の並び)
+    "nav_hidden": {"default": [], "type": "ids"},  # 出さない項目
     # --- プライバシー ---
     "show_online": {"default": True, "type": bool},
     "mute_profile_sounds": {"default": False, "type": bool},
@@ -57,7 +62,12 @@ def _valid(key, value, station_names=None):
     if spec.get("type") == "stations":
         return isinstance(value, list) and all(isinstance(s, str) for s in value) and (
             station_names is None or all(s in station_names for s in value))
+    if spec.get("type") == "ids":
+        return isinstance(value, list) and len(value) <= 60 and all(isinstance(s, str) and _ID_RE.fullmatch(s) for s in value)
     return False
+
+
+_ID_RE = re.compile(r"[a-z_]{1,30}")
 
 
 def normalize(raw, station_names=None):
@@ -107,6 +117,12 @@ def from_form(form, section, current, station_names):
             out[key] = form.get(key) in ("1", "on", "true")
         elif spec.get("type") == "stations":
             out[key] = [s for s in station_names if s in set(form.getlist(key))]
+        elif key == "nav_order":
+            out[key] = [s for s in form.getlist("nav_order") if _ID_RE.fullmatch(s)][:60]
+        elif key == "nav_hidden":
+            # 画面の一覧(nav_order)のうち、チェック(nav_show)の外れているもの
+            shown = set(form.getlist("nav_show"))
+            out[key] = [s for s in form.getlist("nav_order") if _ID_RE.fullmatch(s) and s not in shown][:60]
         elif key in form:
             out[key] = parse_value(key, form.get(key), station_names)
     return out
@@ -115,6 +131,7 @@ def from_form(form, section, current, station_names):
 # 設定画面の節ごとに、どの項目を扱うか(from_formで真偽値の読み直しに使う)
 SECTIONS = {
     "display": ["theme", "text_size", "reduce_motion", "calm_background", "start_page"],
+    "menu": ["nav_position", "nav_order", "nav_hidden"],
     "privacy": ["show_online", "mute_profile_sounds"],
     "push": ["push_stations", "push_custom_stations", "push_digest_morning", "push_digest_evening",
              "push_digest_level", "push_fog_soon", "push_fog_now", "push_fog_nowcast", "push_camera", "push_monthly_report", "push_dm", "push_group",

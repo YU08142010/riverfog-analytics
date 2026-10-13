@@ -28,9 +28,9 @@ function trim(name, max) {
 
 function offlinePage() {
     var html = '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-        '<title>オフライン - 川霧観測・予測</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:2rem 1.2rem;background:#eef3f9;color:#1d1d1f;line-height:1.7}' +
+        '<title>読み込めませんでした - 川霧観測・予測</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:2rem 1.2rem;background:#eef3f9;color:#1d1d1f;line-height:1.7}' +
         'main{max-width:34rem;margin:auto}a{color:#0a64d2}@media(prefers-color-scheme:dark){body{background:#101218;color:#f2f2f5}a{color:#4aa3ff}}</style></head>' +
-        '<body><main><h1 style="font-size:1.3rem">いまはネットにつながっていません</h1><p>このページはまだこの端末に保存されていないため、表示できません。' +
+        '<body><main><h1 style="font-size:1.3rem">ページを読み込めませんでした</h1><p>サーバーに届きませんでした。ネットの接続(Tailscaleを使っている場合はTailscaleがオンか)を確かめて、もう一度お試しください。このページはまだこの端末に保存されていないため、前の内容も出せません。' +
         'ホーム・地点のページ・見頃・今朝の川霧は、一度開くと、つながらないときも最後に見た内容で開けます。</p>' +
         '<p><a href="/">ホーム</a> ・ <a href="/stations">地点一覧</a> ・ <a href="/flow?mode=fc">見頃</a> ・ <a href="/gallery">今朝の川霧</a></p>' +
         '<p><button onclick="location.reload()" style="font:inherit;padding:.5rem 1rem;border-radius:999px;border:0;background:#0a64d2;color:#fff">もう一度試す</button></p></main></body></html>';
@@ -38,16 +38,15 @@ function offlinePage() {
 }
 
 function networkFirst(req) {
+    // 2026-10-13: 以前は、ネットが遅いだけでも(PAGE_TIMEOUT_MSを過ぎると)保存の無いページで「ネットにつながっていません」を
+    // 出していた。いまは、遅いときは保存があればそれを出し、無ければそのままネットの返事を待つ。オフラインの画面を出すのは
+    // 通信が本当に失敗して、保存も無いときだけ。
     return new Promise(function(resolve) {
         var done = false;
-        function fallback() {
-            if (done) { return; }
-            done = true;
-            caches.open(PAGES).then(function(c) { return c.match(req, {ignoreVary: true}); }).then(function(hit) {
-                resolve(hit || offlinePage());
-            });
-        }
-        var timer = setTimeout(fallback, PAGE_TIMEOUT_MS);
+        function cached() { return caches.open(PAGES).then(function(c) { return c.match(req, {ignoreVary: true}); }); }
+        var timer = setTimeout(function() {
+            cached().then(function(hit) { if (hit && !done) { done = true; resolve(hit); } });
+        }, PAGE_TIMEOUT_MS);
         fetch(req).then(function(res) {
             clearTimeout(timer);
             // ログイン画面への転送や失敗は保存しない
@@ -56,7 +55,11 @@ function networkFirst(req) {
                 caches.open(PAGES).then(function(c) { return c.put(req, copy); }).then(function() { return trim(PAGES, PAGE_MAX); });
             }
             if (!done) { done = true; resolve(res); }
-        }).catch(function() { clearTimeout(timer); fallback(); });
+        }).catch(function() {
+            clearTimeout(timer);
+            if (done) { return; }
+            cached().then(function(hit) { if (!done) { done = true; resolve(hit || offlinePage()); } });
+        });
     });
 }
 

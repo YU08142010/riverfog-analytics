@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
+{% from "_icons.html" import icon %}
 {% block title %}設定{% endblock %}
 {% block content %}
 {% macro toggle(name, checked, label, hint="") %}
@@ -31,6 +32,7 @@
 <nav class="settings-nav card" aria-label="設定の項目">
     <a href="#push">通知</a>
     <a href="#display">表示</a>
+    <a href="#menu">メニュー</a>
     <a href="#privacy">プライバシー</a>
     <a href="#install">ホーム画面に追加</a>
     <a href="#account">アカウント</a>
@@ -132,7 +134,7 @@
         <label class="set-row">
             <span class="set-row-text"><span class="set-row-label">最初に開くページ</span><small class="muted">ログインした直後と、ホーム画面のアイコン・ブックマークから開いたとき</small></span>
             <select name="start_page">
-                {% for value, text in [("dashboard", "ダッシュボード"), ("stations", "地点一覧"), ("map", "地図"), ("favorite", "お気に入りの最初の地点"), ("public", "公開ページ(予報)")] %}
+                {% for value, text in [("dashboard", "ホーム"), ("stations", "地点一覧"), ("map", "地図"), ("favorite", "お気に入りの最初の地点"), ("public", "公開ページ(予報)")] %}
                 <option value="{{ value }}"{{ " selected" if s.start_page == value }}>{{ text }}</option>
                 {% endfor %}
             </select>
@@ -141,6 +143,56 @@
     </form>
 </section>
 
+<section class="card settings-card" id="menu" aria-labelledby="h-menu">
+    <h2 id="h-menu">メニュー</h2>
+    <p class="muted">サイトのメニューに出す項目と並び、PCでのメニューの場所を選べます。このアカウントでログインしたどの端末にも反映されます。スマホなど狭い画面では、場所は画面下のタブと「メニュー」のままで、項目と並びだけが反映されます。</p>
+    <form action="{{ url_for('settings_save', section='menu') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {{ seg_radio("nav_position", [("side", "横(左)"), ("top", "上")], s.nav_position, "PCでのメニューの場所") }}
+        <h3 class="set-subhead">出す項目と並び</h3>
+        <p class="muted set-note">チェックを外すとメニューに出しません(「設定」は外せません)。「↑」「↓」で並びを変えられます。同じまとまり(観測・予報・分析など)の項目は、まとまりの中でこの順に並びます。</p>
+        <ul class="nav-custom" id="nav-custom">
+            {% for it in app_nav_catalog() %}
+            <li data-default="{{ it.default_index }}">
+                <input type="hidden" name="nav_order" value="{{ it.id }}">
+                <label class="nav-custom-label">
+                    {% if it.locked %}<input type="checkbox" checked disabled aria-label="{{ it.label }}(外せません)"><input type="hidden" name="nav_show" value="{{ it.id }}">
+                    {% else %}<input type="checkbox" name="nav_show" value="{{ it.id }}"{{ " checked" if it.shown }}>{% endif %}
+                    <span class="nav-custom-icon">{{ icon(it.icon, size=18) }}</span>
+                    <span>{{ it.label }}</span>
+                    {% if it.group %}<small class="muted">{{ it.group }}</small>{% endif %}
+                </label>
+                <span class="nav-custom-move">
+                    <button type="button" class="nav-up" aria-label="{{ it.label }}を上へ">↑</button>
+                    <button type="button" class="nav-down" aria-label="{{ it.label }}を下へ">↓</button>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="nav-custom-actions">
+            <button type="submit" class="button settings-save">メニューの設定を保存</button>
+            <button type="button" class="button cancel" id="nav-reset">最初の並びに戻す</button>
+        </p>
+    </form>
+    <script>
+    (function() {
+        var list = document.getElementById("nav-custom");
+        if (!list) { return; }
+        list.addEventListener("click", function(e) {
+            var b = e.target.closest("button"); if (!b) { return; }
+            var li = b.closest("li");
+            if (b.classList.contains("nav-up") && li.previousElementSibling) { list.insertBefore(li, li.previousElementSibling); b.focus(); }
+            if (b.classList.contains("nav-down") && li.nextElementSibling) { list.insertBefore(li.nextElementSibling, li); b.focus(); }
+        });
+        document.getElementById("nav-reset").addEventListener("click", function() {
+            Array.prototype.slice.call(list.children).sort(function(a, b) { return a.dataset.default - b.dataset.default; })
+                .forEach(function(li) { list.appendChild(li); });
+            list.querySelectorAll('input[name="nav_show"][type="checkbox"]').forEach(function(c) { c.checked = true; });
+            if (window.showToast) { window.showToast("最初の並びにしました。「メニューの設定を保存」で反映されます。"); }
+        });
+    })();
+    </script>
+</section>
 <section class="card settings-card" id="privacy" aria-labelledby="h-privacy">
     <h2 id="h-privacy">プライバシー</h2>
     <form action="{{ url_for('settings_save', section='privacy') }}" method="post" data-ajax class="settings-form">

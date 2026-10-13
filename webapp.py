@@ -747,7 +747,8 @@ MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # サイト全体をログイン必須にする。ログイン・登録申請そのものと静的ファイルだけは例外。
 # /forecastは一般向けの公開ページ(_build_public_forecast参照)。
 PUBLIC_PREFIX = "/forecast"
-LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX, "/api/backup-manifest")
+LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX, "/api/backup-manifest",
+                         "/offline-sw.js")  # Service Workerの更新はログアウト中でも取れるように(中身はただのJS、2026-10-13)
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
 # 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
@@ -1493,7 +1494,7 @@ PUSH_KEY_RE = re.compile(r"^[A-Za-z0-9_\-=]{8,200}$")
 # 正規の証明書のあるURL(Tailscale Funnel)。Service Worker・Web Pushは証明書が正しいHTTPSでしか動かず、
 # :8443(自己署名の証明書)で開いている人にはこちらで開き直すよう案内する。
 PUBLIC_SITE_URL = push_notify.VAPID_SUB
-SETTINGS_SECTION_LABELS = {"display": "表示", "privacy": "プライバシー", "push": "通知"}
+SETTINGS_SECTION_LABELS = {"display": "表示", "privacy": "プライバシー", "push": "通知", "menu": "メニュー"}
 
 
 def _current_user_settings():
@@ -1586,6 +1587,92 @@ def settings_page():
         public_url=PUBLIC_SITE_URL,
     )
 
+
+# --- サイト全体のメニュー(2026-10-13にbase.htmlから移した) ------------------------------------------------
+# 項目は1か所(_app_nav_items)で決め、PCの左/上のメニュー、狭い画面の「メニュー」のシート、設定画面の「メニュー」で共通に使う。
+# 利用者は設定画面で、項目の表示/非表示と並び(nav_hidden / nav_order)、PCでの場所(nav_position: 左/上)を選べる。
+NAV_ALWAYS_SHOWN = {"settings"}  # 設定に戻れなくならないよう、これだけは隠せない
+
+
+def _app_nav_items(obs_pending=0, community_unread=0):
+    """(id, グループ名, 表示名, URL, アイコン, 開いているか, 数, 数の種類, シートだけ)の並び(最初の並び)。役割で見えないものは含めない。"""
+    p = request.path
+    role = session.get("role")
+    logged_in = bool(session.get("user_id"))
+    obs_role = _can_manage_observation_reports(role)
+    analysis = (p.startswith("/graphs") or p.startswith("/river-fog-histogram") or p.startswith("/accuracy")
+                or (p.startswith("/report") and not p.startswith("/reports")))
+    items = [
+        ("home", None, "ホーム", url_for("dashboard"), "dashboard", p == url_for("dashboard")),
+        ("stations", "観測", "地点一覧", url_for("stations_list"), "stations", p.startswith("/stations") or p.startswith("/compare")),
+        ("map", "観測", "地図", url_for("map_page"), "map", p.startswith("/map")),
+        ("gallery", "観測", "今朝の川霧", url_for("gallery_page"), "sunrise", p.startswith("/gallery")),
+        ("flow", "観測", "流れ図・見頃", url_for("flow_page"), "calendar", p.startswith("/flow")),
+        ("public", "予報・分析", "予報(公開ページ)", url_for("public_forecast"), "forecast", False),
+        ("simulator", "予報・分析", "シミュレーター", url_for("simulator_page"), "simulator", p.startswith(url_for("simulator_page"))),
+        ("analysis", "予報・分析", "分析", url_for("weather_fog_graph_page"), "accuracy", analysis),
+        ("reports", "予報・分析", "月ごとのレポート", url_for("reports_page"), "report", p.startswith("/reports")),
+        ("archive", "予報・分析", "観測アーカイブ", url_for("observations_dates"), "data",
+         p.startswith("/observations") or p.startswith("/images") or p.startswith("/predictions")),
+        ("export", "予報・分析", "研究用の書き出し", url_for("export_page"), "db", p.startswith("/export")),
+    ]
+    if obs_role:
+        items += [("obsrep", "観測の確認", "観測報告", url_for("observation_reports"), "error", p.startswith("/observation_reports"), obs_pending),
+                  ("gold", "観測の確認", "正解セット", url_for("gold_page"), "star", p.startswith("/gold"))]
+    if logged_in:
+        items += [("members", "コミュニティ", "メンバー・メッセージ", url_for("members_list"), "members",
+                   p.startswith("/members") or p.startswith("/messages") or p.startswith("/files") or p.startswith("/group"),
+                   community_unread, "community"),
+                  ("game", "コミュニティ", "ゲーム", url_for("game_home"), "game", p.startswith("/game")),
+                  ("chat", "コミュニティ", "AIチャット", url_for("chat_page"), "chat", p.startswith(url_for("chat_page"))),
+                  ("settings", "その他", "設定", url_for("settings_page"), "settings", p.startswith("/settings"))]
+    items.append(("changelog", "その他", "更新履歴", url_for("changelog_page"), "log", p.startswith(url_for("changelog_page"))))
+    if logged_in:
+        items.append(("logout", "その他", "ログアウト", url_for("logout"), "close", False, 0, None, True))
+    if role == "admin" and not _is_funnel_request():
+        items.append(("admin", "その他", "管理者", url_for("admin_home"), "admin", p.startswith("/admin")))
+    out = []
+    for it in items:
+        it = tuple(it) + (0, None, False)[len(it) - 6:]
+        out.append({"id": it[0], "group": it[1], "label": it[2], "url": it[3], "icon": it[4], "active": it[5],
+                    "badge": it[6], "badge_key": it[7], "sheet_only": it[8]})
+    return out
+
+
+def _app_nav_ordered(items, prefs):
+    """利用者の並び(nav_order)に並べ替える。並びに無い項目(新しく増えた項目など)は、最初の並びの位置のまま後ろに付く。"""
+    order = (prefs or {}).get("nav_order") or []
+    rank = {k: i for i, k in enumerate(order)}
+    base = {it["id"]: i for i, it in enumerate(items)}
+    return sorted(items, key=lambda it: (rank.get(it["id"], len(order) + base[it["id"]]),))
+
+
+@app.context_processor
+def _inject_app_nav():
+    def app_nav_menu(obs_pending=0, community_unread=0):
+        """メニューに出すグループと項目。隠した項目を除き、利用者の並びにする。グループは、その中で最初に来る項目の順。"""
+        prefs = _current_user_settings() if session.get("user_id") else {}
+        hidden = set(prefs.get("nav_hidden") or []) - NAV_ALWAYS_SHOWN
+        items = [it for it in _app_nav_ordered(_app_nav_items(obs_pending, community_unread), prefs) if it["id"] not in hidden]
+        groups = []
+        for it in items:
+            g_ = next((g for g in groups if g["title"] == it["group"]), None)
+            if g_ is None:
+                g_ = {"title": it["group"], "items": []}
+                groups.append(g_)
+            g_["items"].append(it)
+        return groups
+
+    def app_nav_catalog():
+        """設定画面用: いまの並びの全項目(シートだけの項目を除く)と、表示しているか。"""
+        prefs = _current_user_settings() if session.get("user_id") else {}
+        hidden = set(prefs.get("nav_hidden") or []) - NAV_ALWAYS_SHOWN
+        items = _app_nav_items()
+        default_index = {it["id"]: i for i, it in enumerate(items)}
+        return [dict(it, shown=it["id"] not in hidden, locked=it["id"] in NAV_ALWAYS_SHOWN, default_index=default_index[it["id"]])
+                for it in _app_nav_ordered(items, prefs) if not it["sheet_only"]]
+
+    return {"app_nav_menu": app_nav_menu, "app_nav_catalog": app_nav_catalog}
 
 @app.route("/settings/<section>", methods=["POST"])
 def settings_save(section):
