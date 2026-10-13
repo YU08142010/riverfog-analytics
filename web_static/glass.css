@@ -1994,3 +1994,37 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 :root .page-tabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 :root .page-tabs::-webkit-scrollbar { display: none; }
 :root .page-tabs a { flex: 0 0 auto; white-space: nowrap; }
+
+/* ==========================================================================
+   透けすぎの手直し(2026-10-13): 背景(山の絵・天気の空)の上に直接乗る面を、ほぼ不透明にする。
+   ========================================================================== */
+:root { --glass-bar: rgba(250, 251, 253, 0.97); --glass-bg: rgba(255, 255, 255, 0.95); --glass-bg-strong: rgba(255, 255, 255, 0.97); }
+:root[data-theme="dark"] { --glass-bar: rgba(22, 25, 32, 0.97); --glass-bg: rgba(30, 33, 42, 0.94); --glass-bg-strong: rgba(34, 37, 46, 0.97); }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --glass-bar: rgba(22, 25, 32, 0.97); --glass-bg: rgba(30, 33, 42, 0.94); --glass-bg-strong: rgba(34, 37, 46, 0.97); }
+}
+/* 天気の空のページのカード・地点の一覧(以前の0.88だと空の色がにじんでいた) */
+:root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel, :root .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.96) !important; }
+:root[data-theme="dark"] .wx-scene ~ main .card,
+:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(30, 33, 42, 0.95) !important; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .wx-scene ~ main .card,
+    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(30, 33, 42, 0.95) !important; }
+}
+/* 背景に直接乗る小さな部品: パンくず・ページ内タブ・一覧を隠すボタン・地点のタブ */
+:root .breadcrumb { display: inline-flex; flex-wrap: wrap; align-items: center; padding: 0.3rem 0.85rem; border-radius: 999px;
+    background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
+:root .wx-scene ~ main .breadcrumb, :root .wx-scene ~ main .breadcrumb a { color: var(--color-text) !important; text-shadow: none !important; }
+:root .wx-scene ~ main .breadcrumb a { color: var(--color-primary) !important; }
+:root .page-tabs { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
+:root .st-tabs { background: var(--glass-bg-strong); }
+:root .app-tabbar { background: var(--glass-bar); }
+:root .app-side { background: var(--glass-bar); }
+header { background: var(--glass-bar) !important; }
+:root .pf-header { background: var(--glass-bar); }
+/* ページ内タブの選ばれている項目: 不透明な白の上で見分けられるよう、青で塗る */
+:root .page-tabs a.active { background: var(--color-primary); color: #fff; box-shadow: none; }
+:root[data-theme="dark"] .page-tabs a.active { color: #0b1726; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .page-tabs a.active { color: #0b1726; } }
