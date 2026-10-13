@@ -4762,7 +4762,6 @@ SPOTLIGHT_PAGES = (
     ("設定", "settings_page", "せってい 通知 プッシュ テーマ ダーク 文字 大きさ プライバシー settings"),
     ("今朝の川霧", "gallery_page", "ギャラリー 写真 けさ 朝 gallery"),
     ("川霧の流れ図・見頃カレンダー", "flow_page", "流れ 広がり 見頃 みごろ カレンダー 時刻 アニメーション flow"),
-    ("みんなの観測写真(投稿)", "photos_page", "写真 投稿 市民 観測 スマホ アップロード photo"),
     ("月ごとのレポート", "reports_page", "レポート 報告 PDF 月報 report"),
     ("研究用の書き出し", "export_page", "書き出し エクスポート ダウンロード CSV ZIP データ 研究 export"),
     ("地点一覧", "stations_list", "地点 一覧 カメラ"),
@@ -12049,49 +12048,7 @@ def report_pdf(month):
                      as_attachment=request.args.get("download") == "1")
 
 
-# --- 市民観測(写真投稿、2026-10-12、citizen_photos.py) -------------------------------------------------
-# ログインした人が霧の写真を投稿し、観測者・管理者が承認したものだけを /photos と近くの地点ページに出す。
-# 写真はEXIFを消して描き直したものだけを保存し、位置は他の人には「最寄りの地点と距離」だけを見せる。
-import citizen_photos
-
-PHOTO_MAX_BYTES = 25 * 1024 * 1024
-PHOTO_DAILY_LIMIT = 20
-PHOTO_CODE_LABELS = dict(citizen_photos.CODES)
-
-
-def _photo_can_review(photo):
-    role = session.get("role")
-    if not _can_manage_observation_reports(role):
-        return False
-    region = _observer_region_for_role(role)
-    return region is None or STATION_REGION.get(photo["station_name"]) == region
-
-
-def _photo_decorate(rows):
-    conn = _users_conn()
-    try:
-        people = users.get_users_by_ids(conn, [r["user_id"] for r in rows])
-    finally:
-        conn.close()
-    for r in rows:
-        u = people.get(r["user_id"]) or {}
-        r["poster"] = u.get("display_name") or u.get("name") or "利用者"
-        r["code_label"] = PHOTO_CODE_LABELS.get(r["code"], "")
-        r["near"] = r["distance_km"] is not None and r["distance_km"] <= citizen_photos.NEAR_KM
-    return rows
-
-
-def station_citizen_photos(name, days=14, limit=6):
-    """地点ページ用: その地点が最寄りで、近く(NEAR_KM以内)から撮られた承認済みの写真。"""
-    since = (now_jst_naive() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = _users_conn()
-    try:
-        rows = users.list_citizen_photos(conn, status="approved", station_names=[name], since=since, limit=limit * 3)
-    finally:
-        conn.close()
-    rows = [r for r in rows if r["distance_km"] is None or r["distance_km"] <= citizen_photos.NEAR_KM]
-    return _photo_decorate(rows[:limit])
-
+# --- 地点ページの「この後3時間」「もう一つの判定」(2026-10-12) -------------------------------------------
 
 def station_short_nowcast(name):
     """地点ページ用: 「この後3時間」の別予測(short_nowcast.py)。無い・古い場合はNone。
@@ -12126,26 +12083,9 @@ def station_own_judge(name):
         return None
 
 
-def pending_photo_count():
-    """メニューのバッジ用: 確認待ちの写真の件数(会津観測者/只見観測者は担当地域分だけ)。"""
-    role = session.get("role")
-    if not _can_manage_observation_reports(role):
-        return 0
-    conn = _users_conn()
-    try:
-        region = _observer_region_for_role(role)
-        if region is None:
-            return users.count_pending_citizen_photos(conn)
-        rows = users.list_citizen_photos(conn, status="pending", station_names=_STATION_NAMES_BY_REGION.get(region, []))
-        return len(rows)
-    finally:
-        conn.close()
-
-
 @app.context_processor
-def _inject_citizen_photos():
-    return {"station_citizen_photos": station_citizen_photos, "station_short_nowcast": station_short_nowcast,
-            "station_own_judge": station_own_judge, "pending_photo_count": pending_photo_count}
+def _inject_station_extras():
+    return {"station_short_nowcast": station_short_nowcast, "station_own_judge": station_own_judge}
 
 
 @app.route("/api/backup-manifest", methods=["POST"])
@@ -12176,6 +12116,7 @@ def backup_manifest():
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     tmp.replace(HEALTH_DIR / "offsite_manifest.json")
     return jsonify({"ok": True, "days": len(clean_days), "zips": len(clean_zips)})
+
 
 def _safe_next(target):
     """同意のあとに戻る先。サイトの中のパスだけ(外のサイトへは飛ばさない)。"""
@@ -12216,6 +12157,7 @@ def terms_agree():
 def public_terms():
     return render_template("public_terms.html")
 
+
 @app.route("/offline-sw.js")
 def offline_service_worker():
     """電波の弱い場所でも見られるようにするService Worker(web_static/offline_sw.js)。範囲を "/" にするため、
@@ -12223,218 +12165,6 @@ def offline_service_worker():
     resp = send_from_directory(BASE_DIR / "web_static", "offline_sw.js", mimetype="application/javascript")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
-
-@app.route("/photos")
-def photos_page():
-    my_id = session.get("user_id")
-    conn = _users_conn()
-    try:
-        approved = users.list_citizen_photos(conn, status="approved", limit=120)
-        mine = users.list_citizen_photos(conn, user_id=my_id, limit=50) if my_id else []
-        pending = users.count_pending_citizen_photos(conn) if _can_manage_observation_reports(session.get("role")) else 0
-    finally:
-        conn.close()
-    try:
-        checks, check_counts = citizen_photos.forecast_checks(approved)
-    except Exception as e:
-        log.warning("Photo forecast checks failed: %s", e)
-        checks, check_counts = [], {}
-    return render_template(
-        "photos.html", approved=_photo_decorate(approved), mine=_photo_decorate(mine), pending_count=pending,
-        checks=checks[:20], check_counts=check_counts,
-        station_names=STATION_NAMES, station_region=STATION_REGION, codes=citizen_photos.CODES,
-        now_local=now_jst_naive().strftime("%Y-%m-%dT%H:%M"), reward=citizen_photos.REWARD_POINTS,
-    )
-
-
-@app.route("/photos/new", methods=["POST"])
-def photo_submit():
-    my_id = session.get("user_id")
-    if not my_id:
-        return redirect(url_for("login", next=url_for("photos_page")))
-    now = now_jst_naive()
-    conn = _users_conn()
-    try:
-        today = [r for r in users.list_citizen_photos(conn, user_id=my_id, limit=PHOTO_DAILY_LIMIT + 1)
-                 if r["created_at"][:10] == now.strftime("%Y-%m-%d")]
-    finally:
-        conn.close()
-    if len(today) >= PHOTO_DAILY_LIMIT:
-        return _finish("photos_page", f"投稿は1日{PHOTO_DAILY_LIMIT}枚までです。", success=False)
-    f = request.files.get("photo")
-    if f is None or not f.filename:
-        return _finish("photos_page", "写真を選んでください。", success=False)
-    code = request.form.get("code", type=int)
-    if code not in PHOTO_CODE_LABELS:
-        return _finish("photos_page", "写っている現象を選んでください。", success=False)
-    comment = (request.form.get("comment") or "").strip()[:300]
-    lat, lon = request.form.get("lat", type=float), request.form.get("lon", type=float)
-    if lat is not None and lon is not None and not (36.0 <= lat <= 38.5 and 138.5 <= lon <= 141.0):
-        return _finish("photos_page", "位置が会津・只見の範囲から大きく外れています。地点を選んで投稿してください。", success=False)
-    chosen = request.form.get("station") or ""
-    if chosen and chosen not in STATION_NAMES:
-        abort(400)
-    taken_form = request.form.get("taken_at") or ""
-
-    incoming = citizen_photos.PHOTO_DIR / "incoming"
-    saved, err = _save_uploaded_file(f, incoming)
-    if err:
-        return _finish("photos_page", err, success=False)
-    src = incoming / saved[1]
-    photo_id = None
-    try:
-        if saved[3] > PHOTO_MAX_BYTES:
-            return _finish("photos_page", f"写真が大きすぎます({PHOTO_MAX_BYTES // 1024 // 1024}MBまで)。", success=False)
-        conn = _users_conn()
-        try:
-            photo_id = users.add_citizen_photo(conn, my_id, now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S"),
-                                               None, None, None, None, code, comment)
-        finally:
-            conn.close()
-        try:
-            w, h, exif_taken, exif_latlon = citizen_photos.process(src, photo_id)
-        except ValueError as e:
-            conn = _users_conn()
-            try:
-                users.delete_citizen_photo(conn, photo_id)
-            finally:
-                conn.close()
-            citizen_photos.delete_files(photo_id)
-            photo_id = None
-            return _finish("photos_page", f"{e}。JPEG・PNG・HEIC以外の形式は使えない場合があります。", success=False)
-    finally:
-        src.unlink(missing_ok=True)
-
-    # 撮影時刻: 画面で入れた値 > 写真のEXIF > 投稿時刻。未来や30日より前は投稿時刻に戻す。
-    taken = None
-    if taken_form:
-        try:
-            taken = datetime.strptime(taken_form, "%Y-%m-%dT%H:%M")
-        except ValueError:
-            taken = None
-    taken = taken or exif_taken or now
-    if taken > now + timedelta(minutes=10) or taken < now - timedelta(days=30):
-        taken = now
-    # 位置: 地点を選んだらその地点、無ければ端末の位置 > 写真のGPS
-    if lat is None and exif_latlon:
-        lat, lon = exif_latlon
-    station, dist = None, None
-    if chosen:
-        station = chosen
-        info = CAMERA_INFO.get(chosen, {})
-        if lat is not None and info.get("lat") is not None:
-            dist = citizen_photos.nearest_station(lat, lon, CAMERA_INFO, [chosen])[1]
-    elif lat is not None:
-        best = citizen_photos.nearest_station(lat, lon, CAMERA_INFO, STATION_NAMES)
-        if best:
-            station, dist = best
-    if station is None:
-        conn = _users_conn()
-        try:
-            users.delete_citizen_photo(conn, photo_id)
-        finally:
-            conn.close()
-        citizen_photos.delete_files(photo_id)
-        return _finish("photos_page", "撮った場所が分かりませんでした。「近くの地点」を選ぶか、「いまの位置を使う」を押してください。",
-                       success=False)
-    conn = _users_conn()
-    try:
-        with conn:
-            conn.execute(
-                "UPDATE citizen_photos SET taken_at = ?, lat = ?, lon = ?, station_name = ?, distance_km = ?, "
-                "width = ?, height = ? WHERE id = ?",
-                (taken.strftime("%Y-%m-%d %H:%M:%S"), round(lat, 3) if lat is not None else None,
-                 round(lon, 3) if lon is not None else None, station,
-                 round(dist, 2) if dist is not None else None, w, h, photo_id),
-            )
-    finally:
-        conn.close()
-    _record_audit("市民観測の写真を投稿", f"#{photo_id} {station} {taken:%Y-%m-%d %H:%M} {PHOTO_CODE_LABELS[code]}")
-    return _finish("photos_page", "投稿しました。観測者が確認して承認すると、一覧と地点ページに載ります。")
-
-
-def _photo_or_404(photo_id):
-    conn = _users_conn()
-    try:
-        p = users.get_citizen_photo(conn, photo_id)
-    finally:
-        conn.close()
-    if p is None:
-        abort(404)
-    return p
-
-
-@app.route("/photos/<int:photo_id>.jpg")
-@app.route("/photos/<int:photo_id>_t.jpg", endpoint="photo_thumb")
-def photo_file(photo_id):
-    p = _photo_or_404(photo_id)
-    if p["status"] != "approved" and p["user_id"] != session.get("user_id") and not _photo_can_review(p):
-        abort(404)
-    thumb = request.endpoint == "photo_thumb"
-    name = f"{photo_id}{'_t' if thumb else ''}.jpg"
-    if not (citizen_photos.PHOTO_DIR / name).is_file():
-        abort(404)
-    resp = send_from_directory(citizen_photos.PHOTO_DIR, name, mimetype="image/jpeg")
-    resp.headers["Cache-Control"] = "private, max-age=3600"
-    return resp
-
-
-@app.route("/photos/review")
-@requires_observer
-def photos_review():
-    region = _observer_region_for_role(session.get("role"))
-    conn = _users_conn()
-    try:
-        rows = users.list_citizen_photos(conn, status="pending", limit=200)
-    finally:
-        conn.close()
-    if region is not None:
-        rows = [r for r in rows if STATION_REGION.get(r["station_name"]) == region]
-    return render_template("photos_review.html", photos=_photo_decorate(rows), reward=citizen_photos.REWARD_POINTS)
-
-
-@app.route("/photos/<int:photo_id>/review", methods=["POST"])
-@requires_observer
-def photo_review_action(photo_id):
-    p = _photo_or_404(photo_id)
-    if not _photo_can_review(p):
-        abort(403)
-    action = request.form.get("action")
-    if action not in ("approve", "reject"):
-        abort(400)
-    note = (request.form.get("note") or "").strip()[:200]
-    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-    conn = _users_conn()
-    try:
-        changed = users.review_citizen_photo(conn, photo_id, "approved" if action == "approve" else "rejected",
-                                             session.get("user_id"), now_str, note)
-        reward = ""
-        if changed and action == "approve" and p["user_id"] != session.get("user_id"):
-            if users.grant_points(conn, p["user_id"], f"citizen_photo:{photo_id}", citizen_photos.REWARD_POINTS, now_str):
-                reward = f"(投稿者に{citizen_photos.REWARD_POINTS}pt付与)"
-    finally:
-        conn.close()
-    if not changed:
-        return _finish("photos_review", "この写真は既に確認済みです。", success=False)
-    _record_audit("市民観測の写真を" + ("承認" if action == "approve" else "却下"),
-                  f"#{photo_id} {p['station_name']} {p['taken_at']} {note} {reward}".strip())
-    return _finish("photos_review", ("承認しました。" + reward) if action == "approve" else "却下しました。")
-
-
-@app.route("/photos/<int:photo_id>/delete", methods=["POST"])
-def photo_delete(photo_id):
-    p = _photo_or_404(photo_id)
-    mine = p["user_id"] == session.get("user_id")
-    if not (mine or _photo_can_review(p)):
-        abort(403)
-    conn = _users_conn()
-    try:
-        users.delete_citizen_photo(conn, photo_id)
-    finally:
-        conn.close()
-    citizen_photos.delete_files(photo_id)
-    _record_audit("市民観測の写真を削除", f"#{photo_id} {p['station_name']} {p['taken_at']}({'本人' if mine else '確認者'})")
-    return _finish("photos_page", "写真を削除しました。")
 
 
 @app.route("/admin/health")

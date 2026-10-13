@@ -144,26 +144,8 @@ def collect(month):
         "by_hour": {int(h): round(float(v), 2) for h, v in by_hour.items()},
         "performance": perf_by_region,
         "best_images": best[:6],
-        "citizen_photos": _citizen_photos(month),
     }
 
-
-def _citizen_photos(month):
-    """その月に撮られた、承認済みの利用者の写真の枚数と、写真での予報の答え合わせ(citizen_photos.forecast_checks)。"""
-    try:
-        import citizen_photos
-        import users
-        conn = users.connect(BASE_DIR / "data" / "users.db")
-        try:
-            rows = [r for r in users.list_citizen_photos(conn, status="approved", since=f"{month}-01", limit=5000)
-                    if r["taken_at"][:7] == month]
-        finally:
-            conn.close()
-        _, counts = citizen_photos.forecast_checks(rows)
-        return {"n": len(rows), "fog": sum(1 for r in rows if r["code"] in (1, 2, 3, 4, 5, 6)), "checks": counts}
-    except Exception as e:  # noqa: BLE001
-        log.warning("citizen photos for the report failed: %s", e)
-        return None
 
 def render_pdf(data, path):
     _setup_font()
@@ -229,11 +211,6 @@ def render_pdf(data, path):
         if not data["performance"].get("全体", {}).get("n"):
             fig.text(0.07, 0.24, "この月は、いまの予測モデル(2026-10-04〜)が前日夜に出した予測が無いため、成績は出していません。\n"
                      "後からやり直した予測は、当時の予測ではないので数えていません。", fontsize=8, color=INK, linespacing=1.6)
-        cp = data.get("citizen_photos")
-        if cp and cp.get("n"):
-            ck = cp["checks"]
-            fig.text(0.07, 0.2, f"利用者の写真(承認済み): {cp['n']}枚(うち霧 {cp['fog']}枚)。写真での予報の答え合わせ: 的中 {ck['hit']}・空振り {ck['fa']}・"
-                     f"見逃し {ck['miss']}・霧なしで一致 {ck['cn']}(カメラのAI判定とは別の、人の目での照合)。", fontsize=8, color=INK)
         fig.text(0.07, 0.27, "適合率: 出やすいと予測した時刻のうち、実際に出た割合。再現率: 実際に出た時刻のうち、予測できていた割合。",
                  fontsize=7.5, color=MUTED)
         pdf.savefig(fig); plt.close(fig)

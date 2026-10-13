@@ -5,7 +5,6 @@
 {% block content %}
 {{ page_tabs([
     {"label": "観測報告", "url": url_for('observation_reports'), "active": false},
-    {"label": "写真の確認", "url": url_for('photos_review'), "active": false},
     {"label": "正解セット", "url": url_for('gold_page'), "active": false},
     {"label": "正解セットの結果", "url": url_for('gold_results'), "active": true},
 ]) }}

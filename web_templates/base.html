@@ -18,7 +18,6 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 <script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
-{% if session.get('user_id') %}<script src="{{ url_for('static', filename='offline_queue.js') }}?v={{ app_version|default('') }}" defer></script>{% endif %}
 {% block extra_head %}{% endblock %}
 <script>
 window.CHART_THEME_PALETTE = {{ chart_theme_palette|tojson }};
@@ -62,7 +61,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 })();
 </script>
 </head>
-<body{% if session.get('user_id') %} data-photo-submit="{{ url_for('photo_submit') }}" data-csrf="{{ csrf_token() }}"{% endif %}>
+<body>
 <a class="skip-link" href="#main-content">本文へ移動</a>
 <div class="offline-bar" id="offline-bar" role="status" hidden>ネットにつながっていません。最後に開いたときの内容を表示しています。</div>
 {% block body_background %}
@@ -92,7 +91,6 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 {% set _role = session.get('role') %}
 {% set _obs_role = _role in ('admin', 'observer', 'aizu_observer', 'tadami_observer') %}
 {% set obs_pending = pending_observation_report_count() if _obs_role else 0 %}
-{% set photo_pending = pending_photo_count() if _obs_role else 0 %}
 {% set community_unread = (dm_unread_count() + group_unread_count()) if session.get('user_id') else 0 %}
 {% set _analysis = (_p.startswith('/graphs') or _p.startswith('/river-fog-histogram') or _p.startswith('/accuracy') or (_p.startswith('/report') and not _p.startswith('/reports'))) %}
 {% set app_nav = [
@@ -104,7 +102,6 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
         {"label": "地図", "url": url_for('map_page'), "icon": "map", "active": _p.startswith('/map')},
         {"label": "今朝の川霧", "url": url_for('gallery_page'), "icon": "sunrise", "active": _p.startswith('/gallery')},
         {"label": "流れ図・見頃", "url": url_for('flow_page'), "icon": "calendar", "active": _p.startswith('/flow')},
-        {"label": "みんなの写真", "url": url_for('photos_page'), "icon": "camera", "active": _p == url_for('photos_page') or (_p.startswith('/photos/') and not _p.startswith('/photos/review'))},
     ]},
     {"title": "予報・分析", "items": [
         {"label": "予報(公開ページ)", "url": url_for('public_forecast'), "icon": "forecast", "active": false},
@@ -116,7 +113,6 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     ]},
     {"title": "観測の確認", "items": ([
         {"label": "観測報告", "url": url_for('observation_reports'), "icon": "error", "active": _p.startswith('/observation_reports'), "badge": obs_pending},
-        {"label": "写真の確認", "url": url_for('photos_review'), "icon": "shield", "active": _p.startswith('/photos/review'), "badge": photo_pending},
         {"label": "正解セット", "url": url_for('gold_page'), "icon": "star", "active": _p.startswith('/gold')},
     ] if _obs_role else [])},
     {"title": "コミュニティ", "items": ([
@@ -136,7 +132,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
         {"label": "管理者", "url": url_for('admin_home'), "icon": "admin", "active": _p.startswith('/admin')},
     ] if _role == 'admin' and not is_funnel_request() else [])},
 ] %}
-{% set _menu_badge = obs_pending + photo_pending + community_unread %}
+{% set _menu_badge = obs_pending + community_unread %}
 <nav class="app-side" id="app-side" aria-label="メインメニュー">
     <a class="app-side-brand" href="{{ url_for('dashboard') }}">
         <img src="{{ url_for('static', filename='favicon.svg') }}" alt="" width="28" height="28">
@@ -152,7 +148,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     <a href="{{ url_for('dashboard') }}" class="{{ 'active' if _p == url_for('dashboard') }}"{{ ' aria-current="page"'|safe if _p == url_for('dashboard') }}>{{ icon("dashboard", size=22) }}<span>ホーム</span></a>
     <a href="{{ url_for('stations_list') }}" class="{{ 'active' if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}"{{ ' aria-current="page"'|safe if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}>{{ icon("stations", size=22) }}<span>地点</span></a>
     <a href="{{ url_for('flow_page', mode='fc') }}" class="{{ 'active' if _p.startswith('/flow') }}"{{ ' aria-current="page"'|safe if _p.startswith('/flow') }}>{{ icon("calendar", size=22) }}<span>見頃</span></a>
-    <a href="{{ url_for('photos_page') }}" class="{{ 'active' if _p.startswith('/photos') or _p.startswith('/gallery') }}"{{ ' aria-current="page"'|safe if _p.startswith('/photos') or _p.startswith('/gallery') }}>{{ icon("camera", size=22) }}<span>写真</span></a>
+    <a href="{{ url_for('gallery_page') }}" class="{{ 'active' if _p.startswith('/gallery') }}"{{ ' aria-current="page"'|safe if _p.startswith('/gallery') }}>{{ icon("sunrise", size=22) }}<span>今朝の川霧</span></a>
     <button type="button" id="app-sheet-open" aria-haspopup="dialog" aria-controls="app-sheet" aria-expanded="false">{{ icon("menu", size=22) }}<span>メニュー</span><span class="app-tab-dot" data-badge-dot {{ "" if _menu_badge else "hidden" }}></span></button>
 </nav>
 <div class="app-sheet" id="app-sheet" hidden>
@@ -1047,7 +1043,7 @@ document.addEventListener("submit", function(e) {
                 checkChatNotice(data);
                 var total = (data.dm_unread || 0) + (data.group_unread || 0);
                 communityBadges.forEach(function(b) { b.textContent = total; b.hidden = !total; });
-                if (menuDot) { menuDot.hidden = !(total || {{ obs_pending + photo_pending }}); }
+                if (menuDot) { menuDot.hidden = !(total || {{ obs_pending }}); }
                 var online = {};
                 (data.online_user_ids || []).forEach(function(id) { online[id] = true; });
                 document.querySelectorAll("[data-user-id]").forEach(function(el) {

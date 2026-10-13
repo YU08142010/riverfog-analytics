@@ -379,25 +379,6 @@ CREATE TABLE IF NOT EXISTS terms_agreements (
     agreed_at TEXT NOT NULL,
     PRIMARY KEY (user_id, version)
 );
-CREATE TABLE IF NOT EXISTS citizen_photos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    taken_at TEXT NOT NULL,
-    lat REAL,
-    lon REAL,
-    station_name TEXT,
-    distance_km REAL,
-    code INTEGER,
-    comment TEXT NOT NULL DEFAULT '',
-    width INTEGER,
-    height INTEGER,
-    status TEXT NOT NULL DEFAULT 'pending',
-    reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    reviewed_at TEXT,
-    review_note TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_citizen_photos_status ON citizen_photos(status, taken_at);
 CREATE TABLE IF NOT EXISTS push_sent (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -2989,86 +2970,8 @@ def terms_agreed_at(conn, user_id):
     """{版: 同意した日時}(管理画面・プロフィール用)。"""
     return dict(conn.execute("SELECT version, agreed_at FROM terms_agreements WHERE user_id = ?", (user_id,)).fetchall())
 
-# --- 市民観測(写真投稿、2026-10-12、citizen_photos.py) ----------------------------------------------
-
-_PHOTO_COLUMNS = ("id, user_id, created_at, taken_at, lat, lon, station_name, distance_km, code, comment, "
-                  "width, height, status, reviewed_by, reviewed_at, review_note")
-
-
-def _photo_row(r):
-    keys = [k.strip() for k in _PHOTO_COLUMNS.split(",")]
-    return dict(zip(keys, r))
-
-
-def add_citizen_photo(conn, user_id, created_at, taken_at, lat, lon, station_name, distance_km, code, comment):
-    """先に行だけ作ってidを返す(画像ファイル名にidを使うため)。画像の保存に失敗したらdelete_citizen_photoで消す。"""
-    with conn:
-        cur = conn.execute(
-            "INSERT INTO citizen_photos (user_id, created_at, taken_at, lat, lon, station_name, distance_km, code, comment) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, created_at, taken_at, lat, lon, station_name, distance_km, code, comment),
-        )
-        return cur.lastrowid
-
-
-def set_citizen_photo_size(conn, photo_id, width, height):
-    with conn:
-        conn.execute("UPDATE citizen_photos SET width = ?, height = ? WHERE id = ?", (width, height, photo_id))
-
-
-def get_citizen_photo(conn, photo_id):
-    r = conn.execute(f"SELECT {_PHOTO_COLUMNS} FROM citizen_photos WHERE id = ?", (photo_id,)).fetchone()
-    return _photo_row(r) if r else None
-
-
-def list_citizen_photos(conn, status=None, user_id=None, station_names=None, since=None, limit=200):
-    where, args = [], []
-    if status:
-        where.append("status = ?")
-        args.append(status)
-    if user_id is not None:
-        where.append("user_id = ?")
-        args.append(user_id)
-    if station_names is not None:
-        if not station_names:
-            return []
-        where.append(f"station_name IN ({','.join('?' * len(station_names))})")
-        args.extend(station_names)
-    if since:
-        where.append("taken_at >= ?")
-        args.append(since)
-    sql = f"SELECT {_PHOTO_COLUMNS} FROM citizen_photos"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY taken_at DESC, id DESC LIMIT ?"
-    rows = conn.execute(sql, args + [limit]).fetchall()
-    return [_photo_row(r) for r in rows]
-
-
-def count_pending_citizen_photos(conn):
-    return conn.execute("SELECT COUNT(*) FROM citizen_photos WHERE status = 'pending'").fetchone()[0]
-
-
-def review_citizen_photo(conn, photo_id, status, reviewed_by, reviewed_at, note=""):
-    """保留中のものだけ確認済みにする。実際に変えられたらTrue(二重承認でポイントが二重にならないように)。"""
-    with conn:
-        cur = conn.execute(
-            "UPDATE citizen_photos SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? "
-            "WHERE id = ? AND status = 'pending'",
-            (status, reviewed_by, reviewed_at, note, photo_id),
-        )
-        return cur.rowcount == 1
-
-
-def delete_citizen_photo(conn, photo_id):
-    with conn:
-        conn.execute("DELETE FROM citizen_photos WHERE id = ?", (photo_id,))
-
-
 __all__ = [
     "has_agreed_terms", "record_terms_agreement", "terms_agreed_at",
-    "add_citizen_photo", "set_citizen_photo_size", "get_citizen_photo", "list_citizen_photos",
-    "count_pending_citizen_photos", "review_citizen_photo", "delete_citizen_photo",
     "get_user_settings_raw", "all_user_settings_raw", "save_user_settings", "clear_presence",
     "save_push_subscription", "list_push_subscriptions", "push_subscriber_ids", "delete_push_subscription",
     "delete_push_subscription_by_endpoint", "record_push_result", "claim_push_key", "prune_push_sent",

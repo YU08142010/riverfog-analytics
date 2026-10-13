@@ -33,14 +33,14 @@
     {% endfor %}
 </div>
 {% endif %}
-{# 地点ページのタブ(2026-10-12): 縦に長いカードを「いま/予報/写真/記録」に分ける。各カードの data-st-tab で振り分け、
+{# 地点ページのタブ(2026-10-12): 縦に長いカードを「いま/予報/動画/記録」に分ける。各カードの data-st-tab で振り分け、
    JavaScriptが無いときは全部を出す。上に地点の名前といまの状態を固定で出す。 #}
 <nav class="st-tabs" id="st-tabs" aria-label="{{ name }}のページの中の切り替え" hidden>
     <span class="st-tabs-status"><b>{{ name }}</b>{% if current %}<span>{{ current.label }}{% if station_weather_latest and station_weather_latest.temp is not none and station_weather_latest.temp == station_weather_latest.temp %} ・ {{ "%.0f"|format(station_weather_latest.temp) }}℃{% endif %}</span>{% endif %}</span>
     <div class="seg" role="group" aria-label="表示する内容">
         <button type="button" class="seg-btn" data-tab="now" aria-pressed="true">いま</button>
         <button type="button" class="seg-btn" data-tab="forecast" aria-pressed="false">予報</button>
-        <button type="button" class="seg-btn" data-tab="photos" aria-pressed="false">写真</button>
+        <button type="button" class="seg-btn" data-tab="photos" aria-pressed="false">動画</button>
         <button type="button" class="seg-btn" data-tab="records" aria-pressed="false">記録</button>
     </div>
 </nav>{% if hourly %}
@@ -255,23 +255,6 @@
     <p>{{ oj.datetime[11:16] }}の画像: <strong>{{ oj.label }}</strong> <span class="muted">({{ "%.0f"|format(oj.prob * 100) }}%)</span></p>
     <p class="muted" style="font-size:0.8rem;">AI(Gemini)とは別に、このサイトで学習した小さなモデルが、晴れた日の同じカメラの画像と見比べて判定したものです。AIの判定と違うときは、どちらかが間違えている可能性があります。{% if oj.agreement %}試した期間でのAIの判定との一致率は{{ "%.0f"|format(oj.agreement * 100) }}%で、川霧かどうかの見分けはまだ苦手です。{% endif %}</p>
     {% endif %}
-</div>
-{% endif %}
-
-{% set cps = station_citizen_photos(name) %}
-{% if cps %}
-<div class="card" data-st-tab="photos">
-    <h2>みんなの観測写真</h2>
-    <p class="muted">この地点の近くで利用者が撮った写真(直近2週間、確認済み)。<a href="{{ url_for('photos_page') }}">すべての写真・投稿</a></p>
-    <div class="photo-grid">
-        {% for p in cps %}
-        <figure class="photo-item">
-            <a href="{{ url_for('photo_file', photo_id=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('photo_thumb', photo_id=p.id) }}" loading="lazy" alt="{{ p.code_label }}の写真"></a>
-            <figcaption><span class="gallery-chip">{{ p.code_label }}</span> <small class="muted">{{ p.taken_at[5:16]|replace("-", "/") }} ・ {{ p.poster }}</small>
-                {% if p.comment %}<span class="photo-comment">{{ p.comment }}</span>{% endif %}</figcaption>
-        </figure>
-        {% endfor %}
-    </div>
 </div>
 {% endif %}
 
