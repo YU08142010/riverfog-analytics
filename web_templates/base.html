@@ -106,7 +106,6 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
         {"label": "設定", "url": url_for('settings_page'), "icon": "settings", "active": _p.startswith('/settings')},
     ] if session.get('user_id') else []) + [
         {"label": "更新履歴", "url": url_for('changelog_page'), "icon": "log", "active": _p.startswith(url_for('changelog_page'))},
-        {"label": "利用規約", "url": url_for('terms_page'), "icon": "shield", "active": _p.startswith('/terms')},
     ] + ([
         {"label": "ログアウト", "url": url_for('logout'), "icon": "close", "active": false, "sheet_only": true},
     ] if session.get('user_id') else []) + [
@@ -410,6 +409,18 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         startY = null; panel.style.transform = "";
         if (dy > 90) { setOpen(false); }
     });
+})();
+// 最近見たページ(2026-10-13): この端末に新しい順で12件まで覚える。検索(Ctrl+K)と地点ページの「最近見た地点」が使う。
+(function() {
+    if (/^\/(terms|login|logout)/.test(location.pathname)) { return; }
+    try {
+        var label = (document.title || "").split(" - ")[0].trim();
+        if (!label) { return; }
+        var href = location.pathname + location.search;
+        var list = JSON.parse(localStorage.getItem("rf-visited") || "[]").filter(function(v) { return v.href !== href; });
+        list.unshift({label: label, href: href, at: Date.now()});
+        localStorage.setItem("rf-visited", JSON.stringify(list.slice(0, 12)));
+    } catch (e) {}
 })();
 // 電波の弱い場所(2026-10-12): オフラインの帯と、ページを保存するService Worker(/offline-sw.js、ログイン中だけ)。
 (function() {

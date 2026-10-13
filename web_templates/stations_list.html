@@ -27,6 +27,10 @@
             <button type="button" class="seg-btn" data-show="fav" aria-pressed="false"{% if not favorite_stations %} title="お気に入り地点はプロフィールで設定できます"{% endif %}>お気に入り</button>
             <button type="button" class="seg-btn" data-show="fog" aria-pressed="false">霧を観測中</button>
         </div>
+        <div class="seg" role="group" aria-label="表示の形">
+            <button type="button" class="seg-btn" data-view="cards" aria-pressed="true">カード</button>
+            <button type="button" class="seg-btn" data-view="list" aria-pressed="false">リスト</button>
+        </div>
     </div>
     <p class="muted list-count" id="station-count">{{ station_names|length }}地点</p>
     {% for region_label in ["只見川", "会津"] %}
@@ -52,8 +56,8 @@
     {% endfor %}
     <p class="muted" id="station-empty" hidden>該当する地点がありません。</p>
     <script>
-    /* 地点名の絞り込みに加えて、並び順(標準/今日の川霧の出やすさ順)と表示する地点(すべて/お気に入り/霧を観測中)を
-       切り替える。選んだ並び順・表示はこの端末に覚えておく。 */
+    /* 地点名の絞り込みに加えて、並び順(標準/今日の川霧の出やすさ順)と表示する地点(すべて/お気に入り/霧を観測中)、
+       表示の形(カード/リスト)を切り替える。選んだ並び順・表示はこの端末に覚えておく。 */
     (function() {
         var input = document.getElementById("station-search");
         var lists = Array.prototype.slice.call(document.querySelectorAll(".station-tiles-region"));
@@ -61,11 +65,12 @@
         var countLabel = document.getElementById("station-count");
         var emptyLabel = document.getElementById("station-empty");
         var total = items.length;
-        var state = { sort: "default", show: "all" };
+        var state = { sort: "default", show: "all", view: "cards" };
         try {
             var saved = JSON.parse(localStorage.getItem("rf-station-list") || "{}");
             if (saved.sort === "level") { state.sort = "level"; }
             if (saved.show === "fav" || saved.show === "fog") { state.show = saved.show; }
+            if (saved.view === "list") { state.view = "list"; }
         } catch (e) {}
         function apply() {
             var q = input.value.trim().toLowerCase();
@@ -98,14 +103,16 @@
                 ? "お気に入り地点がまだありません(プロフィールで設定できます)。"
                 : state.show === "fog" && !q ? "いま霧を観測している地点はありません。" : "該当する地点がありません。";
             emptyLabel.hidden = shown !== 0;
+            // リスト表示(2026-10-13): 1行1地点の詰めた形。63地点を少ないスクロールで見渡せる
+            lists.forEach(function(list) { list.classList.toggle("is-compact", state.view === "list"); });
             document.querySelectorAll(".station-list-tools .seg-btn").forEach(function(b) {
-                var on = b.dataset.sort ? b.dataset.sort === state.sort : b.dataset.show === state.show;
+                var on = b.dataset.sort ? b.dataset.sort === state.sort : b.dataset.view ? b.dataset.view === state.view : b.dataset.show === state.show;
                 b.setAttribute("aria-pressed", on ? "true" : "false");
             });
         }
         document.querySelectorAll(".station-list-tools .seg-btn").forEach(function(b) {
             b.addEventListener("click", function() {
-                if (b.dataset.sort) { state.sort = b.dataset.sort; } else { state.show = b.dataset.show; }
+                if (b.dataset.sort) { state.sort = b.dataset.sort; } else if (b.dataset.view) { state.view = b.dataset.view; } else { state.show = b.dataset.show; }
                 try { localStorage.setItem("rf-station-list", JSON.stringify(state)); } catch (e) {}
                 apply();
             });

@@ -116,10 +116,8 @@ function rfReduceMotion() {
             el.__revealDelay = (batch++ % 4) * 70;
             io.observe(el);
         });
-        Array.prototype.forEach.call(document.querySelectorAll(COUNT), function(el) {
-            el.__countUp = true;
-            io.observe(el);
-        });
+        // 数字の数え上げ(0から目標値まで増やす演出)は2026-10-13にやめた。見た瞬間に読めず、途中の値(例: 18°が4°)を
+        // 本当の値と見間違えるため。countUp()は残してあるが、どの要素にも付けない。
 
         // タイムラプス: 画像が切り替わるたびにふわっと表示
         var tl = document.getElementById("tl-img");

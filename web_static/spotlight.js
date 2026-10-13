@@ -231,6 +231,14 @@
             }).filter(function(x) { return x.href || ACTION_BY_ID[x.action]; }).slice(0, 4);
             var out = [];
             if (r.length) { out.push({ header: "最近" }); out = out.concat(r); }
+            // 最近見たページ(2026-10-13、base.htmlが覚える rf-visited)。検索から開いたものと、いま開いているページは除く
+            var seenHref = {}; r.forEach(function(x) { if (x.href) { seenHref[x.href] = 1; } });
+            var here = location.pathname + location.search, visited = [];
+            try { visited = JSON.parse(localStorage.getItem("rf-visited") || "[]"); } catch (e) {}
+            visited = visited.filter(function(v) { return v.href && v.href !== here && !seenHref[v.href]; }).slice(0, 5).map(function(v) {
+                return { label: v.label, href: v.href, kind: "recent", origKind: /^\/stations\/[^/]+$/.test(v.href) ? "station" : "page", sub: "最近見た" };
+            });
+            if (visited.length) { out.push({ header: "最近見たページ" }); out = out.concat(visited); }
             var qi = quickItems();
             if (qi.length) { out.push({ header: "すぐ開く" }); out = out.concat(qi); }
             out.push({ header: "操作" });

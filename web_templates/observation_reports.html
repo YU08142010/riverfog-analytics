@@ -26,6 +26,15 @@
     </p>
 </div>
 
+{% if stale_auto_count %}
+<div class="card bulk-card">
+    <p style="margin:0 0 0.6rem;"><b>{{ stale_auto_count }}件</b>は、{{ stale_auto_days }}日より前の時刻の自動検知(人ではなくシステムが見つけたもの)です。日がたつと見直す価値が下がるので、まとめて閉じられます(「問題なしと判断」と同じ扱い。学習のラベルは変わりません)。</p>
+    <form method="post" action="{{ url_for('observation_reports_bulk_dismiss') }}" data-confirm="{{ stale_auto_count }}件の古い自動検知をまとめて閉じますか？">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button cancel">古い自動検知 {{ stale_auto_count }}件をまとめて閉じる</button>
+    </form>
+</div>
+{% endif %}
 {% if reports %}
 {% for r in reports %}
 <div class="card observation-report-card" tabindex="-1">

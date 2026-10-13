@@ -36,14 +36,16 @@
 {# 地点ページのタブ(2026-10-12): 縦に長いカードを「いま/予報/動画/記録」に分ける。各カードの data-st-tab で振り分け、
    JavaScriptが無いときは全部を出す。上に地点の名前といまの状態を固定で出す。 #}
 <nav class="st-tabs" id="st-tabs" aria-label="{{ name }}のページの中の切り替え" hidden>
-    <span class="st-tabs-status"><b>{{ name }}</b>{% if current %}<span>{{ current.label }}{% if station_weather_latest and station_weather_latest.temp is not none and station_weather_latest.temp == station_weather_latest.temp %} ・ {{ "%.0f"|format(station_weather_latest.temp) }}℃{% endif %}</span>{% endif %}</span>
+    <span class="st-tabs-status">{% if nav_prev %}<a class="st-step" href="{{ url_for('station_detail', name=nav_prev) }}" id="st-prev" title="前の地点: {{ nav_prev }}" aria-label="前の地点: {{ nav_prev }}">‹</a>{% endif %}<b>{{ name }}</b>{% if nav_next %}<a class="st-step" href="{{ url_for('station_detail', name=nav_next) }}" id="st-next" title="次の地点: {{ nav_next }}" aria-label="次の地点: {{ nav_next }}">›</a>{% endif %}{% if current %}<span>{{ current.label }}{% if station_weather_latest and station_weather_latest.temp is not none and station_weather_latest.temp == station_weather_latest.temp %} ・ {{ "%.0f"|format(station_weather_latest.temp) }}℃{% endif %}</span>{% endif %}</span>
     <div class="seg" role="group" aria-label="表示する内容">
         <button type="button" class="seg-btn" data-tab="now" aria-pressed="true">いま</button>
         <button type="button" class="seg-btn" data-tab="forecast" aria-pressed="false">予報</button>
         <button type="button" class="seg-btn" data-tab="photos" aria-pressed="false">動画</button>
         <button type="button" class="seg-btn" data-tab="records" aria-pressed="false">記録</button>
     </div>
-</nav>{% if hourly %}
+</nav>
+<div class="st-recent" id="st-recent" hidden><span>最近見た地点</span></div>
+{% if hourly %}
 <div class="card" data-st-tab="forecast">
     <h2>時間ごとの{{ fog_word(name) }}の出やすさ</h2>
     <div class="wx-hourly" role="list" aria-label="時間ごとの{{ fog_word(name) }}の出やすさ">
@@ -606,6 +608,31 @@
     else { try { start = sessionStorage.getItem(KEY) || "now"; } catch (e) {} }
     show(start, false);
     if (h && document.getElementById(h)) { document.getElementById(h).scrollIntoView(); }
+})();
+</script>
+<script>
+// 地点の移動(2026-10-13): 最近見た地点(この端末のページの記録 rf-visited から)と、上の大きな表示の左右スワイプで前後の地点へ。
+(function() {
+    var box = document.getElementById("st-recent");
+    var here = location.pathname, items = [];
+    try { items = JSON.parse(localStorage.getItem("rf-visited") || "[]"); } catch (e) {}
+    var seen = {};
+    items.filter(function(v) { return /^\/stations\/[^/]+$/.test(v.href) && v.href !== here; }).forEach(function(v) {
+        if (seen[v.href] || Object.keys(seen).length >= 5) { return; }
+        seen[v.href] = 1;
+        var a = document.createElement("a"); a.href = v.href; a.textContent = v.label; box.appendChild(a);
+    });
+    box.hidden = !Object.keys(seen).length;
+    var hero = document.querySelector(".wx-hero"), x0 = null, y0 = null;
+    if (!hero) { return; }
+    hero.addEventListener("touchstart", function(e) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, {passive: true});
+    hero.addEventListener("touchend", function(e) {
+        if (x0 === null) { return; }
+        var dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+        if (Math.abs(dx) < 80 || Math.abs(dy) > Math.abs(dx) * 0.6) { return; }
+        var link = document.getElementById(dx < 0 ? "st-next" : "st-prev");
+        if (link) { location.href = link.href; }
+    });
 })();
 </script>
 {% endblock %}

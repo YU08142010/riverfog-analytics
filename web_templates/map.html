@@ -22,7 +22,21 @@
     <p class="muted" style="font-size:0.82rem;">
         地図上の個々の地点はマウス操作向けです。キーボードでの操作は下の一覧表からご利用ください。
     </p>
-    <div id="station-map" role="application" aria-label="地点マップ(詳細は下の一覧表を参照)" style="height:560px; border-radius: var(--radius-sm); overflow:hidden;"></div>
+    <div class="map-wrap">
+        <div id="station-map" role="application" aria-label="地点マップ(詳細は下の一覧表を参照)" style="height:560px; border-radius: var(--radius-sm); overflow:hidden;"></div>
+        {# 地点を押したときの小画面(2026-10-13): 最新のカメラ画像・いまの状態・今日の出やすさ。狭い画面では画面の下から出す #}
+        <div class="map-peek" id="map-peek" role="dialog" aria-label="地点の概要" hidden>
+            <button type="button" class="map-peek-close" id="map-peek-close" aria-label="閉じる">×</button>
+            <img class="map-peek-img" id="map-peek-img" alt="" hidden>
+            <div class="map-peek-body">
+                <div class="map-peek-head"><b id="map-peek-name"></b><span class="muted" id="map-peek-region"></span></div>
+                <div class="map-peek-now"><i id="map-peek-dot"></i><span id="map-peek-label"></span></div>
+                <div class="map-peek-today" id="map-peek-today"></div>
+                <div class="map-peek-alert" id="map-peek-alert" hidden>24時間以内に川霧の予測あり</div>
+                <a class="button" id="map-peek-link" href="#">地点のページを開く</a>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="table-scroll">
@@ -122,6 +136,25 @@
         return wrap;
     }
 
+    var peek = document.getElementById("map-peek");
+    var LV_TEXT = {3: "今日の川霧: 出やすい", 2: "今日の川霧: やや出やすい", 1: "今日の川霧: 出にくい", 0: "今日の川霧: 予測なし"};
+    function showPeek(p) {
+        document.getElementById("map-peek-name").textContent = p.name;
+        document.getElementById("map-peek-region").textContent = p.region;
+        document.getElementById("map-peek-label").textContent = p.label;
+        document.getElementById("map-peek-dot").style.background = p.color;
+        document.getElementById("map-peek-today").textContent = LV_TEXT[p.today || 0];
+        document.getElementById("map-peek-alert").hidden = !p.alert;
+        document.getElementById("map-peek-link").href = p.detail_url;
+        var img = document.getElementById("map-peek-img");
+        if (p.image) { img.src = p.image; img.alt = p.name + "の最新のカメラ画像"; img.hidden = false; } else { img.hidden = true; img.removeAttribute("src"); }
+        peek.hidden = false;
+        document.getElementById("map-peek-link").focus({preventScroll: true});
+    }
+    function hidePeek() { peek.hidden = true; }
+    document.getElementById("map-peek-close").addEventListener("click", hidePeek);
+    document.addEventListener("keydown", function(e) { if (e.key === "Escape" && !peek.hidden) { hidePeek(); } });
+    map.on("click", hidePeek);
     var bounds = [];
     points.forEach(function(p) {
         if (p.lat === null || p.lon === null) { return; }
@@ -132,9 +165,10 @@
             weight: p.alert ? 3 : 1.5,
             fillColor: p.color,
             fillOpacity: 0.9,
-            className: p.alert ? "map-marker-alert" : ""
+            className: p.alert ? "map-marker-alert" : "",
+            bubblingMouseEvents: false  // 地点を押したときに地図の「押したら閉じる」が続けて動かないように
         }).addTo(map);
-        marker.bindPopup(buildPopupContent(p));
+        marker.on("click", function() { showPeek(p); });
     });
     if (bounds.length) {
         map.fitBounds(bounds, {padding: [24, 24]});

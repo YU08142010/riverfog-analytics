@@ -302,12 +302,15 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   PC側の `RiverFogBackup\pull.ps1` は取り終えたら `token.txt` で報告する。
 - 地点ページの大きな気温の数字は、表示のときに0から数え上がる(ui_motion.jsのcountUp)。画面の確認の画像で4°や3°に見えたのはその途中。
 
-- **利用規約(2026-10-13)**: 本文は `web_templates/_terms_body.html`(下書き、11条)、版は `webapp.TERMS_VERSION`。
-  研究用サイト: ログインしている人は、いまの版に同意するまで `/terms`(とログアウト)以外は使えない(ページは `/terms?next=` へ移り、
-  フォームやfetchは403のJSON)。同意は users.db の `terms_agreements`(利用者・版・日時)と操作ログに残し、セッションに覚える。
-  公開ページ: 最初に開いたときに規約の全文とチェックボックスの画面を出し(`public_base.html`、端末の `localStorage` の `rf-pub-terms-<版>`)、
-  `/forecast/terms` でいつでも読める。**版を上げると、両方とも全員にもう一度同意を求める。** 使い捨てのテスト用アカウント(smoke_test.py など)は
-  作ったあとに `users.record_terms_agreement` で同意済みにすること(しないと全ページが規約の画面に移る)。
+- **利用規約(2026-10-13、公開ページだけ)**: 本文は `web_templates/_terms_body.html`、版は `webapp.TERMS_VERSION`。公開ページを最初に開いたときに
+  全文とチェックボックスの画面を出し(`public_base.html`、端末の `localStorage` の `rf-pub-terms-<版>`)、`/forecast/terms` でいつでも読める。
+  版を上げると全員にもう一度出る。研究用サイト(ログインする方)では同意を求めない(いったん入れたが、同じ日に利用者の判断で外した。
+  users.db の `terms_agreements` は使っていない表として残っている)。
+- **使いやすさの手直し(2026-10-13)**: ホームの上に「お気に入りの地点」(プロフィールで選んだ地点のいま・今日/明日・予測)、地点ごとの現象は霧の地点を先に。
+  地点ページの「‹ ›」で前後の地点(`_station_flow_order`、流れ図と同じ川の順)、上の大きな表示を左右にスワイプしても移れる、「最近見た地点」。
+  ページの記録は端末の `localStorage["rf-visited"]`(12件)で、検索(Ctrl+K)の「最近見たページ」にも出る。数字の数え上げの演出はやめた(ui_motion.js)。
+  観測報告に「3日より前の自動検知をまとめて閉じる」(`/observation_reports/bulk_dismiss`、`STALE_AUTO_REPORT_DAYS`)。
+  地図で地点を押すと、最新のカメラ画像・いま・今日の出やすさの小画面(狭い画面では下から)。地点一覧に「リスト」表示。設定に「ホーム画面に追加」の案内。
 - **市民観測(写真投稿)は2026-10-13に削除**(利用者の判断)。`citizen_photos.py`・`/photos`・`photos*.html`・`offline_queue.js` を消した。
   users.db の `citizen_photos` テーブルは空のまま残っている(使っていない)。地点ページのタブの「写真」は「動画」(タイムラプス)にした。
 

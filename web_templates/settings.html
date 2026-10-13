@@ -32,6 +32,7 @@
     <a href="#push">通知</a>
     <a href="#display">表示</a>
     <a href="#privacy">プライバシー</a>
+    <a href="#install">ホーム画面に追加</a>
     <a href="#account">アカウント</a>
 </nav>
 <div class="settings-main">
@@ -150,6 +151,44 @@
     </form>
 </section>
 
+<section class="card settings-card" id="install" aria-labelledby="h-install">
+    <h2 id="h-install">ホーム画面に追加</h2>
+    <p class="muted">スマホのホーム画面に追加すると、アプリのように全画面で開けます。iPhone・iPadでは、ホーム画面に追加して開いたときだけ通知を受け取れます。電波の弱い場所で最後に見た内容を出す機能も、追加しておくと使いやすくなります。</p>
+    <p class="install-state" id="install-state"></p>
+    <p><button type="button" class="button" id="install-btn" hidden>この端末に追加する</button></p>
+    <div class="install-steps">
+        <div>
+            <h3 class="set-subhead">iPhone・iPad(Safari)</h3>
+            <ol><li>画面の下(iPadは上)の共有ボタン(四角から上向きの矢印)を押す</li><li>「ホーム画面に追加」を押す</li><li>右上の「追加」を押す</li></ol>
+        </div>
+        <div>
+            <h3 class="set-subhead">Android(Chrome)</h3>
+            <ol><li>右上の「︙」を押す</li><li>「ホーム画面に追加」または「アプリをインストール」を押す</li><li>「インストール」(または「追加」)を押す</li></ol>
+        </div>
+        <div>
+            <h3 class="set-subhead">PC(Chrome・Edge)</h3>
+            <ol><li>アドレスバーの右にある「インストール」のアイコンを押す</li><li>「インストール」を押す</li></ol>
+        </div>
+    </div>
+    <script>
+    (function() {
+        var state = document.getElementById("install-state"), btn = document.getElementById("install-btn"), deferred = null;
+        var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+        state.textContent = standalone ? "いまはホーム画面から開いています(追加済みです)。" : "いまはブラウザで開いています。";
+        // Android・PCのChrome/Edgeでは、ブラウザが「追加できる」と知らせてきたときだけ、ボタンで直接追加できる
+        window.addEventListener("beforeinstallprompt", function(e) { e.preventDefault(); deferred = e; btn.hidden = false; });
+        btn.addEventListener("click", function() {
+            if (!deferred) { return; }
+            deferred.prompt();
+            deferred.userChoice.then(function(c) {
+                if (window.showToast) { window.showToast(c.outcome === "accepted" ? "ホーム画面に追加しました" : "追加をやめました"); }
+                deferred = null; btn.hidden = true;
+            });
+        });
+        window.addEventListener("appinstalled", function() { state.textContent = "ホーム画面に追加しました。"; btn.hidden = true; });
+    })();
+    </script>
+</section>
 <section class="card settings-card" id="account" aria-labelledby="h-account">
     <h2 id="h-account">アカウント</h2>
     <ul class="settings-links">

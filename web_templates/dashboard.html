@@ -23,6 +23,25 @@
         <a class="wx-hero-stat" href="{{ url_for('public_forecast') }}"><b>3日</b><span>出やすさ(公開ページ)</span></a>
     </div>
 </div>
+{# お気に入りの地点(2026-10-13): プロフィールで選んだ地点を一番上に。いまの状態・今日/明日の出やすさ・24時間以内の予測。 #}
+{% if favorites %}
+<div class="card fav-card">
+    <h2>お気に入りの地点</h2>
+    <div class="fav-grid">
+        {% for f in favorites %}
+        <a class="fav-item{{ ' is-fog' if f.fog }}" href="{{ url_for('station_detail', name=f.name) }}">
+            <span class="fav-name">{{ f.name }}</span>
+            <span class="fav-now"{% if f.now %} style="--chip:{{ f.now.color }}"{% endif %}><i></i>{{ f.now.label if f.now else "観測なし" }}</span>
+            <span class="fav-lv">今日 <b class="lv{{ f.lv[0] if f.lv else 0 }}">{{ {3: "高", 2: "中", 1: "低"}.get(f.lv[0] if f.lv else 0, "-") }}</b>
+                明日 <b class="lv{{ f.lv[1] if f.lv|length > 1 else 0 }}">{{ {3: "高", 2: "中", 1: "低"}.get(f.lv[1] if f.lv|length > 1 else 0, "-") }}</b></span>
+            {% if f.alert %}<span class="fav-alert">{{ f.alert[5:16]|replace("-", "/") }}に予測あり</span>{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% elif has_favorites_setting %}
+<p class="fav-hint"><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>でお気に入りの地点を選ぶと、ここにいまの状態と今日の見込みが出ます。</p>
+{% endif %}
 {% for ann in announcements_list %}
 <div class="card" style="border-left: 5px solid var(--color-primary); background: var(--color-primary-light);">
     <h2>お知らせ</h2>
@@ -93,7 +112,11 @@ document.addEventListener("ajaxformsuccess", function(e) {
     {% if region_stations %}
     <h3 style="margin-bottom:0.5rem;">地点ごとの現象({{ region_label }})</h3>
     <div class="station-grid">
-        {% for s in region_stations %}
+        {# 霧が出ている地点を先に(2026-10-13)。残りはいつもの順 #}
+        {% for s in region_stations if s.name in fog_names %}
+        <a class="station-chip is-fog" href="{{ url_for('station_detail', name=s.name) }}" style="background:{{ s.color }}; color:{{ s.text_color }};">{{ s.name }}<br>{{ s.label }}</a>
+        {% endfor %}
+        {% for s in region_stations if s.name not in fog_names %}
         <a class="station-chip" href="{{ url_for('station_detail', name=s.name) }}" style="background:{{ s.color }}; color:{{ s.text_color }};">{{ s.name }}<br>{{ s.label }}</a>
         {% endfor %}
     </div>

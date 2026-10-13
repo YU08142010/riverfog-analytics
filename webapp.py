@@ -857,28 +857,12 @@ def _require_login():
     # 通知の絞り込み(お気に入り地点)等、同じリクエスト内で再度ユーザー情報が必要になる
     # 場合に備えてgに載せておく(_current_user_favorite_stations参照、二重問い合わせ防止)。
     g.current_user = user
-    # 利用規約(2026-10-13): いまの版に同意するまでは、規約のページ・ログアウト以外は使えない。
-    # 同意済みかはセッションに覚え、毎回DBを見ない(版を上げると全員にもう一度同意を求める)。
-    if session.get("terms_version") != TERMS_VERSION and not is_auth_check \
-            and not request.path.startswith(TERMS_EXEMPT_PREFIXES):
-        conn = _users_conn()
-        try:
-            agreed = users.has_agreed_terms(conn, user_id, TERMS_VERSION)
-        finally:
-            conn.close()
-        if agreed:
-            session["terms_version"] = TERMS_VERSION
-        elif request.method in CSRF_SAFE_METHODS and not _wants_json():
-            return redirect(url_for("terms_page", next=request.full_path if request.query_string else request.path))
-        else:
-            return jsonify({"success": False, "message": "利用規約への同意が必要です。ページを開き直してください。"}), 403
     return None
 
 
-# 利用規約(2026-10-13)。文面は web_templates/_terms_body.html。文面を大きく変えたら版(日付)を上げると、
-# ログインする人には改めて同意を求め、公開ページでも改めて同意の画面が出る。
+# 利用規約(2026-10-13、公開ページだけ)。文面は web_templates/_terms_body.html。文面を大きく変えたら版(日付)を上げると、
+# 公開ページで改めて同意の画面が出る。研究用サイト(ログインする方)では同意を求めない(2026-10-13、利用者の判断)。
 TERMS_VERSION = "2026-10-13"
-TERMS_EXEMPT_PREFIXES = ("/terms", "/logout", "/offline-sw.js")
 
 
 @app.context_processor
@@ -4355,9 +4339,19 @@ def dashboard():
     except Exception as e:
         log.warning("Home map data failed: %s", e)
         home = None
+    # お気に入りの地点(2026-10-13): プロフィールで選んだ地点を、いまの状態と今日の見込みつきでホームの上に出す
+    fav_names = [n for n in ((g.get("current_user") or {}).get("favorite_stations") or "").split(",") if n in STATION_NAMES]
+    obs_now = {s["name"]: s for s in (_latest_observations() or {}).get("stations", [])}
+    pts = {p["name"]: p for p in (home or {}).get("points", [])}
+    favorites = [{"name": n, "now": obs_now.get(n), "lv": (pts.get(n) or {}).get("lv") or [], "alert": (pts.get(n) or {}).get("alert"),
+                  "fog": bool((pts.get(n) or {}).get("fog"))} for n in fav_names]
+    fog_names = {p["name"] for p in (home or {}).get("points", []) if p.get("fog")}
     return render_template(
         "dashboard.html",
         home=home,
+        favorites=favorites,
+        has_favorites_setting=bool(session.get("user_id")),
+        fog_names=fog_names,
         dashboard_theme_class=dashboard_theme_class,
         observations=_latest_observations(),
         accuracy=_accuracy_summary_safe(),
@@ -4980,6 +4974,15 @@ def map_page():
         current_by_name = {s["name"]: s for s in observations["stations"]}
 
     alert_stations = {a["station"] for a in _upcoming_fog_alerts_safe()}
+    # 地点を押したときの小画面(2026-10-13): 最新の時刻のカメラ画像と、今日の出やすさ
+    latest_img = {}
+    latest_date = next(iter(_sorted_subdirs(IMAGE_DIR)), None)
+    if latest_date:
+        for hh in _sorted_subdirs(IMAGE_DIR / latest_date)[:3]:
+            for f in (IMAGE_DIR / latest_date / hh).glob("*.jpg"):
+                if f.stem not in latest_img:
+                    latest_img[f.stem] = url_for("images_file", date=latest_date, hhmm=hh, filename=f.name)
+    fc = {s["name"]: s for s in (_public_forecast_safe() or {}).get("stations") or []}
 
     entries = []
     map_points = []
@@ -5006,6 +5009,9 @@ def map_page():
             "color": current["color"] if current else "#bdc3c7",
             "alert": name in alert_stations,
             "detail_url": url_for("station_detail", name=name),
+            "region": STATION_REGION.get(name) or "",
+            "image": latest_img.get(name),
+            "today": ((fc.get(name) or {}).get("days") or [{}])[0].get("max", 0),
         })
 
     return render_template(
@@ -5333,8 +5339,14 @@ def observation_reports():
             and r["prev_image"]["code"] != r["reported_code"]
         )
         r["looks_isolated"] = differs_from_both
+    conn = _users_conn()
+    try:
+        stale_auto_count = len(_stale_auto_reports(conn))
+    finally:
+        conn.close()
     return render_template(
         "observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
+        stale_auto_count=stale_auto_count, stale_auto_days=STALE_AUTO_REPORT_DAYS,
         phenom_style=PHENOM_STYLE, importance_labels=IMPORTANCE_LABELS,
     )
 
@@ -5430,6 +5442,37 @@ def observation_report_dismiss(report_id):
     finally:
         conn.close()
     return _finish("observation_reports", "却下しました。")
+
+
+STALE_AUTO_REPORT_DAYS = 3
+
+
+def _stale_auto_reports(conn):
+    """まとめて閉じられる報告(2026-10-13): 人ではなく自動で検知したもの(前後と1時間だけ違う判定・自前の判定との食い違い)で、
+    STALE_AUTO_REPORT_DAYS日より前の時刻のもの(確認待ちの大半がこれで、日がたつと見直す価値が下がるため)。
+    会津観測者/只見観測者は担当地域の分だけ。"""
+    region = _observer_region_for_role(session.get("role"))
+    cutoff = (now_jst_naive() - timedelta(days=STALE_AUTO_REPORT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    return [r for r in users.list_pending_observation_reports(conn)
+            if r["source"] == "auto_detected" and r["target_datetime"] < cutoff
+            and (region is None or STATION_REGION.get(r["station_name"]) == region)]
+
+
+@app.route("/observation_reports/bulk_dismiss", methods=["POST"])
+@requires_observer
+def observation_reports_bulk_dismiss():
+    my_id = session.get("user_id")
+    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        stale = _stale_auto_reports(conn)
+        for r in stale:
+            users.resolve_observation_report(conn, r["id"], "dismissed", my_id, now_str,
+                                             f"{STALE_AUTO_REPORT_DAYS}日より前の自動検知をまとめて閉じた")
+    finally:
+        conn.close()
+    _record_audit("観測報告をまとめて閉じた", f"自動検知・{STALE_AUTO_REPORT_DAYS}日より前: {len(stale)}件")
+    return _finish("observation_reports", f"{len(stale)}件の古い自動検知を閉じました。")
 
 
 # 地点ページの背景演出(_weather_scene.html / web_static/weather_scene.css)。Appleの「天気」アプリの
@@ -5632,10 +5675,16 @@ def station_detail(name):
         ai_station_summary = ai_summary.get("stations", {}).get(name)
 
     station_weather_latest = _latest_station_weather(name, observations)
+    order = _station_flow_order()
+    i = order.index(name) if name in order else -1
+    nav_prev = order[i - 1] if i > 0 else None
+    nav_next = order[i + 1] if 0 <= i < len(order) - 1 else None
 
     return render_template(
         "station_detail.html",
         name=name,
+        nav_prev=nav_prev,
+        nav_next=nav_next,
         current=current,
         station_weather_latest=station_weather_latest,
         observations_datetime=observations["datetime"] if observations else None,
@@ -11898,6 +11947,16 @@ def _flow_sections(region):
     return [("会津(南→北)", sorted(names, key=lat))]
 
 
+def _station_flow_order():
+    """地点ページの「前の地点/次の地点」の順(2026-10-13): 流れ図と同じ並び(只見川は伊南川と支流→本流の上流→下流、会津は南→北)。"""
+    out = []
+    for region in ("只見川", "会津"):
+        for _title, names in _flow_sections(region):
+            out.extend(n for n in names if n not in out)
+    out.extend(n for n in STATION_NAMES if n not in out)
+    return out
+
+
 def _flow_observed(date_str, names):
     """{地点: {時: {"code": 主コード, "label", "img": 画像があるか, "day": 日中か}}}。人の訂正を反映する。"""
     codes_by = {}
@@ -12116,41 +12175,6 @@ def backup_manifest():
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     tmp.replace(HEALTH_DIR / "offsite_manifest.json")
     return jsonify({"ok": True, "days": len(clean_days), "zips": len(clean_zips)})
-
-
-def _safe_next(target):
-    """同意のあとに戻る先。サイトの中のパスだけ(外のサイトへは飛ばさない)。"""
-    if not target or not target.startswith("/") or target.startswith("//") or target.startswith("/terms"):
-        return url_for("dashboard")
-    return target
-
-
-@app.route("/terms")
-def terms_page():
-    my_id = session.get("user_id")
-    conn = _users_conn()
-    try:
-        agreed = users.terms_agreed_at(conn, my_id)
-    finally:
-        conn.close()
-    return render_template("terms.html", next_path=_safe_next(request.args.get("next")), agreed_at=agreed.get(TERMS_VERSION))
-
-
-@app.route("/terms/agree", methods=["POST"])
-def terms_agree():
-    my_id = session.get("user_id")
-    if request.form.get("agree") != "1":
-        flash("利用規約に同意する場合は、チェックを入れてから押してください。", "error")
-        return redirect(url_for("terms_page", next=request.form.get("next")))
-    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-    conn = _users_conn()
-    try:
-        users.record_terms_agreement(conn, my_id, TERMS_VERSION, now_str)
-    finally:
-        conn.close()
-    session["terms_version"] = TERMS_VERSION
-    _record_audit("利用規約に同意", f"版 {TERMS_VERSION}")
-    return redirect(_safe_next(request.form.get("next")))
 
 
 @app.route("/forecast/terms")
