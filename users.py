@@ -373,6 +373,12 @@ CREATE TABLE IF NOT EXISTS gold_labels (
     labeled_at TEXT NOT NULL,
     PRIMARY KEY (sample_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS terms_agreements (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    agreed_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, version)
+);
 CREATE TABLE IF NOT EXISTS citizen_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -2967,6 +2973,22 @@ def prune_push_sent(conn, before):
         conn.execute("DELETE FROM push_sent WHERE sent_at < ?", (before,))
 
 
+# --- 利用規約への同意(2026-10-13) --------------------------------------------------------------------
+
+def has_agreed_terms(conn, user_id, version):
+    return conn.execute("SELECT 1 FROM terms_agreements WHERE user_id = ? AND version = ?", (user_id, version)).fetchone() is not None
+
+
+def record_terms_agreement(conn, user_id, version, agreed_at):
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO terms_agreements (user_id, version, agreed_at) VALUES (?, ?, ?)",
+                     (user_id, version, agreed_at))
+
+
+def terms_agreed_at(conn, user_id):
+    """{版: 同意した日時}(管理画面・プロフィール用)。"""
+    return dict(conn.execute("SELECT version, agreed_at FROM terms_agreements WHERE user_id = ?", (user_id,)).fetchall())
+
 # --- 市民観測(写真投稿、2026-10-12、citizen_photos.py) ----------------------------------------------
 
 _PHOTO_COLUMNS = ("id, user_id, created_at, taken_at, lat, lon, station_name, distance_km, code, comment, "
@@ -3044,6 +3066,7 @@ def delete_citizen_photo(conn, photo_id):
 
 
 __all__ = [
+    "has_agreed_terms", "record_terms_agreement", "terms_agreed_at",
     "add_citizen_photo", "set_citizen_photo_size", "get_citizen_photo", "list_citizen_photos",
     "count_pending_citizen_photos", "review_citizen_photo", "delete_citizen_photo",
     "get_user_settings_raw", "all_user_settings_raw", "save_user_settings", "clear_presence",

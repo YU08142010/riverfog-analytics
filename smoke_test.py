@@ -39,6 +39,13 @@ log = logging.getLogger("smoke_test")
 def _session_cookie(uid):
     sys.path.insert(0, str(BASE_DIR))
     import webapp  # noqa: E402  (アプリ本体の秘密鍵でセッションCookieに署名するため)
+    # 利用規約(2026-10-13)に同意していないと全ページが規約の画面に移るため、使い捨てのアカウントでは同意済みにしておく
+    import users
+    conn = users.connect(str(BASE_DIR / "data" / "users.db"))
+    try:
+        users.record_terms_agreement(conn, uid, webapp.TERMS_VERSION, datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"))
+    finally:
+        conn.close()
     ser = webapp.app.session_interface.get_signing_serializer(webapp.app)
     name = webapp.app.config.get("SESSION_COOKIE_NAME", "session")
     return name, ser.dumps({"user_id": uid, "role": "admin", "name": "巡回テスト", "_permanent": True}), webapp

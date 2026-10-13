@@ -128,6 +128,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
         {"label": "設定", "url": url_for('settings_page'), "icon": "settings", "active": _p.startswith('/settings')},
     ] if session.get('user_id') else []) + [
         {"label": "更新履歴", "url": url_for('changelog_page'), "icon": "log", "active": _p.startswith(url_for('changelog_page'))},
+        {"label": "利用規約", "url": url_for('terms_page'), "icon": "shield", "active": _p.startswith('/terms')},
     ] + ([
         {"label": "ログアウト", "url": url_for('logout'), "icon": "close", "active": false, "sheet_only": true},
     ] if session.get('user_id') else []) + [

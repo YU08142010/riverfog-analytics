@@ -308,9 +308,12 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   PC側の `RiverFogBackup\pull.ps1` は取り終えたら `token.txt` で報告する。
 - 地点ページの大きな気温の数字は、表示のときに0から数え上がる(ui_motion.jsのcountUp)。画面の確認の画像で4°や3°に見えたのはその途中。
 
-- **公開ページの注意(2026-10-13)**: public_base.html で、最初に開いたときに「許可なくネット上に公開・転載しないで」という画面を出す。
-  「同意して見る」でこの端末に覚える(localStorage の f-pub-notice-v1。文面を変えたら末尾の番号を上げると全員にもう一度出る)。フッターにも同じ注意。
-
+- **利用規約(2026-10-13)**: 本文は `web_templates/_terms_body.html`(下書き、11条)、版は `webapp.TERMS_VERSION`。
+  研究用サイト: ログインしている人は、いまの版に同意するまで `/terms`(とログアウト)以外は使えない(ページは `/terms?next=` へ移り、
+  フォームやfetchは403のJSON)。同意は users.db の `terms_agreements`(利用者・版・日時)と操作ログに残し、セッションに覚える。
+  公開ページ: 最初に開いたときに規約の全文とチェックボックスの画面を出し(`public_base.html`、端末の `localStorage` の `rf-pub-terms-<版>`)、
+  `/forecast/terms` でいつでも読める。**版を上げると、両方とも全員にもう一度同意を求める。** 使い捨てのテスト用アカウント(smoke_test.py など)は
+  作ったあとに `users.record_terms_agreement` で同意済みにすること(しないと全ページが規約の画面に移る)。
 ## 試して採らなかった改良(2026-10-08、その6)
 
 直近6週を2週×3でずらし、過去の予報(lead 0、JMA+ECMWFの平均)を入力に比べた

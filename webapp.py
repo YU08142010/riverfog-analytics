@@ -857,8 +857,33 @@ def _require_login():
     # 通知の絞り込み(お気に入り地点)等、同じリクエスト内で再度ユーザー情報が必要になる
     # 場合に備えてgに載せておく(_current_user_favorite_stations参照、二重問い合わせ防止)。
     g.current_user = user
+    # 利用規約(2026-10-13): いまの版に同意するまでは、規約のページ・ログアウト以外は使えない。
+    # 同意済みかはセッションに覚え、毎回DBを見ない(版を上げると全員にもう一度同意を求める)。
+    if session.get("terms_version") != TERMS_VERSION and not is_auth_check \
+            and not request.path.startswith(TERMS_EXEMPT_PREFIXES):
+        conn = _users_conn()
+        try:
+            agreed = users.has_agreed_terms(conn, user_id, TERMS_VERSION)
+        finally:
+            conn.close()
+        if agreed:
+            session["terms_version"] = TERMS_VERSION
+        elif request.method in CSRF_SAFE_METHODS and not _wants_json():
+            return redirect(url_for("terms_page", next=request.full_path if request.query_string else request.path))
+        else:
+            return jsonify({"success": False, "message": "利用規約への同意が必要です。ページを開き直してください。"}), 403
     return None
 
+
+# 利用規約(2026-10-13)。文面は web_templates/_terms_body.html。文面を大きく変えたら版(日付)を上げると、
+# ログインする人には改めて同意を求め、公開ページでも改めて同意の画面が出る。
+TERMS_VERSION = "2026-10-13"
+TERMS_EXEMPT_PREFIXES = ("/terms", "/logout", "/offline-sw.js")
+
+
+@app.context_processor
+def _inject_terms_version():
+    return {"terms_version": TERMS_VERSION}
 
 def _touch_presence_if_due(conn, user_id):
     """オンライン判定用の最終アクセス時刻を更新する。毎リクエストDBに書き込むと
@@ -12151,6 +12176,45 @@ def backup_manifest():
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     tmp.replace(HEALTH_DIR / "offsite_manifest.json")
     return jsonify({"ok": True, "days": len(clean_days), "zips": len(clean_zips)})
+
+def _safe_next(target):
+    """同意のあとに戻る先。サイトの中のパスだけ(外のサイトへは飛ばさない)。"""
+    if not target or not target.startswith("/") or target.startswith("//") or target.startswith("/terms"):
+        return url_for("dashboard")
+    return target
+
+
+@app.route("/terms")
+def terms_page():
+    my_id = session.get("user_id")
+    conn = _users_conn()
+    try:
+        agreed = users.terms_agreed_at(conn, my_id)
+    finally:
+        conn.close()
+    return render_template("terms.html", next_path=_safe_next(request.args.get("next")), agreed_at=agreed.get(TERMS_VERSION))
+
+
+@app.route("/terms/agree", methods=["POST"])
+def terms_agree():
+    my_id = session.get("user_id")
+    if request.form.get("agree") != "1":
+        flash("利用規約に同意する場合は、チェックを入れてから押してください。", "error")
+        return redirect(url_for("terms_page", next=request.form.get("next")))
+    now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _users_conn()
+    try:
+        users.record_terms_agreement(conn, my_id, TERMS_VERSION, now_str)
+    finally:
+        conn.close()
+    session["terms_version"] = TERMS_VERSION
+    _record_audit("利用規約に同意", f"版 {TERMS_VERSION}")
+    return redirect(_safe_next(request.form.get("next")))
+
+
+@app.route("/forecast/terms")
+def public_terms():
+    return render_template("public_terms.html")
 
 @app.route("/offline-sw.js")
 def offline_service_worker():

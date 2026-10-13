@@ -1864,3 +1864,14 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 }
 .wx-scene ~ main :is(.card, .sidebar-panel) :is(.muted, small, .wx-hour-day, .sidebar-group-label-static, th, .empty-state) { color: var(--color-text-muted); }
 .sidebar-toggle, .layout:has(> .sidebar:not(:empty)) .sidebar-toggle { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
+/* 利用規約(2026-10-13) */
+.terms-body h3 { font-size: 0.98rem; margin: 1.1rem 0 0.35rem; }
+.terms-body p, .terms-body li { line-height: 1.8; }
+.terms-body ol, .terms-body ul { padding-left: 1.4rem; margin: 0.2rem 0 0.4rem; }
+.terms-meta { color: var(--color-text-muted); font-size: 0.85rem; }
+.terms-scroll { max-height: 55vh; overflow-y: auto; margin: 0.8rem 0; padding: 0.4rem 1rem; border-radius: 12px; background: var(--control-bg); }
+.terms-scroll:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.terms-check { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; margin: 0.6rem 0; cursor: pointer; }
+.terms-check input { width: 1.15rem; height: 1.15rem; }
+.terms-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.terms-actions .button:disabled { opacity: 0.5; cursor: not-allowed; }

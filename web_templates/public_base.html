@@ -253,6 +253,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
     <p><strong>本サイトの内容(予測・カメラ画像・データ・画面のスクリーンショット)を、許可なくSNS・Webサイト等に公開・転載しないこと。</strong></p>
     <p>本ページは研究段階の川霧予測モデルによる試験的な計算結果であり、気象庁の予報ではない。予測には誤りが含まれるため、行動の判断に用いる場合は利用者の責任において判断されたい。</p>
     <p>気象データ: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)・気象庁<br>河川カメラ: 国土交通省「川の防災情報」<br>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>(淡色地図)</p>
+    <p><a href="{{ url_for('public_terms') }}">利用規約</a></p>
     <p class="pf-footer-meta">只見川・会津地方 川霧発生予測(試験公開){% if app_version %} v{{ app_version }}{% endif %}</p>
 </footer>
 <script>
@@ -273,20 +274,19 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 // ページ全体の全画面表示(発表や展示でスクリーンに映す用)は web_static/fs_shell.js(研究用サイトと共通)。
 // 全画面のままページを移っても解除されない。
 </script>
-{# 最初に開いたときの注意(2026-10-12): 許可なくネット上に公開・転載しないでほしい旨。同意するとこの端末に覚え、
-   次からは出さない(文面を変えたら PF_NOTICE_KEY の末尾を上げると、もう一度出る)。覚えられない環境では毎回出す。 #}
-<div class="pf-notice" id="pf-notice" role="dialog" aria-modal="true" aria-labelledby="pf-notice-title" aria-describedby="pf-notice-body" hidden>
+{# 最初に開いたときの利用規約への同意(2026-10-13。10-12の「ネット上に公開しないで」の注意を置き換え)。
+   同意するとこの端末に覚え、規約の版(webapp.TERMS_VERSION)が変わるまで出さない。覚えられない環境では毎回出す。
+   規約のページ(/forecast/terms)を開いているときは出さない(読むためのページなので)。 #}
+<div class="pf-notice" id="pf-notice" role="dialog" aria-modal="true" aria-labelledby="pf-notice-title" aria-describedby="pf-notice-lead" hidden
+     data-key="rf-pub-terms-{{ terms_version }}"{% if request.path == url_for('public_terms') %} data-skip="1"{% endif %}>
     <div class="pf-notice-box">
-        <h2 id="pf-notice-title">ご利用の前に</h2>
-        <div id="pf-notice-body">
-            <p><strong>このサイトの内容を、許可なくネット上に公開しないでください。</strong></p>
-            <p>掲載している予測・カメラ画像・データ、この画面のスクリーンショットを、SNS・ブログ・Webサイトなどに投稿・転載することはお控えください。</p>
-            <p class="pf-notice-sub">このサイトは研究のための試験公開です。予測は研究段階の計算結果で、誤りを含みます。</p>
-        </div>
-        <button type="button" class="pf-notice-ok" id="pf-notice-ok">同意して見る</button>
+        <h2 id="pf-notice-title">利用規約への同意</h2>
+        <p id="pf-notice-lead"><strong>このサイトの内容を、許可なくネット上に公開しないでください。</strong>ご利用の前に、利用規約をお読みいただき、同意をお願いします。</p>
+        <div class="pf-notice-terms" tabindex="0" aria-label="利用規約の本文">{% include "_terms_body.html" %}</div>
+        <label class="pf-notice-check"><input type="checkbox" id="pf-notice-box"> 利用規約を読み、同意します</label>
+        <button type="button" class="pf-notice-ok" id="pf-notice-ok" disabled>同意して見る</button>
     </div>
-</div>
-<style>
+</div><style>
 .pf-notice { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 16px;
     background: rgba(8, 14, 26, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 .pf-notice[hidden] { display: none; }
@@ -309,20 +309,34 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
     :root:not([data-theme="light"]) .pf-notice-sub { color: #c4c8d0; }
 }
 .pf-noscroll { overflow: hidden; }
+.pf-notice-box { width: min(40rem, 100%); display: flex; flex-direction: column; }
+.pf-notice-terms { flex: 1 1 auto; min-height: 8rem; max-height: 46vh; overflow-y: auto; margin: 0.3rem 0 0.8rem; padding: 0.6rem 0.9rem;
+    border: 1px solid rgba(30, 40, 60, 0.15); border-radius: 12px; background: rgba(120, 130, 150, 0.07); font-size: 0.86rem; }
+.pf-notice-terms:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(10, 100, 210, 0.35); }
+.pf-notice-check { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; margin-bottom: 0.3rem; cursor: pointer; }
+.pf-notice-check input { width: 1.15rem; height: 1.15rem; }
+.pf-notice-ok:disabled { background: #9aa3b0; cursor: not-allowed; }
 </style>
 <script>
 (function() {
-    var PF_NOTICE_KEY = "rf-pub-notice-v1";
-    var box = document.getElementById("pf-notice"), ok = document.getElementById("pf-notice-ok");
+    var box = document.getElementById("pf-notice"), ok = document.getElementById("pf-notice-ok"), check = document.getElementById("pf-notice-box");
+    var PF_NOTICE_KEY = box.getAttribute("data-key");
+    if (box.getAttribute("data-skip")) { return; }
     var seen = false;
     try { seen = localStorage.getItem(PF_NOTICE_KEY) === "1"; } catch (e) {}
     if (seen) { return; }
     var before = document.activeElement;
     box.hidden = false;
     document.documentElement.classList.add("pf-noscroll");
-    ok.focus();
-    // 同意するまで後ろの画面は操作できないので、Tabもこのボタンの中に留める
-    box.addEventListener("keydown", function(e) { if (e.key === "Tab") { e.preventDefault(); ok.focus(); } });
+    box.querySelector(".pf-notice-terms").focus();
+    check.addEventListener("change", function() { ok.disabled = !check.checked; });
+    // 同意するまで後ろの画面は操作できないので、Tabはこの画面の中を回る
+    box.addEventListener("keydown", function(e) {
+        if (e.key !== "Tab") { return; }
+        var f = Array.prototype.filter.call(box.querySelectorAll("[tabindex='0'], input, button, a[href]"), function(el) { return !el.disabled; });
+        var i = f.indexOf(document.activeElement), j = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i + 1) % f.length;
+        e.preventDefault(); f[j].focus();
+    });
     ok.addEventListener("click", function() {
         try { localStorage.setItem(PF_NOTICE_KEY, "1"); } catch (e) {}
         box.hidden = true;
