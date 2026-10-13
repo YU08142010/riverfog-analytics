@@ -25,6 +25,7 @@ SETTINGS = {
     "nav_position": {"default": "side", "choices": ["side", "top"]},  # PCでのメニューの場所(左/上)
     "nav_order": {"default": [], "type": "ids"},   # 項目の並び(空なら最初の並び)
     "nav_hidden": {"default": [], "type": "ids"},  # 出さない項目
+    "tabbar_items": {"default": ["stations", "flow_fc", "gallery"], "type": "ids"},  # 狭い画面の下のタブの真ん中の3つ
     # --- プライバシー ---
     "show_online": {"default": True, "type": bool},
     "mute_profile_sounds": {"default": False, "type": bool},
@@ -119,6 +120,14 @@ def from_form(form, section, current, station_names):
             out[key] = [s for s in station_names if s in set(form.getlist(key))]
         elif key == "nav_order":
             out[key] = [s for s in form.getlist("nav_order") if _ID_RE.fullmatch(s)][:60]
+        elif key == "tabbar_items":
+            # 3つの選択欄(tabbar_1〜3)。同じものを2つ選んだら1つにする
+            picked = []
+            for i in (1, 2, 3):
+                v = form.get(f"tabbar_{i}", "")
+                if _ID_RE.fullmatch(v) and v not in picked:
+                    picked.append(v)
+            out[key] = picked or list(SETTINGS[key]["default"])
         elif key == "nav_hidden":
             # 画面の一覧(nav_order)のうち、チェック(nav_show)の外れているもの
             shown = set(form.getlist("nav_show"))
@@ -131,7 +140,7 @@ def from_form(form, section, current, station_names):
 # 設定画面の節ごとに、どの項目を扱うか(from_formで真偽値の読み直しに使う)
 SECTIONS = {
     "display": ["theme", "text_size", "reduce_motion", "calm_background", "start_page"],
-    "menu": ["nav_position", "nav_order", "nav_hidden"],
+    "menu": ["nav_position", "nav_order", "nav_hidden", "tabbar_items"],
     "privacy": ["show_online", "mute_profile_sounds"],
     "push": ["push_stations", "push_custom_stations", "push_digest_morning", "push_digest_evening",
              "push_digest_level", "push_fog_soon", "push_fog_now", "push_fog_nowcast", "push_camera", "push_monthly_report", "push_dm", "push_group",

@@ -24,6 +24,7 @@ SMOKE = BASE_DIR / "data" / "health" / "smoke.json"
 DISK_WARN_PCT = 85
 GEMINI_QUOTA_WARN = 3          # 1日にこれ以上のクォータ超過があれば知らせる
 COLLECT_MIN_RUNS = 14          # 4〜19時の毎時 = 16回。これ未満なら収集が抜けている
+DNS_FAIL_WARN = 10             # 24時間で名前解決の失敗した「分」がこれ以上あれば知らせる(2026-10-13)
 log = logging.getLogger("health_report")
 
 
@@ -104,6 +105,21 @@ def check(now):
         issues.append("夜間の巡回テストの結果がありません")
     except Exception as e:  # noqa: BLE001
         issues.append(f"巡回テストの結果を読めません: {e}")
+
+    # 名前解決(DNS)の失敗(2026-10-13): サーバーのDNSが時々数十秒失敗し、予測の天気予報の取得やアメダスの取得が抜けることがあった。
+    # 各処理はやり直すが、多い日はWi-Fi・ルーター側を疑うきっかけにする。どのログにも出るので、主なログを合わせて数える。
+    # 1回の不調で何行も出る(アメダスは地点ごと)ので、失敗のあった「分」の数で数える
+    minutes = set()
+    for name in ("cron.log", "collect.log", "predict.log", "amedas.log"):
+        minutes.update(ln[:16] for ln in _log_lines_since(LOG_DIR / name, since)
+                       if "Temporary failure in name resolution" in ln or "NameResolutionError" in ln)
+    dns = len(minutes)
+    if dns >= DNS_FAIL_WARN:
+        hours = sorted({m[11:13] for m in minutes})
+        issues.append(f"名前解決(DNS)の失敗が{dns}分ありました({'・'.join(h + '時' for h in hours[:8])}"
+                      f"{'ほか' if len(hours) > 8 else ''}。Wi-Fi・ルーターの不調の可能性。処理はやり直しています)")
+    else:
+        ok.append(f"名前解決の失敗: {dns}分")
 
     # サービス・タイマー
     for unit in ("river-fog-web.service", "river-fog-collect.timer"):

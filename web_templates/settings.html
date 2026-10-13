@@ -149,7 +149,18 @@
     <form action="{{ url_for('settings_save', section='menu') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {{ seg_radio("nav_position", [("side", "横(左)"), ("top", "上")], s.nav_position, "PCでのメニューの場所") }}
-        <h3 class="set-subhead">出す項目と並び</h3>
+        <h3 class="set-subhead">スマホの下のタブ</h3>
+        <p class="muted set-note">画面の狭い端末で、下のタブの左右(ホーム・メニュー)のあいだに出す3つを選べます。</p>
+        {% set _tb = s.tabbar_items or [] %}
+        <div class="tabbar-pick">
+            {% for i in range(1, 4) %}
+            <label>{{ i }}つ目
+                <select name="tabbar_{{ i }}">
+                    {% for c in tabbar_choices() %}<option value="{{ c.id }}"{{ " selected" if _tb|length >= i and _tb[i - 1] == c.id }}>{{ c.full }}</option>{% endfor %}
+                </select>
+            </label>
+            {% endfor %}
+        </div>        <h3 class="set-subhead">出す項目と並び</h3>
         <p class="muted set-note">チェックを外すとメニューに出しません(「設定」は外せません)。「↑」「↓」で並びを変えられます。同じまとまり(観測・予報・分析など)の項目は、まとまりの中でこの順に並びます。</p>
         <ul class="nav-custom" id="nav-custom">
             {% for it in app_nav_catalog() %}

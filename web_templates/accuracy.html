@@ -53,7 +53,7 @@
             <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
             <td>{{ "%.1f"|format(row.recall * 100) if row.recall is not none else "-" }}%</td>
             <td>{{ "%.1f"|format(row.precision * 100) if row.precision is not none else "-" }}%</td>
-            <td>{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%</td>
+            <td>{% if row.region == "会津" %}-{% else %}{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -123,7 +123,7 @@
             <td>{{ "%.1f"|format(100.0 * row.correct / row.n) if row.n else "-" }}%</td>
             <td>{{ "%.1f"|format(row.recall * 100) if row.recall is not none else "-" }}%</td>
             <td>{{ "%.1f"|format(row.precision * 100) if row.precision is not none else "-" }}%</td>
-            <td>{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%</td>
+            <td>{% if row.region == "会津" %}-{% else %}{{ "%.1f"|format(row.f1 * 100) if row.f1 is not none else "-" }}%{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>

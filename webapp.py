@@ -1649,6 +1649,27 @@ def _app_nav_ordered(items, prefs):
     return sorted(items, key=lambda it: (rank.get(it["id"], len(order) + base[it["id"]]),))
 
 
+# 狭い画面の下のタブ(2026-10-13): 左右の「ホーム」「メニュー」は固定で、真ん中の3つを設定で選べる。
+# 候補はメニューの項目に、よく使うページへの近道(見頃・今朝の川霧・地図)を足したもの。
+TABBAR_SHORTCUTS = [
+    ("flow_fc", "見頃", "flow_page", {"mode": "fc"}, "calendar", ("/flow",)),
+    ("gallery", "今朝の川霧", "gallery_page", {}, "sunrise", ("/gallery",)),
+    ("map", "地図", "map_page", {}, "map", ("/map",)),
+]
+TABBAR_SHORT_LABELS = {"stations": "地点", "public": "予報", "review": "確認", "members": "メンバー", "chat": "AIチャット",
+                       "simulator": "シミュ", "changelog": "更新履歴"}
+
+
+def _tabbar_candidates(nav_items):
+    """[{id, label(タブ用の短い名前), full(設定画面用), url, icon, active}]。"""
+    p = request.path
+    out = [{"id": it["id"], "label": TABBAR_SHORT_LABELS.get(it["id"], it["label"]), "full": it["label"], "url": it["url"],
+            "icon": it["icon"], "active": it["active"]} for it in nav_items if not it["sheet_only"] and it["id"] != "home"]
+    for sid, label, endpoint, kwargs, icon, prefixes in TABBAR_SHORTCUTS:
+        out.append({"id": sid, "label": label, "full": f"{label}(近道)", "url": url_for(endpoint, **kwargs), "icon": icon,
+                    "active": p.startswith(prefixes)})
+    return out
+
 @app.context_processor
 def _inject_app_nav():
     def app_nav_menu(obs_pending=0, community_unread=0):
@@ -1674,7 +1695,30 @@ def _inject_app_nav():
         return [dict(it, shown=it["id"] not in hidden, locked=it["id"] in NAV_ALWAYS_SHOWN, default_index=default_index[it["id"]])
                 for it in _app_nav_ordered(items, prefs) if not it["sheet_only"]]
 
-    return {"app_nav_menu": app_nav_menu, "app_nav_catalog": app_nav_catalog}
+    def tabbar_items():
+        """下のタブの真ん中の3つ(設定の tabbar_items。見られない項目は飛ばし、足りなければ既定で埋める)。"""
+        prefs = _current_user_settings() if session.get("user_id") else {}
+        cands = {c["id"]: c for c in _tabbar_candidates(_app_nav_items())}
+        chosen = [cands[i] for i in (prefs.get("tabbar_items") or []) if i in cands]
+        for i in user_settings.SETTINGS["tabbar_items"]["default"]:
+            if len(chosen) >= 3:
+                break
+            if i in cands and cands[i] not in chosen:
+                chosen.append(cands[i])
+        if chosen:
+            # 同じページで2つ光らないよう、開いているページに当てはまる最初の1つだけを光らせる
+            # 近道(見頃・今朝の川霧・地図)は「地点」より絞った場所なので、両方当てはまるときは近道のほうを光らせる
+            shortcut_ids = {s[0] for s in TABBAR_SHORTCUTS}
+            lit = (next((c["id"] for c in chosen if c["active"] and c["id"] in shortcut_ids), None)
+                   or next((c["id"] for c in chosen if c["active"]), None))
+            chosen = [dict(c, active=c["id"] == lit) for c in chosen]
+        return chosen[:3]
+
+    def tabbar_choices():
+        return _tabbar_candidates(_app_nav_items())
+
+    return {"app_nav_menu": app_nav_menu, "app_nav_catalog": app_nav_catalog, "tabbar_items": tabbar_items,
+            "tabbar_choices": tabbar_choices}
 
 @app.route("/settings/<section>", methods=["POST"])
 def settings_save(section):
@@ -2619,6 +2663,9 @@ def _render_region_compare_chart_png(region_summary):
     return buf.getvalue()
 
 
+REGION_F1_HIDDEN = {"会津"}  # 分析ページの「地域別の的中率・川霧F1」で川霧F1を出さない地域
+
+
 def _render_region_compare_chart_plotly(region_summary):
     """_render_region_compare_chart_pngのPlotly版(2026-09-14)。"""
     rows = [r for r in region_summary if r["n"] > 0]
@@ -2626,12 +2673,14 @@ def _render_region_compare_chart_plotly(region_summary):
     if rows:
         labels = [r["region"] for r in rows]
         acc = [100.0 * r["correct"] / r["n"] for r in rows]
-        f1_text = [f"{100.0 * r['f1']:.1f}" if r["f1"] is not None else "データなし" for r in rows]
-        f1_vals = [100.0 * r["f1"] if r["f1"] is not None else 0 for r in rows]
+        # 川霧F1は REGION_F1_HIDDEN の地域(会津、2026-10-13に利用者の判断で外した)には出さない
+        f1_rows = [r for r in rows if r["region"] not in REGION_F1_HIDDEN]
+        f1_text = [f"{100.0 * r['f1']:.1f}" if r["f1"] is not None else "データなし" for r in f1_rows]
+        f1_vals = [100.0 * r["f1"] if r["f1"] is not None else 0 for r in f1_rows]
         data = [
             go.Bar(x=labels, y=acc, name="的中率(%)", marker={"color": "#1a5276"},
                    text=[f"{v:.1f}" for v in acc], textposition="outside"),
-            go.Bar(x=labels, y=f1_vals, name="川霧F1(%)", marker={"color": "#c0392b"},
+            go.Bar(x=[r["region"] for r in f1_rows], y=f1_vals, name="川霧F1(%)", marker={"color": "#c0392b"},
                    text=f1_text, textposition="outside"),
         ]
     else:
@@ -5231,6 +5280,10 @@ def _scan_and_autocorrect_station_anomalies(name):
             prev_c, cur_c, next_c = int(prev_raw), int(cur_raw), int(next_raw)
             if prev_c != next_c or cur_c == prev_c:
                 continue
+            # 2026-10-13: 予測の対象(この地点の霧かどうか)が変わらないブレは積まない(現象なし⇔全体霧・層雲、全体霧の濃さだけの違い等)。
+            # 学習のラベルが変わらないため、確認待ちを埋めるだけだった(当時の確認待ち211件のうち約8割)。
+            if _is_target_code(name, cur_c) == _is_target_code(name, prev_c):
+                continue
             target_dt = recent.iloc[i]["datetime"]
             target_dt_str = (
                 target_dt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(target_dt, "strftime") else str(target_dt)
@@ -5533,6 +5586,25 @@ def observation_report_dismiss(report_id):
     return _finish("observation_reports", "却下しました。")
 
 
+def _is_target_code(station, packed):
+    """現象コード(2コード同時はパック値)が、この地点の予測の対象の霧(fog_features.target_codes)を含むか。"""
+    tc = fog_features.target_codes(station)
+    return any(c is not None and c in tc for c in decode_phenom_value(packed))
+
+
+def _auto_report_changes_target(r, phenom_by_dt):
+    """自動検知の報告が、予測の対象かどうかの違うブレか(前の時刻と比べる)。調べられなければTrue(残す側)。"""
+    try:
+        import pandas as pd
+        prev = phenom_by_dt.at[pd.Timestamp(r["target_datetime"]) - pd.Timedelta(hours=1), r["station_name"]]
+        prev_c = encode_phenomena_cell(prev)
+        if prev_c != prev_c:
+            return True
+        return _is_target_code(r["station_name"], int(prev_c)) != _is_target_code(r["station_name"], int(r["reported_code"]))
+    except Exception:
+        return True
+
+
 STALE_AUTO_REPORT_DAYS = 3
 
 
@@ -5540,11 +5612,24 @@ def _stale_auto_reports(conn):
     """まとめて閉じられる報告(2026-10-13): 人ではなく自動で検知したもの(前後と1時間だけ違う判定・自前の判定との食い違い)で、
     STALE_AUTO_REPORT_DAYS日より前の時刻のもの(確認待ちの大半がこれで、日がたつと見直す価値が下がるため)。
     会津観測者/只見観測者は担当地域の分だけ。"""
+    # 2026-10-13: 3日より前のものに加え、予測の対象(霧かどうか)が変わらないブレ(新しい条件では積まないもの)も含める
     region = _observer_region_for_role(session.get("role"))
     cutoff = (now_jst_naive() - timedelta(days=STALE_AUTO_REPORT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-    return [r for r in users.list_pending_observation_reports(conn)
-            if r["source"] == "auto_detected" and r["target_datetime"] < cutoff
-            and (region is None or STATION_REGION.get(r["station_name"]) == region)]
+    pending = [r for r in users.list_pending_observation_reports(conn)
+               if r["source"] == "auto_detected" and (region is None or STATION_REGION.get(r["station_name"]) == region)]
+    phenom_by_dt = None
+    try:
+        _, phenom_df, _ = fog_data.load_river_fog_data()
+        phenom_by_dt = phenom_df.set_index("datetime")
+    except Exception as e:
+        log.warning("Phenomena data unavailable for stale report check: %s", e)
+    out = []
+    for r in pending:
+        own_judge_report = (r.get("reason") or "").startswith("自前の画像判定")
+        if r["target_datetime"] < cutoff or (phenom_by_dt is not None and not own_judge_report
+                                              and not _auto_report_changes_target(r, phenom_by_dt)):
+            out.append(r)
+    return out
 
 
 @app.route("/observation_reports/bulk_dismiss", methods=["POST"])
@@ -5557,11 +5642,11 @@ def observation_reports_bulk_dismiss():
         stale = _stale_auto_reports(conn)
         for r in stale:
             users.resolve_observation_report(conn, r["id"], "dismissed", my_id, now_str,
-                                             f"{STALE_AUTO_REPORT_DAYS}日より前の自動検知をまとめて閉じた")
+                                             f"見直す必要の低い自動検知({STALE_AUTO_REPORT_DAYS}日より前、または霧かどうかの変わらないブレ)をまとめて閉じた")
     finally:
         conn.close()
-    _record_audit("観測報告をまとめて閉じた", f"自動検知・{STALE_AUTO_REPORT_DAYS}日より前: {len(stale)}件")
-    return _finish("observation_reports", f"{len(stale)}件の古い自動検知を閉じました。")
+    _record_audit("観測報告をまとめて閉じた", f"見直す必要の低い自動検知: {len(stale)}件")
+    return _finish("observation_reports", f"{len(stale)}件の自動検知を閉じました。")
 
 
 # 地点ページの背景演出(_weather_scene.html / web_static/weather_scene.css)。Appleの「天気」アプリの

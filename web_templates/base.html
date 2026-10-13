@@ -91,9 +91,8 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 </nav>
 <nav class="app-tabbar" aria-label="主なページ">
     <a href="{{ url_for('dashboard') }}" class="{{ 'active' if _p == url_for('dashboard') }}"{{ ' aria-current="page"'|safe if _p == url_for('dashboard') }}>{{ icon("dashboard", size=22) }}<span>ホーム</span></a>
-    <a href="{{ url_for('stations_list') }}" class="{{ 'active' if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}"{{ ' aria-current="page"'|safe if _p.startswith('/stations') or _p.startswith('/compare') or _p.startswith('/map') }}>{{ icon("stations", size=22) }}<span>地点</span></a>
-    <a href="{{ url_for('flow_page', mode='fc') }}" class="{{ 'active' if _p.startswith('/flow') }}"{{ ' aria-current="page"'|safe if _p.startswith('/flow') }}>{{ icon("calendar", size=22) }}<span>見頃</span></a>
-    <a href="{{ url_for('gallery_page') }}" class="{{ 'active' if _p.startswith('/gallery') }}"{{ ' aria-current="page"'|safe if _p.startswith('/gallery') }}>{{ icon("sunrise", size=22) }}<span>今朝の川霧</span></a>
+    {% for tb in tabbar_items() %}<a href="{{ tb.url }}" class="{{ 'active' if tb.active }}"{{ ' aria-current="page"'|safe if tb.active }}>{{ icon(tb.icon, size=22) }}<span>{{ tb.label }}</span></a>
+    {% endfor %}
     <button type="button" id="app-sheet-open" aria-haspopup="dialog" aria-controls="app-sheet" aria-expanded="false">{{ icon("menu", size=22) }}<span>メニュー</span><span class="app-tab-dot" data-badge-dot {{ "" if _menu_badge else "hidden" }}></span></button>
 </nav>
 <div class="app-sheet" id="app-sheet" hidden>

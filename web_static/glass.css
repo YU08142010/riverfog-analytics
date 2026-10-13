@@ -967,77 +967,6 @@ button.date-nav-step:active:not(:disabled) { transform: scale(0.94); }
 button.date-nav-step:disabled { opacity: 0.35; cursor: default; }
 
 /* ==========================================================================
-   背景の絵(base.htmlの.bg-art、2026-10-07)。空の背景(_weather_scene.html)を持たない
-   ページ(観測アーカイブ・分析・地点一覧など)の、夜明けの川の谷: ゆっくり動く色の光、
-   流れのような線、重なる稜線、谷を漂う霧。動かすのはtransformとopacityだけ。
-   ========================================================================== */
-:root {
-    --bg-glow-1: rgba(110, 170, 255, 0.55);
-    --bg-glow-2: rgba(185, 150, 255, 0.42);
-    --bg-glow-3: rgba(100, 210, 200, 0.40);
-    --bg-line: rgba(50, 90, 170, 0.12);
-    --bg-ridge-far: rgba(120, 140, 210, 0.20);
-    --bg-ridge-mid: rgba(95, 118, 190, 0.24);
-    --bg-ridge-near: rgba(70, 92, 160, 0.28);
-    --bg-mist: rgba(255, 255, 255, 0.62);
-}
-:root[data-theme="dark"] {
-    --bg-glow-1: rgba(40, 95, 210, 0.50);
-    --bg-glow-2: rgba(125, 60, 210, 0.40);
-    --bg-glow-3: rgba(20, 140, 150, 0.36);
-    --bg-line: rgba(150, 180, 255, 0.10);
-    --bg-ridge-far: rgba(90, 110, 190, 0.16);
-    --bg-ridge-mid: rgba(20, 26, 50, 0.55);
-    --bg-ridge-near: rgba(8, 10, 20, 0.70);
-    --bg-mist: rgba(170, 195, 255, 0.13);
-}
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        --bg-glow-1: rgba(40, 95, 210, 0.50);
-        --bg-glow-2: rgba(125, 60, 210, 0.40);
-        --bg-glow-3: rgba(20, 140, 150, 0.36);
-        --bg-line: rgba(150, 180, 255, 0.10);
-        --bg-ridge-far: rgba(90, 110, 190, 0.16);
-        --bg-ridge-mid: rgba(20, 26, 50, 0.55);
-        --bg-ridge-near: rgba(8, 10, 20, 0.70);
-        --bg-mist: rgba(170, 195, 255, 0.13);
-    }
-}
-.bg-art { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
-.bg-glow {
-    position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%;
-    will-change: transform;
-}
-.bg-glow.g1 { left: -22vmax; top: -30vmax; background: radial-gradient(closest-side, var(--bg-glow-1), transparent); animation: bgDrift1 38s ease-in-out infinite alternate; }
-.bg-glow.g2 { right: -26vmax; top: -18vmax; background: radial-gradient(closest-side, var(--bg-glow-2), transparent); animation: bgDrift2 46s ease-in-out infinite alternate; }
-.bg-glow.g3 { left: 20vw; bottom: -40vmax; background: radial-gradient(closest-side, var(--bg-glow-3), transparent); animation: bgDrift3 52s ease-in-out infinite alternate; }
-@keyframes bgDrift1 { to { transform: translate(14vw, 10vh) scale(1.12); } }
-@keyframes bgDrift2 { to { transform: translate(-12vw, 14vh) scale(0.92); } }
-@keyframes bgDrift3 { to { transform: translate(-16vw, -8vh) scale(1.1); } }
-.bg-lines { position: absolute; inset: -4% -6%; width: 112%; height: 108%; animation: bgFlow 60s ease-in-out infinite alternate; }
-.bg-lines path { fill: none; stroke: var(--bg-line); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-@keyframes bgFlow { to { transform: translateX(-4%) translateY(1.5%); } }
-.bg-ridges { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; }
-.bg-ridges .far { fill: var(--bg-ridge-far); }
-.bg-ridges .mid { fill: var(--bg-ridge-mid); }
-.bg-ridges .near { fill: var(--bg-ridge-near); }
-.bg-mist {
-    position: absolute; left: -50%; width: 200%; height: 18vh; border-radius: 50%;
-    background: radial-gradient(50% 50% at 50% 50%, var(--bg-mist), transparent 70%);
-    will-change: transform;
-}
-.bg-mist.m1 { top: 52vh; opacity: 0.55; animation: bgMist 70s linear infinite; }
-.bg-mist.m2 { top: 66vh; height: 22vh; opacity: 0.8; animation: bgMist 95s linear infinite reverse; }
-.bg-mist.m3 { top: 78vh; height: 20vh; opacity: 0.65; animation: bgMist 120s linear infinite; animation-delay: -40s; }
-@keyframes bgMist { from { transform: translateX(-12%); } 50% { transform: translateX(12%); } to { transform: translateX(-12%); } }
-/* 空の背景のあるページ(地点・ダッシュボード)は、その空を優先する */
-.wx-scene ~ .bg-art { display: none; }
-@media (prefers-reduced-motion: reduce) {
-    .bg-glow, .bg-lines, .bg-mist { animation: none !important; }
-}
-@media print { .bg-art { display: none; } }
-
-/* ==========================================================================
    全画面のままページを移る枠と、「全画面に戻す」ボタン(web_static/fs_shell.js)
    ========================================================================== */
 .fs-shell-frame {
@@ -1133,7 +1062,7 @@ a.button.cancel, button.button.cancel { color: var(--color-text); }
 .chat-notify-btn { padding: 0.25rem 0.75rem !important; font-size: 0.78rem !important; white-space: nowrap; }
 
 /* ==========================================================================
-   2026-10-08 UI: ヘッダーの「その他」メニュー・テーマ切替のアイコン・グラフの拡大表示・地点ページの3日間の見込み
+   2026-10-08 UI: ヘッダーの並び・テーマ切替のアイコン・グラフの拡大表示・地点ページの3日間の見込み(「その他」メニューは2026-10-13に削除)
    ========================================================================== */
 @media (min-width: 901px) {
     /* 入りきらない項目は「その他」に移すので、横スクロール用の右端のぼかしは要らない。
@@ -1145,30 +1074,6 @@ a.button.cancel, button.button.cancel { color: var(--color-text); }
     header .spotlight-trigger { margin-left: auto; }
     header .theme-toggle { margin-left: 0; }  /* style.cssのmargin-left:autoで余白が2か所に分かれていた */
 }
-@media (max-width: 900px) { .nav-more { display: none !important; } }
-.nav-more { position: relative; flex: 0 0 auto; }
-.nav-more[hidden] { display: none; }
-.nav-more-btn {
-    display: inline-flex; align-items: center; gap: 0.2rem; background: none; border: 0; cursor: pointer;
-    font: inherit; font-size: 0.86rem; font-weight: 500; color: var(--color-text-muted);
-    padding: 0.4rem 0.6rem; border-radius: 999px;
-}
-.nav-more-btn:hover, .nav-more-btn[aria-expanded="true"] { background: var(--control-bg); color: var(--color-text); }
-.nav-more-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
-.nav-more-btn svg { transition: transform 0.2s ease; }
-.nav-more-menu {
-    position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; min-width: 12rem; padding: 0.35rem;
-    display: flex; flex-direction: column; gap: 0.1rem;
-    background: var(--color-surface); border: 0.5px solid var(--glass-hairline); border-radius: 14px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-}
-.nav-more-menu[hidden] { display: none; }
-.nav-more-menu a {
-    display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.75rem; border-radius: 10px;
-    color: var(--color-text); text-decoration: none; white-space: nowrap; font-size: 0.88rem;
-}
-.nav-more-menu a:hover, .nav-more-menu a:focus-visible { background: var(--control-bg); outline: none; }
-.nav-more-menu a .icon { margin-right: 0; }
 
 .theme-toggle-icon { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0 !important; border-radius: 999px; }
 .theme-toggle-icon .ti-sun { display: none; }
@@ -1938,8 +1843,6 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 .ls-on-sky #ls-g5 .ls-top { stop-color: rgba(10, 18, 30, 0.72); } .ls-on-sky #ls-g5 .ls-foot { stop-color: rgba(10, 18, 30, 0.55); }
 .ls-on-sky .ls-fog { opacity: 0.35; }
 .ls-on-sky .ls-fog ellipse { fill: #e8eef4; }
-/* 以前の背景(グラデーションの光と線)はもう使わない */
-.bg-art { display: none; }
 /* 暗い表示の背景の手直し(2026-10-13): 稜線が見えにくかったため、地平線に月明かりを足し、稜線を濃い影にする */
 :root[data-theme="dark"] {
         --ls-sky-top: #070c14; --ls-sky-mid: #101b2b; --ls-sky-low: #26394f; --ls-sun: rgba(214, 228, 245, 0.42);
@@ -2126,3 +2029,10 @@ header { background: var(--glass-bar) !important; }
 .nav-custom-move button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .nav-custom li:first-child .nav-up, .nav-custom li:last-child .nav-down { opacity: 0.35; }
 .nav-custom-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+/* 下のタブの選択(2026-10-13) */
+.tabbar-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+.tabbar-pick label { display: grid; gap: 0.25rem; font-size: 0.88rem; }
+
+/* 設定の「背景を動かさない」・スクロール中は、背景の絵(_landscape.html)の霧も止める(2026-10-13) */
+html.rf-calm-bg .ls-fog, html.rf-scrolling .ls-fog { animation-play-state: paused !important; }
+html.rf-calm-bg .ls-fog { animation: none !important; }
