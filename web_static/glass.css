@@ -1959,3 +1959,38 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
         --ls-r5: #070d16; --ls-r5-foot: #0b131e;
         --ls-fog: #c3d2e2; --ls-fog-op: 0.30; --ls-grain-op: 0.08;
 } }
+
+/* ==========================================================================
+   角の丸み(2026-10-13、iOSに寄せる): カードは大きく丸く、ボタン・タブ・切り替えはカプセル形、入力欄は12px。
+   天気の空のCSS(weather_scene.css)が後から読まれるので、:root を付けて確実に効かせる。
+   ========================================================================== */
+:root { --radius-sm: 12px; --radius-md: 18px; --radius-lg: 26px; }
+:root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root .wx-card { border-radius: 26px; }
+:root .modal-dialog, :root .notif-panel, :root .rfcal-pop, :root .spotlight-panel, :root .pf-notice-box { border-radius: 28px; }
+:root a.button, :root button.button, :root label.button, :root input[type="submit"], :root input[type="button"],
+:root .copy-btn, :root .sidebar-toggle, :root .chat-notify-btn { border-radius: 999px; }
+:root input[type="text"], :root input[type="email"], :root input[type="password"], :root input[type="search"], :root input[type="number"],
+:root input[type="date"], :root input[type="datetime-local"], :root input[type="time"], :root input[type="url"], :root input[type="file"],
+:root select, :root textarea, :root .search-box, :root .sidebar-search { border-radius: 12px; }
+:root .page-tabs { border-radius: 999px; padding: 3px; }
+:root .page-tabs a { border-radius: 999px; }
+:root .seg, :root .seg-btn { border-radius: 999px; }
+:root .station-chip { border-radius: 14px; }
+:root .stat-card, :root .weather-info-item, :root .nowcast-cell, :root .wx-hour, :root .wx-day-card { border-radius: 18px; }
+:root .table-scroll { border-radius: 18px; }
+:root .chart-wrap, :root .chart-wrap img, :root img.full-graph, :root .timelapse-img, :root .dash-gallery img, :root .gallery-item img,
+:root .compare-image img, :root .gold-grid img, :root .home-strip a, :root .flow-map { border-radius: 18px; }
+:root .home-map { border-radius: 20px; }
+:root .leaflet-popup-content-wrapper { border-radius: 18px !important; }
+:root .toast { border-radius: 20px; }
+:root .rfcal-day, :root .date-nav-step, :root .spotlight-item, :root .sidebar-list a, :root .nav-more-menu a { border-radius: 12px; }
+:root .app-nav-link { border-radius: 14px; }
+:root .app-sheet .app-nav-link { border-radius: 16px; }
+:root .app-sheet-panel { border-radius: 28px 28px 0 0; }
+:root .dm-bubble { border-radius: 20px; }
+:root .empty-state { border-radius: 18px; }
+:root .flash-success, :root .flash-error { border-radius: 20px; }
+/* ページ内タブ: 狭い画面では折り返さず、1列のまま横にスクロール(カプセルの形が崩れないように) */
+:root .page-tabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+:root .page-tabs::-webkit-scrollbar { display: none; }
+:root .page-tabs a { flex: 0 0 auto; white-space: nowrap; }
