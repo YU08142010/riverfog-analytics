@@ -64,7 +64,6 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 </head>
 <body>
 <a class="skip-link" href="#main-content">本文へ移動</a>
-<div class="offline-bar" id="offline-bar" role="status" hidden>ネットにつながっていません。最後に開いたときの内容を表示しています。</div>
 {% block body_background %}
 {% with on_sky = false %}{% include "_landscape.html" %}{% endwith %}
 {% endblock %}
@@ -392,18 +391,17 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         localStorage.setItem("rf-visited", JSON.stringify(list.slice(0, 12)));
     } catch (e) {}
 })();
-// 電波の弱い場所(2026-10-12): オフラインの帯と、ページを保存するService Worker(/offline-sw.js、ログイン中だけ)。
+// 電波の弱い場所でも見られるようにする仕組み(/offline-sw.js)は2026-10-14にやめた。前に入ったブラウザに残っている登録を解除し、
+// 保存したページ・画像を消す(通知用の /web_static/ の登録は残す)。
 (function() {
-    var bar = document.getElementById("offline-bar");
-    function sync() { if (bar) { bar.hidden = navigator.onLine; } }
-    window.addEventListener("online", sync); window.addEventListener("offline", sync); sync();
-    {% if session.get('user_id') %}
-    if ("serviceWorker" in navigator && window.isSecureContext) {
-        window.addEventListener("load", function() {
-            navigator.serviceWorker.register("{{ url_for('offline_service_worker') }}", {scope: "/"}).catch(function() {});
+    if (!("serviceWorker" in navigator)) { return; }
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+        regs.forEach(function(r) {
+            var url = (r.active || r.waiting || r.installing || {}).scriptURL || "";
+            if (url.indexOf("/offline-sw.js") >= 0) { r.unregister(); }
         });
-    }
-    {% endif %}
+    }).catch(function() {});
+    try { if (window.caches) { ["rf-pages-v1", "rf-images-v1", "rf-assets-v1", "rf-assets-v2"].forEach(function(k) { caches.delete(k); }); } } catch (e) {}
 })();
 // トップに戻るボタン(一定量スクロールしたら表示)。
 (function() {

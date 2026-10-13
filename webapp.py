@@ -748,7 +748,7 @@ MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # /forecastは一般向けの公開ページ(_build_public_forecast参照)。
 PUBLIC_PREFIX = "/forecast"
 LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX, "/api/backup-manifest",
-                         "/offline-sw.js")  # Service Workerの更新はログアウト中でも取れるように(中身はただのJS、2026-10-13)
+                         "/offline-sw.js")  # 2026-10-14: やめた仕組みを、ログアウト中のブラウザからも解除できるように(中身は自分を解除するだけのJS)
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
 # 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
@@ -12474,7 +12474,7 @@ def public_terms():
 
 @app.route("/offline-sw.js")
 def offline_service_worker():
-    """電波の弱い場所でも見られるようにするService Worker(web_static/offline_sw.js)。範囲を "/" にするため、
+    """2026-10-14にやめた「電波の弱い場所でも見られる」仕組みの、自分を解除して消える版(web_static/offline_sw.js)を配る。範囲を "/" にするため、
     /web_static/ ではなくサイトの直下から配信する(Service Workerは置いた場所より上の範囲を扱えない)。"""
     resp = send_from_directory(BASE_DIR / "web_static", "offline_sw.js", mimetype="application/javascript")
     resp.headers["Cache-Control"] = "no-cache"
