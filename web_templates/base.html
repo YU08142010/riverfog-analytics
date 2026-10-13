@@ -65,25 +65,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 <a class="skip-link" href="#main-content">本文へ移動</a>
 <div class="offline-bar" id="offline-bar" role="status" hidden>ネットにつながっていません。最後に開いたときの内容を表示しています。</div>
 {% block body_background %}
-{# 空の背景(_weather_scene.html)を持たないページの背景: 夜明けの川の谷(色の光・稜線・流れの線・漂う霧)。
-   飾りだけなので読み上げない。見た目はglass.cssの「背景の絵」の節。 #}
-<div class="bg-art" aria-hidden="true">
-    <span class="bg-glow g1"></span><span class="bg-glow g2"></span><span class="bg-glow g3"></span>
-    <svg class="bg-lines" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" focusable="false">
-        <path d="M-40 300 C 180 250, 380 340, 620 300 S 1040 230, 1260 290 S 1460 330, 1500 310"/>
-        <path d="M-40 345 C 200 300, 400 385, 640 345 S 1060 280, 1280 335 S 1470 370, 1500 355"/>
-        <path d="M-40 392 C 220 352, 420 430, 660 392 S 1080 330, 1300 382 S 1480 410, 1500 400"/>
-        <path d="M-40 440 C 240 404, 440 476, 680 440 S 1100 382, 1320 430 S 1490 452, 1500 446"/>
-        <path d="M-40 490 C 260 458, 460 524, 700 490 S 1120 436, 1340 480 S 1500 496, 1500 492"/>
-    </svg>
-    <span class="bg-mist m1"></span>
-    <svg class="bg-ridges" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" focusable="false">
-        <path class="far" d="M0 610 C 110 560, 210 600, 320 548 S 540 470, 690 528 S 930 604, 1070 522 S 1310 466, 1440 536 L1440 900 L0 900 Z"/>
-        <path class="mid" d="M0 680 C 150 628, 290 668, 420 626 S 690 572, 850 646 S 1130 700, 1250 632 S 1400 610, 1440 628 L1440 900 L0 900 Z"/>
-        <path class="near" d="M0 760 C 170 714, 330 752, 480 722 S 760 690, 930 744 S 1200 790, 1330 742 S 1420 726, 1440 732 L1440 900 L0 900 Z"/>
-    </svg>
-    <span class="bg-mist m2"></span><span class="bg-mist m3"></span>
-</div>
+{% with on_sky = false %}{% include "_landscape.html" %}{% endwith %}
 {% endblock %}
 {# --- メニュー(2026-10-12に作り直し): PCは左のサイドバー、狭い画面は下のタブバー+「メニュー」のシート --- #}
 {% from "_app_nav.html" import nav_groups %}

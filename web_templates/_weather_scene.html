@@ -17,5 +17,6 @@
     <div class="wx-fogbank wx-fogbank-1"></div>
     <div class="wx-rainfall"></div>
 </div>
+{% with on_sky = true %}{% include "_landscape.html" %}{% endwith %}
 <script src="{{ url_for('static', filename='weather_scene.js') }}?v={{ app_version|default('') }}" defer></script>
 {% endif %}

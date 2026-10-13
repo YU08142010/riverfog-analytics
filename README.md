@@ -308,8 +308,12 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   公開ページ: 最初に開いたときに規約の全文とチェックボックスの画面を出し(`public_base.html`、端末の `localStorage` の `rf-pub-terms-<版>`)、
   `/forecast/terms` でいつでも読める。**版を上げると、両方とも全員にもう一度同意を求める。** 使い捨てのテスト用アカウント(smoke_test.py など)は
   作ったあとに `users.record_terms_agreement` で同意済みにすること(しないと全ページが規約の画面に移る)。
-- **市民観測(写真投稿)は2026-10-13に削除**(利用者の判断)。citizen_photos.py・/photos・photos*.html・offline_queue.js を消した。
-  users.db の citizen_photos テーブルは空のまま残っている(使っていない)。地点ページのタブの「写真」は「動画」(タイムラプス)にした。
+- **市民観測(写真投稿)は2026-10-13に削除**(利用者の判断)。`citizen_photos.py`・`/photos`・`photos*.html`・`offline_queue.js` を消した。
+  users.db の `citizen_photos` テーブルは空のまま残っている(使っていない)。地点ページのタブの「写真」は「動画」(タイムラプス)にした。
+
+- **背景の絵(2026-10-13)** web_templates/_landscape.html: 夜明けの谷の5層の稜線(遠いほど淡い)と、そのあいだをゆっくり漂う川霧の帯、紙のような粒。
+  色は glass.css の --ls-*(明るい表示・暗い表示)。空の天気の演出(_weather_scene.html)のページには、手前の2層の稜線と霧だけを影として重ねる。
+  以前の .bg-art(グラデーションの光と線)は使っていない(CSSに display:none で残っている)。
 
 ## 試して採らなかった改良(2026-10-08、その6)
 

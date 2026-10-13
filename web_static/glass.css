@@ -1875,3 +1875,87 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 .terms-check input { width: 1.15rem; height: 1.15rem; }
 .terms-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .terms-actions .button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ==========================================================================
+   背景の絵(2026-10-13): 夜明けの谷の稜線と川霧(_landscape.html)。
+   明るい表示: 霧白の空、遠い山ほど淡い藍鼠、手前は藍、地平線にだけ朝焼けの色をうっすら。
+   暗い表示: 夜の谷(深い藍)に、月明かりの霧。
+   ========================================================================== */
+:root {
+    --ls-sky-top: #d9e3ea; --ls-sky-mid: #e9eef0; --ls-sky-low: #f1ebe2; --ls-sun: rgba(240, 214, 186, 0.75);
+    --ls-r1: #c5d0d8; --ls-r1-foot: #dfe6ea;
+    --ls-r2: #a9b8c4; --ls-r2-foot: #d2dbe1;
+    --ls-r3: #8a9cad; --ls-r3-foot: #bccad4;
+    --ls-r4: #5d7590; --ls-r4-foot: #9fb1c0;
+    --ls-r5: #3c5269; --ls-r5-foot: #6f8498;
+    --ls-fog: #f6f8f8; --ls-fog-op: 0.78; --ls-grain-op: 0.07;
+}
+:root[data-theme="dark"] {
+    --ls-sky-top: #0a111b; --ls-sky-mid: #111c2b; --ls-sky-low: #1a283a; --ls-sun: rgba(214, 228, 245, 0.55);
+    --ls-r1: #1f2e41; --ls-r1-foot: #263950;
+    --ls-r2: #1b293b; --ls-r2-foot: #23344a;
+    --ls-r3: #172435; --ls-r3-foot: #1f2f43;
+    --ls-r4: #121d2b; --ls-r4-foot: #192739;
+    --ls-r5: #0c1520; --ls-r5-foot: #111c2a;
+    --ls-fog: #b8c8da; --ls-fog-op: 0.20; --ls-grain-op: 0.09;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --ls-sky-top: #0a111b; --ls-sky-mid: #111c2b; --ls-sky-low: #1a283a; --ls-sun: rgba(214, 228, 245, 0.55);
+        --ls-r1: #1f2e41; --ls-r1-foot: #263950;
+        --ls-r2: #1b293b; --ls-r2-foot: #23344a;
+        --ls-r3: #172435; --ls-r3-foot: #1f2f43;
+        --ls-r4: #121d2b; --ls-r4-foot: #192739;
+        --ls-r5: #0c1520; --ls-r5-foot: #111c2a;
+        --ls-fog: #b8c8da; --ls-fog-op: 0.20; --ls-grain-op: 0.09;
+    }
+}
+.ls { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
+.ls-sky { position: absolute; inset: 0; background: linear-gradient(180deg, var(--ls-sky-top) 0%, var(--ls-sky-mid) 48%, var(--ls-sky-low) 66%, var(--ls-sky-mid) 100%); }
+.ls-sun { position: absolute; left: 68%; top: 46%; width: 34vmin; height: 34vmin; margin: -17vmin 0 0 -17vmin; border-radius: 50%;
+    background: radial-gradient(closest-side, var(--ls-sun), transparent 72%); }
+.ls-svg { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
+#ls-g1 .ls-top { stop-color: var(--ls-r1); } #ls-g1 .ls-foot { stop-color: var(--ls-r1-foot); }
+#ls-g2 .ls-top { stop-color: var(--ls-r2); } #ls-g2 .ls-foot { stop-color: var(--ls-r2-foot); }
+#ls-g3 .ls-top { stop-color: var(--ls-r3); } #ls-g3 .ls-foot { stop-color: var(--ls-r3-foot); }
+#ls-g4 .ls-top { stop-color: var(--ls-r4); } #ls-g4 .ls-foot { stop-color: var(--ls-r4-foot); }
+#ls-g5 .ls-top { stop-color: var(--ls-r5); } #ls-g5 .ls-foot { stop-color: var(--ls-r5-foot); }
+.ls-fog ellipse { fill: var(--ls-fog); }
+.ls-fog { opacity: var(--ls-fog-op); }
+.ls-fog-a { animation: lsDrift 84s ease-in-out infinite alternate; }
+.ls-fog-b { animation: lsDrift 70s ease-in-out -20s infinite alternate-reverse; }
+.ls-fog-c { animation: lsDrift 96s ease-in-out -40s infinite alternate; }
+.ls-fog-d { animation: lsDrift 110s ease-in-out -10s infinite alternate-reverse; }
+@keyframes lsDrift { from { transform: translateX(-60px); } to { transform: translateX(60px); } }
+.ls-grain { opacity: var(--ls-grain-op); mix-blend-mode: multiply; }
+:root[data-theme="dark"] .ls-grain { mix-blend-mode: screen; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ls-grain { mix-blend-mode: screen; } }
+@media (prefers-reduced-motion: reduce) { .ls-fog { animation: none !important; } }
+.rf-reduce-motion .ls-fog { animation: none !important; }
+/* 空の背景(天気の演出)のページ: 手前の稜線だけを、空の色になじむ影として重ねる */
+.ls-on-sky { z-index: -1; }  /* 天気の空(.wx-scene、z-index:-1)の後ろに置かれるので、同じ-1で空の上・本文の下に重なる */
+.ls-on-sky .ls-svg { height: 62%; }
+.ls-on-sky #ls-g4 .ls-top { stop-color: rgba(18, 30, 46, 0.55); } .ls-on-sky #ls-g4 .ls-foot { stop-color: rgba(18, 30, 46, 0.35); }
+.ls-on-sky #ls-g5 .ls-top { stop-color: rgba(10, 18, 30, 0.72); } .ls-on-sky #ls-g5 .ls-foot { stop-color: rgba(10, 18, 30, 0.55); }
+.ls-on-sky .ls-fog { opacity: 0.35; }
+.ls-on-sky .ls-fog ellipse { fill: #e8eef4; }
+/* 以前の背景(グラデーションの光と線)はもう使わない */
+.bg-art { display: none; }
+/* 暗い表示の背景の手直し(2026-10-13): 稜線が見えにくかったため、地平線に月明かりを足し、稜線を濃い影にする */
+:root[data-theme="dark"] {
+        --ls-sky-top: #070c14; --ls-sky-mid: #101b2b; --ls-sky-low: #26394f; --ls-sun: rgba(214, 228, 245, 0.42);
+        --ls-r1: #2b3f57; --ls-r1-foot: #34495f;
+        --ls-r2: #1f3046; --ls-r2-foot: #2a3d54;
+        --ls-r3: #162436; --ls-r3-foot: #1f3044;
+        --ls-r4: #0e1826; --ls-r4-foot: #152233;
+        --ls-r5: #070d16; --ls-r5-foot: #0b131e;
+        --ls-fog: #c3d2e2; --ls-fog-op: 0.30; --ls-grain-op: 0.08;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+        --ls-sky-top: #070c14; --ls-sky-mid: #101b2b; --ls-sky-low: #26394f; --ls-sun: rgba(214, 228, 245, 0.42);
+        --ls-r1: #2b3f57; --ls-r1-foot: #34495f;
+        --ls-r2: #1f3046; --ls-r2-foot: #2a3d54;
+        --ls-r3: #162436; --ls-r3-foot: #1f3044;
+        --ls-r4: #0e1826; --ls-r4-foot: #152233;
+        --ls-r5: #070d16; --ls-r5-foot: #0b131e;
+        --ls-fog: #c3d2e2; --ls-fog-op: 0.30; --ls-grain-op: 0.08;
+} }
