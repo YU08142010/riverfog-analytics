@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_tab_groups.html" import data_tabs %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
 {% block title %}研究用の書き出し{% endblock %}
 {% block content %}
+{{ data_tabs() }}
 <div class="card">
     <h2>研究用の書き出し</h2>
     <p class="muted">期間と地点を選んで、観測(カメラ画像の判定、人の訂正を反映)・地点の気象・予測の記録・かすみ度・カメラ画像を1つのZIPにまとめます。

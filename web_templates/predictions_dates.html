@@ -1,13 +1,9 @@
 {% extends "base.html" %}
 {% from "_date_month_groups.html" import date_month_groups %}
-{% from "_page_tabs.html" import page_tabs %}
+{% from "_tab_groups.html" import analysis_tabs, data_tabs %}
 {% block title %}予測結果{% endblock %}
 {% block content %}
-{{ page_tabs([
-    {"label": "観測データ", "url": url_for('observations_dates'), "active": request.path.startswith('/observations')},
-    {"label": "カメラ画像", "url": url_for('images_dates'), "active": request.path.startswith('/images')},
-    {"label": "予測結果", "url": url_for('predictions_dates'), "active": request.path.startswith('/predictions')},
-]) }}
+{{ data_tabs() }}
 <div class="card">
     <h2>予測結果(日付一覧)</h2>
     {{ date_month_groups(date_groups, endpoint, "予測結果がまだありません。", dates=dates, kind="predictions") }}

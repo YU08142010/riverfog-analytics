@@ -1,13 +1,8 @@
 {% extends "base.html" %}
-{% from "_page_tabs.html" import page_tabs %}
+{% from "_tab_groups.html" import analysis_tabs, data_tabs %}
 {% block title %}予測精度{% endblock %}
 {% block content %}
-{{ page_tabs([
-    {"label": "気象と川霧", "url": url_for('weather_fog_graph_page'), "active": request.path.startswith('/graphs')},
-    {"label": "ヒストグラム", "url": url_for('river_fog_histogram_page'), "active": request.path.startswith('/river-fog-histogram')},
-    {"label": "予測精度", "url": url_for('accuracy_page'), "active": request.path.startswith('/accuracy')},
-    {"label": "期間レポート", "url": url_for('period_report'), "active": request.path.startswith('/report')},
-]) }}
+{{ analysis_tabs() }}
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}

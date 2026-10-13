@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_tab_groups.html" import analysis_tabs %}
 {% block title %}月ごとのレポート{% endblock %}
 {% macro pct(v) %}{{ "-" if v is none else "%.0f%%"|format(100 * v) }}{% endmacro %}
 {% block content %}
+{{ analysis_tabs() }}
 <div class="card">
     <h2>月ごとのレポート</h2>
     <p class="muted">毎月1日の朝に、前の月の川霧の観測(カメラ画像のAI判定、人の訂正を反映)と、前日夜の予測の成績をPDFにまとめています。

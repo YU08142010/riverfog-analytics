@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_page_tabs.html" import page_tabs %}
+{% from "_tab_groups.html" import analysis_tabs, data_tabs %}
 {% block title %}期間レポート{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -8,12 +8,7 @@
 </ul>
 {% endblock %}
 {% block content %}
-{{ page_tabs([
-    {"label": "気象と川霧", "url": url_for('weather_fog_graph_page'), "active": request.path.startswith('/graphs')},
-    {"label": "ヒストグラム", "url": url_for('river_fog_histogram_page'), "active": request.path.startswith('/river-fog-histogram')},
-    {"label": "予測精度", "url": url_for('accuracy_page'), "active": request.path.startswith('/accuracy')},
-    {"label": "期間レポート", "url": url_for('period_report'), "active": request.path.startswith('/report')},
-]) }}
+{{ analysis_tabs() }}
 <div class="card">
     <h2>期間レポートの生成</h2>
     <p class="muted">

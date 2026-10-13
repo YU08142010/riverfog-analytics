@@ -1602,23 +1602,25 @@ def _app_nav_items(obs_pending=0, community_unread=0):
     obs_role = _can_manage_observation_reports(role)
     analysis = (p.startswith("/graphs") or p.startswith("/river-fog-histogram") or p.startswith("/accuracy")
                 or (p.startswith("/report") and not p.startswith("/reports")))
+    # 2026-10-13: 項目が増えすぎたため、同じページのタブで行き来できるものを1つにまとめた(19→12)。
+    #   地点 = 地点一覧・比較・地図・今朝の川霧・流れ図/見頃、分析 = 気象と川霧〜期間レポート・月ごとのレポート、
+    #   データ = 観測データ・カメラ画像・予測結果・書き出し、観測の確認 = 観測報告・正解セット。
+    #   更新履歴とログアウトはヘッダーにあるので、狭い画面の「メニュー」のシートにだけ出す。
+    stations_paths = ("/stations", "/compare", "/map", "/gallery", "/flow")
+    data_paths = ("/observations", "/images", "/predictions", "/export")
     items = [
         ("home", None, "ホーム", url_for("dashboard"), "dashboard", p == url_for("dashboard")),
-        ("stations", "観測", "地点一覧", url_for("stations_list"), "stations", p.startswith("/stations") or p.startswith("/compare")),
-        ("map", "観測", "地図", url_for("map_page"), "map", p.startswith("/map")),
-        ("gallery", "観測", "今朝の川霧", url_for("gallery_page"), "sunrise", p.startswith("/gallery")),
-        ("flow", "観測", "流れ図・見頃", url_for("flow_page"), "calendar", p.startswith("/flow")),
-        ("public", "予報・分析", "予報(公開ページ)", url_for("public_forecast"), "forecast", False),
-        ("simulator", "予報・分析", "シミュレーター", url_for("simulator_page"), "simulator", p.startswith(url_for("simulator_page"))),
-        ("analysis", "予報・分析", "分析", url_for("weather_fog_graph_page"), "accuracy", analysis),
-        ("reports", "予報・分析", "月ごとのレポート", url_for("reports_page"), "report", p.startswith("/reports")),
-        ("archive", "予報・分析", "観測アーカイブ", url_for("observations_dates"), "data",
-         p.startswith("/observations") or p.startswith("/images") or p.startswith("/predictions")),
-        ("export", "予報・分析", "研究用の書き出し", url_for("export_page"), "db", p.startswith("/export")),
+        ("stations", "観測", "地点", url_for("stations_list"), "stations", p.startswith(stations_paths)),
     ]
     if obs_role:
-        items += [("obsrep", "観測の確認", "観測報告", url_for("observation_reports"), "error", p.startswith("/observation_reports"), obs_pending),
-                  ("gold", "観測の確認", "正解セット", url_for("gold_page"), "star", p.startswith("/gold"))]
+        items.append(("review", "観測", "観測の確認", url_for("observation_reports"), "error",
+                      p.startswith("/observation_reports") or p.startswith("/gold"), obs_pending))
+    items += [
+        ("public", "予報・分析", "予報(公開ページ)", url_for("public_forecast"), "forecast", False),
+        ("simulator", "予報・分析", "シミュレーター", url_for("simulator_page"), "simulator", p.startswith(url_for("simulator_page"))),
+        ("analysis", "予報・分析", "分析", url_for("weather_fog_graph_page"), "accuracy", analysis or p.startswith("/reports")),
+        ("data", "予報・分析", "データ", url_for("observations_dates"), "data", p.startswith(data_paths)),
+    ]
     if logged_in:
         items += [("members", "コミュニティ", "メンバー・メッセージ", url_for("members_list"), "members",
                    p.startswith("/members") or p.startswith("/messages") or p.startswith("/files") or p.startswith("/group"),
@@ -1626,11 +1628,11 @@ def _app_nav_items(obs_pending=0, community_unread=0):
                   ("game", "コミュニティ", "ゲーム", url_for("game_home"), "game", p.startswith("/game")),
                   ("chat", "コミュニティ", "AIチャット", url_for("chat_page"), "chat", p.startswith(url_for("chat_page"))),
                   ("settings", "その他", "設定", url_for("settings_page"), "settings", p.startswith("/settings"))]
-    items.append(("changelog", "その他", "更新履歴", url_for("changelog_page"), "log", p.startswith(url_for("changelog_page"))))
-    if logged_in:
-        items.append(("logout", "その他", "ログアウト", url_for("logout"), "close", False, 0, None, True))
     if role == "admin" and not _is_funnel_request():
         items.append(("admin", "その他", "管理者", url_for("admin_home"), "admin", p.startswith("/admin")))
+    items.append(("changelog", "その他", "更新履歴", url_for("changelog_page"), "log", p.startswith(url_for("changelog_page")), 0, None, True))
+    if logged_in:
+        items.append(("logout", "その他", "ログアウト", url_for("logout"), "close", False, 0, None, True))
     out = []
     for it in items:
         it = tuple(it) + (0, None, False)[len(it) - 6:]

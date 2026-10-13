@@ -1,0 +1,20 @@
+{# ページ上部のタブのまとまり(2026-10-13、メニューの項目を減らしたときにまとめた)。
+   メニューの「分析」「データ」から入り、ここで同じまとまりのページを行き来する。 #}
+{% from "_page_tabs.html" import page_tabs %}
+{% macro analysis_tabs() -%}
+{{ page_tabs([
+    {"label": "気象と川霧", "url": url_for('weather_fog_graph_page'), "active": request.path.startswith('/graphs')},
+    {"label": "ヒストグラム", "url": url_for('river_fog_histogram_page'), "active": request.path.startswith('/river-fog-histogram')},
+    {"label": "予測精度", "url": url_for('accuracy_page'), "active": request.path.startswith('/accuracy')},
+    {"label": "期間レポート", "url": url_for('period_report'), "active": request.path.startswith('/report') and not request.path.startswith('/reports')},
+    {"label": "月ごとのレポート", "url": url_for('reports_page'), "active": request.path.startswith('/reports')},
+]) }}
+{%- endmacro %}
+{% macro data_tabs() -%}
+{{ page_tabs([
+    {"label": "観測データ", "url": url_for('observations_dates'), "active": request.path.startswith('/observations')},
+    {"label": "カメラ画像", "url": url_for('images_dates'), "active": request.path.startswith('/images')},
+    {"label": "予測結果", "url": url_for('predictions_dates'), "active": request.path.startswith('/predictions')},
+    {"label": "書き出し", "url": url_for('export_page'), "active": request.path.startswith('/export')},
+]) }}
+{%- endmacro %}
