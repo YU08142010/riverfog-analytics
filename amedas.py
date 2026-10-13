@@ -222,5 +222,9 @@ if __name__ == "__main__":
             log.info("Backfilled %d hourly row(s)", n)
         else:
             log.info("Collected %d hourly row(s)", collect_latest(conn))
+    except requests.RequestException as e:
+        # ネットや名前解決の一時的な失敗(Wi-Fiの切り替わりなど)。JSONは約9日分あるので次の毎時の実行で取り戻せる。
+        # cron.log にTracebackを残さず、1行の警告にする
+        log.warning("AMeDAS skipped this run (network error): %s", e)
     finally:
         conn.close()
