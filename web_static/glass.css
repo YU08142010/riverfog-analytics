@@ -2042,3 +2042,15 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .chat-example { border: none; border-radius: 999px; padding: 0.4rem 0.85rem; background: var(--control-bg); color: var(--color-text); font: inherit; font-size: 0.84rem; cursor: pointer; }
 .chat-example:hover { background: var(--color-primary-lighter); }
 .chat-example:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* 表示の不具合の修正(2026-10-14)
+   - 左のメニューで、名前の長い項目(メンバー・メッセージ)の未読の数がメニューの右端からはみ出して切れていた。
+     名前の方を縮めて(…で省略)、数は必ず見えるようにする。
+   - 幅860px以下では地点の一覧が本文の下に回るため、上の「地点の一覧を隠す」は押しても見た目が変わらず分かりにくかった。狭い画面では出さない。 */
+.app-nav-group { grid-template-columns: minmax(0, 1fr); }
+.app-nav-link .app-nav-label { flex: 1 1 auto; }
+.app-nav-link .app-nav-badge { flex: 0 0 auto; }
+@media (max-width: 860px) {
+    .sidebar-toggle, .layout:has(> .sidebar:not(:empty)) .sidebar-toggle { display: none; }
+    .rf-stlist-hidden .layout > .sidebar:not(:empty) { display: block !important; }
+}

@@ -335,7 +335,8 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         sync();
     }
     toggler(document.getElementById("app-side-toggle"), "rf-side-hidden", "rf-side-hidden", {aria: true, show: "メニューを開く", hide: "メニューを閉じる"});
-    toggler(document.getElementById("sidebar-toggle"), "rf-stlist-hidden", "rf-stlist-hidden", {show: "地点の一覧を出す", hide: "地点の一覧を隠す"});    var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
+    toggler(document.getElementById("sidebar-toggle"), "rf-stlist-hidden", "rf-stlist-hidden", {show: "地点の一覧を出す", hide: "地点の一覧を隠す"});
+    var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
     if (!sheet || !openBtn) { return; }
     var panel = sheet.querySelector(".app-sheet-panel");
     function setOpen(open) {
