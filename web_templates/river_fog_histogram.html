@@ -8,25 +8,43 @@
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点合算の川霧発生時の気象条件ヒストグラム" data-chart-url="{{ url_for('weather_fog_histogram_png') }}"></div></div>
 </div>
 
-{# 気象要素ごとの個別のヒストグラム(2026-10-14): 1項目ずつ画像で保存できるように。保存する画像は白い背景・大きめ(論文・資料用) #}
+{# 気象要素ごとの個別のヒストグラム(2026-10-14): 1項目ずつ画像(PNG)・数値(CSV)で保存できるように。
+   保存する画像は白い背景・大きめ(論文・資料用)。?compare=1 で「川霧なし」と並べた図にする。 #}
+{% set cmp = 1 if compare else None %}
+{% set kind = "川霧あり・なしの比較" if compare else "川霧発生時のヒストグラム" %}
 <div class="card">
     <h2 style="margin-top:0;">気象要素ごとのヒストグラム</h2>
-    <p class="muted" style="font-size:0.85rem;">「保存」で、その項目だけの図を画像(PNG)で保存できます。図を押すと大きく表示されます。</p>
-    <div class="hist-items">
+    <div class="hist-tools">
+        <div class="seg hist-mode" role="group" aria-label="図の種類">
+            <a class="seg-btn" href="{{ url_for('river_fog_histogram_page') }}#hist-items" {% if not compare %}aria-current="page"{% endif %}>川霧ありのみ</a>
+            <a class="seg-btn" href="{{ url_for('river_fog_histogram_page', compare=1) }}#hist-items" {% if compare %}aria-current="page"{% endif %}>川霧なしと比べる</a>
+        </div>
+        <span class="hist-dl">
+            <a class="button button-small" href="{{ url_for('weather_fog_histogram_csv') }}">全項目の数値(CSV)</a>
+            <a class="button button-small" href="{{ url_for('paper_figures_zip') }}" title="SHAP・信頼性・しきい値・ヒストグラムなど(作るのに数十秒かかります)">論文用の図をまとめて(ZIP)</a>
+        </span>
+    </div>
+    <p class="muted" style="font-size:0.85rem;">
+        「画像」でその項目だけの図(PNG)を、「CSV」で区分ごとの件数・割合(川霧あり・なし)を保存できます。図を押すと大きく表示されます。
+        {% if compare %}割合は「川霧あり」「川霧なし」それぞれの中での割合です(件数が大きく違うため)。灰色の棒より橙色の棒が高い区分ほど、霧が出やすい条件です。{% endif %}
+    </p>
+    <div class="hist-items" id="hist-items">
         {% for it in hist_items %}
-        {% set src = url_for('weather_fog_histogram_png', item=it.index) %}
-        <figure class="hist-item" data-download-name="川霧発生時のヒストグラム_{{ it.file }}.png">
+        {% set src = url_for('weather_fog_histogram_png', item=it.index, compare=cmp) %}
+        {% set fname = kind ~ "_" ~ it.file %}
+        <figure class="hist-item" data-download-name="{{ fname }}.png">
             <figcaption>
                 <span>{{ it.label }}</span>
-                <a class="button button-small" href="{{ src }}&format=png&theme=light&w=1000&scale=2&notitle=0"
-                   download="川霧発生時のヒストグラム_{{ it.file }}.png">保存</a>
+                <span class="hist-dl">
+                    <a class="button button-small" href="{{ src }}&format=png&theme=light&w=1000&scale=2&notitle=0" download="{{ fname }}.png">画像</a>
+                    <a class="button button-small button-secondary" href="{{ url_for('weather_fog_histogram_csv', item=it.index) }}">CSV</a>
+                </span>
             </figcaption>
-            <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="川霧発生時の{{ it.label }}のヒストグラム" data-chart-url="{{ src }}"></div></div>
+            <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ it.label }}の{{ kind }}" data-chart-url="{{ src }}"></div></div>
         </figure>
         {% endfor %}
     </div>
 </div>
-
 {% if correction_counts %}
 <div class="card">
     <h2>画像判定の訂正状況(地点別)</h2>

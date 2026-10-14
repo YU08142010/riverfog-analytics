@@ -25,6 +25,8 @@ DISK_WARN_PCT = 85
 GEMINI_QUOTA_WARN = 3          # 1日にこれ以上のクォータ超過があれば知らせる
 COLLECT_MIN_RUNS = 14          # 4〜19時の毎時 = 16回。これ未満なら収集が抜けている
 DNS_FAIL_WARN = 10             # 24時間で名前解決の失敗した「分」がこれ以上あれば知らせる(2026-10-13)
+WIFI_DROP_WARN = 30            # 24時間でWi-Fiがこれ以上切れたら知らせる(固定できているときは0〜数回、2026-10-14)
+WIFI_CONNECTION = "AGwlSt"
 log = logging.getLogger("health_report")
 
 
@@ -120,6 +122,23 @@ def check(now):
                       f"{'ほか' if len(hours) > 8 else ''}。Wi-Fi・ルーターの不調の可能性。処理はやり直しています)")
     else:
         ok.append(f"名前解決の失敗: {dns}分")
+
+    # Wi-Fiの切れた回数(2026-10-14): アクセスポイントの固定が外れたままだと、同じ名前の2台のあいだで5分おきに切り替わり、
+    # 1日約550回切れていた(Tailscale・名前解決・バックアップの不調の主な原因)。見張り(rf-wifi-watchdog)が固定し直すが、
+    # また多くなったら知らせる。sshuser は adm グループなので journalctl を読める。
+    try:
+        out = subprocess.run(["journalctl", "--since", since.strftime("%Y-%m-%d %H:%M:%S"), "--no-pager", "-q", "-o", "cat",
+                              "-g", "Lost carrier"], capture_output=True, text=True, timeout=60).stdout
+        drops = sum("Lost carrier" in ln for ln in out.splitlines())
+        locked = subprocess.run(["nmcli", "-g", "802-11-wireless.bssid", "connection", "show", WIFI_CONNECTION],
+                                capture_output=True, text=True, timeout=20).stdout.strip()
+        lock_note = "固定あり" if locked else "固定なし"
+        if drops >= WIFI_DROP_WARN:
+            issues.append(f"Wi-Fiが24時間で{drops}回切れました(アクセスポイントの{lock_note})。Tailscaleやバックアップが不安定になります")
+        else:
+            ok.append(f"Wi-Fiの切断: {drops}回(アクセスポイントの{lock_note})")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Wi-Fi check failed: %s", e)
 
     # サービス・タイマー
     for unit in ("river-fog-web.service", "river-fog-collect.timer"):

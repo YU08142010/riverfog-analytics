@@ -2058,4 +2058,11 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .hist-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 1rem; }
 .hist-item { margin: 0; min-width: 0; padding: 0.8rem; border-radius: 16px; background: var(--control-bg); }
 .hist-item figcaption { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; font-weight: 650; font-size: 0.92rem; }
-.hist-item .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; }
+.hist-item .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; }.hist-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.5rem; }
+.hist-mode .seg-btn { text-decoration: none; color: inherit; }
+.hist-mode .seg-btn[aria-current="page"] { background: var(--color-primary); color: #fff; font-weight: 600; }
+.hist-dl { display: inline-flex; gap: 0.35rem; flex: 0 0 auto; }
+.hist-item .button-small, .hist-tools .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; text-decoration: none; }.button-secondary { background: var(--control-bg); color: var(--color-text); box-shadow: none; }
+.button-secondary:hover { background: var(--color-primary-lighter); }
+.paper-figs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin: 0 0 0.8rem; font-size: 0.82rem; }
+.paper-figs .button-small { padding: 0.35rem 0.95rem; font-size: 0.82rem; border-radius: 999px; text-decoration: none; }

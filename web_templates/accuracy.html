@@ -3,6 +3,11 @@
 {% block title %}予測精度{% endblock %}
 {% block content %}
 {{ analysis_tabs() }}
+{# 論文用の図をまとめて保存(2026-10-14) #}
+<div class="paper-figs">
+    <a class="button button-small" href="{{ url_for('paper_figures_zip') }}">論文用の図をまとめて保存(ZIP)</a>
+    <span class="muted">SHAP・信頼性・しきい値・ヒストグラムなど約20枚を白い背景の画像で(作るのに数十秒かかります)</span>
+</div>
 <div class="card">
     <h2>的中率の推移(全地点)</h2>
     {% if summary and summary.overall.n %}

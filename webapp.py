@@ -2136,7 +2136,89 @@ def _bucket_by_edges(values, edges):
     return labels, pct
 
 
-def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names, item=None):
+def _collect_river_fog_histogram_values(main_df, phenom_df, station_names):
+    """全地点分の行を「川霧あり」「なし」に分け、気象項目ごとの値の一覧を返す: (あり{列: [値]}, なし{列: [値]})。
+    画像の判定が付いている行だけを使う(判定の無い夜間などは含めない)。"""
+    fog = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
+    nofog = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
+    if main_df is None or phenom_df is None or main_df.empty:
+        return fog, nofog
+    main_df = main_df.copy()
+    main_df[_COL_DEWPOINT_DEPRESSION] = main_df[COL_TEMP] - main_df[COL_DEWPOINT]
+    for station_name in station_names or []:
+        if station_name not in phenom_df.columns:
+            continue
+        merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
+        codes = merged[station_name].apply(encode_phenomena_cell).apply(primary_phenom_code)
+        merged = merged.loc[codes.notna()].copy()
+        is_fog = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
+        for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES:
+            fog[col].extend(merged.loc[is_fog, col].dropna().tolist())
+            nofog[col].extend(merged.loc[~is_fog, col].dropna().tolist())
+    return fog, nofog
+
+
+_river_fog_hist_cache = {"key": None, "values": None}
+_river_fog_hist_cache_lock = threading.Lock()
+
+
+def _river_fog_histogram_values():
+    """_collect_river_fog_histogram_values の結果を、気象DBが変わるまで使い回す(9項目×2種類の図とCSVで同じものを使うため)。"""
+    try:
+        key = WEATHER_DB_PATH.stat().st_mtime
+    except OSError:
+        key = None
+    with _river_fog_hist_cache_lock:
+        if _river_fog_hist_cache["key"] == key and _river_fog_hist_cache["values"] is not None:
+            return _river_fog_hist_cache["values"]
+    main_df = phenom_df = station_names = None
+    if key is not None:
+        try:
+            main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+        except Exception as e:
+            log.warning("Failed to load data for river-fog histogram: %s", e)
+    values = _collect_river_fog_histogram_values(main_df, phenom_df, station_names or STATION_NAMES)
+    with _river_fog_hist_cache_lock:
+        _river_fog_hist_cache.update(key=key, values=values)
+    return values
+
+
+def _river_fog_histogram_bins(step, *value_lists):
+    """値の一覧(1つ以上)を同じ区分で数える。戻り値: (区分のラベル, 区分の中央(数値の区分のみ、それ以外はNone),
+    値の一覧ごとの件数のリスト)。step が list なら不均等な境界(最初は「未満」、最後は「以上」)、数値なら固定幅で、
+    すべての一覧の最小〜最大を覆う。"""
+    if isinstance(step, list):
+        labels = [f"〜{step[0]}"] + [f"{step[i]}〜{step[i + 1]}" for i in range(len(step) - 1)] + [f"{step[-1]}〜"]
+        counts_list = []
+        for values in value_lists:
+            counts = [0] * (len(step) + 1)
+            for v in values:
+                counts[next((i for i, e in enumerate(step) if v < e), len(step))] += 1
+            counts_list.append(counts)
+        return labels, None, counts_list
+    all_values = [v for values in value_lists for v in values]
+    lo = (min(all_values) // step) * step
+    hi = (max(all_values) // step) * step + step
+    n_bins = max(1, int(round((hi - lo) / step)))
+    counts_list = []
+    for values in value_lists:
+        counts = [0] * n_bins
+        for v in values:
+            counts[min(int((v - lo) // step), n_bins - 1)] += 1
+        counts_list.append(counts)
+    centers = [round(lo + (i + 0.5) * step, 6) for i in range(n_bins)]
+    labels = [f"{_fmt_bin(lo + i * step)}〜{_fmt_bin(lo + (i + 1) * step)}" for i in range(n_bins)]
+    return labels, centers, counts_list
+
+
+def _fmt_bin(x):
+    return f"{x:.1f}".rstrip("0").rstrip(".") if abs(x - round(x)) > 1e-9 else str(int(round(x)))
+
+
+_WEATHER_FOG_NO_HIST_COLOR = "#8a94a6"
+
+
+def _render_river_fog_histogram_plotly(fog_values, nofog_values, item=None, compare=False):
     """気象条件(気温・湿度・風速・降水量・露点温度・湿数・日射量・日照時間・視程)ごとに、
     川霧が発生していた瞬間の値だけをヒストグラムにする。_render_weather_fog_boxplot_plotly
     とは違い地点ごとに分けず、全地点分の「川霧あり」行をまとめて1つの分布として扱う
@@ -2144,28 +2226,11 @@ def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names, item=N
     固定の刻み幅でビンを揃える(気温なら2℃刻み)。matplotlib版から移行(2026-09-14)。
     ax.hist(bins=edges, weights=...)と同じ「割合(%)のヒストグラム」を、go.Histogramの
     自動ビニングに任せず自前でカウントして再現する(ビン幅を項目ごとに固定するため)。
-    item(_RIVER_FOG_HISTOGRAM_FEATURES の番号)を渡すと、その項目だけの1枚の図にする(個別に保存するため、2026-10-14)。"""
-    values_by_col = {col: [] for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES}
-    has_data = main_df is not None and phenom_df is not None and not main_df.empty
-    if has_data:
-        main_df = main_df.copy()
-        main_df[_COL_DEWPOINT_DEPRESSION] = main_df[COL_TEMP] - main_df[COL_DEWPOINT]
-        for station_name in station_names or []:
-            if station_name not in phenom_df.columns:
-                continue
-            merged = main_df.merge(phenom_df[["datetime", station_name]], on="datetime", how="inner")
-            codes = merged[station_name].apply(encode_phenomena_cell).apply(primary_phenom_code)
-            merged = merged.loc[codes.notna()].copy()
-            merged["is_fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
-            fog_rows = merged.loc[merged["is_fog"]]
-            if fog_rows.empty:
-                continue
-            for col, _, _ in _RIVER_FOG_HISTOGRAM_FEATURES:
-                values_by_col[col].extend(fog_rows[col].dropna().tolist())
-        has_data = any(values_by_col.values())
-
+    item(_RIVER_FOG_HISTOGRAM_FEATURES の番号)を渡すと、その項目だけの1枚の図にする(個別に保存するため、2026-10-14)。
+    compare=True なら「川霧なし」の分布を灰色で並べる(どの値で霧が出やすいかを比べるため、2026-10-14)。
+    割合はそれぞれの中での割合(あり・なしで件数が大きく違うため)。"""
     title = "全地点合算：川霧発生時の気象条件ヒストグラム"
-    if not has_data:
+    if not any(fog_values.values()):
         fig = go.Figure()
         fig.update_layout(
             title={"text": title, "font": {"size": 14}},
@@ -2181,24 +2246,29 @@ def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names, item=N
     if item is not None:
         col_name, label, step = _RIVER_FOG_HISTOGRAM_FEATURES[item]
         fig = go.Figure()
-        _add_river_fog_histogram_trace(fig, values_by_col[col_name], step)
+        _add_river_fog_histogram_trace(fig, fog_values[col_name], nofog_values[col_name] if compare else None, step)
         fig.update_xaxes(title_text=label)
         fig.update_yaxes(title_text="割合(%)")
+        if compare:
+            text = (f"{label}: 川霧あり(n={len(fog_values[col_name])})となし(n={len(nofog_values[col_name])})の分布(全地点合算)")
+        else:
+            text = f"川霧発生時の{label}(全地点合算、n={len(fog_values[col_name])})"
         fig.update_layout(
-            title={"text": f"川霧発生時の{label}(全地点合算、n={len(values_by_col[col_name])})", "font": {"size": 14}},
-            showlegend=False,
+            title={"text": text, "font": {"size": 14}},
+            showlegend=compare, barmode="group", bargap=0.12,
+            legend={"orientation": "h", "x": 1, "xanchor": "right", "y": 1.02, "yanchor": "bottom"},
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            margin={"t": 60, "r": 20, "b": 50, "l": 55},
+            margin={"t": 70, "r": 20, "b": 50, "l": 55},
             height=380,
         )
         return _chart_json(fig)
 
-    subplot_titles = [f"{label}(n={len(values_by_col[col])})" for col, label, _ in _RIVER_FOG_HISTOGRAM_FEATURES]
+    subplot_titles = [f"{label}(n={len(fog_values[col])})" for col, label, _ in _RIVER_FOG_HISTOGRAM_FEATURES]
     fig = make_subplots(rows=3, cols=3, subplot_titles=subplot_titles,
                          vertical_spacing=0.12, horizontal_spacing=0.08)
     positions = [(r, c) for r in range(1, 4) for c in range(1, 4)]
     for (row, col), (col_name, label, step) in zip(positions, _RIVER_FOG_HISTOGRAM_FEATURES):
-        _add_river_fog_histogram_trace(fig, values_by_col[col_name], step, row=row, col=col)
+        _add_river_fog_histogram_trace(fig, fog_values[col_name], None, step, row=row, col=col)
         fig.update_yaxes(title_text="割合(%)", row=row, col=col)
     fig.update_layout(
         title={"text": title, "font": {"size": 14}},
@@ -2210,32 +2280,46 @@ def _render_river_fog_histogram_plotly(main_df, phenom_df, station_names, item=N
     return _chart_json(fig)
 
 
-def _add_river_fog_histogram_trace(fig, values, step, row=None, col=None):
-    """ヒストグラム1項目分の棒を fig に足す(row/col が無ければ1枚の図として)。step が list なら不均等な区分。"""
+def _add_river_fog_histogram_trace(fig, values, nofog_values, step, row=None, col=None):
+    """ヒストグラム1項目分の棒を fig に足す(row/col が無ければ1枚の図として)。nofog_values があれば「川霧なし」も並べる。"""
     if not values:
         return
     pos = {"row": row, "col": col} if row else {}
-    if isinstance(step, list):
-        bin_labels, pct = _bucket_by_edges(values, step)
-        fig.add_trace(go.Bar(
-            x=bin_labels, y=pct, marker_color=_WEATHER_FOG_YES_COLOR,
-            text=[f"{v:.1f}" for v in pct], textposition="outside",
-        ), **pos)
+    lists = [values] + ([nofog_values] if nofog_values else [])
+    labels, centers, counts_list = _river_fog_histogram_bins(step, *lists)
+    pcts = [[c * 100.0 / max(1, len(v)) for c in counts] for v, counts in zip(lists, counts_list)]
+    names = ["川霧あり", "川霧なし"]
+    colors = [_WEATHER_FOG_YES_COLOR, _WEATHER_FOG_NO_HIST_COLOR]
+    for i, pct in enumerate(pcts):
+        if centers is None:
+            fig.add_trace(go.Bar(
+                x=labels, y=pct, name=names[i], marker_color=colors[i],
+                text=[f"{v:.1f}" for v in pct] if len(pcts) == 1 else None, textposition="outside",
+            ), **pos)
+        else:
+            width = step * (0.92 if len(pcts) == 1 else 0.44)
+            offset = None if len(pcts) == 1 else (-0.46 + 0.46 * i) * step
+            fig.add_trace(go.Bar(
+                x=centers, y=pct, name=names[i], marker_color=colors[i], width=width, offset=offset,
+            ), **pos)
+    if centers is None:
         fig.update_xaxes(tickangle=-45, **pos)
-    else:
-        lo = (min(values) // step) * step
-        hi = (max(values) // step) * step + step
-        n_bins = int(round((hi - lo) / step))
-        counts = [0] * n_bins
-        for v in values:
-            idx = min(int((v - lo) // step), n_bins - 1)
-            counts[idx] += 1
-        pct = [c * 100.0 / len(values) for c in counts]
-        centers = [lo + (i + 0.5) * step for i in range(n_bins)]
-        fig.add_trace(go.Bar(
-            x=centers, y=pct, marker_color=_WEATHER_FOG_YES_COLOR, width=step * 0.92,
-        ), **pos)
 
+
+def _river_fog_histogram_csv(fog_values, nofog_values, items):
+    """ヒストグラムの数値(区分ごとの件数と割合、川霧あり・なし)をCSVの文字列にする(Excelで開けるようBOM付き)。"""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["項目", "区分", "川霧あり_件数", "川霧あり_割合(%)", "川霧なし_件数", "川霧なし_割合(%)"])
+    for i in items:
+        col_name, label, step = _RIVER_FOG_HISTOGRAM_FEATURES[i]
+        fog, nofog = fog_values[col_name], nofog_values[col_name]
+        if not fog and not nofog:
+            continue
+        labels, _, (cf, cn) = _river_fog_histogram_bins(step, fog, nofog)
+        for lab, a, b in zip(labels, cf, cn):
+            w.writerow([label, lab, a, round(a * 100.0 / max(1, len(fog)), 2), b, round(b * 100.0 / max(1, len(nofog)), 2)])
+    return "﻿" + out.getvalue()
 
 # 1日分の観測値推移グラフの項目(列名, 表示ラベル, 色, プロット種別)。
 # 以前は気温・視程を左軸、湿度・降水量を右軸(twinx)にまとめた2軸グラフだったが、
@@ -6060,37 +6144,98 @@ def weather_fog_graph_png():
 def river_fog_histogram_page():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラムの専用ページ。
     「気象と川霧」ページ(/graphs配下)とはナビの見た目上のアクティブ判定が
-    衝突しないよう、あえて/graphs以下ではないパスにしている。"""
+    衝突しないよう、あえて/graphs以下ではないパスにしている。
+    ?compare=1 で、気象要素ごとの図を「川霧あり・なし」の比較にする(2026-10-14)。"""
     conn = _users_conn()
     try:
         correction_counts = users.phenomena_correction_counts_by_station(conn)
     finally:
         conn.close()
+    compare = request.args.get("compare") == "1"
     hist_items = [{"index": i, "label": label, "file": re.sub(r"[(（].*", "", label)}
                   for i, (_, label, _) in enumerate(_RIVER_FOG_HISTOGRAM_FEATURES)]
-    return render_template("river_fog_histogram.html", correction_counts=correction_counts, hist_items=hist_items)
+    return render_template("river_fog_histogram.html", correction_counts=correction_counts, hist_items=hist_items,
+                           compare=compare)
 
 
 @app.route("/graphs/weather-fog-histogram.json")
 def weather_fog_histogram_png():
     """全地点合算・川霧発生時のみに絞った気象条件ヒストグラム(地点選択は無く常に全地点)。
-    ?item=<番号> で1項目だけの図(個別に保存する用、2026-10-14)。"""
+    ?item=<番号> で1項目だけの図(個別に保存する用)、&compare=1 で「川霧なし」と並べた図(2026-10-14)。"""
     item = request.args.get("item", type=int)
     if item is not None and not 0 <= item < len(_RIVER_FOG_HISTOGRAM_FEATURES):
         abort(404)
+    compare = item is not None and request.args.get("compare") == "1"
 
     def render():
-        main_df = phenom_df = station_names = None
-        if WEATHER_DB_PATH.exists():
-            try:
-                main_df, phenom_df, station_names = fog_data.load_river_fog_data()
-            except Exception as e:
-                log.warning("Failed to load data for river-fog histogram: %s", e)
-        return _render_river_fog_histogram_plotly(main_df, phenom_df, station_names or STATION_NAMES, item=item)
+        fog_values, nofog_values = _river_fog_histogram_values()
+        return _render_river_fog_histogram_plotly(fog_values, nofog_values, item=item, compare=compare)
 
-    data = _cached_chart_json("weather_fog_histogram" if item is None else f"weather_fog_histogram_{item}", [WEATHER_DB_PATH], render)
+    key = "weather_fog_histogram" if item is None else f"weather_fog_histogram_{item}{'_cmp' if compare else ''}"
+    data = _cached_chart_json(key, [WEATHER_DB_PATH], render)
     return Response(data, mimetype="application/json")
 
+
+@app.route("/graphs/weather-fog-histogram.csv")
+def weather_fog_histogram_csv():
+    """ヒストグラムの数値をCSVで(区分ごとの件数・割合、川霧あり・なし)。?item=<番号> でその項目だけ、無ければ全項目(2026-10-14)。"""
+    item = request.args.get("item", type=int)
+    if item is not None and not 0 <= item < len(_RIVER_FOG_HISTOGRAM_FEATURES):
+        abort(404)
+    items = [item] if item is not None else list(range(len(_RIVER_FOG_HISTOGRAM_FEATURES)))
+    fog_values, nofog_values = _river_fog_histogram_values()
+    name = ("川霧ヒストグラム_" + re.sub(r"[(（].*", "", _RIVER_FOG_HISTOGRAM_FEATURES[item][1])) if item is not None else "川霧ヒストグラム_全項目"
+    resp = Response(_river_fog_histogram_csv(fog_values, nofog_values, items), mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name + '.csv')}"
+    return resp
+
+
+# 論文・発表用の図をまとめてZIPで(2026-10-14)。(ファイル名, エンドポイント, 引数)。画面と同じグラフを白い背景・大きめの画像にする。
+_PAPER_FIGURES = [
+    ("01_特徴量の重要度_SHAP.png", "accuracy_feature_importance_chart", {}),
+    ("02_特徴量の重要度_グループ別.png", "accuracy_feature_group_importance_chart", {}),
+    ("03_モデルと気候値の比較.png", "accuracy_model_compare_chart", {}),
+    ("04_確率の信頼性.png", "accuracy_reliability_chart", {}),
+    ("05_しきい値ごとの成績.png", "accuracy_threshold_chart", {}),
+    ("06_混同行列_評価期間.png", "accuracy_training_confusion_matrix", {}),
+    ("07_学習時の指標.png", "accuracy_training_metrics_chart", {}),
+    ("08_的中率の推移.png", "accuracy_chart", {}),
+    ("09_予報の先までの日数ごとの成績.png", "accuracy_lead_time_chart", {}),
+    ("10_地域別の成績.png", "accuracy_region_chart", {}),
+    ("11_混同行列_運用.png", "accuracy_confusion_matrix", {}),
+    ("12_気象条件ヒストグラム_全項目.png", "weather_fog_histogram_png", {}),
+] + [
+    (f"{13 + i:02d}_川霧あり・なしの比較_{re.sub(r'[(（].*', '', label)}.png", "weather_fog_histogram_png", {"item": i, "compare": 1})
+    for i, (_, label, _) in enumerate(_RIVER_FOG_HISTOGRAM_FEATURES)
+]
+
+
+@app.route("/analysis/paper-figures.zip")
+def paper_figures_zip():
+    """_PAPER_FIGURES をそれぞれのグラフのJSONから画像(PNG、白い背景・幅1400px・2倍)にしてZIPで返す。
+    作れなかった図は飛ばして、ZIPの中の「作れなかった図.txt」に書く。ヒストグラムのCSVも入れる。"""
+    buf = io.BytesIO()
+    failed = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname, endpoint, kwargs in _PAPER_FIGURES:
+            try:
+                with app.test_request_context(url_for(endpoint, **kwargs)):
+                    resp = app.make_response(app.view_functions[endpoint]())
+                    fig = json.loads(resp.get_data(as_text=True))
+                png = mpl_render.render_cached(fig, theme="light", width=1400, scale=2, notitle=False)
+                zf.writestr(fname, png)
+            except Exception as e:  # noqa: BLE001
+                log.warning("paper figure %s failed: %s", fname, e)
+                failed.append(f"{fname}: {type(e).__name__}")
+        fog_values, nofog_values = _river_fog_histogram_values()
+        zf.writestr("気象条件ヒストグラム_全項目.csv",
+                    _river_fog_histogram_csv(fog_values, nofog_values, range(len(_RIVER_FOG_HISTOGRAM_FEATURES))).encode("utf-8"))
+        if failed:
+            zf.writestr("作れなかった図.txt", "\n".join(failed) + "\n")
+    name = f"川霧_論文用の図_{datetime.now(JST).strftime('%Y%m%d')}.zip"
+    resp = Response(buf.getvalue(), mimetype="application/zip")
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name)}"
+    return resp
 
 @app.route("/stations/<name>/comments", methods=["POST"])
 def station_comment_add(name):
