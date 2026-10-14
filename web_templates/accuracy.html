@@ -42,6 +42,36 @@
     {% endif %}
 </div>
 
+{% if recall_views %}
+{# 見逃しを減らす見方(2026-10-14): 本番の予報(しきい値)は変えず、同じ予測を別の基準で見たときの成績を並べる #}
+<div class="card">
+    <h2>見逃しを減らす見方</h2>
+    <p class="muted">予報そのものは変えずに、同じ予測を「どこから霧ありとみるか」を変えたときの成績です(本番の予測・答え合わせ済みの分)。
+        霧を見逃したくないとき(撮影・注意の呼びかけなど)は、地点ページ・公開ページの「中」以上を目安にしてください。</p>
+    <div class="table-scroll">
+    <table class="obs-table recall-views">
+        <thead><tr><th>見方</th><th>確率</th><th>見逃しの少なさ<br><small>(recall)</small></th><th>空振りの少なさ<br><small>(precision)</small></th><th>F1</th><th>当たり</th><th>見逃し</th><th>空振り</th></tr></thead>
+        <tbody>
+        {% for v in recall_views %}
+        <tr class="{{ 'is-current' if v.key == 'high' }}">
+            <td>{{ v.label }}</td>
+            <td>{{ "%.0f"|format(v.threshold * 100) }}%以上</td>
+            <td><b>{{ "%.1f"|format(v.recall * 100) }}%</b></td>
+            <td>{{ "%.1f"|format(v.precision * 100) }}%</td>
+            <td>{{ "%.3f"|format(v.f1) }}</td>
+            <td>{{ "{:,}".format(v.hit) }}</td>
+            <td>{{ "{:,}".format(v.miss) }}</td>
+            <td>{{ "{:,}".format(v.false_alarm) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="muted" style="font-size:0.8rem;">「見逃し重視(F2)」は、見逃しを空振りの2倍重く見る指標(F2)がこの期間で最も良くなる確率です。
+        同じ期間で選んでいるため成績は良く見えやすく、参考値です。</p>
+</div>
+{% endif %}
+
 {% if region_summary %}
 <div class="card">
     <h2>地域別の的中率・川霧F1</h2>

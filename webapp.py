@@ -6537,7 +6537,41 @@ def accuracy_page():
         model_rows=model_rows, global_metrics=fog_model.shared_global_metrics(model_state),
         model_type=any_info.get("model_type"), model_trained_at=any_info.get("trained_at"),
         fog_threshold=any_info.get("fog_threshold"),
+        recall_views=_recall_view_stats(any_info.get("fog_threshold")),
     )
+
+
+def _recall_view_stats(threshold):
+    """見逃しを減らす見方(2026-10-14、本番の予報は変えない「追加」の表示): 本番の予測(答え合わせ済み)を、
+    (1) 高だけを霧ありとみる(いまのしきい値)、(2) 中以上を霧ありとみる(しきい値×PUBLIC_MID_RATIO)、
+    (3) 見逃しを空振りより重く見るF2が最大になる確率(この期間で最も良かった値なので参考)、の3つで採点する。
+    戻り値: [{"key", "label", "threshold", "precision", "recall", "f1", "hit", "false_alarm", "miss"}, ...] / データが無ければ[]。"""
+    if threshold is None:
+        return []
+    buckets = _fog_prob_buckets_safe()
+    if not buckets:
+        return []
+    fog = [(b["prob"], b["n"], primary_phenom_code(b["actual_code"]) in SUMMARY_FOG_CODES) for b in buckets]
+    total_fog = sum(n for _, n, f in fog if f)
+    if not total_fog:
+        return []
+
+    def score(t):
+        hit = sum(n for p, n, f in fog if f and p >= t - 1e-9)
+        fa = sum(n for p, n, f in fog if not f and p >= t - 1e-9)
+        prec = hit / (hit + fa) if hit + fa else 0.0
+        rec = hit / total_fog
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        f2 = 5 * prec * rec / (4 * prec + rec) if prec + rec else 0.0
+        return {"threshold": round(t, 3), "precision": prec, "recall": rec, "f1": f1, "f2": f2,
+                "hit": hit, "false_alarm": fa, "miss": total_fog - hit}
+
+    best_f2 = max((score(float(t)) for t in fog_model.FOG_THRESHOLD_GRID), key=lambda s: (s["f2"], s["threshold"]))
+    return [
+        {"key": "high", "label": "「高」だけを霧ありとみる(いまの予報)", **score(float(threshold))},
+        {"key": "mid", "label": "「中」以上を霧ありとみる(見逃しを減らす)", **score(float(threshold) * PUBLIC_MID_RATIO)},
+        {"key": "f2", "label": "見逃し重視(F2)で最も良かった確率(参考)", **best_f2},
+    ]
 
 
 @app.route("/accuracy/chart.json")

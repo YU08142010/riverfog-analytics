@@ -2068,4 +2068,6 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .paper-figs .button-small { padding: 0.35rem 0.95rem; font-size: 0.82rem; border-radius: 999px; text-decoration: none; }/* 観測報告の下見(2026-10-14) */
 .oj-hint { margin: 0.35rem 0 0; font-size: 0.84rem; color: var(--color-text-muted); }
 .oj-hint.is-disagree { color: var(--color-danger); font-weight: 600; }
-.oj-summary { border-left: 4px solid var(--color-danger); }
+.oj-summary { border-left: 4px solid var(--color-danger); }/* 見逃しを減らす見方(2026-10-14) */
+.recall-views tr.is-current td { background: color-mix(in srgb, var(--color-primary) 8%, transparent); }
+.recall-views td:first-child { white-space: normal; min-width: 14rem; }
