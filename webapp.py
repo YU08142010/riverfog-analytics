@@ -590,6 +590,8 @@ _SECURITY_HEADERS_CSP = (
     "object-src 'none'; "
     "base-uri 'self'"
 )
+_PERMISSIONS_POLICY = ("camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), "
+                       "midi=(), magnetometer=(), gyroscope=(), accelerometer=(), browsing-topics=()")
 
 
 @app.after_request
@@ -598,6 +600,12 @@ def _apply_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Content-Security-Policy", _SECURITY_HEADERS_CSP)
+    # 2026-10-14: このサイトで使わない端末の機能(カメラ・マイク・位置など)は、万一埋め込まれたスクリプトからも使えないようにする。
+    # 別のサイトの窓から window.opener でこのページを操作されないようにする(COOP)。
+    # HSTSは付けない: 公開URLと同じホスト名で研究用サイト(:8443、自前の証明書)を開くことがあり、
+    # HSTSがあると証明書の警告を越えられず研究用サイトが開けなくなるため。
+    response.headers.setdefault("Permissions-Policy", _PERMISSIONS_POLICY)
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     if request.path == "/game/shop":
         # ショップ画面は所持ポイント・装着中アイテムをJSでその場更新するため、ブラウザの
         # bfcache(戻る/進むでの復元)やHTTPキャッシュに古いDOM/HTMLのまま残ると、
@@ -12598,4 +12606,5 @@ if __name__ == "__main__":
         trusted_proxy="127.0.0.1", trusted_proxy_count=1,
         trusted_proxy_headers={"x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"},
         clear_untrusted_proxy_headers=True,
+        ident="",  # 2026-10-14: 応答に「Server: waitress」を出さない(公開URLで使っているソフトを知らせない)
     )
