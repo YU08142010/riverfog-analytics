@@ -78,6 +78,9 @@
         img.style.width = big.narrow && big.width ? big.width + "px" : "";
         overlay.classList.toggle("is-narrow", big.narrow);
         save.href = big.src;
+        // 保存する名前: グラフの周りに data-download-name があればそれ(例: 気象要素ごとのヒストグラム)
+        var named = source.closest("[data-download-name]");
+        save.setAttribute("download", named ? named.getAttribute("data-download-name") : "graph.png");
         overlay.hidden = false;
         document.documentElement.classList.add("rf-zoom-open");
         closeBtn.focus();

@@ -2054,3 +2054,8 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
     .sidebar-toggle, .layout:has(> .sidebar:not(:empty)) .sidebar-toggle { display: none; }
     .rf-stlist-hidden .layout > .sidebar:not(:empty) { display: block !important; }
 }
+/* 気象要素ごとのヒストグラム(2026-10-14) */
+.hist-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 1rem; }
+.hist-item { margin: 0; min-width: 0; padding: 0.8rem; border-radius: 16px; background: var(--control-bg); }
+.hist-item figcaption { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; font-weight: 650; font-size: 0.92rem; }
+.hist-item .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; }

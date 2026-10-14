@@ -8,6 +8,25 @@
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点合算の川霧発生時の気象条件ヒストグラム" data-chart-url="{{ url_for('weather_fog_histogram_png') }}"></div></div>
 </div>
 
+{# 気象要素ごとの個別のヒストグラム(2026-10-14): 1項目ずつ画像で保存できるように。保存する画像は白い背景・大きめ(論文・資料用) #}
+<div class="card">
+    <h2 style="margin-top:0;">気象要素ごとのヒストグラム</h2>
+    <p class="muted" style="font-size:0.85rem;">「保存」で、その項目だけの図を画像(PNG)で保存できます。図を押すと大きく表示されます。</p>
+    <div class="hist-items">
+        {% for it in hist_items %}
+        {% set src = url_for('weather_fog_histogram_png', item=it.index) %}
+        <figure class="hist-item" data-download-name="川霧発生時のヒストグラム_{{ it.file }}.png">
+            <figcaption>
+                <span>{{ it.label }}</span>
+                <a class="button button-small" href="{{ src }}&format=png&theme=light&w=1000&scale=2&notitle=0"
+                   download="川霧発生時のヒストグラム_{{ it.file }}.png">保存</a>
+            </figcaption>
+            <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="川霧発生時の{{ it.label }}のヒストグラム" data-chart-url="{{ src }}"></div></div>
+        </figure>
+        {% endfor %}
+    </div>
+</div>
+
 {% if correction_counts %}
 <div class="card">
     <h2>画像判定の訂正状況(地点別)</h2>
