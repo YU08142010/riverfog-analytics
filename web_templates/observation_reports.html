@@ -35,6 +35,11 @@
     </form>
 </div>
 {% endif %}
+{% if own_judge_disagree_count %}
+<div class="card oj-summary">
+    <p style="margin:0;"><b>{{ own_judge_disagree_count }}件</b>は、自前の画像判定(Geminiとは別の判定)が今の判定と違う、と自信を持って判定したものです。ラベルの誤りの可能性が高いので、先頭に並べています。</p>
+</div>
+{% endif %}
 {% if reports %}
 {% for r in reports %}
 <div class="card observation-report-card" tabindex="-1">
@@ -51,6 +56,13 @@
                 現在の判定: {{ r.current_label }} /
                 報告者: {{ r.reporter_name }} ({{ r.reported_at }})
             </p>
+            {% if r.own_judge %}
+            {# 観測報告の下見(2026-10-14): 自前の画像判定(Geminiとは別)の結果。今のラベルと違えば、ラベルの誤りの可能性が高い #}
+            <p class="oj-hint {{ 'is-disagree' if r.own_judge.disagrees }}">
+                自前の画像判定: <b>{{ r.own_judge.label }}</b>({{ "%.0f"|format(r.own_judge.prob * 100) }}%)
+                {% if r.own_judge.disagrees %}— 今の判定と違います(訂正が必要な可能性が高い){% else %}— 今の判定と矛盾しません{% endif %}
+            </p>
+            {% endif %}
             {% if r.reason %}
             <p style="margin:0.4rem 0 0; font-size:0.85rem;">
                 <strong>報告者の理由:</strong> {{ r.reason }}

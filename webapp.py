@@ -5710,6 +5710,9 @@ def observation_reports():
             and r["prev_image"]["code"] != r["reported_code"]
         )
         r["looks_isolated"] = differs_from_both
+    _attach_own_judge(reports)
+    # 自前の判定が今のラベルと違う(=ラベルの誤りの可能性が高い)報告を先に。それ以外は元の並びのまま(sortは安定)
+    reports.sort(key=lambda r: 0 if (r.get("own_judge") or {}).get("disagrees") else 1)
     conn = _users_conn()
     try:
         stale_auto_count = len(_stale_auto_reports(conn))
@@ -5719,7 +5722,49 @@ def observation_reports():
         "observation_reports.html", reports=reports, phenom_labels=PHENOM_LABELS,
         stale_auto_count=stale_auto_count, stale_auto_days=STALE_AUTO_REPORT_DAYS,
         phenom_style=PHENOM_STYLE, importance_labels=IMPORTANCE_LABELS,
+        own_judge_disagree_count=sum(1 for r in reports if (r.get("own_judge") or {}).get("disagrees")),
     )
+
+
+OWN_JUDGE_CONFIDENT = 0.6  # 自前の判定がこの確率以上で今のラベルと違うときだけ「違う」とする(迷っている判定で並びを変えない)
+
+
+def _attach_own_judge(reports):
+    """観測報告の下見(2026-10-14): 各報告の対象時刻・地点の、自前の画像判定(own_judge.py、Geminiとは別の判定)を付ける。
+    r["own_judge"] = {"label", "prob", "disagrees"}。disagrees は、自前の判定が今のラベルと別のまとまり
+    (現象なし・川霧・全体霧・層雲・雨)を OWN_JUDGE_CONFIDENT 以上の確率で出しているとき。判定が無ければ付けない。"""
+    if not reports:
+        return
+    try:
+        import own_judge
+        if not own_judge.DB.exists():
+            return
+        c = own_judge.connect(ro=True)
+        try:
+            keys = {(r["target_datetime"], r["station_name"]) for r in reports}
+            rows = {}
+            dts = sorted({k[0] for k in keys})
+            for i in range(0, len(dts), 500):
+                chunk = dts[i:i + 500]
+                for dt, st, pred, probs in c.execute(
+                        f"SELECT datetime, station, pred, probs FROM judge WHERE datetime IN ({','.join('?' * len(chunk))})", chunk):
+                    if (dt, st) in keys:
+                        rows[(dt, st)] = (pred, json.loads(probs))
+        finally:
+            c.close()
+    except Exception as e:  # noqa: BLE001
+        log.warning("own_judge lookup for observation reports failed: %s", e)
+        return
+    for r in reports:
+        hit = rows.get((r["target_datetime"], r["station_name"]))
+        if not hit:
+            continue
+        pred, probs = hit
+        current = own_judge._group(r["reported_code"])
+        r["own_judge"] = {
+            "label": own_judge.GROUPS[pred], "prob": probs[pred],
+            "disagrees": current is not None and pred != current and probs[pred] >= OWN_JUDGE_CONFIDENT,
+        }
 
 
 @app.route("/observation_reports/<int:report_id>/resolve", methods=["POST"])
