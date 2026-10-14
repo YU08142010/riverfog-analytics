@@ -347,6 +347,11 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   いまは、固定が外れたまま30分続けて届いていれば、つながっているアクセスポイントに固定し直す(すぐまた外れたら待ちを倍に、最大12時間)。前の版は `.bak-20261014`。
   切り替わりの回数: `journalctl --since '24 hours ago' | grep -c 'wlp2s0b1: Lost carrier'`。
 - **アメダスの取得**: ネットの一時的な失敗ではTracebackを出さず、1行の警告にして次の毎時で取り戻す。
+- **ヒストグラムの保存(2026-10-14)**: `/graphs/weather-fog-histogram.json?item=<番号>`(`&compare=1` で川霧なしと並べる)で1項目の図、`/graphs/weather-fog-histogram.csv` で区分ごとの件数・割合。
+  値の集計は `_river_fog_histogram_values` が気象DBの更新まで使い回す。`/analysis/paper-figures.zip` は `_PAPER_FIGURES` の図を白い背景のPNGにしてまとめる(初回は約40秒)。
+- **観測報告の下見**: 各報告に自前の画像判定(own_judge)を付け、今の判定と違うもの(確率 `OWN_JUDGE_CONFIDENT`=0.6 以上)を先頭に並べる。
+- **Wi-Fiの切断の見張り**: health_report.py が24時間の「Lost carrier」を数え、`WIFI_DROP_WARN`(30回)以上で知らせる。
+- **ファイアウォール**: `m_ufw.sh`(利用者が実行、5分で自動的に戻る安全装置つき)で外からの接続をTailscale経由だけにする。確かめたら `m_ufw_ok.sh`。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 
