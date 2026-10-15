@@ -1,0 +1,139 @@
+/* テーマ「iOS」(2026-10-15、利用者の希望「もっとiOSみたいに」)。glass.css の後に読み、iOSの標準アプリ(天気・設定)の
+   見た目にそろえる。消せば以前の見た目に戻る(base.html・public_base.html・base_auth.html の <link> を外す)。
+   - 文字: Appleの端末ではシステムフォント(San Francisco・ヒラギノ)。それ以外は Inter + Zen Kaku Gothic。
+   - 色: iOSのシステムカラー(青 #007AFF、グループ背景 #F2F2F7、補足の文字はiOSの灰色)。ダークは黒地に #1C1C1E。
+   - 切り替え(セグメント・タブ): 灰色の溝に白いつまみ(選んだものを青で塗らない)。
+   - カード: 影なしの面と細い区切り線(iOSのグループ化したリスト)。見出しは17pxの太字。 */
+:root {
+    --ios-blue: #007aff;
+    --ios-label: #000000;
+    --ios-secondary: rgba(60, 60, 67, 0.62);
+    --ios-separator: rgba(60, 60, 67, 0.18);
+    --ios-fill: rgba(118, 118, 128, 0.12);
+    --ios-grouped: #f2f2f7;
+    --ios-card: #ffffff;
+    --ios-thumb: #ffffff;
+    --ios-thumb-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+               "Inter", "Zen Kaku Gothic New", "Segoe UI Variable Text", "Yu Gothic UI", "Noto Sans JP", sans-serif;
+
+    --color-primary: var(--ios-blue);
+    --color-primary-dark: #0062cc;
+    --color-primary-light: rgba(0, 122, 255, 0.10);
+    --color-primary-lighter: rgba(0, 122, 255, 0.16);
+    --color-text: var(--ios-label);
+    --color-text-muted: var(--ios-secondary);
+    --color-border: var(--ios-separator);
+    --button-bg: var(--ios-blue);
+    --button-bg-hover: #0062cc;
+    --focus-ring: 0 0 0 3.5px rgba(0, 122, 255, 0.35);
+    --control-bg: var(--ios-fill);
+    --control-active: var(--ios-thumb);
+    --glass-hairline: var(--ios-separator);
+    --glass-shadow: 0 0 0 0.5px var(--ios-separator);
+    --glass-shadow-hover: 0 0 0 0.5px rgba(60, 60, 67, 0.28);
+    --wallpaper: var(--ios-grouped);
+
+    /* 公開ページ */
+    --pf-text: var(--ios-label);
+    --pf-muted: rgba(60, 60, 67, 0.7);
+    --pf-border: rgba(60, 60, 67, 0.18);
+    --pf-primary: var(--ios-blue);
+    --pf-lv3: var(--ios-blue);
+    --pf-lv2: #8ec5ff;
+    --pf-lv2-text: #002a57;
+    --pf-lv1: #e5e5ea;
+    --pf-radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --ios-blue: #0a84ff;
+        --ios-label: #ffffff;
+        --ios-secondary: rgba(235, 235, 245, 0.62);
+        --ios-separator: rgba(84, 84, 88, 0.6);
+        --ios-fill: rgba(118, 118, 128, 0.24);
+        --ios-grouped: #000000;
+        --ios-card: #1c1c1e;
+        --ios-thumb: #636366;
+        --ios-thumb-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+        --color-primary-dark: #409cff;
+        --button-bg-hover: #409cff;
+        --focus-ring: 0 0 0 3.5px rgba(10, 132, 255, 0.45);
+        --glass-shadow-hover: 0 0 0 0.5px rgba(235, 235, 245, 0.3);
+        --pf-muted: rgba(235, 235, 245, 0.65);
+        --pf-border: rgba(84, 84, 88, 0.6);
+        --pf-lv2: #1f4f86;
+        --pf-lv2-text: #ffffff;
+        --pf-lv1: #2c2c2e;
+    }
+}
+:root[data-theme="dark"] {
+    --ios-blue: #0a84ff;
+    --ios-label: #ffffff;
+    --ios-secondary: rgba(235, 235, 245, 0.62);
+    --ios-separator: rgba(84, 84, 88, 0.6);
+    --ios-fill: rgba(118, 118, 128, 0.24);
+    --ios-grouped: #000000;
+    --ios-card: #1c1c1e;
+    --ios-thumb: #636366;
+    --ios-thumb-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+    --color-primary-dark: #409cff;
+    --button-bg-hover: #409cff;
+    --focus-ring: 0 0 0 3.5px rgba(10, 132, 255, 0.45);
+    --glass-shadow-hover: 0 0 0 0.5px rgba(235, 235, 245, 0.3);
+    --pf-muted: rgba(235, 235, 245, 0.65);
+    --pf-border: rgba(84, 84, 88, 0.6);
+    --pf-lv2: #1f4f86;
+    --pf-lv2-text: #ffffff;
+    --pf-lv1: #2c2c2e;
+}
+
+body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+
+/* 見出し: iOSの「ヘッドライン」(17px・太字)。公開ページの見出しの縦線は消す */
+:root .card > h2, :root .pf-card > h2 { font-size: 1.06rem; font-weight: 650; letter-spacing: -0.01em; }
+:root .pf-card > h2::before, :root .pf-card > h2::after { display: none; }
+:root .pf-card > h2 { padding-left: 0; border-left: 0; }
+
+/* 空の背景のないページ: iOSのグループ背景の上に、影なしの白い面 */
+:root body:not(:has(.wx-scene)) .card { background: var(--ios-card); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* 切り替え(セグメント・ページのタブ): 灰色の溝に白いつまみ。選んだものは青で塗らない */
+:root .seg, :root .page-tabs, :root .pf-seg { background: var(--ios-fill); border: 0; border-radius: 10px; padding: 2px; gap: 0; }
+:root .seg-btn, :root .page-tabs a, :root .pf-seg button { border-radius: 8px; color: var(--ios-label); font-weight: 500; }
+:root .seg-btn[aria-pressed="true"], :root .seg-btn[aria-current="page"], :root .page-tabs a.active, :root .pf-seg button[aria-pressed="true"] {
+    background: var(--ios-thumb); color: var(--ios-label); font-weight: 600; box-shadow: var(--ios-thumb-shadow);
+}
+:root[data-theme="dark"] .seg-btn[aria-pressed="true"] { color: var(--ios-label); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seg-btn[aria-pressed="true"] { color: var(--ios-label); } }
+
+/* ボタン: iOSの角丸の四角(12px)。補助のボタンは「色つきの薄い面+青い文字」(iOSのティント) */
+:root .button, :root button.button, :root label.button { border-radius: 12px; font-weight: 600; }
+:root .button-secondary, :root .button.cancel { background: var(--color-primary-light); color: var(--ios-blue); box-shadow: none; }
+
+/* 左のメニュー: 選んだ項目は薄い灰色の面に青い文字とアイコン(iPadの設定アプリ) */
+:root .app-nav-link.active { background: var(--ios-fill); color: var(--ios-blue); }
+:root .app-nav-link.active::before { display: none; }
+
+/* 上の数字(天気アプリ風): 気温・地点数は細い字 */
+:root .wx-hero-temp { font-weight: 200; }
+:root .wx-hero-name { font-weight: 500; }
+
+/* iOSの「大きなタイトル」: パンくずの最後(いまのページ)を大きな太字の題名に、その前は小さな青い戻り先に。
+   上部に大きな名前が出るページ(ホーム・地点 = .wx-hero)と、空の背景のページは、今の白い枠のまま */
+:root body:not(:has(.wx-scene)) .breadcrumb {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.1rem; padding: 0; margin: 0.2rem 0 0.9rem;
+    background: none; box-shadow: none; border-radius: 0; font-size: 0.92rem;
+}
+:root body:not(:has(.wx-scene)) .breadcrumb li:last-child {
+    flex: 0 0 100%; order: 2; margin-top: 0.15rem; font-size: clamp(1.6rem, 3.2vw, 2.05rem); font-weight: 700;
+    letter-spacing: -0.02em; line-height: 1.15; color: var(--ios-label);
+}
+:root body:not(:has(.wx-scene)) .breadcrumb li:last-child::before { display: none; content: none; }
+/* 設定画面のラジオ式の切り替え(.seg-radio)も、白いつまみの形に */
+:root .seg-radio label span { border-radius: 8px; color: var(--ios-label); font-weight: 500; }
+:root .seg-radio input:checked + span { background: var(--ios-thumb); color: var(--ios-label); font-weight: 600; box-shadow: var(--ios-thumb-shadow); }
+/* スイッチ(オン・オフ): iOSと同じく、オンは緑 */
+:root input[type="checkbox"][role="switch"]:checked, :root .set-toggle input[type="checkbox"]:checked { background: #34c759; border-color: #34c759; }
+:root[data-theme="dark"] input[type="checkbox"][role="switch"]:checked, :root[data-theme="dark"] .set-toggle input[type="checkbox"]:checked { background: #30d158; border-color: #30d158; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) input[type="checkbox"][role="switch"]:checked, :root:not([data-theme="light"]) .set-toggle input[type="checkbox"]:checked { background: #30d158; border-color: #30d158; } }

@@ -371,6 +371,9 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
 - **公開ページ「川霧が出やすい条件」(2026-10-15)**: 「予測と観測の照合」(直近7日の的中・空振り・見逃し)は1日ごとの外れが目立ち誤解を招くため削除
   (`_build_public_verification` ほか)。代わりに `_build_public_insights` で、これまでの観測(画像の判定のある時刻、全地点)から
   時刻ごと・湿度/風速/気温露点差の区分ごとの川霧の割合と、割合の高い地点5つを出す(`PUBLIC_INSIGHT_BINS`、200件未満の区分は出さない、6時間ごとに作り直す)。
+- **見た目のテーマ「iOS」(2026-10-15)**: `web_static/theme.css` を glass.css の後に読む(base.html・public_base.html・base_auth.html)。iOSのシステムカラー(青 #007AFF ほか)、
+  Apple端末ではシステムフォント、切り替え(.seg・.page-tabs・.seg-radio・.pf-seg)は灰色の溝に白いつまみ、スイッチのオンは緑、
+  空の背景のないページはパンくずの最後を大きなタイトルにする。`<link>` を外せば以前の見た目に戻る。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 
