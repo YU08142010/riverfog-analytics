@@ -1207,6 +1207,9 @@ def _get_forecast_with_retry(params, timeout, url=OPEN_METEO_FORECAST_URL):
         try:
             resp = request_with_dns_fallback("GET", url, params=params, timeout=timeout, log=log)
             resp.raise_for_status()
+            # 200でも中身が空・JSONでないこと(混雑時・通信が途中で切れたとき)があるため、読めることまで確かめてから返す
+            # (読めないときの requests.exceptions.JSONDecodeError は RequestException の仲間なので、ここでやり直しになる。2026-10-15)
+            resp.json()
             return resp
         except requests.exceptions.RequestException as e:
             last_exc = e

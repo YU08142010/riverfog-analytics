@@ -38,6 +38,7 @@ LOG_FILE = BASE_DIR / "logs" / "experiment.log"
 HIST_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 HIST_FORECAST_CACHE_HOURS = 20
 HIST_FORECAST_CHUNK_DAYS = 120
+HIST_FORECAST_TRIES = 5  # 過去予報の取得のやり直し回数(待ちは15秒・30秒・45秒・60秒)
 
 log = logging.getLogger("experiment_model")
 
@@ -207,19 +208,22 @@ def fetch_historical_forecast(lat, lon, start_date, end_date):
             "timezone": "Asia/Tokyo", "wind_speed_unit": "ms", "precipitation_unit": "mm",
             "temperature_unit": "celsius",
         }
-        resp = None
-        for attempt in range(1, 4):
+        # 2026-10-15: 応答が200でも中身が空・JSONでないこと(混雑時・通信が途中で切れたとき)があり、resp.json() で
+        # 止まっていた(10/14 22:45 の実行が「Expecting value」で失敗)。JSONとして読めて "hourly" があるまでをやり直しの対象にする。
+        hourly = None
+        for attempt in range(1, HIST_FORECAST_TRIES + 1):
             try:
                 resp = request_with_dns_fallback("GET", HIST_FORECAST_URL, params=params, timeout=90, log=log)
                 resp.raise_for_status()
+                hourly = resp.json()["hourly"]
                 break
             except Exception as e:  # noqa: BLE001
-                log.warning("historical forecast fetch failed (%s..%s, attempt %d/3): %s", cur, chunk_end, attempt, e)
-                resp = None
-                time.sleep(5 * attempt)
-        if resp is None:
+                log.warning("historical forecast fetch failed (%s..%s, attempt %d/%d): %s",
+                            cur, chunk_end, attempt, HIST_FORECAST_TRIES, e)
+                if attempt < HIST_FORECAST_TRIES:
+                    time.sleep(15 * attempt)
+        if hourly is None:
             raise RuntimeError(f"Open-Meteo過去予報を取得できませんでした({cur}〜{chunk_end})")
-        hourly = resp.json()["hourly"]
         # fog_model側の変換(列名・単位・短い欠測の補間)を再利用し、追加変数は別に取り込む。
         df = fm._forecast_payload_to_df({k: v for k, v in hourly.items() if k != "cloud_cover"
                                          and k not in ("cloud_cover_low", "surface_pressure")} | {"time": hourly["time"]})

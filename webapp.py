@@ -671,6 +671,7 @@ _SECURITY_HEADERS_CSP = (
     "object-src 'none'; "
     "base-uri 'self'"
 )
+NO_STORE_ENDPOINTS = {"login", "signup"}
 _PERMISSIONS_POLICY = ("camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), "
                        "midi=(), magnetometer=(), gyroscope=(), accelerometer=(), browsing-topics=()")
 
@@ -687,6 +688,9 @@ def _apply_security_headers(response):
     # HSTSがあると証明書の警告を越えられず研究用サイトが開けなくなるため。
     response.headers.setdefault("Permissions-Policy", _PERMISSIONS_POLICY)
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if request.endpoint in NO_STORE_ENDPOINTS:
+        # ログイン・登録の画面はブラウザに保存させない(戻る・タブの復元で古いCSRFトークンの画面が出ないように、2026-10-15)
+        response.headers["Cache-Control"] = "no-store"
     if request.path == "/game/shop":
         # ショップ画面は所持ポイント・装着中アイテムをJSでその場更新するため、ブラウザの
         # bfcache(戻る/進むでの復元)やHTTPキャッシュに古いDOM/HTMLのまま残ると、
@@ -998,6 +1002,18 @@ def _get_or_create_csrf_token():
         token = secrets.token_hex(16)
         session["csrf_token"] = token
     return token
+
+
+def _clear_session_keep_csrf():
+    """ログイン・ログアウトでセッションを作り直すとき、CSRFトークンだけは引き継ぐ(2026-10-15)。
+    以前は session.clear() でトークンも消えていたため、別のタブで開いていたログイン画面や、戻る・タブの復元で
+    出た前のログイン画面から送ると必ず「画面の情報が古くなっています」になり、ログインできないことがあった
+    (webapp.log の「CSRF token mismatch for POST /login」がほぼ毎日、数秒おきに続けて出ていた)。
+    トークンはこのブラウザのセッションの中にしか無いので、引き継いでも別サイトから使われることはない。"""
+    token = session.get("csrf_token")
+    session.clear()
+    if token:
+        session["csrf_token"] = token
 
 
 @app.context_processor
@@ -7310,7 +7326,7 @@ def login():
         finally:
             conn.close()
         if user:
-            session.clear()
+            _clear_session_keep_csrf()
             session["user_id"] = user["id"]
             session["role"] = user["role"]
             session["name"] = user["name"]
@@ -7373,7 +7389,7 @@ def logout():
             users.record_logout(conn, user_id, now_jst_naive().strftime("%Y-%m-%d %H:%M:%S"))
         finally:
             conn.close()
-    session.clear()
+    _clear_session_keep_csrf()
     return redirect(url_for("public_forecast"))
 
 
