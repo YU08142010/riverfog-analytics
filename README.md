@@ -356,6 +356,11 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   CSSは配信時に `_minify_css` で縮める(glass.css 142KB→105KB、gzipで20KB。どの経路でも)。静的ファイルの結果は ETag ごとにメモリに置く。
   カメラ画像の縮小版 `/images/<date>/<hhmm>/thumb/<file>`(幅400px・約23KB、`data/thumbs/` に作って使い回す)を一覧・比較・観測報告・ギャラリーの `<img>` に使う(押した先は原寸)。
   Ctrl+Kの検索は、開くときに `/api/spotlight-items` と spotlight.js を読む(以前は全ページに約50KB)。
+- **DNS(2026-10-15)**: 機関のDNS(10.42.0.1)は時々5〜10秒かかる・答えないことがあったため、`/etc/systemd/resolved.conf.d/rf-dns.conf`(`DNS=1.1.1.1 8.8.8.8`)で外部DNSを足した
+  (機関のDNSと並べて問い合わせ、先に返った答えを使う)。キャッシュを消して8つの接続先を80回ずつ解決した比較: 機関のDNSのみ 失敗2・1秒以上8回・平均約690ms・最大10秒 →
+  外部DNSを追加 失敗0・1秒以上1回・平均約105ms。測り方・戻し方は `/root/m_dns.sh`(measure / apply / revert)。
+  注意: 無線(wlp2s0b1)はNetworkManagerと systemd-networkd(`/run/systemd/network/zzzz-dracut-default.network`、dracutの既定)の両方が管理しており、
+  DNSはnetworkdがDHCPで受けたものが使われる(NetworkManagerのipv4.dnsは効かない)。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 
