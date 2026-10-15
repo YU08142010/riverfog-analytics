@@ -6972,7 +6972,7 @@ def _build_public_forecast():
     start = days[0].strftime("%Y-%m-%d 00:00:00")
     end = days[-1].strftime("%Y-%m-%d 23:59:59")
 
-    rows, run_at, verification = [], None, []
+    rows, run_at = [], None
     if DB_PATH.exists():
         conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
@@ -6987,10 +6987,7 @@ def _build_public_forecast():
                        WHERE run_at = ? AND target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1""",
                     (run_at, start, end),
                 ).fetchall()
-            try:
-                verification = _build_public_verification(conn, today)
-            except Exception as e:
-                log.warning("Public page: failed to build verification: %s", e)
+
         finally:
             conn.close()
 
@@ -7062,7 +7059,6 @@ def _build_public_forecast():
                   "date_label": f"{d.month}/{d.day}({weekdays[d.weekday()]})"} for i, d in enumerate(days)],
         "stations": stations,
         "run_at": run_at,
-        "verification": verification,
         "nowcast": nowcast_info,
         "stale": stale,
         "observed_at": observations["datetime"].strftime("%Y/%m/%d %H:%M") if observations else None,
@@ -7073,58 +7069,6 @@ def _build_public_forecast():
             "n_train": metrics.get("n_train"),
         },
     }
-
-
-PUBLIC_VERIFY_DAYS = 7             # 予測と観測の照合を出す直近の日数
-
-
-def _code_is_fog(code, station=None):
-    """実測の現象コード(2コード同時観測はパック値)が川霧かどうか。prediction_log._fog_sqlと同じ判定。"""
-    if code is None:
-        return None
-    code = int(code)
-    return (code // 100 if code > 10 else code) in fog_features.target_codes(station)
-
-
-def _build_public_verification(conn, today):
-    """直近の日ごとに、前日夜の本番の予測(その日0時より前で最新のrun)と、カメラ画像のAI判定(観測)を
-    照合する。「高」(=しきい値以上、predicted_code=1)を予測あり、川霧コードを観測ありとし、
-    地点×時刻ごとに 的中(hit)・空振り(fa)・見逃し(miss) を数える。照合できる行が無い日は出さない。"""
-    out = []
-    for back in range(PUBLIC_VERIFY_DAYS, 0, -1):
-        d = today - timedelta(days=back)
-        day_start = d.strftime("%Y-%m-%d 00:00:00")
-        run_at = conn.execute(
-            """SELECT MAX(run_at) FROM predictions WHERE model_type LIKE ? AND model_type NOT LIKE '%[再予測]'
-               AND run_at < ? AND target_datetime BETWEEN ? AND ?""",
-            (prediction_log.CURRENT_MODEL_LIKE, day_start, day_start, d.strftime("%Y-%m-%d 23:59:59")),
-        ).fetchone()[0]
-        if not run_at:
-            continue
-        rows = conn.execute(
-            """SELECT station, target_datetime, predicted_code, actual_code FROM predictions
-               WHERE run_at = ? AND target_datetime BETWEEN ? AND ? AND COALESCE(daylight, 1) = 1
-               AND actual_code IS NOT NULL""",
-            (run_at, day_start, d.strftime("%Y-%m-%d 23:59:59")),
-        ).fetchall()
-        if not rows:
-            continue
-        counts = {"hit": 0, "fa": 0, "miss": 0, "cn": 0}
-        cells = {}
-        for station, target_dt, pred, actual in rows:
-            p_fog, a_fog = int(pred or 0) == 1, _code_is_fog(actual, station)
-            kind = "hit" if p_fog and a_fog else "fa" if p_fog else "miss" if a_fog else "cn"
-            counts[kind] += 1
-            if kind != "cn":
-                cells.setdefault(station, {})[int(target_dt[11:13])] = kind
-        stations = [{"name": n, "region": STATION_REGION.get(n) or "その他", "hours": cells[n]}
-                    for n in STATION_NAMES if n in cells]
-        weekdays = "月火水木金土日"
-        out.append({
-            "date": d.strftime("%Y-%m-%d"), "date_label": f"{d.month}/{d.day}({weekdays[d.weekday()]})",
-            "run_at": run_at[:16], "n": len(rows), "counts": counts, "stations": stations,
-        })
-    return out
 
 
 def _public_forecast_safe():
@@ -7275,10 +7219,92 @@ def _public_noindex(response):
     return response
 
 
+# 公開ページ「川霧が出やすい条件」(2026-10-15): 以前の「予測と観測の照合」(1日ごとの的中・空振り・見逃し)は、
+# 件数の少ない日の外れが目立ち誤解を招きやすいため取りやめ、これまでの観測から分かる「出やすい時間帯・条件・地点」を出す。
+# 割合 = その区分の、画像の判定がある時刻のうち川霧だった割合(全地点合算。夜間は判定が無いので含まれない)。
+PUBLIC_INSIGHT_BINS = [
+    (COL_HUMIDITY, "湿度", [(None, 80, "80%未満"), (80, 90, "80〜90%"), (90, 95, "90〜95%"), (95, None, "95%以上")]),
+    (COL_WIND_SPEED, "風の強さ", [(2, None, "2m/s以上"), (1, 2, "1〜2m/s"), (0.5, 1, "0.5〜1m/s"), (None, 0.5, "0.5m/s未満")]),
+    ("__depression", "気温と露点の差(小さいほど空気が湿っている)", [(4, None, "4℃以上"), (2, 4, "2〜4℃"), (1, 2, "1〜2℃"), (None, 1, "1℃未満")]),
+]
+PUBLIC_INSIGHT_MIN_N = 200       # 地点の上位・区分の割合は、判定がこの件数以上あるものだけ出す
+PUBLIC_INSIGHT_TTL = 6 * 3600
+_public_insights_cache = {"key": None, "at": 0.0, "data": None}
+_public_insights_lock = threading.Lock()
+
+
+def _build_public_insights():
+    import pandas as pd
+    main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+    df = main_df.copy()
+    df["__depression"] = df[COL_TEMP] - df[COL_DEWPOINT]
+    rows = []
+    for st in station_names or []:
+        if st not in phenom_df.columns:
+            continue
+        m = df.merge(phenom_df[["datetime", st]], on="datetime", how="inner")
+        codes = m[st].apply(encode_phenomena_cell).apply(primary_phenom_code)
+        m = m.loc[codes.notna()].copy()
+        m["__fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
+        m["__station"] = st
+        rows.append(m[["datetime", "__fog", "__station", COL_HUMIDITY, COL_WIND_SPEED, "__depression"]])
+    if not rows:
+        return None
+    d = pd.concat(rows, ignore_index=True)
+    n, fog = len(d), int(d["__fog"].sum())
+    if not n or not fog:
+        return None
+    overall = fog / n
+    hours = []
+    for h, g in d.groupby(d["datetime"].dt.hour):
+        if len(g) >= PUBLIC_INSIGHT_MIN_N:
+            hours.append({"hour": int(h), "rate": float(g["__fog"].mean())})
+    conditions = []
+    for col, title, bins in PUBLIC_INSIGHT_BINS:
+        items = []
+        for lo, hi, label in bins:
+            mask = d[col].notna()
+            if lo is not None:
+                mask &= d[col] >= lo
+            if hi is not None:
+                mask &= d[col] < hi
+            g = d.loc[mask, "__fog"]
+            if len(g) >= PUBLIC_INSIGHT_MIN_N:
+                items.append({"label": label, "rate": float(g.mean())})
+        if items:
+            conditions.append({"title": title, "items": items})
+    st_rates = d.groupby("__station")["__fog"].agg(["mean", "size"])
+    st_rates = st_rates[st_rates["size"] >= PUBLIC_INSIGHT_MIN_N].sort_values("mean", ascending=False).head(5)
+    stations = [{"name": s, "rate": float(r["mean"]), "region": STATION_REGION.get(s) or ""} for s, r in st_rates.iterrows()]
+    return {"overall": overall, "hours": hours, "conditions": conditions, "stations": stations,
+            "since": d["datetime"].min().strftime("%Y年%-m月"), "n": n}
+
+
+def _public_insights_safe():
+    """_build_public_insights を気象DBの更新(と6時間)ごとに作り直して使い回す。失敗したらNone(ページはその項目を出さない)。"""
+    try:
+        key = WEATHER_DB_PATH.stat().st_mtime
+    except OSError:
+        return None
+    now = time.monotonic()
+    with _public_insights_lock:
+        c = _public_insights_cache
+        if c["data"] is not None and (c["key"] == key or now - c["at"] < PUBLIC_INSIGHT_TTL):
+            return c["data"]
+    try:
+        data = _build_public_insights()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Public page: failed to build fog insights: %s", e)
+        return _public_insights_cache["data"]
+    with _public_insights_lock:
+        _public_insights_cache.update(key=key, at=now, data=data)
+    return data
+
+
 @app.route("/forecast")
 def public_forecast():
     data = _public_forecast_safe()
-    return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS)
+    return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS, insights=_public_insights_safe())
 
 
 @app.route("/forecast/about")

@@ -166,28 +166,20 @@
 .pf-popup-actions { display: flex; gap: 0.7rem; margin-top: 0.35rem; align-items: center; }
 .pf-popup-actions button { font: inherit; font-size: 0.85em; border: 0; background: none; padding: 0; color: #0078a8; cursor: pointer; text-decoration: underline; }
 
-/* 予測と観測の照合 */
-.pf-verify-days { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.8rem; }
-.pf-verify-days button {
-    font: inherit; font-size: 0.82rem; border: 1px solid var(--pf-border); background: var(--pf-surface); color: var(--pf-text);
-    border-radius: 8px; padding: 0.3rem 0.7rem; cursor: pointer; text-align: left; line-height: 1.3;
-}
-.pf-verify-days button small { display: block; color: var(--pf-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
-.pf-verify-days button[aria-pressed="true"] { border-color: var(--pf-primary); box-shadow: inset 0 0 0 1px var(--pf-primary); }
-.pf-verify-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.9rem; }
-.pf-verify-stats div { border: 1px solid var(--pf-border); border-radius: 8px; padding: 0.45rem 0.7rem; border-top: 3px solid var(--pf-border); }
-.pf-verify-stats div:nth-child(1) { border-top-color: var(--pf-lv3); }
-.pf-verify-stats div:nth-child(2) { border-top-color: color-mix(in srgb, var(--pf-lv3) 45%, transparent); }
-.pf-verify-stats div:nth-child(3) { border-top-color: #c98a2b; }
-.pf-verify-stats b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
-.pf-verify-stats span { font-size: 0.78rem; color: var(--pf-muted); }
-.pf-vk { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; vertical-align: -0.25rem; margin-right: 0.3rem; }
-.pf-v-hit { background: var(--pf-lv3); color: var(--pf-lv3-text); }
-.pf-v-fa { background: transparent; color: var(--pf-vfa, var(--pf-lv3)); box-shadow: inset 0 0 0 2px var(--pf-lv3); }
-.pf-v-miss { background: repeating-linear-gradient(135deg, #c98a2b 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 2px #c98a2b; color: transparent; }
-.pf-table td.pf-v-hit, .pf-table td.pf-v-fa, .pf-table td.pf-v-miss { font-weight: 700; }
-.pf-verify-note { font-size: 0.82rem; color: var(--pf-muted); margin: 0.6rem 0 0; }
-
+/* 川霧が出やすい条件(2026-10-15、以前の「予測と観測の照合」の代わり) */
+.pf-insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem 1.4rem; margin-top: 0.6rem; }
+.pf-insight h3 { font-size: 0.95rem; margin: 0 0 0.45rem; }
+.pf-insight ol, .pf-insight ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.pf-bar-row { display: grid; grid-template-columns: 6.6rem 1fr 3.4rem; align-items: center; gap: 0.5rem; font-size: 0.84rem; }
+.pf-bar-row > span:first-child { color: var(--pf-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-bar { height: 0.7rem; border-radius: 999px; background: color-mix(in srgb, var(--pf-border) 60%, transparent); overflow: hidden; }
+.pf-bar i { display: block; height: 100%; border-radius: inherit; background: var(--pf-lv3); }
+.pf-bar-row b { font-variant-numeric: tabular-nums; text-align: right; font-size: 0.82rem; }
+.pf-hours { display: grid; gap: 0.15rem; align-items: end; height: 6.5rem; margin-top: 0.3rem; }
+.pf-hours div { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 0.2rem; }
+.pf-hours i { display: block; width: 70%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--pf-lv3); }
+.pf-hours small { font-size: 0.68rem; color: var(--pf-muted); font-variant-numeric: tabular-nums; }
+.pf-insight-note { font-size: 0.8rem; color: var(--pf-muted); margin: 0.8rem 0 0; }
 /* --- 仕上げ(2026-10-06) --- */
 /* 見出し: 説明文は1行の長さを抑える */
 .pf-hero { text-align: center; }
@@ -340,25 +332,51 @@
     </div>
 </div>
 
-{% if data.verification %}
-<div class="pf-card" id="pf-verify">
-    <h2>予測と観測の照合</h2>
-    <p class="pf-muted" style="margin-top:0;">前日夜に計算した予測(発生可能性「高」)と、当日のカメラ画像のAI判定(観測)を地点・時刻ごとに照合した結果である。照合は毎日の予測計算時に更新される。</p>
-    <div class="pf-verify-days" id="pf-verify-days" role="group" aria-label="照合する日"></div>
-    <p class="pf-answer" id="pf-verify-answer" style="font-size:1rem; margin-bottom:0.4rem;"></p>
-    <div class="pf-verify-stats" id="pf-verify-stats"></div>
-    <div class="pf-legend" style="margin:0 0 0.6rem;">
-        <span><i class="pf-vk pf-v-hit" style="width:1.25rem;height:1.25rem;border:0;">○</i>的中(「高」と予測し、発生)</span>
-        <span><i class="pf-vk pf-v-fa" style="width:1.25rem;height:1.25rem;border:0;">×</i>空振り(「高」と予測し、非発生)</span>
-        <span><i class="pf-vk pf-v-miss" style="width:1.25rem;height:1.25rem;border:0;"></i>見逃し(「高」と予測せず、発生)</span>
+{% if insights %}
+{# 川霧が出やすい条件(2026-10-15): これまでの観測(カメラ画像の判定)から集計した、出やすい時間帯・気象条件・地点 #}
+{% set top = [insights.hours|map(attribute='rate')|max, 0.0001]|max %}
+<div class="pf-card" id="pf-insights">
+    <h2>川霧が出やすい条件</h2>
+    <p class="pf-muted" style="margin-top:0;">{{ insights.since }}からの観測(カメラ画像の判定、のべ{{ "{:,}".format(insights.n) }}件)で、川霧が出ていた割合。全体の平均は<b>{{ "%.1f"|format(insights.overall * 100) }}%</b>。</p>
+    <div class="pf-insight-grid">
+        <section class="pf-insight">
+            <h3>時間帯</h3>
+            {% set peak = insights.hours|sort(attribute="rate", reverse=true) %}
+            <div class="pf-hours" role="list" aria-label="時刻ごとの川霧の出ていた割合" style="grid-template-columns: repeat({{ insights.hours|length }}, minmax(0, 1fr));">
+                {% for h in insights.hours %}
+                <div role="listitem" title="{{ h.hour }}時: {{ '%.1f'|format(h.rate * 100) }}%">
+                    <i style="height: {{ '%.0f'|format(h.rate / top * 100) }}%"></i><small>{{ h.hour }}</small>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="pf-muted" style="font-size:0.8rem; margin:0.3rem 0 0;">出ていた割合が高いのは {{ (peak[:3]|map(attribute="hour")|sort|map("string")|join("時・")) }}時(数字は時刻)。夜間は判定できないため含まない。</p>
+        </section>
+        {% for c in insights.conditions %}
+        {% set cmax = [c['items']|map(attribute='rate')|max, 0.0001]|max %}
+        <section class="pf-insight">
+            <h3>{{ c.title }}</h3>
+            <ul>
+                {% for it in c['items'] %}
+                <li class="pf-bar-row"><span>{{ it.label }}</span><span class="pf-bar"><i style="width: {{ '%.0f'|format(it.rate / cmax * 100) }}%"></i></span><b>{{ "%.1f"|format(it.rate * 100) }}%</b></li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endfor %}
+        {% if insights.stations %}
+        {% set smax = [insights.stations|map(attribute='rate')|max, 0.0001]|max %}
+        <section class="pf-insight">
+            <h3>出やすい地点</h3>
+            <ol>
+                {% for s in insights.stations %}
+                <li class="pf-bar-row"><span><a href="{{ url_for('public_station', name=s.name) }}">{{ s.name }}</a></span><span class="pf-bar"><i style="width: {{ '%.0f'|format(s.rate / smax * 100) }}%"></i></span><b>{{ "%.1f"|format(s.rate * 100) }}%</b></li>
+                {% endfor %}
+            </ol>
+        </section>
+        {% endif %}
     </div>
-    <div class="pf-table-wrap">
-        <table class="pf-table" id="pf-verify-table"></table>
-    </div>
-    <p class="pf-verify-note">表には的中・空振り・見逃しのいずれかがあった地点のみを示す。観測はAIによる自動判定であり、誤判定を含む場合がある。1日分の照合件数は少なく、精度の評価には<a href="{{ url_for('public_about') }}">研究の概要</a>に示す長期間の検証結果を参照されたい。</p>
+    <p class="pf-insight-note">湿度が高い・風が弱い・気温と露点の差が小さい(空気が飽和に近い)ときに、川霧が出ていた割合が高い傾向がある。観測はカメラ画像のAIによる判定で、誤りを含むことがある。</p>
 </div>
-{% endif %}
-<script id="pf-data" type="application/json">{{ data|tojson }}</script>
+{% endif %}<script id="pf-data" type="application/json">{{ data|tojson }}</script>
 <script id="pf-levels" type="application/json">{{ levels|tojson }}</script>
 <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
@@ -737,81 +755,6 @@
         }
         table.appendChild(tbody);
     }
-
-    // 予測と観測の照合: 日を選ぶと、その日の的中・空振り・見逃しを地点×時刻で示す
-    var VERIFY_MARK = {hit: "○", fa: "×", miss: ""};
-    var VERIFY_LABEL = {hit: "的中", fa: "空振り", miss: "見逃し"};
-    function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "-"; }
-    function renderVerification(idx) {
-        var list = data.verification || [];
-        var v = list[idx];
-        if (!v) { return; }
-        Array.prototype.forEach.call(document.getElementById("pf-verify-days").children, function(b, i) {
-            b.setAttribute("aria-pressed", i === idx ? "true" : "false");
-        });
-        var c = v.counts;
-        document.getElementById("pf-verify-answer").textContent =
-            v.date_label + "の予測(" + v.run_at + " 計算)を観測と照合した。照合件数 " + v.n.toLocaleString() + " 件(地点×時刻)のうち、的中 " +
-            c.hit + " 件、空振り " + c.fa + " 件、見逃し " + c.miss + " 件である。";
-        var stats = document.getElementById("pf-verify-stats");
-        stats.textContent = "";
-        [["的中", c.hit], ["空振り", c.fa], ["見逃し", c.miss],
-         ["適合率", pct(c.hit, c.hit + c.fa)], ["再現率", pct(c.hit, c.hit + c.miss)]].forEach(function(p) {
-            var d = el("div");
-            d.appendChild(el("b", null, String(p[1])));
-            d.appendChild(el("span", null, p[0]));
-            stats.appendChild(d);
-        });
-        var table = document.getElementById("pf-verify-table");
-        table.textContent = "";
-        if (!v.stations.length) {
-            table.appendChild(el("tbody")).appendChild(el("tr", "pf-table-empty")).appendChild(
-                el("td", null, "この日は全地点・全時刻で「高」の予測も川霧の観測もなかった。"));
-            return;
-        }
-        var thead = el("thead"), tr = el("tr");
-        tr.appendChild(el("th", "pf-name", "地点"));
-        HOURS.forEach(function(h) { tr.appendChild(el("th", null, h + "時")); });
-        thead.appendChild(tr);
-        table.appendChild(thead);
-        var tbody = el("tbody"), lastRegion = null;
-        v.stations.forEach(function(s) {
-            if (s.region !== lastRegion) {
-                var rr = el("tr"), rc = el("th", "pf-region", s.region);
-                rc.colSpan = HOURS.length + 1;
-                rr.appendChild(rc);
-                tbody.appendChild(rr);
-                lastRegion = s.region;
-            }
-            var row = el("tr");
-            var nameCell = el("td", "pf-name"), a = el("a", null, s.name);
-            a.href = stationUrl(s.name);
-            nameCell.appendChild(a);
-            row.appendChild(nameCell);
-            HOURS.forEach(function(h) {
-                var k = s.hours[h];
-                var cell = el("td", "pf-cell" + (k ? " pf-v-" + k : ""), k ? VERIFY_MARK[k] : "");
-                if (k) { cell.title = s.name + " " + h + "時: " + VERIFY_LABEL[k]; }
-                row.appendChild(cell);
-            });
-            tbody.appendChild(row);
-        });
-        table.appendChild(tbody);
-    }
-    (function setupVerification() {
-        var list = data.verification || [];
-        var box = document.getElementById("pf-verify-days");
-        if (!box || !list.length) { return; }
-        list.forEach(function(v, i) {
-            var b = el("button");
-            b.type = "button";
-            b.appendChild(document.createTextNode(v.date_label));
-            b.appendChild(el("small", null, "的中" + v.counts.hit + " 空振り" + v.counts.fa + " 見逃し" + v.counts.miss));
-            b.addEventListener("click", function() { renderVerification(i); });
-            box.appendChild(b);
-        });
-        renderVerification(list.length - 1);
-    })();
 
     var buttons = document.querySelectorAll(".pf-day");
     Array.prototype.forEach.call(buttons, function(btn) {
