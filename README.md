@@ -360,7 +360,9 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   (機関のDNSと並べて問い合わせ、先に返った答えを使う)。キャッシュを消して8つの接続先を80回ずつ解決した比較: 機関のDNSのみ 失敗2・1秒以上8回・平均約690ms・最大10秒 →
   外部DNSを追加 失敗0・1秒以上1回・平均約105ms。測り方・戻し方は `/root/m_dns.sh`(measure / apply / revert)。
   注意: 無線(wlp2s0b1)はNetworkManagerと systemd-networkd(`/run/systemd/network/zzzz-dracut-default.network`、dracutの既定)の両方が管理しており、
-  DNSはnetworkdがDHCPで受けたものが使われる(NetworkManagerのipv4.dnsは効かない)。
+  DNSはnetworkdがDHCPで受けたものが使われていた。→ 2026-10-15に `/etc/systemd/network/05-rf-wlan-unmanaged.network`(`Unmanaged=yes`)で
+  無線を NetworkManager だけの管理にした(機関のDNSは NetworkManager の `ipv4.dns` で持つ)。手順・戻し方は `/root/m_wlan.sh`(apply / ok / revert / status)。
+  health_report.py のWi-Fiの切断は、カーネルの「disconnect from AP」と wpa_supplicant の「CTRL-EVENT-DISCONNECTED」で数える。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 

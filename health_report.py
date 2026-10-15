@@ -27,6 +27,7 @@ COLLECT_MIN_RUNS = 14          # 4〜19時の毎時 = 16回。これ未満なら
 DNS_FAIL_WARN = 10             # 24時間で名前解決の失敗した「分」がこれ以上あれば知らせる(2026-10-13)
 WIFI_DROP_WARN = 30            # 24時間でWi-Fiがこれ以上切れたら知らせる(固定できているときは0〜数回、2026-10-14)
 WIFI_CONNECTION = "AGwlSt"
+WIFI_DROP_PATTERN = "wlp2s0b1: disconnect from AP|CTRL-EVENT-DISCONNECTED"
 log = logging.getLogger("health_report")
 
 
@@ -127,9 +128,11 @@ def check(now):
     # 1日約550回切れていた(Tailscale・名前解決・バックアップの不調の主な原因)。見張り(rf-wifi-watchdog)が固定し直すが、
     # また多くなったら知らせる。sshuser は adm グループなので journalctl を読める。
     try:
+        # 2026-10-15: 無線を NetworkManager だけで管理するようにした(m_wlan.sh)ため、networkd の「Lost carrier」は出なくなった。
+        # 無線そのものの記録で数える: アクセスポイントの切り替え(カーネル「disconnect from AP」)と切断(wpa_supplicant)。
         out = subprocess.run(["journalctl", "--since", since.strftime("%Y-%m-%d %H:%M:%S"), "--no-pager", "-q", "-o", "cat",
-                              "-g", "Lost carrier"], capture_output=True, text=True, timeout=60).stdout
-        drops = sum("Lost carrier" in ln for ln in out.splitlines())
+                              "-g", WIFI_DROP_PATTERN], capture_output=True, text=True, timeout=60).stdout
+        drops = sum(1 for ln in out.splitlines() if ln.strip())
         locked = subprocess.run(["nmcli", "-g", "802-11-wireless.bssid", "connection", "show", WIFI_CONNECTION],
                                 capture_output=True, text=True, timeout=20).stdout.strip()
         lock_note = "固定あり" if locked else "固定なし"
