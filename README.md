@@ -363,6 +363,11 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   DNSはnetworkdがDHCPで受けたものが使われていた。→ 2026-10-15に `/etc/systemd/network/05-rf-wlan-unmanaged.network`(`Unmanaged=yes`)で
   無線を NetworkManager だけの管理にした(機関のDNSは NetworkManager の `ipv4.dns` で持つ)。手順・戻し方は `/root/m_wlan.sh`(apply / ok / revert / status)。
   health_report.py のWi-Fiの切断は、カーネルの「disconnect from AP」と wpa_supplicant の「CTRL-EVENT-DISCONNECTED」で数える。
+- **バグ探しと修正(2026-10-15)**: 全GETルート336件(地点63か所・日付あり/なし/不正・存在しないID)を管理者・一般・ログアウトの3つの立場で巡回し5xxは0件、
+  管理者用・観測者用31ページは一般・ログアウトでは開けないことを確認、主なページのJavaScriptエラーも0件。見つけて直したもの:
+  (1) ログインで「CSRF token mismatch」がほぼ毎日続いていた → `_clear_session_keep_csrf`(ログイン・ログアウトでトークンを引き継ぐ)と、
+  `NO_STORE_ENDPOINTS`(ログイン・登録の画面を no-store)。(2) `experiment_model.py` が Open-Meteo の読めない応答(200でもJSONでない)で止まっていた
+  → 読めるまでをやり直しの対象に(5回)。同じ理由で `fog_model._get_forecast_with_retry` も `resp.json()` まで確かめてから返す。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 
