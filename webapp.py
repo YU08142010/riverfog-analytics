@@ -7,6 +7,7 @@ import configparser
 import csv
 import bisect
 import hmac
+import gzip
 import io
 import json
 import logging
@@ -566,6 +567,86 @@ app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FORCE_HTTPS_COOKIES") == "
 # 防ぐ。最大の正規アップロードは管理者のバックアップ復元(RESTORE_MAX_UPLOAD_BYTES=2GB)
 # なので、それに余裕を持たせた値にする(2026-09-13の監査で指摘)。
 app.config["MAX_CONTENT_LENGTH"] = 2560 * 1024 * 1024  # 2.5GB
+
+
+# --- 軽量化(2026-10-14) -------------------------------------------------------------
+# 公開URL(Tailscale Funnel)とMagicDNSで直接開いた場合はnginxを通らず、圧縮されないまま送られていた
+# (公開ページのHTML 131KB、glass.css 142KB。nginx経由なら glass.css は31KB)。nginxを通らない応答だけ、ここでgzipにする
+# (nginx経由はnginxが圧縮する)。CSSは配信のときにコメント・余分な空白を除いて縮める(どの経路でも)。
+# Flaskの after_request は登録の逆順に動くので、ここ(他より先)で登録して最後に動かす = 他の処理で作り直した応答も圧縮される。
+_COMPRESS_TYPES = ("text/html", "text/css", "text/plain", "text/csv", "application/javascript", "text/javascript",
+                   "application/json", "image/svg+xml", "application/manifest+json")
+_COMPRESS_MIN_BYTES = 1024
+_static_cache = {}            # (パス, ETag, 種類) -> 縮めた/圧縮した中身。静的ファイルは中身が変わればETagが変わる
+_static_cache_lock = threading.Lock()
+_STATIC_CACHE_MAX = 400
+
+
+def _minify_css(text):
+    """CSSのコメントと余分な空白を除く(意味を変えない範囲だけ: 「:」の前の空白は `.a :hover` のように意味があるので残す)。"""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*([{};,>])\s*", r"\1", text)
+    text = re.sub(r":\s+", ":", text)
+    return text.replace(";}", "}").strip()
+
+
+def _static_transform(kind, key, data_fn, fn):
+    with _static_cache_lock:
+        hit = _static_cache.get((kind,) + key)
+    if hit is not None:
+        return hit
+    out = fn(data_fn())
+    with _static_cache_lock:
+        if len(_static_cache) >= _STATIC_CACHE_MAX:
+            _static_cache.clear()
+        _static_cache[(kind,) + key] = out
+    return out
+
+
+@app.after_request
+def _compress_response(response):
+    if response.status_code != 200 or request.method == "HEAD" or "Content-Encoding" in response.headers:
+        return response
+    mimetype = response.mimetype or ""
+    is_static = request.endpoint == "static"
+    etag = response.get_etag()[0] if is_static else None
+    # CSSを縮める(静的ファイルの .css。既に縮めてある .min.css はそのまま)
+    if is_static and mimetype == "text/css" and not request.path.endswith(".min.css") and etag:
+        response.direct_passthrough = False
+        try:
+            body = _static_transform("css", (request.path, etag), lambda: response.get_data(),
+                                     lambda b: _minify_css(b.decode("utf-8")).encode("utf-8"))
+            response.set_data(body)
+        except Exception as e:  # noqa: BLE001
+            log.warning("CSS minify failed for %s: %s", request.path, e)
+    if request.headers.get("X-Rf-Internal") == _NGINX_INTERNAL_HEADER_SECRET:
+        return response  # nginx経由: 圧縮はnginxがする
+    if "gzip" not in request.headers.get("Accept-Encoding", "").lower() or request.headers.get("Range"):
+        return response
+    if not mimetype.startswith(_COMPRESS_TYPES) or mimetype.startswith("text/event-stream"):
+        return response
+    if response.is_streamed and not is_static:
+        return response
+    response.direct_passthrough = False
+    try:
+        if is_static and etag:
+            body = _static_transform("gz", (request.path, etag), lambda: response.get_data(),
+                                     lambda b: gzip.compress(b, compresslevel=6))
+        else:
+            data = response.get_data()
+            if len(data) < _COMPRESS_MIN_BYTES:
+                return response
+            body = gzip.compress(data, compresslevel=5)
+    except Exception as e:  # noqa: BLE001
+        log.warning("gzip failed for %s: %s", request.path, e)
+        return response
+    response.set_data(body)
+    response.headers["Content-Encoding"] = "gzip"
+    response.vary.add("Accept-Encoding")
+    if etag:
+        response.set_etag(etag + "-gz")
+    return response
 
 # 外部から読み込んでいるのは地図ページのLeaflet(cdnjs.cloudflare.com)と
 # OpenStreetMapのタイル画像(*.tile.openstreetmap.org)のみ(把握済み・確認済み)。
@@ -5014,6 +5095,42 @@ def images_file(date, hhmm, filename):
     return send_from_directory(IMAGE_DIR / date / hhmm, filename)
 
 
+THUMB_DIR = BASE_DIR / "data" / "thumbs"
+THUMB_WIDTH = 400          # 一覧のカードは横300〜400px前後
+THUMB_QUALITY = 62
+
+
+@app.route("/images/<date>/<hhmm>/thumb/<path:filename>")
+def images_thumb(date, hhmm, filename):
+    """カメラ画像の縮小版(2026-10-14、軽量化)。一覧・比較・観測報告などの小さい表示用(原寸 約74KB → 約15KB)。
+    初めて求められたときに作って data/thumbs/ に置き、以後はそれを返す(元の画像は変わらないので作り直さない)。
+    元の画像が無ければ404。押して大きく見るときは images_file(原寸)を使う。"""
+    from werkzeug.security import safe_join
+    date = _validate_date(date)
+    hhmm = _validate_hhmm(hhmm)
+    src = safe_join(str(IMAGE_DIR / date / hhmm), filename)
+    if src is None or not os.path.isfile(src) or not filename.lower().endswith(".jpg"):
+        abort(404)
+    out_dir = THUMB_DIR / f"w{THUMB_WIDTH}q{THUMB_QUALITY}" / date / hhmm  # 大きさを変えたら作り直されるよう、フォルダを分ける
+    out = out_dir / filename
+    if not out.is_file() or out.stat().st_mtime < os.path.getmtime(src):
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            with Image.open(src) as im:
+                im = im.convert("RGB")
+                if im.width > THUMB_WIDTH:
+                    im = im.resize((THUMB_WIDTH, round(im.height * THUMB_WIDTH / im.width)), Image.LANCZOS)
+                tmp = out.with_suffix(f".tmp{os.getpid()}")
+                im.save(tmp, "JPEG", quality=THUMB_QUALITY, optimize=True, progressive=True)
+                os.replace(tmp, out)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Thumbnail failed for %s: %s", src, e)
+            return send_from_directory(IMAGE_DIR / date / hhmm, filename)
+    resp = send_from_directory(out_dir, filename)
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+
 @app.route("/images/<date>/<hhmm>/download.zip")
 def images_hour_zip(date, hhmm):
     date = _validate_date(date)
@@ -5238,6 +5355,15 @@ def calendar_dates():
     out["today"] = datetime.now(JST).strftime("%Y-%m-%d")
     resp = jsonify(out)
     resp.headers["Cache-Control"] = "private, max-age=60"
+    return resp
+
+
+@app.route("/api/spotlight-items")
+def spotlight_items_api():
+    """Ctrl+Kの検索の候補(2026-10-14、軽量化): 以前は全ページに約20KB埋め込んでいたが、検索を開いたときだけ読む
+    (base.htmlの小さな読み込み係が、これと spotlight.js を取ってから開く)。管理者向けの候補が入るので人ごとに変わる。"""
+    resp = jsonify(_spotlight_items())
+    resp.headers["Cache-Control"] = "private, max-age=300"
     return resp
 
 

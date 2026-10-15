@@ -54,7 +54,7 @@
         <figure class="compare-image">
             {% if e.image and not e.image.unavailable %}
             {% set image_url = url_for('images_file', date=e.image.date, hhmm=e.image.hhmm, filename=e.image.file) %}
-            <a href="{{ image_url }}" target="_blank" rel="noopener"><img src="{{ image_url }}" loading="lazy" alt="{{ e.name }}の最新のカメラ画像"></a>
+            <a href="{{ image_url }}" target="_blank" rel="noopener"><img src="{{ url_for('images_thumb', date=e.image.date, hhmm=e.image.hhmm, filename=e.image.file) }}" loading="lazy" alt="{{ e.name }}の最新のカメラ画像"></a>
             <figcaption class="muted">{{ e.image.date[5:7]|int }}/{{ e.image.date[8:10]|int }} {{ e.image.hhmm[:2] }}:{{ e.image.hhmm[2:] }} のカメラ画像</figcaption>
             {% else %}
             <div class="observation-report-noimage">最新のカメラ画像なし</div>

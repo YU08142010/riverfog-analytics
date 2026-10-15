@@ -24,7 +24,7 @@
     {% for it in items %}
     {% set img = url_for('images_file', date=date, hhmm=it.hhmm, filename=it.station ~ '.jpg') %}
     <figure class="card gallery-item{{ ' is-top' if loop.first }}">
-        <a href="{{ img }}" target="_blank" rel="noopener"><img src="{{ img }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像({{ it.label }})"></a>
+        <a href="{{ img }}" target="_blank" rel="noopener"><img src="{{ url_for('images_thumb', date=date, hhmm=it.hhmm, filename=it.station ~ '.jpg') }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像({{ it.label }})"></a>
         <figcaption>
             <span class="gallery-title"><a href="{{ url_for('station_detail', name=it.station) }}">{{ it.station }}</a>
                 <small class="muted">{{ it.region }} ・ {{ it.hhmm[:2]|int }}:{{ it.hhmm[2:] }}</small></span>

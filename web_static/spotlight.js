@@ -453,6 +453,7 @@
         render();
         ensureDates();
         input.focus();
+        if (prefill === "?") { input.value = ""; showHelp(); }  // 「?」で開いたとき(読み込み前に押された場合も)
     }
     function close() {
         if (overlay.hidden) { return; }

@@ -352,6 +352,10 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
 - **観測報告の下見**: 各報告に自前の画像判定(own_judge)を付け、今の判定と違うもの(確率 `OWN_JUDGE_CONFIDENT`=0.6 以上)を先頭に並べる。
 - **Wi-Fiの切断の見張り**: health_report.py が24時間の「Lost carrier」を数え、`WIFI_DROP_WARN`(30回)以上で知らせる。
 - **ファイアウォール**: `m_ufw.sh`(利用者が実行、5分で自動的に戻る安全装置つき)で外からの接続をTailscale経由だけにする。確かめたら `m_ufw_ok.sh`。
+- **軽量化(2026-10-14)**: `_compress_response`: nginxを通らない応答(公開URL・MagicDNS直接)をgzipにする(公開ページ 131KB→28KB)。
+  CSSは配信時に `_minify_css` で縮める(glass.css 142KB→105KB、gzipで20KB。どの経路でも)。静的ファイルの結果は ETag ごとにメモリに置く。
+  カメラ画像の縮小版 `/images/<date>/<hhmm>/thumb/<file>`(幅400px・約23KB、`data/thumbs/` に作って使い回す)を一覧・比較・観測報告・ギャラリーの `<img>` に使う(押した先は原寸)。
+  Ctrl+Kの検索は、開くときに `/api/spotlight-items` と spotlight.js を読む(以前は全ページに約50KB)。
 - **研究用サイトの証明書**: 作業用の `m_cert.sh`(root)で、nginx :8443 をTailscaleの証明書(`/etc/nginx/ssl/ts.crt`)に替え、
   `/etc/cron.weekly/rf-ts-cert` で毎週取り直す(実行は利用者)。替えたあとはIPアドレスではなく MagicDNS の名前で開くこと。
 

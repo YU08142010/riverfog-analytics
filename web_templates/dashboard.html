@@ -312,7 +312,7 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <h2>{{ "今朝" if mg.today else "昨日の朝" }}の川霧</h2>
     <div class="dash-gallery">
         {% for it in mg["items"] %}
-        {% set img = url_for('images_file', date=mg.date, hhmm=it.hhmm, filename=it.station ~ '.jpg') %}
+        {% set img = url_for('images_thumb', date=mg.date, hhmm=it.hhmm, filename=it.station ~ '.jpg') %}
         <figure>
             <a href="{{ url_for('station_detail', name=it.station) }}"><img src="{{ img }}" loading="lazy" alt="{{ it.station }}の{{ it.hhmm[:2]|int }}時の画像({{ it.label }})"></a>
             <figcaption><strong>{{ it.station }}</strong> <span class="muted">{{ it.hhmm[:2]|int }}:{{ it.hhmm[2:] }} ・ {{ it.label }}</span></figcaption>
@@ -341,7 +341,7 @@ document.addEventListener("ajaxformsuccess", function(e) {
         {% set station_name = f.replace('_unavailable.jpg', '').replace('.jpg', '') %}
         <figure class="{{ 'unavailable' if '_unavailable' in f else '' }}">
             <a href="{{ url_for('station_detail', name=station_name) }}" title="{{ station_name }}の地点別ページを見る">
-                <img src="{{ url_for('images_file', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy" alt="{{ station_name }}のカメラ画像">
+                <img src="{{ url_for('images_thumb', date=latest_image_date, hhmm=latest_image_hour, filename=f) }}" loading="lazy" alt="{{ station_name }}のカメラ画像">
             </a>
             <figcaption>
                 <a href="{{ url_for('station_detail', name=station_name) }}">{{ station_name }}</a>

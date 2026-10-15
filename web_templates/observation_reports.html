@@ -81,7 +81,7 @@
             {% if img.has_image %}
             {% set image_url = url_for('images_file', date=img.date, hhmm=img.hhmm, filename=r.station_name ~ '.jpg') %}
             <a href="{{ image_url }}" target="_blank" rel="noopener">
-                <img src="{{ image_url }}" loading="lazy" alt="{{ r.station_name }}の{{ img.label }}の画像">
+                <img src="{{ url_for('images_thumb', date=img.date, hhmm=img.hhmm, filename=r.station_name ~ '.jpg') }}" loading="lazy" alt="{{ r.station_name }}の{{ img.label }}の画像">
             </a>
             {% else %}
             <div class="observation-report-noimage">画像なし</div>

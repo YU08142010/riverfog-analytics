@@ -1037,7 +1037,6 @@ window.RF_PUSH = {
 </script>
 <script src="{{ url_for('static', filename='push_client.js') }}?v={{ app_version|default('') }}"></script>
 {% endif %}
-<script id="spotlight-data" type="application/json">{{ spotlight_items()|tojson }}</script>
 <script src="{{ url_for('static', filename='fs_shell.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='calendar.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='chart_zoom.js') }}?v={{ app_version|default('') }}" defer></script>
@@ -1052,8 +1051,42 @@ window.RF_PUSH = {
     }, { passive: true });
 })();
 </script>
-<script src="{{ url_for('static', filename='spotlight.js') }}?v={{ app_version|default('') }}" defer></script>
-<div class="a2hs" id="a2hs" role="dialog" aria-label="ホーム画面に追加" hidden>
+<script>
+// Ctrl+Kの検索は、開くときだけ読む(2026-10-14、軽量化): 以前は全ページで spotlight.js(30KB)と候補(約20KB)を読んでいた。
+// Ctrl+K・「/」・検索ボタンで、候補(/api/spotlight-items)を #spotlight-data として置き、spotlight.js を読んでから開く。
+// 読み込んだ後は spotlight.js 自身が同じキー・ボタンを受け持つ(window.openSpotlight があれば、ここは何もしない)。
+(function() {
+    var state = 0, after = null;  // 0=未読込 1=読込中
+    function load(then) {
+        after = then;
+        if (state) { return; }
+        state = 1;
+        fetch({{ url_for('spotlight_items_api')|tojson }}, { credentials: "same-origin" }).then(function(r) { return r.json(); }).then(function(data) {
+            var el = document.createElement("script");
+            el.id = "spotlight-data"; el.type = "application/json"; el.textContent = JSON.stringify(data);
+            document.body.appendChild(el);
+            var s = document.createElement("script");
+            s.src = {{ (url_for('static', filename='spotlight.js') ~ '?v=' ~ (app_version|default('')))|tojson }};
+            s.onload = function() { if (window.openSpotlight && after) { var f = after; after = null; f(); } };
+            s.onerror = function() { state = 0; };
+            document.body.appendChild(s);
+        }).catch(function() { state = 0; });
+    }
+    document.addEventListener("keydown", function(e) {
+        if (window.openSpotlight) { return; }
+        var k = (e.key || "").toLowerCase(), t = e.target, tag = t && t.tagName;
+        var typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable);
+        if ((e.ctrlKey || e.metaKey) && k === "k") { e.preventDefault(); load(function() { window.openSpotlight(); }); return; }
+        if ((k === "/" || k === "?") && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault(); load(function() { window.openSpotlight(k === "?" ? "?" : ""); });
+        }
+    });
+    document.addEventListener("click", function(e) {
+        if (window.openSpotlight) { return; }
+        if (e.target.closest && e.target.closest("[data-spotlight-open]")) { e.preventDefault(); load(function() { window.openSpotlight(); }); }
+    });
+})();
+</script><div class="a2hs" id="a2hs" role="dialog" aria-label="ホーム画面に追加" hidden>
     <div class="a2hs-text">
         <strong>ホーム画面に追加できます</strong>
         <span id="a2hs-how">ブラウザのメニューから「ホーム画面に追加」を選ぶと、アプリのように全画面で開けます。</span>
