@@ -145,9 +145,9 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
    ========================================================================== */
 :root {
     --glass-filter: saturate(180%) blur(30px);
-    --glass-bg: rgba(255, 255, 255, 0.56);
+    --glass-bg: rgba(255, 255, 255, 0.46);
     --glass-bg-strong: rgba(255, 255, 255, 0.78);
-    --glass-bar: rgba(249, 249, 251, 0.70);
+    --glass-bar: rgba(249, 249, 251, 0.52);
     --glass-edge: rgba(255, 255, 255, 0.55);
     --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.7), 0 0 0 0.5px rgba(60, 60, 67, 0.12), 0 8px 28px rgba(30, 50, 90, 0.08);
     /* 空のないページの壁紙: 川霧の朝(淡い青・水色・薄紫・朝焼けの桃色)を大きくにじませる */
@@ -159,9 +159,9 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
         linear-gradient(180deg, #eef2f8 0%, #f3f2f7 100%);
 }
 :root[data-theme="dark"] {
-    --glass-bg: rgba(28, 28, 30, 0.58);
+    --glass-bg: rgba(28, 28, 30, 0.48);
     --glass-bg-strong: rgba(36, 36, 38, 0.76);
-    --glass-bar: rgba(22, 22, 24, 0.68);
+    --glass-bar: rgba(22, 22, 24, 0.55);
     --glass-edge: rgba(255, 255, 255, 0.08);
     --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.10), 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.30);
     --wallpaper:
@@ -172,9 +172,9 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-        --glass-bg: rgba(28, 28, 30, 0.58);
+        --glass-bg: rgba(28, 28, 30, 0.48);
         --glass-bg-strong: rgba(36, 36, 38, 0.76);
-        --glass-bar: rgba(22, 22, 24, 0.68);
+        --glass-bar: rgba(22, 22, 24, 0.55);
         --glass-edge: rgba(255, 255, 255, 0.08);
         --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.10), 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.30);
         --wallpaper:
@@ -197,19 +197,54 @@ body { background-attachment: fixed; }
 :root .app-side { box-shadow: none; }
 :root .modal-dialog, :root .notif-panel, :root .app-sheet-panel { background: var(--glass-bg-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
 /* 空のページのカード(glass.css・weather_scene.css が不透明に近い色を !important で決めているので、同じ書き方で上書きする) */
-:root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel, :root .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.66) !important; }
+:root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel, :root .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.52) !important; }
 :root[data-theme="dark"] .wx-scene ~ main .card, :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
-:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.62) !important; }
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.50) !important; }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .wx-scene ~ main .card, :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
-    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.62) !important; }
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.50) !important; }
 }
+/* カードの中の面(数値のタイル・メンバーのカード・表の見出し・入力欄・お知らせの枠など)も、白く塗りつぶさず
+   iOSの「塗り」のように薄く色をのせるだけにする(2026-10-16、「ほかにもっと透明化」)。
+   カードの中だけ --color-surface / --color-bg を半透明に置き換えるので、個々の部品の CSS は変えない。
+   不透明に戻す設定のために、置き換える前の色を --surface-solid / --bg-solid に取っておく。 */
+:root { --surface-solid: var(--color-surface); --bg-solid: var(--color-bg); }
+:root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card {
+    --color-surface: rgba(255, 255, 255, 0.30); --color-bg: rgba(118, 118, 128, 0.10);
+}
+:root[data-theme="dark"] .card, :root[data-theme="dark"] .sidebar-panel, :root[data-theme="dark"] .pf-card, :root[data-theme="dark"] .auth-card {
+    --color-surface: rgba(72, 72, 78, 0.26); --color-bg: rgba(118, 118, 128, 0.20);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .sidebar-panel,
+    :root:not([data-theme="light"]) .pf-card, :root:not([data-theme="light"]) .auth-card {
+        --color-surface: rgba(72, 72, 78, 0.26); --color-bg: rgba(118, 118, 128, 0.20);
+    }
+}
+/* カードの中のガラスの部品(地点・メンバーのカードなど)は、ガラスを重ねると後ろの色が届かず白く濁るので、
+   ぼかしをやめて上の薄い塗りにする */
+:root :is(.card, .sidebar-panel, .pf-card) :is(.station-card, .member-tile, .badge-tile, .search-box, .pinned-bar-item,
+    .dm-quick-action-btn, .reaction-pill, .files-tab.active, .phenom-btn) {
+    background: var(--color-surface); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* 横に動かす表の固定列と右クリックのメニューは、下を流れる文字と重ならないよう、濃いめの面+ぼかしにする */
+:root .pf-table .pf-name, :root .flow-grid .flow-name, :root table.obs-table .sticky-col {
+    background: var(--glass-bg-strong); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+:root .context-menu { background: var(--glass-bg-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
+/* 白い背景で描いた画像(グラフ)は、そのままにする */
 /* 透明度を下げる設定・ぼかし非対応のブラウザでは不透明にする */
 @media (prefers-reduced-transparency: reduce) {
     :root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root header, :root .pf-header, :root .app-side, :root .app-tabbar,
     :root .modal-dialog, :root .notif-panel, :root .app-sheet-panel, :root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel,
-    :root .wx-scene ~ main .pf-card { background: var(--color-surface) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+    :root .wx-scene ~ main .pf-card, :root .pf-table .pf-name, :root .flow-grid .flow-name, :root table.obs-table .sticky-col,
+    :root .context-menu {
+        --color-surface: var(--surface-solid); --color-bg: var(--bg-solid);
+        background: var(--surface-solid) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+    }
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    :root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root .wx-scene ~ main .card { background: var(--color-surface) !important; }
+    :root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root .wx-scene ~ main .card {
+        --color-surface: var(--surface-solid); --color-bg: var(--bg-solid); background: var(--surface-solid) !important;
+    }
 }
