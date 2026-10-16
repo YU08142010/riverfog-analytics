@@ -1,0 +1,92 @@
+# コードの確認(CI)。push・プルリクエストのたびに GitHub 上で動き、問題があれば赤い×で知らせる。
+# 本番サーバーへの自動配置(CD)はしない: サーバーは Tailscale の中にあり、GitHub に SSH の鍵を預けることになるため。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: 静的検査(構文・未定義の名前・秘密の値)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 秘密の値・本番データが入っていないか
+        run: python scripts/ci_guard.py
+      - name: Python の構文
+        run: python -m compileall -q -x '(^|/)(\.venv|data|logs|backups)/' .
+      - name: ruff(バグになりやすい書き方)
+        run: |
+          pip install --quiet ruff==0.17.1
+          ruff check --output-format=github .
+
+  javascript:
+    name: JavaScript の構文
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: node --check
+        run: |
+          status=0
+          for f in $(git ls-files 'web_static/*.js' ':!:web_static/vendor/**'); do
+            node --check "$f" || status=1
+          done
+          exit $status
+
+  test:
+    name: テスト(ページ・権限・セキュリティ・計算)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: 日本語フォント(グラフの描画用)
+        run: sudo apt-get update -q && sudo apt-get install -y -q fonts-noto-cjk
+      - name: 依存パッケージ
+        run: pip install -r requirements.txt
+      - name: unittest
+        run: python -m unittest discover -s tests -t . -v
+      - name: ポイント経済の回帰テスト
+        run: python test_economy_sanity.py
+
+  audit:
+    name: 依存パッケージの既知の脆弱性(参考)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 修正版がまだ出ていない脆弱性もあるので、ここでは赤くせずに一覧を残すだけにする
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: pip-audit
+        run: |
+          pip install --quiet pip-audit
+          pip-audit -r requirements.txt --desc on

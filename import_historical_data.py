@@ -30,7 +30,6 @@ from common import (
     COL_DATETIME,
     COL_PHENOM_START,
     DATA_XLSX,
-    JST,
     XlsxLockTimeout,
     build_data_backup_zip,
     now_jst_naive,

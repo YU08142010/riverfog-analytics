@@ -9,9 +9,7 @@
 import json
 import logging
 import os
-import re
 import sqlite3
-import sys
 from datetime import datetime
 
 import numpy as np

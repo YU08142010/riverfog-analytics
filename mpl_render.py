@@ -770,10 +770,10 @@ def _bar(ax, t, xi, yi, ctx, group):
         bottoms = np.zeros(n)
     edge = _with_alpha(to_rgba(ctx["pal"]["fg"]), 0.45) if hatch else "none"
     if horiz:
-        bars = ax.barh(cats + offs, vals, height=w_each, left=bottoms, color=cols, edgecolor=edge, linewidth=0,
+        ax.barh(cats + offs, vals, height=w_each, left=bottoms, color=cols, edgecolor=edge, linewidth=0,
                        hatch=hatch, zorder=2)
     else:
-        bars = ax.bar(cats + offs, vals, width=w_each, bottom=bottoms, color=cols, edgecolor=edge, linewidth=0,
+        ax.bar(cats + offs, vals, width=w_each, bottom=bottoms, color=cols, edgecolor=edge, linewidth=0,
                       hatch=hatch, zorder=2)
     # 棒の外に数字を出すときは、上端(横棒は右端)で切れないよう余白を足す
     if t.get("text") is not None and (t.get("textposition") or "auto") in ("outside", "auto") and n:

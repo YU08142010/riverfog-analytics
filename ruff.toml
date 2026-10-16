@@ -1,0 +1,9 @@
+# CI の静的検査(ruff)。見た目の好みではなく「バグになりやすいもの」だけを止める。
+#   E9: 構文エラー  F: 未定義の名前・使っていない import や変数・重複定義など(pyflakes)
+#   PLE: pylint のエラー級  B006/B008: 引数の既定値に変わる物・関数呼び出し  B017/B018: 意味のない文
+target-version = "py314"
+line-length = 140
+extend-exclude = ["data", "logs", "backups", ".venv", "web_static/vendor"]
+
+[lint]
+select = ["E9", "F", "PLE", "B006", "B008", "B017", "B018"]

@@ -392,3 +392,28 @@ crontab(sshuser)に次を追加した(変更前は `backups/ui-20261009/crontab_
   **境界層の高さと逆転の強さだけ**ならAP +0.009・loglossも有意に改善したが、3期間のうち最後の期間はAPが
   下がり(0.188→0.159)、全部入れた結果を見てから選んだ組み合わせなので、データが増えてから(2〜3週間後)
   新しい期間で確かめ直す。入れる場合は、学習期間全体の過去の予報(この2変数)を取得・保存する仕組みが要る。
+
+## CI(GitHub Actions によるコードの確認、2026-10-16)
+
+`main` への push とプルリクエストのたびに `.github/workflows/ci.yml` が GitHub 上で動く。結果はリポジトリの「Actions」タブで見られる。
+
+| ジョブ | 確認すること | 失敗したら |
+|---|---|---|
+| 静的検査 | `scripts/ci_guard.py`(秘密の値・`.env`・`*.db`・`data/` がリポジトリに入っていないか)、Python の構文、`ruff check`(未定義の名前・使っていない import など、バグになりやすいものだけ。設定は `ruff.toml`) | 止める |
+| JavaScript の構文 | `web_static/*.js` を `node --check`(vendor は除く) | 止める |
+| テスト | `tests/`(標準の unittest)と `test_economy_sanity.py` | 止める |
+| 依存パッケージの既知の脆弱性 | `pip-audit -r requirements.txt` | 参考(赤くしない) |
+
+テスト(`tests/`)の中身:
+- `test_pages.py`: 引数のない GET のページを管理者・一般の両方で全部開き、500 が出ないこと。一般の人や公開URL(Funnel)からは `/admin` のページが開けないこと。
+- `test_security.py`: 応答ヘッダー(CSP・nosniff など)、ログイン画面をキャッシュしないこと、CSRF の合言葉がない POST を通さないこと、ログイン後に外部サイトへ飛ばさないこと、パスをさかのぼるファイル取得を断ること。
+- `test_units.py`: CSS の圧縮・gzip、ヒストグラムの区分、利用者設定の既定値、全テンプレートが読み込めること。
+
+`tests/support.py` が data/ 以下のDBの置き場所(モジュールの定数と関数の引数の既定値)を一時フォルダに差し替えるので、
+本番の /opt/river-fog で実行しても本物の users.db などには書き込まない。サーバーでの実行:
+
+```
+cd /opt/river-fog && .venv/bin/python -m unittest discover -s tests -t . -v
+```
+
+本番サーバーへの自動配置(CD)は作っていない。サーバーは Tailscale の中にあり、GitHub に SSH の鍵を預けることになるため。

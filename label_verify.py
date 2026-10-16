@@ -14,13 +14,11 @@
 """
 import csv
 import io
-import json
 import logging
 import os
 import sqlite3
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Literal
 
 from PIL import Image

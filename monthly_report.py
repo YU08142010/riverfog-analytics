@@ -234,7 +234,6 @@ def render_pdf(data, path):
 
 def notify(data):
     import push_notify
-    import user_settings
     import users
     from common import now_jst_naive
     db = BASE_DIR / "data" / "users.db"

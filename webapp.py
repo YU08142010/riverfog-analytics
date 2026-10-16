@@ -30,7 +30,6 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from PIL import Image
 from flask import (
@@ -7256,9 +7255,9 @@ def _build_public_insights():
         return None
     overall = fog / n
     hours = []
-    for h, g in d.groupby(d["datetime"].dt.hour):
-        if len(g) >= PUBLIC_INSIGHT_MIN_N:
-            hours.append({"hour": int(h), "rate": float(g["__fog"].mean())})
+    for h, grp in d.groupby(d["datetime"].dt.hour):
+        if len(grp) >= PUBLIC_INSIGHT_MIN_N:
+            hours.append({"hour": int(h), "rate": float(grp["__fog"].mean())})
     conditions = []
     for col, title, bins in PUBLIC_INSIGHT_BINS:
         items = []
@@ -11908,7 +11907,7 @@ def admin_backup_restore():
             ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
             start_new_session=True,
         )
-    except Exception as e:
+    except Exception:
         log.exception("Backup restore failed")
         flash("復元に失敗しました。詳細はログを確認してください。", "error")
     finally:
@@ -11989,7 +11988,7 @@ def admin_settings():
         try:
             _write_editable_env_values(updates)
             flash("設定を保存しました。次回のcollect.py/predict.py実行から反映されます。", "success")
-        except Exception as e:
+        except Exception:
             log.exception("Failed to write .env")
             flash("設定の保存に失敗しました。詳細はログを確認してください。", "error")
         return redirect(url_for("admin_settings"))
@@ -12053,7 +12052,6 @@ def _generate_report_pdf(start_date, end_date):
                 if code in phenom_code_totals:
                     phenom_code_totals[code] += 1
 
-    accuracy = _accuracy_summary_safe()
     trend = _accuracy_trend_safe()
     trend_in_range = [r for r in trend if start_date.isoformat() <= r["date"] <= end_date.isoformat() and r["n"] > 0]
     # レポートのタイトルには「その期間の」的中率を出したいため、全期間集計のoverallではなく
@@ -12678,13 +12676,17 @@ def _station_flow_order():
 def _flow_observed(date_str, names):
     """{地点: {時: {"code": 主コード, "label", "img": 画像があるか, "day": 日中か}}}。人の訂正を反映する。"""
     codes_by = {}
-    w = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
+    # 気象DBがまだ無い・読めないとき(初回の構築直後やCI)は、観測なしとして表で返す(以前は500になった)
     try:
-        for dt, st, code in w.execute("SELECT datetime, station_name, code FROM phenomena WHERE datetime BETWEEN ? AND ?",
-                                      (f"{date_str} 00:00:00", f"{date_str} 23:59:59")):
-            codes_by[(st, int(dt[11:13]))] = code
-    finally:
-        w.close()
+        w = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
+        try:
+            for dt, st, code in w.execute("SELECT datetime, station_name, code FROM phenomena WHERE datetime BETWEEN ? AND ?",
+                                          (f"{date_str} 00:00:00", f"{date_str} 23:59:59")):
+                codes_by[(st, int(dt[11:13]))] = code
+        finally:
+            w.close()
+    except sqlite3.Error as e:
+        log.warning("flow: weather DB unavailable: %s", e)
     conn = _users_conn()
     try:
         for st, dt, code in conn.execute("SELECT station_name, target_datetime, corrected_code FROM phenomena_corrections "
