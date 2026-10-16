@@ -203,7 +203,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
 <div class="layout">
 <aside class="sidebar">{%- block sidebar -%}{%- endblock -%}</aside>
 <div class="layout-content">
-<button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-expanded="true">地点の一覧を隠す</button>
+<button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-expanded="true" data-list-name="{% block sidebar_name %}地点の一覧{% endblock %}">{{ self.sidebar_name() }}を隠す</button>
 {% block content %}{% endblock %}
 </div>
 </div>
@@ -336,7 +336,7 @@ document.getElementById("theme-toggle-btn").addEventListener("click", function()
         sync();
     }
     toggler(document.getElementById("app-side-toggle"), "rf-side-hidden", "rf-side-hidden", {aria: true, show: "メニューを開く", hide: "メニューを閉じる"});
-    toggler(document.getElementById("sidebar-toggle"), "rf-stlist-hidden", "rf-stlist-hidden", {show: "地点の一覧を出す", hide: "地点の一覧を隠す"});
+    toggler(document.getElementById("sidebar-toggle"), "rf-stlist-hidden", "rf-stlist-hidden", (function(b) { var n = (b && b.getAttribute("data-list-name")) || "地点の一覧"; return {show: n + "を出す", hide: n + "を隠す"}; })(document.getElementById("sidebar-toggle")));
     var sheet = document.getElementById("app-sheet"), openBtn = document.getElementById("app-sheet-open");
     if (!sheet || !openBtn) { return; }
     var panel = sheet.querySelector(".app-sheet-panel");

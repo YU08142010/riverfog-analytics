@@ -2071,3 +2071,27 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .oj-summary { border-left: 4px solid var(--color-danger); }/* 見逃しを減らす見方(2026-10-14) */
 .recall-views tr.is-current td { background: color-mix(in srgb, var(--color-primary) 8%, transparent); }
 .recall-views td:first-child { white-space: normal; min-width: 14rem; }
+/* AIチャットの会話欄を広く(2026-10-16): style.css の .card の余白(1.3rem 1.5rem)が .chat-card の padding:0 を
+   上書きしていて、見出し・入力欄が内側に二重に寄っていた。高さも 70vh 固定で、スマホでは会話がほぼ見えなかった。
+   画面の高さに合わせて伸ばし、質問の例はスマホでは横にスクロールする1行にする。 */
+:root .card.chat-card { padding: 0; height: calc(100dvh - 14.5rem); min-height: 460px; margin-bottom: 1rem; }
+:root .chat-card-header { padding: 0.75rem 1.1rem; }
+:root .chat-card-header h2 { margin: 0; font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+:root .chat-card-header #chat-remaining { flex: none; }
+:root .chat-messages { padding: 1rem 1.1rem; gap: 0.6rem; }
+:root .chat-message { font-size: 0.93rem; line-height: 1.65; max-width: min(85%, 52rem); padding: 0.6rem 0.9rem; border-radius: 18px; overflow-wrap: anywhere; }
+:root .chat-message-user { border-bottom-right-radius: 6px; }
+:root .chat-message-ai, :root .chat-message-error, :root .chat-message-thinking { border-bottom-left-radius: 6px; }
+:root .chat-form { padding: 0.6rem 1.1rem; align-items: flex-end; }
+:root .chat-form textarea { font-size: 0.93rem; min-height: 2.6rem; max-height: 9rem; border-radius: 14px; padding: 0.55rem 0.8rem; }
+:root .chat-form button { border-radius: 999px; padding: 0.55rem 1.1rem; white-space: nowrap; }
+:root .chat-footnote { padding: 0.35rem 1.1rem 0.5rem; font-size: 0.7rem; line-height: 1.5; }
+@media (max-width: 860px) {
+    :root .card.chat-card { height: calc(100dvh - 15.5rem); min-height: 380px; border-radius: 20px; }
+    :root .chat-card-header, :root .chat-messages, :root .chat-form { padding-left: 0.8rem; padding-right: 0.8rem; }
+    :root .chat-footnote { padding: 0.3rem 0.8rem 0.45rem; }
+    :root .chat-message { max-width: 92%; }
+    :root .chat-examples { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -0.8rem; padding-right: 0.8rem; }
+    :root .chat-examples::-webkit-scrollbar { display: none; }
+    :root .chat-example { flex: none; white-space: nowrap; }
+}
