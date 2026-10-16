@@ -95,8 +95,7 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 :root .pf-card > h2::before, :root .pf-card > h2::after { display: none; }
 :root .pf-card > h2 { padding-left: 0; border-left: 0; }
 
-/* 空の背景のないページ: iOSのグループ背景の上に、影なしの白い面 */
-:root body:not(:has(.wx-scene)) .card { background: var(--ios-card); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* 空の背景のないページのカード: 下の「iOSの素材」で半透明+ぼかしにする(2026-10-16。以前は影なしの白い面) */
 
 /* 切り替え(セグメント・ページのタブ): 灰色の溝に白いつまみ。選んだものは青で塗らない */
 :root .seg, :root .page-tabs, :root .pf-seg { background: var(--ios-fill); border: 0; border-radius: 10px; padding: 2px; gap: 0; }
@@ -137,3 +136,80 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 :root input[type="checkbox"][role="switch"]:checked, :root .set-toggle input[type="checkbox"]:checked { background: #34c759; border-color: #34c759; }
 :root[data-theme="dark"] input[type="checkbox"][role="switch"]:checked, :root[data-theme="dark"] .set-toggle input[type="checkbox"]:checked { background: #30d158; border-color: #30d158; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) input[type="checkbox"][role="switch"]:checked, :root:not([data-theme="light"]) .set-toggle input[type="checkbox"]:checked { background: #30d158; border-color: #30d158; } }
+/* ==========================================================================
+   iOSの「素材」(2026-10-16、利用者の希望「もっとiOSっぽく透明化」)。
+   面を半透明にして、後ろを強くぼかす(iOSの通常の素材 = 白56〜66%+ぼかし30px+彩度180%)。
+   10/12・10/13に「透けすぎて読みにくい」と言われたときは、ぼかし18pxで後ろの山の絵の形が残っていた。
+   今回はぼかしを強くして形を消し、色だけが透けるようにして読みやすさを保つ。
+   「視差効果を減らす/透明度を下げる」設定の端末では、これまでどおり不透明な面にする。
+   ========================================================================== */
+:root {
+    --glass-filter: saturate(180%) blur(30px);
+    --glass-bg: rgba(255, 255, 255, 0.56);
+    --glass-bg-strong: rgba(255, 255, 255, 0.78);
+    --glass-bar: rgba(249, 249, 251, 0.70);
+    --glass-edge: rgba(255, 255, 255, 0.55);
+    --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.7), 0 0 0 0.5px rgba(60, 60, 67, 0.12), 0 8px 28px rgba(30, 50, 90, 0.08);
+    /* 空のないページの壁紙: 川霧の朝(淡い青・水色・薄紫・朝焼けの桃色)を大きくにじませる */
+    --wallpaper:
+        radial-gradient(1000px 680px at 6% -6%, rgba(122, 176, 255, 0.50), transparent 62%),
+        radial-gradient(860px 620px at 100% 4%, rgba(196, 176, 255, 0.36), transparent 60%),
+        radial-gradient(1000px 760px at 88% 100%, rgba(120, 214, 220, 0.36), transparent 62%),
+        radial-gradient(880px 660px at 0% 100%, rgba(255, 196, 176, 0.32), transparent 60%),
+        linear-gradient(180deg, #eef2f8 0%, #f3f2f7 100%);
+}
+:root[data-theme="dark"] {
+    --glass-bg: rgba(28, 28, 30, 0.58);
+    --glass-bg-strong: rgba(36, 36, 38, 0.76);
+    --glass-bar: rgba(22, 22, 24, 0.68);
+    --glass-edge: rgba(255, 255, 255, 0.08);
+    --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.10), 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.30);
+    --wallpaper:
+        radial-gradient(1000px 680px at 6% -6%, rgba(40, 86, 170, 0.45), transparent 62%),
+        radial-gradient(860px 620px at 100% 4%, rgba(92, 64, 160, 0.34), transparent 60%),
+        radial-gradient(1000px 760px at 88% 100%, rgba(20, 110, 120, 0.34), transparent 62%),
+        linear-gradient(180deg, #05070c 0%, #0a0a10 100%);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --glass-bg: rgba(28, 28, 30, 0.58);
+        --glass-bg-strong: rgba(36, 36, 38, 0.76);
+        --glass-bar: rgba(22, 22, 24, 0.68);
+        --glass-edge: rgba(255, 255, 255, 0.08);
+        --glass-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.10), 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.30);
+        --wallpaper:
+            radial-gradient(1000px 680px at 6% -6%, rgba(40, 86, 170, 0.45), transparent 62%),
+            radial-gradient(860px 620px at 100% 4%, rgba(92, 64, 160, 0.34), transparent 60%),
+            radial-gradient(1000px 760px at 88% 100%, rgba(20, 110, 120, 0.34), transparent 62%),
+            linear-gradient(180deg, #05070c 0%, #0a0a10 100%);
+    }
+}
+body { background-attachment: fixed; }
+/* カード・バー・メニュー・下のタブ: すべて同じ素材(半透明+強いぼかし) */
+:root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card {
+    background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+    border: 0.5px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+}
+:root header, :root .pf-header, :root .app-side, :root .app-tabbar {
+    -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+}
+:root .app-tabbar { background: var(--glass-bar); box-shadow: none; }
+:root .app-side { box-shadow: none; }
+:root .modal-dialog, :root .notif-panel, :root .app-sheet-panel { background: var(--glass-bg-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
+/* 空のページのカード(glass.css・weather_scene.css が不透明に近い色を !important で決めているので、同じ書き方で上書きする) */
+:root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel, :root .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.66) !important; }
+:root[data-theme="dark"] .wx-scene ~ main .card, :root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
+:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.62) !important; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .wx-scene ~ main .card, :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
+    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(28, 28, 30, 0.62) !important; }
+}
+/* 透明度を下げる設定・ぼかし非対応のブラウザでは不透明にする */
+@media (prefers-reduced-transparency: reduce) {
+    :root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root header, :root .pf-header, :root .app-side, :root .app-tabbar,
+    :root .modal-dialog, :root .notif-panel, :root .app-sheet-panel, :root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel,
+    :root .wx-scene ~ main .pf-card { background: var(--color-surface) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root .card, :root .sidebar-panel, :root .pf-card, :root .auth-card, :root .wx-scene ~ main .card { background: var(--color-surface) !important; }
+}
