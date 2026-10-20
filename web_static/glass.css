@@ -14,115 +14,45 @@
    ========================================================================== */
 
 :root {
-    --color-primary: #0a64d2;
-    --color-primary-dark: #0751ad;
-    --color-primary-light: #e8f1fc;
-    --color-primary-lighter: #d2e4fa;
     --color-bg: rgba(120, 130, 150, 0.09);
     --color-surface: #ffffff;
-    --color-border: rgba(30, 40, 60, 0.10);
-    --color-text: #1d1d1f;
-    --color-text-muted: #4f5663;
-    --radius-sm: 8px;
-    --radius-md: 14px;
-    --radius-lg: 18px;
 
-    --glass-bg: rgba(255, 255, 255, 0.38);
-    --glass-bg-strong: rgba(255, 255, 255, 0.60);
-    --glass-bar: rgba(250, 251, 253, 0.34);
-    --glass-edge: rgba(255, 255, 255, 0.16);
-    --glass-hairline: rgba(20, 30, 50, 0.08);
-    --glass-filter: saturate(170%) blur(18px);
-    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 0.5px var(--glass-hairline),
-                    0 8px 28px rgba(30, 50, 90, 0.08);
-    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 0.5px var(--glass-hairline),
-                          0 14px 36px rgba(30, 50, 90, 0.13);
     --shadow-card: var(--glass-shadow);
     --shadow-card-hover: var(--glass-shadow-hover);
-    --control-bg: rgba(118, 118, 128, 0.12);
-    --control-active: #ffffff;
-    --button-bg: #0a64d2;
-    --button-bg-hover: #0751ad;
-    --focus-ring: 0 0 0 3.5px rgba(10, 100, 210, 0.32);
-    --wallpaper:
-        radial-gradient(1100px 700px at 8% -8%, rgba(120, 180, 255, 0.55), transparent 60%),
-        radial-gradient(900px 650px at 100% 0%, rgba(190, 160, 255, 0.40), transparent 60%),
-        radial-gradient(1000px 800px at 85% 100%, rgba(110, 215, 210, 0.38), transparent 62%),
-        radial-gradient(900px 700px at 0% 100%, rgba(255, 200, 170, 0.32), transparent 60%),
-        linear-gradient(180deg, #eef3f9 0%, #f4f2f8 100%);
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         --color-primary: #4aa3ff;
-        --color-primary-dark: #7dbdff;
         --color-primary-light: #1c2d42;
         --color-primary-lighter: #23405f;
         --color-bg: rgba(255, 255, 255, 0.06);
         --color-surface: #1e2027;
         --color-border: rgba(255, 255, 255, 0.10);
         --color-text: #f2f2f5;
-        --color-text-muted: #bcc1cc;
-        --glass-bg: rgba(36, 38, 48, 0.32);
-        --glass-bg-strong: rgba(40, 42, 52, 0.58);
-        --glass-bar: rgba(28, 30, 38, 0.30);
-        --glass-edge: rgba(255, 255, 255, 0.06);
         --glass-hairline: rgba(255, 255, 255, 0.09);
-        --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
-                        0 10px 30px rgba(0, 0, 0, 0.35);
-        --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 0 0 0.5px var(--glass-hairline),
-                              0 16px 40px rgba(0, 0, 0, 0.45);
         --control-bg: rgba(118, 118, 128, 0.24);
         --control-active: rgba(255, 255, 255, 0.16);
         --button-bg: #0a6fe0;
-        --button-bg-hover: #2a85f0;
-        --focus-ring: 0 0 0 3.5px rgba(74, 163, 255, 0.40);
-        --wallpaper:
-            radial-gradient(1100px 700px at 8% -8%, rgba(40, 90, 200, 0.50), transparent 60%),
-            radial-gradient(900px 650px at 100% 0%, rgba(120, 60, 200, 0.38), transparent 60%),
-            radial-gradient(1000px 800px at 85% 100%, rgba(20, 130, 140, 0.34), transparent 62%),
-            radial-gradient(900px 700px at 0% 100%, rgba(160, 70, 90, 0.26), transparent 60%),
-            linear-gradient(180deg, #101218 0%, #14121c 100%);
     }
 }
 :root[data-theme="dark"] {
     --color-primary: #4aa3ff;
-    --color-primary-dark: #7dbdff;
     --color-primary-light: #1c2d42;
     --color-primary-lighter: #23405f;
     --color-bg: rgba(255, 255, 255, 0.06);
     --color-surface: #1e2027;
     --color-border: rgba(255, 255, 255, 0.10);
     --color-text: #f2f2f5;
-    --color-text-muted: #bcc1cc;
-    --glass-bg: rgba(36, 38, 48, 0.32);
-    --glass-bg-strong: rgba(40, 42, 52, 0.58);
-    --glass-bar: rgba(28, 30, 38, 0.30);
-    --glass-edge: rgba(255, 255, 255, 0.06);
     --glass-hairline: rgba(255, 255, 255, 0.09);
-    --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px var(--glass-hairline),
-                    0 10px 30px rgba(0, 0, 0, 0.35);
-    --glass-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 0 0 0.5px var(--glass-hairline),
-                          0 16px 40px rgba(0, 0, 0, 0.45);
     --control-bg: rgba(118, 118, 128, 0.24);
     --control-active: rgba(255, 255, 255, 0.16);
     --button-bg: #0a6fe0;
-    --button-bg-hover: #2a85f0;
-    --focus-ring: 0 0 0 3.5px rgba(74, 163, 255, 0.40);
-    --wallpaper:
-        radial-gradient(1100px 700px at 8% -8%, rgba(40, 90, 200, 0.50), transparent 60%),
-        radial-gradient(900px 650px at 100% 0%, rgba(120, 60, 200, 0.38), transparent 60%),
-        radial-gradient(1000px 800px at 85% 100%, rgba(20, 130, 140, 0.34), transparent 62%),
-        radial-gradient(900px 700px at 0% 100%, rgba(160, 70, 90, 0.26), transparent 60%),
-        linear-gradient(180deg, #101218 0%, #14121c 100%);
 }
 
 /* ---- 文字と壁紙 ---------------------------------------------------------- */
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-                 "Segoe UI Variable Text", "Yu Gothic UI", "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
     background: transparent;
-    letter-spacing: 0.005em;
 }
 /* 壁紙はスクロールしても動かない固定の層にする(background-attachment:fixedはiOSで効かないため)。 */
 html { background: #eef3f9; }
@@ -136,7 +66,6 @@ body::before {
     background: var(--wallpaper);
     pointer-events: none;
 }
-h1, h2, h3 { letter-spacing: 0.01em; }
 
 /* ---- ガラスの面 ------------------------------------------------------------ */
 header,
@@ -154,23 +83,22 @@ header,
     box-shadow: var(--glass-shadow);
 }
 .card { border-radius: var(--radius-lg); transition: box-shadow 0.2s ease; }
-.card h2 { border-left: none; padding-left: 0; font-weight: 650; font-size: 1.08rem; }
+.card h2 { border-left: none; padding-left: 0; font-size: 1.08rem; }
 .sidebar-panel { border-radius: var(--radius-lg); }
 .notif-panel, .modal-dialog { background: var(--glass-bg-strong); border-radius: var(--radius-lg); }
 
 /* ---- ヘッダー(ツールバー) -------------------------------------------------- */
 header {
-    background: var(--glass-bar);
     color: var(--color-text);
     border: none;
     border-bottom: 0.5px solid var(--glass-hairline);
     border-radius: 0;
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 4px 18px rgba(20, 30, 60, 0.06);
 }
-header h1 { color: var(--color-text); font-weight: 700; }
+header h1 { color: var(--color-text); }
 header nav { scrollbar-color: var(--glass-hairline) transparent; }
 header nav::-webkit-scrollbar-thumb { background: var(--glass-hairline); }
-header nav a { color: var(--color-text-muted); border-radius: 999px; padding: 0.42rem 0.8rem; }
+header nav a { color: var(--color-text-muted); border-radius: 999px; }
 header nav a:hover { background: var(--control-bg); color: var(--color-text); }
 header nav a.active {
     background: var(--control-active);
@@ -203,7 +131,6 @@ header .header-user span[style*="border-radius:50%"] { background: var(--control
     margin: 0;
     border-radius: 8px;
     padding: 0.38rem 0.95rem;
-    font-weight: 550;
     color: var(--color-text-muted);
 }
 .page-tabs a.active {
@@ -222,7 +149,6 @@ header .header-user span[style*="border-radius:50%"] { background: var(--control
 a.button, button.button, label.button {
     background: var(--button-bg);
     border-radius: 9px;
-    font-weight: 550;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(10, 100, 210, 0.18);
 }
 a.button:hover, button.button:hover, label.button:hover {
@@ -260,13 +186,6 @@ table.obs-table tbody tr:hover { background: var(--color-primary-light); }
     background: rgba(10, 14, 22, 0.28);
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
-}
-.toast {
-    background: rgba(30, 32, 40, 0.78);
-    -webkit-backdrop-filter: var(--glass-filter);
-    backdrop-filter: var(--glass-filter);
-    border-radius: 12px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 10px 30px rgba(0, 0, 0, 0.25);
 }
 
 /* ---- ログイン画面 ------------------------------------------------------------ */
@@ -311,7 +230,7 @@ table.obs-table tbody tr:hover { background: var(--color-primary-light); }
 }
 .pf-day[aria-pressed="true"] { border-color: var(--color-primary); box-shadow: var(--glass-shadow), 0 0 0 2px var(--color-primary); }
 .pf-table .pf-name { background: var(--color-surface); }
-.pf-hero h1 { font-size: 1.9rem; font-weight: 750; letter-spacing: 0.01em; }
+.pf-hero h1 { font-size: 1.9rem; }
 
 /* ---- 透明度を下げる設定・非対応ブラウザでは不透明に ------------------------ */
 @media (prefers-reduced-transparency: reduce) {
@@ -435,10 +354,6 @@ header, .pf-header { view-transition-name: site-header; }
    文字(2026-10-05)。英数字はInter(AppleのSF Proに近い形)、日本語はZen Kaku Gothic New。
    web_static/fonts/fonts.css(自前配信。CSPでフォントは同一オリジンのみ許可のため)で読み込む。
    ========================================================================== */
-:root {
-    --font-ui: "Inter", "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, "Hiragino Sans",
-               "Segoe UI Variable Text", "Yu Gothic UI", "Noto Sans JP", sans-serif;
-}
 body, .pf-header, input, textarea, select, button {
     font-family: var(--font-ui);
     font-optical-sizing: auto;
@@ -468,9 +383,6 @@ header nav a .icon { margin-right: 0.22rem; }
 header .theme-toggle { font-size: 0.78rem; padding: 0.4rem 0.6rem; }
 header h1 { letter-spacing: 0.03em; }
 /* 画面幅に収まらないときは横スクロールになる。右端をふわっと消して、続きがあることを示す */
-@media (min-width: 901px) {
-    header nav { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); padding-right: 24px; }
-}
 
 /* ==========================================================================
    Spotlight風の検索(spotlight.js)
@@ -793,8 +705,6 @@ input[type="date"], input[type="month"], input[type="datetime-local"] { cursor: 
 .rfcal-week, .rfcal-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
 .rfcal-week { margin-bottom: 3px; }
 .rfcal-week span { text-align: center; font-size: 0.72rem; font-weight: 600; color: var(--color-text-muted); padding: 0.15rem 0; }
-.rfcal-week .sun, .rfcal-day.sun b { color: #d9534f; }
-.rfcal-week .sat, .rfcal-day.sat b { color: #2f7fd8; }
 :root[data-theme="dark"] .rfcal-week .sun, :root[data-theme="dark"] .rfcal-day.sun b { color: #ff8a80; }
 :root[data-theme="dark"] .rfcal-week .sat, :root[data-theme="dark"] .rfcal-day.sat b { color: #7dbdff; }
 .rfcal-grid { display: grid; gap: 3px; }
@@ -1048,7 +958,6 @@ img.full-graph { border: none; border-radius: 12px; }
 a.button.cancel, button.button.cancel { color: var(--color-text); }
 .ranking-item.rank-1 .ranking-badge:not([class*="rank-style-"]) { color: #2b2205; }
 .ranking-item.rank-2 .ranking-badge:not([class*="rank-style-"]) { color: #1d1f25; }
-.ranking-item.rank-3 .ranking-badge:not([class*="rank-style-"]) { color: #24170a; }
 .ranking-streak { color: #241600; }
 /* ダークモードでは選択中の切り替えボタンの背景(--color-primary)が明るい水色になるため、濃い文字にする。 */
 :root[data-theme="dark"] .ranking-toggle-btn.active, :root[data-theme="dark"] .pf-seg button[aria-pressed="true"] { color: #0b1726; }
@@ -1157,8 +1066,6 @@ html:has(.wx-scene.wx-night) { background: #142046; }
 }
 .seg-btn:hover { background: var(--tint-bg-hover, rgba(74, 163, 255, 0.14)); }
 .seg-btn[aria-pressed="true"] { background: var(--color-primary); color: #fff; font-weight: 600; }
-:root[data-theme="dark"] .seg-btn[aria-pressed="true"] { color: #0b1726; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seg-btn[aria-pressed="true"] { color: #0b1726; } }
 .seg-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 /* 観測報告: 画像を大きく3枚並べ、処理中のカードを目立たせる(2026-10-09) */
 .observation-report-images { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0.8rem; }
@@ -1467,24 +1374,8 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .export-parts legend { padding: 0 0.3rem; font-weight: 600; }
 .export-img-hours select { width: auto; }
 /* 市民観測(写真投稿)・この後3時間(2026-10-12) */
-.photo-form { display: grid; gap: 0.7rem; max-width: 40rem; }
-.photo-form label { display: grid; gap: 0.25rem; }
-.photo-place { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; }
-.photo-place label { flex: 1 1 14rem; }
-.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: 0.8rem; }
-.photo-item { margin: 0; display: grid; gap: 0.35rem; }
-.photo-item img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; display: block; }
-.photo-item figcaption { display: grid; gap: 0.2rem; font-size: 0.85rem; }
-.photo-item form { margin: 0; }
-.photo-comment { font-size: 0.85rem; overflow-wrap: anywhere; }
-.photo-status { display: inline-block; font-size: 0.75rem; padding: 0.05rem 0.5rem; border-radius: 999px; background: var(--color-bg); }
 .photo-status.is-approved { background: color-mix(in srgb, #2e9d5b 22%, transparent); }
 .photo-status.is-rejected { background: color-mix(in srgb, #d14b4b 22%, transparent); }
-.photo-review { display: grid; grid-template-columns: minmax(0, 18rem) 1fr; gap: 1rem; align-items: start; }
-.photo-review img { width: 100%; border-radius: 10px; display: block; }
-.photo-review-form { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.photo-review-form input[type=text] { flex: 1 1 12rem; }
-@media (max-width: 640px) { .photo-review { grid-template-columns: 1fr; } }
 .nowcast-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.6rem; }
 .nowcast-cell { display: grid; justify-items: center; gap: 0.1rem; padding: 0.5rem; border-radius: 10px; background: var(--color-bg); }
 .nowcast-cell.is-likely { background: color-mix(in srgb, #4a8fd6 26%, transparent); }
@@ -1497,10 +1388,10 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
    ========================================================================== */
 .app-side, .app-tabbar, .app-sheet { display: none; }
 .app-nav-group { display: grid; gap: 2px; margin-bottom: 0.9rem; }
-.app-nav-title { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; color: var(--color-text-muted); padding: 0 0.75rem 0.25rem; }
+.app-nav-title { font-weight: 700; letter-spacing: 0.04em; padding: 0 0.75rem 0.25rem; }
 .app-nav-link {
     position: relative; display: flex; align-items: center; gap: 0.7rem; padding: 0.52rem 0.75rem; border-radius: 10px;
-    color: var(--color-text); text-decoration: none; font-size: 0.9rem; line-height: 1.25; transition: background 0.15s ease, color 0.15s ease;
+    color: var(--color-text); text-decoration: none; line-height: 1.25; transition: background 0.15s ease, color 0.15s ease;
 }
 .app-nav-link:hover { background: var(--control-bg); }
 .app-nav-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -1525,7 +1416,6 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
         display: flex; flex-direction: column; position: fixed; top: 0; bottom: 0; left: 0; width: var(--side-w); z-index: 30;
         background: var(--glass-bar); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
         border-right: 0.5px solid var(--glass-hairline); box-shadow: 4px 0 18px rgba(20, 30, 60, 0.05);
-        transition: width 0.2s var(--ease-out, ease);
     }
     .app-side-brand {
         display: flex; align-items: center; gap: 0.6rem; padding: 0.95rem 1.05rem 0.85rem; color: var(--color-text); text-decoration: none;
@@ -1540,7 +1430,6 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
     .app-side-collapse:hover { background: var(--control-bg); color: var(--color-text); }
     .app-side-collapse svg { flex: 0 0 auto; width: 1.3rem; transition: transform 0.2s ease; }
     .rf-side-collapsed .app-side-collapse svg { transform: rotate(180deg); }
-    .rf-side-collapsed .app-side .app-nav-label, .rf-side-collapsed .app-side .app-nav-title { display: none; }
     .rf-side-collapsed .app-side-brand { justify-content: center; padding-left: 0; padding-right: 0; }
     .rf-side-collapsed .app-side-scroll { padding: 0.4rem 0.55rem; }
     .rf-side-collapsed .app-side .app-nav-group { padding-top: 0.5rem; border-top: 0.5px solid var(--glass-hairline); }
@@ -1608,9 +1497,9 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .home-hero { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 1rem; align-items: start; margin-bottom: 1rem; }
 .home-map-card { padding: 0.7rem; display: flex; flex-direction: column; gap: 0.6rem; position: sticky; top: 4.6rem; }
 .home-map-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
-.home-mode .seg-btn { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; border: none; font: inherit; font-size: 0.86rem; cursor: pointer; color: inherit; }
-.home-mode .seg-btn small { font-size: 0.66rem; opacity: 0.8; font-weight: 400; }
-.home-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font-size: 0.76rem; color: var(--color-text-muted); }
+.home-mode .seg-btn { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; border: none; font: inherit; cursor: pointer; color: inherit; }
+.home-mode .seg-btn small { font-weight: 400; }
+.home-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
 .home-legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
 .home-legend i { width: 0.8rem; height: 0.8rem; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 1px rgba(44, 62, 80, 0.6); }
 .home-map { height: min(68vh, 640px); min-height: 360px; border-radius: 12px; overflow: hidden; z-index: 0; }
@@ -1631,7 +1520,7 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .home-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; box-shadow: 0 0 0 1px rgba(44, 62, 80, 0.5); }
 .home-tag { font-size: 0.66rem; font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--control-bg); color: var(--color-text-muted); }
 .home-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
-.home-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.5rem; font-size: 0.86rem; }
+.home-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.5rem; }
 .home-list li a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-bar { width: 4.5rem; height: 0.4rem; border-radius: 999px; background: var(--control-bg); overflow: hidden; }
 .home-bar span { display: block; height: 100%; background: var(--color-primary); border-radius: 999px; }
@@ -1645,7 +1534,6 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .home-strip span { position: absolute; left: 0; right: 0; bottom: 0; padding: 0.9rem 0.45rem 0.25rem; font-size: 0.72rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.6)); }
 @media (min-width: 1100px) and (max-width: 1280px) { .home-hero { grid-template-columns: minmax(0, 1fr) 18rem; } }
 @media (max-width: 900px) {
-    .home-hero { grid-template-columns: 1fr; }
     .home-map-card { position: static; }
     .home-map { height: 56vh; min-height: 300px; }
     .home-panel { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
@@ -1675,7 +1563,7 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
     margin: 0 0 1rem; padding: 0.45rem 0.6rem 0.45rem 0.9rem; border-radius: 999px; background: var(--glass-bg-strong);
     -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .st-tabs[hidden] { display: none; }
-.st-tabs-status { display: inline-flex; align-items: baseline; gap: 0.5rem; min-width: 0; font-size: 0.9rem; }
+.st-tabs-status { display: inline-flex; gap: 0.5rem; min-width: 0; font-size: 0.9rem; }
 .st-tabs-status span { color: var(--color-text-muted); font-size: 0.82rem; white-space: nowrap; }
 .st-tabs .seg-btn { border: none; font: inherit; font-size: 0.86rem; cursor: pointer; color: inherit; padding: 0.35rem 0.85rem; }
 .st-tabs .seg-btn[aria-selected="true"] { background: var(--color-primary); color: #fff; font-weight: 600; }
@@ -1700,24 +1588,12 @@ main:focus { outline: none; }
    見やすさの手直し(2026-10-12、利用者から「見づらい」): 後ろの空の絵が透けすぎて文字が読みにくかったため、
    カード・メニューの面を濃くし、薄い灰色の文字を濃くし、メニューの文字を少し大きくする。
    ========================================================================== */
-:root {
-    --glass-bg: rgba(255, 255, 255, 0.78);
-    --glass-bg-strong: rgba(255, 255, 255, 0.90);
-    --glass-bar: rgba(250, 251, 253, 0.86);
-    --color-text-muted: #3d434d;
-}
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-        --glass-bg: rgba(30, 33, 42, 0.82);
-        --glass-bg-strong: rgba(34, 37, 46, 0.92);
-        --glass-bar: rgba(24, 26, 33, 0.88);
         --color-text-muted: #d2d6de;
     }
 }
 :root[data-theme="dark"] {
-    --glass-bg: rgba(30, 33, 42, 0.82);
-    --glass-bg-strong: rgba(34, 37, 46, 0.92);
-    --glass-bar: rgba(24, 26, 33, 0.88);
     --color-text-muted: #d2d6de;
 }
 .app-nav-link { font-size: 0.95rem; }
@@ -1730,7 +1606,6 @@ main:focus { outline: none; }
 a.station-chip { display: block; text-decoration: none; }
 a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); box-shadow: 0 0 0 2px var(--color-primary); outline: none; }
 :root:not([data-theme="dark"]) { --glass-bg: rgba(255, 255, 255, 0.88); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --glass-bg: rgba(30, 33, 42, 0.82); } }
 
 /* サイドバーをしまう(2026-10-12) */
 .app-side-toggle { display: none; }
@@ -1759,14 +1634,6 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 /* 見やすさ(2026-10-12): 空の背景のページ(ホーム・地点)のカードは、背景を見せるためにわざと透けさせていた
    (weather_scene.css)が、文字が読みにくいとの声があったため、ほかのページと同じくらいの濃さにする。 */
 .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.88) !important; }
-:root[data-theme="dark"] .wx-scene ~ main .card,
-:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
-:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(28, 31, 40, 0.86) !important; }
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .wx-scene ~ main .card,
-    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
-    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(28, 31, 40, 0.86) !important; }
-}
 .wx-scene ~ main :is(.card, .sidebar-panel) :is(.muted, small, .wx-hour-day, .sidebar-group-label-static, th, .empty-state) { color: var(--color-text-muted); }
 .sidebar-toggle, .layout:has(> .sidebar:not(:empty)) .sidebar-toggle { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
 /* 利用規約(2026-10-13) */
@@ -1793,26 +1660,6 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
     --ls-r4: #5d7590; --ls-r4-foot: #9fb1c0;
     --ls-r5: #3c5269; --ls-r5-foot: #6f8498;
     --ls-fog: #f6f8f8; --ls-fog-op: 0.78; --ls-grain-op: 0.07;
-}
-:root[data-theme="dark"] {
-    --ls-sky-top: #0a111b; --ls-sky-mid: #111c2b; --ls-sky-low: #1a283a; --ls-sun: rgba(214, 228, 245, 0.55);
-    --ls-r1: #1f2e41; --ls-r1-foot: #263950;
-    --ls-r2: #1b293b; --ls-r2-foot: #23344a;
-    --ls-r3: #172435; --ls-r3-foot: #1f2f43;
-    --ls-r4: #121d2b; --ls-r4-foot: #192739;
-    --ls-r5: #0c1520; --ls-r5-foot: #111c2a;
-    --ls-fog: #b8c8da; --ls-fog-op: 0.20; --ls-grain-op: 0.09;
-}
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        --ls-sky-top: #0a111b; --ls-sky-mid: #111c2b; --ls-sky-low: #1a283a; --ls-sun: rgba(214, 228, 245, 0.55);
-        --ls-r1: #1f2e41; --ls-r1-foot: #263950;
-        --ls-r2: #1b293b; --ls-r2-foot: #23344a;
-        --ls-r3: #172435; --ls-r3-foot: #1f2f43;
-        --ls-r4: #121d2b; --ls-r4-foot: #192739;
-        --ls-r5: #0c1520; --ls-r5-foot: #111c2a;
-        --ls-fog: #b8c8da; --ls-fog-op: 0.20; --ls-grain-op: 0.09;
-    }
 }
 .ls { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
 .ls-sky { position: absolute; inset: 0; background: linear-gradient(180deg, var(--ls-sky-top) 0%, var(--ls-sky-mid) 48%, var(--ls-sky-low) 66%, var(--ls-sky-mid) 100%); }
@@ -1875,9 +1722,6 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 :root input[type="text"], :root input[type="email"], :root input[type="password"], :root input[type="search"], :root input[type="number"],
 :root input[type="date"], :root input[type="datetime-local"], :root input[type="time"], :root input[type="url"], :root input[type="file"],
 :root select, :root textarea, :root .search-box, :root .sidebar-search { border-radius: 12px; }
-:root .page-tabs { border-radius: 999px; padding: 3px; }
-:root .page-tabs a { border-radius: 999px; }
-:root .seg, :root .seg-btn { border-radius: 999px; }
 :root .station-chip { border-radius: 14px; }
 :root .stat-card, :root .weather-info-item, :root .nowcast-cell, :root .wx-hour, :root .wx-day-card { border-radius: 18px; }
 :root .table-scroll { border-radius: 18px; }
@@ -1901,34 +1745,18 @@ a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); b
 /* ==========================================================================
    透けすぎの手直し(2026-10-13): 背景(山の絵・天気の空)の上に直接乗る面を、ほぼ不透明にする。
    ========================================================================== */
-:root { --glass-bar: rgba(250, 251, 253, 0.97); --glass-bg: rgba(255, 255, 255, 0.95); --glass-bg-strong: rgba(255, 255, 255, 0.97); }
-:root[data-theme="dark"] { --glass-bar: rgba(22, 25, 32, 0.97); --glass-bg: rgba(30, 33, 42, 0.94); --glass-bg-strong: rgba(34, 37, 46, 0.97); }
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --glass-bar: rgba(22, 25, 32, 0.97); --glass-bg: rgba(30, 33, 42, 0.94); --glass-bg-strong: rgba(34, 37, 46, 0.97); }
-}
 /* 天気の空のページのカード・地点の一覧(以前の0.88だと空の色がにじんでいた) */
-:root .wx-scene ~ main .card, :root .wx-scene ~ main .sidebar-panel, :root .wx-scene ~ main .pf-card { background: rgba(255, 255, 255, 0.96) !important; }
-:root[data-theme="dark"] .wx-scene ~ main .card,
-:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
-:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(30, 33, 42, 0.95) !important; }
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .wx-scene ~ main .card,
-    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
-    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(30, 33, 42, 0.95) !important; }
-}
 /* 背景に直接乗る小さな部品: パンくず・ページ内タブ・一覧を隠すボタン・地点のタブ */
 :root .breadcrumb { display: inline-flex; flex-wrap: wrap; align-items: center; padding: 0.3rem 0.85rem; border-radius: 999px;
     background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
 :root .wx-scene ~ main .breadcrumb, :root .wx-scene ~ main .breadcrumb a { color: var(--color-text) !important; text-shadow: none !important; }
 :root .wx-scene ~ main .breadcrumb a { color: var(--color-primary) !important; }
-:root .page-tabs { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
+:root .page-tabs { box-shadow: var(--glass-shadow); }
 :root .st-tabs { background: var(--glass-bg-strong); }
-:root .app-tabbar { background: var(--glass-bar); }
 :root .app-side { background: var(--glass-bar); }
 header { background: var(--glass-bar) !important; }
 :root .pf-header { background: var(--glass-bar); }
 /* ページ内タブの選ばれている項目: 不透明な白の上で見分けられるよう、青で塗る */
-:root .page-tabs a.active { background: var(--color-primary); color: #fff; box-shadow: none; }
 :root[data-theme="dark"] .page-tabs a.active { color: #0b1726; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .page-tabs a.active { color: #0b1726; } }
 
@@ -2058,7 +1886,7 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .hist-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 1rem; }
 .hist-item { margin: 0; min-width: 0; padding: 0.8rem; border-radius: 16px; background: var(--control-bg); }
 .hist-item figcaption { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; font-weight: 650; font-size: 0.92rem; }
-.hist-item .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; }.hist-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.5rem; }
+.hist-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.5rem; }
 .hist-mode .seg-btn { text-decoration: none; color: inherit; }
 .hist-mode .seg-btn[aria-current="page"] { background: var(--color-primary); color: #fff; font-weight: 600; }
 .hist-dl { display: inline-flex; gap: 0.35rem; flex: 0 0 auto; }

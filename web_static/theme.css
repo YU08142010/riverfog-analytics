@@ -30,9 +30,7 @@
     --control-bg: var(--ios-fill);
     --control-active: var(--ios-thumb);
     --glass-hairline: var(--ios-separator);
-    --glass-shadow: 0 0 0 0.5px var(--ios-separator);
     --glass-shadow-hover: 0 0 0 0.5px rgba(60, 60, 67, 0.28);
-    --wallpaper: var(--ios-grouped);
 
     /* 公開ページ */
     --pf-text: var(--ios-label);

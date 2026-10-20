@@ -1,15 +1,6 @@
 :root {
-    --color-primary: #1a5276;
-    --color-primary-dark: #123c58;
-    --color-primary-light: #eaf2f8;
-    --color-primary-lighter: #d4e6f1;
-    --color-bg: #f2f5f8;
-    --color-surface: #ffffff;
-    --color-border: #dde4ea;
-    --color-text: #1c2733;
     /* WCAG AA(4.5:1)を満たすよう#71808fから調整(白背景で4.05:1、カード外の背景で3.70:1しか
        なくAA未達だったため)。#606d7aは白背景で5.3:1、背景色で4.84:1。 */
-    --color-text-muted: #606d7a;
     --color-danger: #c0392b;
     --color-danger-bg: #fdecea;
     --color-danger-dark: #a3291b;
@@ -19,11 +10,6 @@
     --color-success-bg: #eaf7ee;
     --color-accent: #7c3fa0;
     --color-accent-bg: #f3e8fa;
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --shadow-card: 0 0 0 1px rgba(16, 42, 67, 0.04), 0 6px 20px rgba(16, 42, 67, 0.05);
-    --shadow-card-hover: 0 0 0 1px rgba(16, 42, 67, 0.05), 0 10px 28px rgba(16, 42, 67, 0.09);
 }
 
 /* ダークモード。以前一度削除された経緯があり、原因は現象コードのチップ・セルが
@@ -38,15 +24,6 @@
    白いカードで囲って浮いて見えないようにしている（画像自体の配色は変更しない）。 */
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-        --color-primary: #5b9bd0;
-        --color-primary-dark: #7fb3dc;
-        --color-primary-light: #1c3a4d;
-        --color-primary-lighter: #234a63;
-        --color-bg: #12191f;
-        --color-surface: #1b242c;
-        --color-border: #2c3944;
-        --color-text: #e6edf3;
-        --color-text-muted: #94a4b3;
         --color-danger: #e5776a;
         --color-danger-bg: #3a2323;
         --color-danger-dark: #f0968b;
@@ -61,15 +38,6 @@
     }
 }
 :root[data-theme="dark"] {
-    --color-primary: #5b9bd0;
-    --color-primary-dark: #7fb3dc;
-    --color-primary-light: #1c3a4d;
-    --color-primary-lighter: #234a63;
-    --color-bg: #12191f;
-    --color-surface: #1b242c;
-    --color-border: #2c3944;
-    --color-text: #e6edf3;
-    --color-text-muted: #94a4b3;
     --color-danger: #e5776a;
     --color-danger-bg: #3a2323;
     --color-danger-dark: #f0968b;
@@ -119,9 +87,6 @@
    拡大表示されてしまい(ズームしたまま戻し忘れる・入力しづらい、という苦情の主因)、
    個別に小さいfont-sizeを指定している箇所は下の@media(max-width:640px)で16pxまで
    引き上げる(PC表示での見た目はそのまま、モバイルでのズーム誘発だけを防ぐ)。 */
-input, textarea, select, button {
-    font-family: inherit;
-}
 input[type="text"], input[type="email"], input[type="password"], input[type="search"],
 input[type="number"], input[type="date"], input[type="tel"], input[type="url"], textarea, select {
     font-size: 16px;
@@ -129,11 +94,8 @@ input[type="number"], input[type="date"], input[type="tel"], input[type="url"], 
 
 body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
-    background: var(--color-bg);
     color: var(--color-text);
     line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
     transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -148,7 +110,6 @@ body {
     font-family: inherit;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s ease;
 }
 .theme-toggle:hover { background: rgba(255, 255, 255, 0.24); }
 
@@ -164,7 +125,6 @@ body {
     display: inline-flex;
     align-items: center;
     cursor: pointer;
-    transition: background 0.15s ease;
 }
 .notif-bell:hover { background: rgba(255, 255, 255, 0.24); }
 .notif-badge {
@@ -212,7 +172,6 @@ body {
     gap: 0.8rem;
     padding: 0.7rem;
     border-radius: var(--radius-md);
-    background: var(--color-bg);
     text-decoration: none;
     color: var(--color-text);
 }
@@ -226,7 +185,6 @@ body {
 .dm-thread-list > li > .dm-thread-item { flex: 1 1 auto; }
 .dm-thread-quick-actions { display: flex; flex-direction: column; gap: 0.2rem; flex: 0 0 auto; }
 .dm-quick-action-btn {
-    background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -248,7 +206,6 @@ body {
     max-width: 70%;
     padding: 0.55rem 0.8rem;
     border-radius: 1rem;
-    background: var(--color-surface);
     border: 1px solid var(--color-border);
     word-break: break-word;
 }
@@ -264,7 +221,6 @@ body {
     display: block;
     margin-top: 0.2rem;
     font-size: 0.68rem;
-    opacity: 0.7;
 }
 .dm-attachment { margin-top: 0.3rem; }
 .dm-attachment a { color: inherit; text-decoration: underline; word-break: break-all; display: inline-flex; align-items: center; gap: 0.25rem; }
@@ -273,10 +229,8 @@ body {
 .context-menu {
     position: absolute;
     z-index: 200;
-    background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-card-hover);
     padding: 0.3rem;
     min-width: 160px;
 }
@@ -334,11 +288,7 @@ body {
     max-width: calc(100vw - 2rem);
     max-height: 420px;
     overflow-y: auto;
-    background: var(--color-surface);
     color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-card-hover);
     z-index: 20;
 }
 @media (max-width: 640px) {
@@ -362,10 +312,8 @@ body {
 .notif-panel-header {
     padding: 0.7rem 1rem;
     font-weight: 600;
-    border-bottom: 1px solid var(--color-border);
     position: sticky;
     top: 0;
-    background: var(--color-surface);
 }
 .notif-item {
     display: block;
@@ -390,7 +338,6 @@ body {
     border-top: 1px solid var(--color-border);
     position: sticky;
     bottom: 0;
-    background: var(--color-surface);
 }
 
 /* AIチャットページ(/chat)。他のナビ項目(地点別・メンバー等)と同じく専用ページとして
@@ -501,8 +448,6 @@ a { color: var(--color-primary); }
 }
 
 header {
-    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-    color: #fff;
     padding: 0.7rem 1.5rem;
     display: flex;
     align-items: center;
@@ -511,14 +456,11 @@ header {
     position: sticky;
     top: 0;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 header h1 {
     font-size: 1.1rem;
-    font-weight: 600;
     margin: 0;
     white-space: nowrap;
-    letter-spacing: 0.01em;
 }
 header nav {
     display: flex;
@@ -535,23 +477,16 @@ header nav {
        アクセスできるよう、スクロールバーは隠さず細く表示する(base.htmlのJSでマウス
        ホイールでの横スクロールにも対応)。 */
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
 }
 header nav::-webkit-scrollbar { height: 6px; }
 header nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.35); border-radius: 3px; }
 header nav::-webkit-scrollbar-track { background: transparent; }
 header nav a {
-    color: rgba(255, 255, 255, 0.82);
     text-decoration: none;
-    font-size: 0.9rem;
-    padding: 0.5rem 0.7rem;
-    border-radius: var(--radius-sm);
     white-space: nowrap;
-    transition: background 0.15s ease, color 0.15s ease;
 }
-header nav a:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-header nav a.active { background: rgba(255, 255, 255, 0.22); color: #fff; font-weight: 600; }
-header nav a .icon { vertical-align: -3px; margin-right: 0.3rem; }
+header nav a.active { font-weight: 600; }
+header nav a .icon { vertical-align: -3px; }
 
 .nav-toggle {
     display: none;
@@ -631,11 +566,7 @@ main {
 }
 
 .sidebar-panel {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
     padding: 0.7rem;
-    box-shadow: var(--shadow-card);
     max-height: calc(100vh - 6rem);
     overflow-y: auto;
 }
@@ -646,7 +577,6 @@ main {
     font-family: inherit;
     border: none;
     border-radius: 999px;
-    background: var(--color-bg);
     color: var(--color-text);
     margin-bottom: 0.5rem;
     box-sizing: border-box;
@@ -686,7 +616,6 @@ main {
 .station-grid-region-label { margin: 0.8rem 0 0.4rem; }
 .station-grid-region-label:first-child { margin-top: 0; }
 .table-region-divider td, .table-region-divider {
-    background: var(--color-bg);
     font-weight: 700;
     font-size: 0.78rem;
     color: var(--color-text-muted);
@@ -711,17 +640,14 @@ main {
     align-items: center;
     gap: 0.55rem;
     padding: 0.5rem 0.6rem;
-    border-radius: var(--radius-sm);
     color: var(--color-text);
     text-decoration: none;
     font-size: 0.88rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: background 0.12s ease;
 }
-.sidebar-list a:hover { background: var(--color-bg); }
-.sidebar-list a.active { background: var(--color-primary); color: #fff; font-weight: 600; }
+.sidebar-list a.active { font-weight: 600; }
 .sidebar-dot {
     flex: 0 0 8px;
     width: 8px;
@@ -733,20 +659,12 @@ main {
 .sidebar-empty { padding: 0.5rem 0.6rem; }
 
 .card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
     padding: 1.3rem 1.5rem;
     margin-bottom: 1.4rem;
-    box-shadow: var(--shadow-card);
 }
 .card h2 {
     margin-top: 0;
     margin-bottom: 0.9rem;
-    font-size: 1.05rem;
-    font-weight: 600;
-    border-left: 4px solid var(--color-primary);
-    padding-left: 0.65rem;
 }
 .card h3 { font-size: 0.95rem; font-weight: 600; }
 
@@ -754,21 +672,15 @@ main {
 
 a.button, button.button, label.button {
     display: inline-block;
-    background: var(--color-primary);
     color: #fff;
     text-decoration: none;
     padding: 0.55rem 1.05rem;
     border: none;
-    border-radius: var(--radius-sm);
     font-size: 0.9rem;
     font-family: inherit;
     margin: 0.2rem 0.4rem 0.2rem 0;
     cursor: pointer;
-    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 2px rgba(16, 42, 67, 0.15);
 }
-a.button:hover, button.button:hover, label.button:hover { background: var(--color-primary-dark); box-shadow: 0 2px 6px rgba(16, 42, 67, 0.22); }
-a.button:active, button.button:active, label.button:active { transform: scale(0.97); }
 
 /* 削除・拒否・再起動など取り消しにくい/影響の大きい操作用の共通ボタン色。
    以前はページごとにstyle="background:#c0392b;"等を直書きしていて、ダークモード用の
@@ -853,57 +765,39 @@ button.button:disabled {
 /* トップナビの項目を統合したページ内での切り替えタブ(地点/観測アーカイブ/分析/
    コミュニティ等、1つのナビ項目に複数ページをまとめた場所で使う)。 */
 .page-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.2rem;
     margin-bottom: 1.2rem;
     border-bottom: 1px solid var(--color-border);
 }
 .page-tabs a {
-    padding: 0.55rem 0.9rem;
-    color: var(--color-text-muted);
     text-decoration: none;
     font-size: 0.88rem;
-    font-weight: 600;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     white-space: nowrap;
 }
 .page-tabs a:hover { color: var(--color-text); }
-.page-tabs a.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.page-tabs a.active { border-bottom-color: var(--color-primary); }
 
 .toast-container {
     position: fixed;
-    bottom: 1.2rem;
-    right: 1.2rem;
     z-index: 1000;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
 }
 .toast {
-    background: #1c2733;
-    color: #fff;
-    padding: 0.7rem 1.1rem;
-    border-radius: var(--radius-sm);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
     font-size: 0.88rem;
-    max-width: 320px;
     opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.2s ease, transform 0.2s ease;
     display: flex;
     align-items: flex-start;
     gap: 0.6rem;
 }
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast.toast-error { background: var(--color-danger); }
+.toast.show { opacity: 1; }
 .toast-message { flex: 1 1 auto; }
 .toast-close {
     flex: 0 0 auto;
     background: none;
     border: none;
-    color: inherit;
     opacity: 0.7;
     cursor: pointer;
     font-size: 1rem;
@@ -917,7 +811,6 @@ button.button:disabled {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(16, 24, 32, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -925,30 +818,24 @@ button.button:disabled {
     padding: 1rem;
 }
 .modal-dialog {
-    background: var(--color-surface);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-card-hover);
     padding: 1.4rem 1.5rem;
     max-width: 420px;
     width: 100%;
 }
 .modal-dialog p { margin: 0 0 1.2rem; white-space: pre-wrap; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
-.button.cancel { background: var(--color-text-muted); }
 
 /* トップに戻るボタン(base.html)。 */
 .back-to-top {
     position: fixed;
     bottom: 1.2rem;
     left: 1.2rem;
-    background: var(--color-surface);
     color: var(--color-text);
     border: 1px solid var(--color-border);
     border-radius: 999px;
     padding: 0.5rem 0.9rem;
     font-size: 0.8rem;
     cursor: pointer;
-    box-shadow: var(--shadow-card);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
@@ -1004,9 +891,8 @@ button.button:disabled {
     animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.chart-wrap { position: relative; min-height: 2.4rem; }
+.chart-wrap { min-height: 2.4rem; }
 .chart-wrap .spinner { position: absolute; top: 0.6rem; left: 0.6rem; display: none; }
-.chart-wrap.is-loading .spinner { display: inline-block; }
 .chart-wrap img { display: block; }
 .chart-wrap img.loading { visibility: hidden; height: 0; }
 
@@ -1017,8 +903,6 @@ button.button:disabled {
     display: block;
     width: 100%;
     min-height: 320px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
 }
 .chart-wrap div.chart-themed.loading { visibility: hidden; }
 
@@ -1042,7 +926,6 @@ button.button:disabled {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     margin-bottom: 1rem;
-    background: var(--color-surface);
     color: var(--color-text);
 }
 .search-box:focus {
@@ -1064,7 +947,6 @@ ul.date-list { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap
 ul.tile-list li a, ul.date-list li a {
     display: block;
     padding: 0.8rem 0.9rem;
-    background: var(--color-primary-light);
     border: 1px solid var(--color-primary-lighter);
     border-radius: var(--radius-md);
     text-decoration: none;
@@ -1076,12 +958,10 @@ ul.tile-list li a, ul.date-list li a {
 }
 ul.date-list li a { padding: 0.55rem 0.7rem; font-size: 0.9rem; }
 ul.tile-list li a:hover, ul.date-list li a:hover {
-    background: var(--color-primary-lighter);
     box-shadow: var(--shadow-card-hover);
     transform: translateY(-1px);
 }
 ul.tile-list li a:active, ul.date-list li a:active { transform: translateY(0); }
-ul.tile-list.compact { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 ul.date-list.compact { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 0.4rem; }
 
 details.date-month-group {
@@ -1095,7 +975,6 @@ details.date-month-group summary {
     list-style: none;
     padding: 0.6rem 0.9rem;
     font-weight: 600;
-    background: var(--color-primary-light);
     color: var(--color-primary-dark);
     display: flex;
     align-items: baseline;
@@ -1110,7 +989,6 @@ details.date-month-group summary::before {
 details.date-month-group[open] summary::before { transform: rotate(90deg); }
 details.date-month-group summary .muted { font-weight: 400; }
 details.date-month-group .date-list { padding: 0.8rem 0.9rem; margin: 0; }
-ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 
 .station-grid {
     display: grid;
@@ -1161,7 +1039,6 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 }
 .image-grid figure {
     margin: 0;
-    background: var(--color-bg);
     border-radius: var(--radius-sm);
     overflow: hidden;
     border: 1px solid var(--color-border);
@@ -1180,8 +1057,6 @@ ul.tile-list.compact li a { padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 
 img.full-graph {
     max-width: 100%;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
 }
 
 /* station_detail.htmlのタイムラプス画像。カメラごとに元画像の解像度がまちまちで、
@@ -1213,16 +1088,6 @@ table.obs-table th, table.obs-table td {
     text-align: center;
     white-space: nowrap;
 }
-table.obs-table th {
-    background: var(--color-primary-light);
-    color: var(--color-primary-dark);
-    font-weight: 600;
-    /* 以前はposition:stickyで見出し行をスクロール中も表示していたが、ヘッダー高さの
-       測定値とずれると見出しがテーブル途中に浮いて表示される不具合が繰り返し発生したため、
-       信頼性を優先し通常のテーブル見出し(スクロールで流れる)に戻した。 */
-}
-table.obs-table tbody tr:nth-child(even) { background: var(--color-bg); }
-table.obs-table tbody tr:hover { background: var(--color-primary-light); }
 .table-scroll { overflow-x: auto; }
 
 /* 地点数だけ横に伸びる表(observations_date.html等)で、左端の時刻列を横スクロールしても
@@ -1282,7 +1147,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .content-grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1.4rem;
     align-items: start;
 }
 .content-grid-2 > .card { margin-bottom: 0; }
@@ -1291,9 +1155,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 }
 
 /* 地点マップ(map.html)の川霧アラート地点マーカー点滅。 */
-.map-marker-alert {
-    animation: mapMarkerPulse 1.2s ease-in-out infinite;
-}
 @keyframes mapMarkerPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
@@ -1429,7 +1290,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     text-align: center;
     text-decoration: none;
     color: var(--color-text);
-    background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: 1.1rem 0.8rem;
@@ -1475,7 +1335,7 @@ table.obs-table th.sticky-col { z-index: 3; }
 .role-tag.admin { background: var(--color-danger-bg); color: var(--color-danger); }
 .role-tag.general { background: var(--color-primary-lighter); color: var(--color-primary-dark); }
 .role-tag.aizu_observer { background: var(--color-success-bg); color: var(--color-success); }
-.role-tag.tadami_observer { background: var(--color-warning-bg); color: var(--color-warning); }
+.role-tag.tadami_observer { background: var(--color-warning-bg); }
 .role-tag.observer { background: var(--color-accent-bg); color: var(--color-accent); }
 
 /* メンバーページのログイン回数ランキング。以前は装飾の無い番号付きリストだったため、
@@ -1487,7 +1347,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     gap: 0.8rem;
     padding: 0.6rem 0.7rem;
     border-radius: var(--radius-md);
-    background: var(--color-bg);
 }
 .ranking-badge {
     flex: 0 0 auto;
@@ -1561,7 +1420,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 0.1rem 0.5rem;
     border-radius: 999px;
     background: var(--color-warning);
-    color: #fff;
     white-space: nowrap;
 }
 .ranking-toggle-btn {
@@ -1589,7 +1447,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 0.9rem 0.5rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border);
-    background: var(--color-surface);
     transition: box-shadow 0.15s ease;
 }
 .badge-tile:not(.locked):hover { box-shadow: var(--shadow-card-hover); }
@@ -1621,7 +1478,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .weather-info-item {
     padding: 0.5rem 0.8rem;
     border-radius: var(--radius-sm);
-    background: var(--color-bg);
 }
 .weather-info-label { font-size: 0.76rem; color: var(--color-text-muted); }
 .weather-info-value { font-size: 1.05rem; font-weight: 600; margin-top: 0.15rem; }
@@ -1695,7 +1551,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 1.5rem;
     box-sizing: border-box;
     overflow: hidden;
-    background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-bg) 65%);
 }
 /* 背景の川霧演出。帯状の要素をぼかして左右にゆっくり漂わせる(CSSのみ、画像・JS不要)。 */
 .fog-layer {
@@ -1731,16 +1586,10 @@ table.obs-table th.sticky-col { z-index: 3; }
     z-index: 1;
     width: 100%;
     max-width: 400px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card-hover);
-    padding: 2rem 1.8rem;
     text-align: center;
 }
 .auth-title {
     font-size: 1.25rem;
-    color: var(--color-primary);
     margin: 0 0 1.4rem;
 }
 .auth-card .card {
@@ -1754,9 +1603,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     position: fixed;
     top: 1rem;
     right: 1rem;
-    background: var(--color-surface);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
 }
 .auth-theme-toggle:hover { background: var(--color-bg); }
 
@@ -1981,7 +1827,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .reply-preview {
     font-size: 0.74rem;
     color: var(--color-text-muted);
-    background: var(--color-bg);
     border-left: 3px solid var(--color-border);
     padding: 0.25rem 0.5rem;
     border-radius: 0.3rem;
@@ -1995,7 +1840,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    background: var(--color-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     padding: 0.4rem 0.6rem;
@@ -2017,7 +1861,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     padding: 0.1rem 0.45rem;
     border-radius: 1rem;
     border: 1px solid var(--color-border);
-    background: var(--color-surface);
     color: var(--color-text);
     cursor: pointer;
 }
@@ -2065,7 +1908,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .pinned-bar-list[hidden] { display: none; }
 .pinned-bar-item {
     font-size: 0.78rem;
-    background: var(--color-surface);
     border-radius: 0.3rem;
     padding: 0.3rem 0.5rem;
     cursor: pointer;
@@ -2091,7 +1933,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     border-left: 4px solid var(--color-border);
     padding: 0.4rem 0.6rem;
     border-radius: 0.4rem;
-    background: var(--color-surface);
     color: var(--color-text);
     min-width: 160px;
 }
@@ -2133,14 +1974,12 @@ table.obs-table th.sticky-col { z-index: 3; }
     border: none;
     cursor: pointer;
     font-size: 0.95rem;
-    color: var(--color-warning);
     padding: 0 0.2rem;
     vertical-align: middle;
 }
 .file-tag-chip {
     display: inline-block;
     font-size: 0.68rem;
-    background: var(--color-bg);
     color: var(--color-text-muted);
     border: 1px solid var(--color-border);
     border-radius: 1rem;
@@ -2201,7 +2040,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     text-decoration: none;
 }
 .files-tab.active {
-    background: var(--color-surface);
     color: var(--color-primary);
     font-weight: 600;
     box-shadow: var(--shadow-card);
@@ -2249,14 +2087,11 @@ table.obs-table th.sticky-col { z-index: 3; }
 .observation-report-card { padding-bottom: 1.1rem; }
 .observation-report-head { margin-bottom: 0.8rem; }
 .observation-report-images {
-    display: flex;
     flex-wrap: wrap;
-    gap: 0.8rem;
     margin-bottom: 1rem;
 }
 .observation-report-image {
     text-align: center;
-    width: 260px;
     max-width: 100%;
 }
 .observation-report-image img {
@@ -2277,13 +2112,11 @@ table.obs-table th.sticky-col { z-index: 3; }
     font-weight: 600;
 }
 .observation-report-noimage {
-    width: 260px;
     max-width: 100%;
     aspect-ratio: 4 / 3;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--color-bg);
     border-radius: var(--radius-sm);
     color: var(--color-text-muted);
     font-size: 0.85rem;
@@ -2317,7 +2150,6 @@ table.obs-table th.sticky-col { z-index: 3; }
     align-items: center;
     gap: 0.35rem;
     border: 1px solid var(--color-border);
-    background: var(--color-surface);
     color: var(--color-text);
     border-radius: var(--radius-sm);
     padding: 0.45rem 0.75rem;

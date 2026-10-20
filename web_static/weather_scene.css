@@ -202,14 +202,6 @@
 .wx-scene ~ main .card, .wx-scene ~ main .sidebar-panel, .wx-scene ~ main .pf-card {
     background: rgba(255, 255, 255, 0.56);  /* 2026-10-09: 空を濃くしたぶん0.46→0.56(文字の読みやすさのため) */
 }
-:root[data-theme="dark"] .wx-scene ~ main .card,
-:root[data-theme="dark"] .wx-scene ~ main .sidebar-panel,
-:root[data-theme="dark"] .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.40); }
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .wx-scene ~ main .card,
-    :root:not([data-theme="light"]) .wx-scene ~ main .sidebar-panel,
-    :root:not([data-theme="light"]) .wx-scene ~ main .pf-card { background: rgba(24, 26, 34, 0.40); }
-}
 .wx-scene ~ main .breadcrumb, .wx-scene ~ main .breadcrumb a, .wx-scene ~ main .pf-back {
     color: #fff;
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
@@ -352,8 +344,8 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
         radial-gradient(closest-side, rgba(var(--wx-fog), 0.95), transparent) 85% 55% / 40% 100% no-repeat;
     filter: blur(10px);
 }
-.wx-card::before { bottom: -18%; height: 70%; opacity: var(--wx-fog-alpha); animation: wxDrift 26s ease-in-out infinite alternate; }
-.wx-card::after { top: -30%; height: 80%; opacity: max(var(--wx-cloud-alpha), calc(var(--wx-haze-alpha) * 0.8)); animation: wxDrift 38s ease-in-out infinite alternate-reverse; }
+.wx-card::before { bottom: -18%; height: 70%; opacity: var(--wx-fog-alpha); }
+.wx-card::after { top: -30%; height: 80%; opacity: max(var(--wx-cloud-alpha), calc(var(--wx-haze-alpha) * 0.8)); }
 .wx-card-name { font-size: 1.12rem; font-weight: 700; letter-spacing: 0.03em; font-feature-settings: "palt" 1; align-self: start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wx-card-region { font-size: 0.75rem; opacity: 0.88; margin-top: 0.05rem; }
 .wx-card-temp { grid-row: 1 / span 2; grid-column: 2; font-family: "Inter", var(--font-ui, sans-serif); font-size: 2.7rem; font-weight: 250; line-height: 1; letter-spacing: -0.03em; }
