@@ -205,7 +205,8 @@ def accuracy_summary(conn, since=None, model_like=CURRENT_MODEL_LIKE):
 def accuracy_trend(conn, station=None, model_like=CURRENT_MODEL_LIKE):
     """target_datetimeの日付ごとの的中率(「川霧かどうか」の一致率)の推移を返す。
     stationを指定すればその地点のみ。
-    戻り値: [{"date": "YYYY-MM-DD", "n": int, "correct": int}, ...]（日付昇順）
+    戻り値: [{"date": "YYYY-MM-DD", "n": int, "correct": int, "tp": int, "fp": int, "fn": int}, ...]（日付昇順）
+    tp/fp/fn は「川霧あり」についての的中・空振り・見逃し(2026-10-20追加。F1の推移を出すため)。
     """
     where = "WHERE actual_code IS NOT NULL"
     params = ()
@@ -217,13 +218,17 @@ def accuracy_trend(conn, station=None, model_like=CURRENT_MODEL_LIKE):
         params = params + (model_like,)
     where += " AND COALESCE(daylight, 1) = 1"
 
+    pf, af = _fog_sql("predicted_code"), _actual_fog_sql()
     rows = conn.execute(
         f"""SELECT substr(target_datetime, 1, 10) AS d, COUNT(*),
-                   SUM({_correct_sql()})
+                   SUM({_correct_sql()}),
+                   SUM(CASE WHEN {pf} = 1 AND {af} = 1 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN {pf} = 1 AND {af} = 0 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN {pf} = 0 AND {af} = 1 THEN 1 ELSE 0 END)
             FROM predictions {where}
             GROUP BY d ORDER BY d""", params,
     ).fetchall()
-    return [{"date": d, "n": n, "correct": c} for d, n, c in rows]
+    return [{"date": d, "n": n, "correct": c, "tp": tp, "fp": fp, "fn": fn} for d, n, c, tp, fp, fn in rows]
 
 
 def fog_pair_counts(conn, since=None, station=None, model_like=CURRENT_MODEL_LIKE):

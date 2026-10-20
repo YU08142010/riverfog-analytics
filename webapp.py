@@ -2114,7 +2114,7 @@ def _render_line_chart_png(dates, rates, title):
     return buf.getvalue()
 
 
-def _render_line_chart_plotly(dates, rates, title):
+def _render_line_chart_plotly(dates, rates, title, ytitle="的中率(%)", yrange=(0, 100), hoverformat="%{y:.1f}%"):
     """_render_line_chart_pngのPlotly版(2026-09-14、matplotlibからの移行第1弾)。
     PNGバイト列ではなくFigureのJSON文字列を返す。文字色・グリッド色はテーマに
     依存させず(サーバー側はニュートラルに描画)、base.htmlのmountPlotlyChart/
@@ -2128,7 +2128,7 @@ def _render_line_chart_plotly(dates, rates, title):
             x=x, y=rates, mode="lines+markers",
             line={"color": "#1a5276", "width": 1.4},
             marker={"size": 6},
-            hovertemplate="%{x|%Y-%m-%d}: %{y:.1f}%<extra></extra>",
+            hovertemplate="%{x|%Y-%m-%d}: " + hoverformat + "<extra></extra>",
         )]
         annotations = []
     else:
@@ -2140,7 +2140,7 @@ def _render_line_chart_plotly(dates, rates, title):
     layout = {
         "title": {"text": title, "font": {"size": 14}},
         "xaxis": {"type": "date"},
-        "yaxis": {"title": {"text": "的中率(%)"}, "range": [0, 100]},
+        "yaxis": {"title": {"text": ytitle}, "range": list(yrange)},
         "margin": {"t": 48, "r": 20, "b": 40, "l": 50},
         "showlegend": False,
         "paper_bgcolor": "rgba(0,0,0,0)",
@@ -6414,7 +6414,7 @@ _PAPER_FIGURES = [
     ("05_しきい値ごとの成績.png", "accuracy_threshold_chart", {}),
     ("06_混同行列_評価期間.png", "accuracy_training_confusion_matrix", {}),
     ("07_学習時の指標.png", "accuracy_training_metrics_chart", {}),
-    ("08_的中率の推移.png", "accuracy_chart", {}),
+    ("08_川霧F1の推移.png", "accuracy_chart", {}),
     ("09_予報の先までの日数ごとの成績.png", "accuracy_lead_time_chart", {}),
     ("10_地域別の成績.png", "accuracy_region_chart", {}),
     ("11_混同行列_運用.png", "accuracy_confusion_matrix", {}),
@@ -6744,15 +6744,29 @@ def _recall_view_stats(threshold):
     ]
 
 
+ACCURACY_F1_WINDOW_DAYS = 7
+
+
 @app.route("/accuracy/chart.json")
 def accuracy_chart():
+    # 的中率は、川霧がまれなため「いつも霧なし」でも95%以上になり、良し悪しが分からなかった(2026-10-20)。
+    # 川霧の判定の成績(F1)を、1日ごとでは件数が少なくぶれるので、その日までの7日分をまとめて出す。
     def render():
-        trend = _accuracy_trend_safe()
-        dates = [r["date"] for r in trend if r["n"] > 0]
-        rates = [100.0 * r["correct"] / r["n"] for r in trend if r["n"] > 0]
-        return _render_line_chart_plotly(dates, rates, "全地点の的中率推移")
+        trend = [r for r in _accuracy_trend_safe() if r["n"] > 0]
+        dates, f1s = [], []
+        for i, r in enumerate(trend):
+            win = trend[max(0, i - ACCURACY_F1_WINDOW_DAYS + 1):i + 1]
+            tp = sum(x.get("tp") or 0 for x in win)
+            fp = sum(x.get("fp") or 0 for x in win)
+            fn = sum(x.get("fn") or 0 for x in win)
+            if tp + fn == 0:
+                continue  # 7日間に川霧が1件も無いとF1が決まらない
+            dates.append(r["date"])
+            f1s.append(2 * tp / (2 * tp + fp + fn))
+        return _render_line_chart_plotly(dates, f1s, f"川霧の判定の成績(F1・直近{ACCURACY_F1_WINDOW_DAYS}日)の推移",
+                                         ytitle="F1", yrange=[0, 1], hoverformat="%{y:.2f}")
 
-    data = _cached_chart_json("accuracy_chart", [DB_PATH], render)
+    data = _cached_chart_json("accuracy_f1_chart", [DB_PATH], render)
     return Response(data, mimetype="application/json")
 
 
@@ -7268,16 +7282,24 @@ _public_insights_lock = threading.Lock()
 def _build_public_insights():
     import pandas as pd
     main_df, phenom_df, station_names = fog_data.load_river_fog_data()
+    # 「研究の概要」の集計(_build_public_station_stats)・学習と同じ数え方にそろえる(2026-10-20): 人の訂正を反映し、
+    # 日の出〜日の入りの時刻だけを数える。以前は訂正前の判定を、日の出前・日没後の時刻も含めて数えていて、
+    # 同じ公開ページの「日中の判定件数」と件数が食い違っていた。
+    phenom_df, _n = fog_data.apply_phenomena_corrections(phenom_df, fog_data.load_phenomena_corrections())
     df = main_df.copy()
     df["__depression"] = df[COL_TEMP] - df[COL_DEWPOINT]
     rows = []
     for st in station_names or []:
         if st not in phenom_df.columns:
             continue
+        info = CAMERA_INFO.get(st, {})
+        if info.get("lat") is None or info.get("lon") is None:
+            continue
         m = df.merge(phenom_df[["datetime", st]], on="datetime", how="inner")
         codes = m[st].apply(encode_phenomena_cell).apply(primary_phenom_code)
-        m = m.loc[codes.notna()].copy()
-        m["__fog"] = codes.loc[codes.notna()].isin(SUMMARY_FOG_CODES)
+        keep = codes.notna().to_numpy() & np.asarray(fog_features.daylight_mask(m["datetime"], info["lat"], info["lon"]), dtype=bool)
+        m = m.loc[keep].copy()
+        m["__fog"] = codes.loc[keep].isin(SUMMARY_FOG_CODES)
         m["__station"] = st
         rows.append(m[["datetime", "__fog", "__station", COL_HUMIDITY, COL_WIND_SPEED, "__depression"]])
     if not rows:

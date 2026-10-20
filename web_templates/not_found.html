@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{# ログイン中の人向けの「ページが見つかりません」(2026-10-20。以前は英語の素の画面だった)。 #}
+{# ログイン中の人向けの「ページが見つかりません」(2026-10-20。以前は英語の素の画面だった)。
+   見出しはbase.htmlがタイトルから出すので、カードの中には書かない。 #}
 {% block title %}ページが見つかりません{% endblock %}
 {% block content %}
 <div class="card" style="text-align:center;">
-    <h2 style="margin-top:0;">ページが見つかりません</h2>
     <p class="muted">URLが間違っているか、ページが移動・削除された可能性があります(地点の名前が変わった場合など)。</p>
     <p><a class="button" href="{{ url_for('dashboard') }}">ホームへ戻る</a></p>
 </div>

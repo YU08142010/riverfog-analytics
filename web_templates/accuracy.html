@@ -9,9 +9,11 @@
     <span class="muted">SHAP・信頼性・しきい値・ヒストグラムなど約20枚を白い背景の画像で(作るのに数十秒かかります)</span>
 </div>
 <div class="card">
-    <h2>的中率の推移(全地点)</h2>
+    <h2>川霧の判定の成績(F1)の推移(全地点)</h2>
     {% if summary and summary.overall.n %}
-    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点の的中率推移グラフ" data-chart-url="{{ url_for('accuracy_chart') }}"></div></div>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点の川霧F1の推移グラフ" data-chart-url="{{ url_for('accuracy_chart') }}"></div></div>
+    <p class="muted" style="font-size:0.85rem;">F1は「川霧あり」の予測が当たった割合と、川霧を見逃さなかった割合をまとめた値(0〜1、高いほど良い)。
+        1日ごとでは川霧の件数が少なくぶれるので、各日までの7日分で計算しています。的中率は、川霧がまれなため「いつも霧なし」でも高く出るので、グラフには使っていません。</p>
     {% if summary.next_day and summary.next_day.n %}
     <p class="muted">翌日の予測(発表から24時間先まで) {{ summary.next_day.correct }}/{{ summary.next_day.n }}
         （的中率 {{ "%.1f"|format(100.0 * summary.next_day.correct / summary.next_day.n) }}%{% if summary.next_day.n_hindcast %}、うち再予測 {{ summary.next_day.n_hindcast }}件{% endif %}）</p>
