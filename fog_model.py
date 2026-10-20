@@ -43,6 +43,11 @@ loglossも有意に改善し、3期間すべてで改善した)
 試して採らなかったもの(同じ評価): 前日の川霧実績(APが変わらない)、日長(悪化)、リードタイム別の
 気候値の割合(差が無い)、日単位(その日の朝に霧が出るか)のモデル(1時間ごとのモデルの日最大よりAPが低い)。
 
+【2026-10-20の改良】しきい値を「検証期間の最大のF1の半分」に(_choose_threshold)。F1が最大になる確率そのものは
+期間ごとのぶれが大きかった。試して採らなかったもの(data/experiments/accuracy_review*_20261020.json): 学習行の地点別
+発生率を自分の週を除いて計算(APは有意差なし・loglossが悪化)、学習データに過去の予報を入力にした行を足す(差が無い)、
+気候値との混合の代わりにロジスティック補正(F1が下がる)、検証期間の「川霧あり」の数を実際の数に合わせるしきい値(F1が下がる)。
+
 【期間の分け方】(すべて時系列順。未来のデータで過去を学習しない)
   [ ........ 学習(inner) ........ | 検証 VALIDATION_WINDOW_DAYS日 | 評価 TEST_WINDOW_DAYS日 ]
   - 検証期間: ハイパーパラメータ・木の本数(early stopping)・しきい値の選択
@@ -424,6 +429,17 @@ def _best_threshold(y_true, probs):
         if f1 > best_f1:
             best_t, best_f1 = float(t), float(f1)
     return best_t, best_f1
+
+
+def _choose_threshold(y_true, probs):
+    """本番のしきい値(2026-10-20〜): 検証期間で到達できる最大のF1の半分。戻り値: (しきい値, 最大のF1)。
+    確率が較正されていれば、F1を最大にするしきい値は「最大のF1の半分」になる(Lipton et al. 2014)。
+    以前はF1が最大になる確率そのものを使っていたが、14日分のF1曲線は凸凹で山の位置が大きくぶれ、
+    0.02や0.28のような極端な値を選ぶ日があった(2026-10-19の学習は0.28で、10月の評価期間は「川霧あり」が3週間で17件・F1 0.07)。
+    直近8週を2週×4でずらした比較(data/experiments/accuracy_review3_20261020.json、川霧1185件)で
+    F1 0.213→0.341(差の95%区間 +0.081〜+0.167)。APなど確率そのものの成績は変わらない。"""
+    _t, best_f1 = _best_threshold(y_true, probs)
+    return max(float(FOG_THRESHOLD_GRID[0]), round(best_f1 / 2.0, 2)), best_f1
 
 
 # --- 学習データの準備 -------------------------------------------------------------------
@@ -886,7 +902,7 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
         chosen = min(candidates, key=lambda c: c["logloss"])
     params, inner_model = chosen["params"], chosen["model"]
 
-    # 2) しきい値: 検証期間で、予報を入力にした場合にF1が最大になる値
+    # 2) しきい値: 検証期間で、予報を入力にした場合の最大のF1の半分(_choose_threshold)
     #    (川霧が少なすぎれば前回の値→既定値)
     val_fc = _forecast_input_rows(val, hist_by_station, station_coords, weather_features, shared_medians)
     use_forecast = len(val_fc) > 0 and int(val_fc["__y"].sum()) >= MIN_POSITIVES_FOR_THRESHOLD
@@ -909,8 +925,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     log.info("Climatology blend weight=%.2f [%s]", clim_weight, weight_source)
     prev_threshold = _previous_shared_threshold(prev_state)
     if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
-        threshold, thr_f1 = _best_threshold(thr_y, thr_p)
-        threshold_source = (f"validation F1 max on {'forecast' if use_forecast else 'observed'} inputs "
+        threshold, thr_f1 = _choose_threshold(thr_y, thr_p)
+        threshold_source = (f"half of validation F1 max on {'forecast' if use_forecast else 'observed'} inputs "
                             f"({thr_f1:.3f}, {int(thr_y.sum())} fog rows)")
     elif prev_threshold is not None:
         threshold, threshold_source = prev_threshold, f"previous model (only {int(thr_y.sum())} fog rows in validation)"
@@ -937,7 +953,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     pred_test = (p_test >= threshold).astype(int)
     overall = binary_metrics(y_test, pred_test, p_test)
     unblended = binary_metrics(y_test, (p_test_raw >= threshold).astype(int), p_test_raw) if len(y_test) else {}
-    # 基準(気候値)も同じ行・同じ決め方(検証期間でF1最大)のしきい値で採点する
+    # 基準(気候値)は同じ行で、検証期間でF1が最大になるしきい値で採点する(F1の半分の規則とどちらが有利かは期間で
+    # 入れ替わる(accuracy_review_20261020.json・..._review3_...)ため、以前からの決め方のまま比べる)
     clim_threshold = (_best_threshold(thr_y, clim_val)[0]
                       if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD else threshold)
     climatology = binary_metrics(y_test, (clim_test >= clim_threshold).astype(int), clim_test)
@@ -1071,13 +1088,13 @@ def _compare_rf_xgboost(inner, val, train, thr_rows, eval_rows, weather_features
                                    sample_weight=w_inner)
     best = getattr(xgb_i, "best_iteration", None)
     n_xgb = max(50, int(round(((best + 1) if best is not None else MAX_ESTIMATORS) * REFIT_ESTIMATOR_SCALE)))
-    # 2) 気候値の割合・しきい値: LightGBMと同じ検証期間の行・同じ入力で、F1最大
+    # 2) 気候値の割合・しきい値: LightGBMと同じ検証期間の行・同じ入力・同じ決め方(_choose_threshold)
     thr_y = thr_rows["__y"].to_numpy()
     p_thr = ens((_rf_i, xgb_i), thr_rows, inner_rates, inner_global)
     clim_thr = _climatology_probs(inner, thr_rows)
     if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD:
         w = _best_climatology_weight(thr_y, p_thr, clim_thr)
-        threshold = _best_threshold(thr_y, (1 - w) * p_thr + w * clim_thr)[0]
+        threshold = _choose_threshold(thr_y, (1 - w) * p_thr + w * clim_thr)[0]
     else:
         w, threshold = lgbm_clim_weight, DEFAULT_FOG_THRESHOLD
     # 3) 評価: 「学習+検証」で学習し直し、評価期間を採点
