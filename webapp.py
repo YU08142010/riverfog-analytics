@@ -12396,6 +12396,10 @@ def _warm_caches_once():
     steps = (
         ("weather data", lambda: fog_data.load_river_fog_data()),  # 観測DBの更新時刻で自動的に読み直す
         ("public forecast", lambda: refresh(_public_forecast_cache, PUBLIC_CACHE_SECONDS, _public_forecast_safe)),
+        # 公開ページの「川霧が出やすい条件」と地点ページの月別・時刻別の割合(2026-10-20〜): 再起動直後に公開ページを
+        # 最初に開いた人が約11秒待たされていた。どちらも自分で作り直す時期を判断するので、呼ぶだけでよい。
+        ("public insights", _public_insights_safe),
+        ("public station stats", _public_station_stats_safe),
         ("accuracy summary", lambda: refresh(_accuracy_summary_cache, ACCURACY_SUMMARY_CACHE_SECONDS, _accuracy_summary_safe)),
         ("accuracy by weather", lambda: refresh(_accuracy_by_weather_cache, ACCURACY_SUMMARY_CACHE_SECONDS,
                                                _accuracy_by_weather_safe)),
