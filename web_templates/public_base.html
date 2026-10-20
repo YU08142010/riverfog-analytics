@@ -169,9 +169,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 .pf-fs .pf-i-shrink { display: none; }
 .pf-fs[aria-pressed="true"] .pf-i-expand { display: none; }
 .pf-fs[aria-pressed="true"] .pf-i-shrink { display: block; }
-/* 全画面の時は、ページの背景(空・霧)が画面の端まで続くようにする */
-:root:fullscreen, :root:fullscreen body { background: var(--pf-bg); }
-:root:-webkit-full-screen body { background: var(--pf-bg); }
+/* 全画面の時は、ページの背景(空・霧)が画面の端まで続くようにする。
+   色を塗るのはhtmlだけにする。bodyまで塗ると、その下(z-index:-1)にある空の背景(.wx-scene)と
+   壁紙(body::before)が隠れ、全画面で背景が消えていた(2026-10-20)。 */
+:root:fullscreen { background: var(--pf-bg); }
+:root:-webkit-full-screen { background: var(--pf-bg); }
 .pf-theme .pf-i-moon { display: none; }
 :root[data-theme="dark"] .pf-theme .pf-i-sun { display: none; }
 :root[data-theme="dark"] .pf-theme .pf-i-moon { display: block; }

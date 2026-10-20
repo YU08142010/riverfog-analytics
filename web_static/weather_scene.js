@@ -96,13 +96,26 @@
         }
     }
 
+    // 大きさが変わったときは、霧・雲・雨・星を作り直さずに位置と大きさを伸び縮みさせる
+    // (作り直すと、全画面の出入りやウィンドウの大きさの変更のたびに霧が別の場所へ飛んで見えた、2026-10-20)
+    function rescale(sx, sy, su) {
+        var i;
+        for (i = 0; i < puffs.length; i++) { puffs[i].x *= sx; puffs[i].y *= sy; puffs[i].r *= su; }
+        for (i = 0; i < clouds.length; i++) { clouds[i].x *= sx; clouds[i].y *= sy; clouds[i].r *= su; }
+        for (i = 0; i < drops.length; i++) { drops[i].x *= sx; drops[i].y *= sy; }
+        for (i = 0; i < stars.length; i++) { stars[i].x *= sx; stars[i].y *= sy; }
+    }
+    var built = false;
     function resize() {
         // 背景は画面より大きくしてある(glass.css)ので、背景そのものの大きさで描く(引き伸ばさない)
+        var oldW = W, oldH = H, oldUnit = unit;
         W = scene.clientWidth || window.innerWidth; H = scene.clientHeight || window.innerHeight;
         unit = Math.max(0.6, Math.min(1.4, W / 1280));
+        if (W === oldW && H === oldH && built) { return; }
         canvas.width = Math.ceil(W * SCALE);
         canvas.height = Math.ceil(H * SCALE);
-        build();
+        if (built && oldW && oldH) { rescale(W / oldW, H / oldH, unit / oldUnit); }
+        else { build(); built = true; }
     }
 
     // マウス・スクロールによる視差(目標値に向けてなめらかに追従させる)
@@ -176,6 +189,8 @@
         if (!running) { return; }
         var dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016;
         last = now;
+        // 全画面の中の枠(fs_shell.js)で別のページを見ている間、この下のページは見えないので描かない
+        if (rootCls.contains("fs-shell-on")) { window.requestAnimationFrame(frame); return; }
         acc += dt;
         if (acc >= 1 / 16) {  // 約15fps
             draw(now / 1000, acc);
@@ -186,10 +201,16 @@
 
     resize();
     var resizeTimer = null;
+    function resizeNow() { resize(); draw(last / 1000, 0); }
     window.addEventListener("resize", function() {
         clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(function() { resize(); if (reduceMotion) { draw(0, 0); } }, 150);
+        resizeTimer = setTimeout(resizeNow, 150);
     });
+    // 全画面の出入りでは大きさが一度に大きく変わる。待つと古い絵が引き伸ばされて見えるので、すぐに描き直す
+    // (次のコマで大きさが確定してから)
+    function onFullscreen() { window.requestAnimationFrame(resizeNow); }
+    document.addEventListener("fullscreenchange", onFullscreen);
+    document.addEventListener("webkitfullscreenchange", onFullscreen);
     if (reduceMotion) {
         draw(0, 0);
         return;
