@@ -1889,6 +1889,8 @@ html.rf-calm-bg .ls-fog { animation: none !important; }
 .hist-mode .seg-btn { text-decoration: none; color: inherit; }
 .hist-mode .seg-btn[aria-current="page"] { background: var(--color-primary); color: #fff; font-weight: 600; }
 .hist-dl { display: inline-flex; gap: 0.35rem; flex: 0 0 auto; }
+/* 上の2つのボタン(CSV・ZIP)は、スマホの幅では折り返す(縮まずに画面の右へはみ出していた、2026-10-20) */
+.hist-tools .hist-dl { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; }
 .hist-item .button-small, .hist-tools .button-small { padding: 0.3rem 0.85rem; font-size: 0.8rem; border-radius: 999px; text-decoration: none; }.button-secondary { background: var(--control-bg); color: var(--color-text); box-shadow: none; }
 .button-secondary:hover { background: var(--color-primary-lighter); }
 .paper-figs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin: 0 0 0.8rem; font-size: 0.82rem; }
