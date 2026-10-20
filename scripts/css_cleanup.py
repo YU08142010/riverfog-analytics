@@ -10,7 +10,7 @@
      上書きする側は、同じファイルか、必ず後に読まれるファイル(style→glass→theme)。weather_scene.cssは自分の中だけ。
   B) 規則: セレクタのクラス名・idが、テンプレート・JS・Pythonのどこにも出てこない(動的に作る接頭辞・ライブラリのものは除く)。
 """
-import glob, json, os, re, sys
+import glob, json, os, re
 import tinycss2
 
 ROOT = "/opt/river-fog"
