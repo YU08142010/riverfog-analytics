@@ -21,6 +21,7 @@
             <div><span class="muted">予測の適合率</span><b>{{ pct(perf.precision) }}</b></div>
             <div><span class="muted">予測の再現率</span><b>{{ pct(perf.recall) }}</b></div>
         </div>
+        {% if not perf.n %}<p class="muted" style="font-size:0.85rem;">予測の成績は、今の予測モデル(2026年10月4日から)の予測だけで数えるため、この月は出せません。</p>{% endif %}
         {% if r.top_stations %}<p class="muted">多かった地点: {% for t in r.top_stations[:5] %}{{ t.station }}({{ t.days }}日){{ "・" if not loop.last }}{% endfor %}</p>{% endif %}
         <p class="report-actions">
             <a class="button" href="{{ url_for('report_pdf', month=r.month) }}" target="_blank" rel="noopener">PDFを開く</a>

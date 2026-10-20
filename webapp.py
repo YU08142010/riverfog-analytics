@@ -844,7 +844,7 @@ MAINTENANCE_EXEMPT_PREFIXES = ("/admin", "/web_static", "/login", "/logout")
 # /forecastは一般向けの公開ページ(_build_public_forecast参照)。
 PUBLIC_PREFIX = "/forecast"
 LOGIN_EXEMPT_PREFIXES = ("/login", "/signup", "/logout", "/web_static", PUBLIC_PREFIX, "/api/backup-manifest",
-                         "/offline-sw.js")  # 2026-10-14: やめた仕組みを、ログアウト中のブラウザからも解除できるように(中身は自分を解除するだけのJS)
+                         "/offline-sw.js", "/favicon.ico")  # 2026-10-14: やめた仕組みを、ログアウト中のブラウザからも解除できるように(中身は自分を解除するだけのJS)
 
 # Tailscale Funnelで一般公開しているホスト名。nginx(8443)経由のTailscale内アクセスとは
 # 別に、tailscaledがこのホスト名宛のリクエストだけを直接127.0.0.1:8081へ転送してくる。
@@ -955,6 +955,31 @@ def _require_login():
     # 場合に備えてgに載せておく(_current_user_favorite_stations参照、二重問い合わせ防止)。
     g.current_user = user
     return None
+
+
+# 「ページが見つかりません」(2026-10-20)。以前はFlaskの英語の素の画面だった。公開ページとログインしていない人には
+# 公開ページの見た目で、ログイン中の人には研究用サイトの見た目で出す。画像・JSON・CSVなどページ以外は今までどおり。
+_NOT_FOUND_RAW_SUFFIXES = (".json", ".png", ".jpg", ".svg", ".csv", ".zip", ".js", ".css", ".ico", ".xlsx", ".pdf", ".mp4")
+
+
+@app.errorhandler(404)
+def _not_found(e):
+    path = request.path
+    if path.startswith(("/web_static/", "/api/")) or path.endswith(_NOT_FOUND_RAW_SUFFIXES):
+        return e
+    try:
+        if path.startswith(PUBLIC_PREFIX) or not session.get("user_id") or getattr(g, "current_user", None) is None:
+            return render_template("public_not_found.html"), 404
+        return render_template("not_found.html"), 404
+    except Exception:
+        log.exception("Failed to render the not-found page for %s", path)
+        return e
+
+
+# ブラウザがページと関係なく取りに来る /favicon.ico に、サイトのアイコン(SVG)を返す(404の記録を出さないため)
+@app.route("/favicon.ico")
+def favicon_ico():
+    return redirect(url_for("static", filename="favicon.svg"), code=301)
 
 
 # 利用規約(2026-10-13、公開ページだけ)。文面は web_templates/_terms_body.html。文面を大きく変えたら版(日付)を上げると、
@@ -7106,6 +7131,9 @@ def _build_public_station_stats():
     hours = dts.dt.hour.to_numpy()
     fog_codes = set(SUMMARY_FOG_CODES)
     stations, total_n, total_fog = {}, 0, 0
+    # 記録期間は、どこかの地点に判定がある時刻だけから求める。表には判定の無い行(2024-06〜2025-06の
+    # 枠だけの行)もあり、表の先頭を使うと「2024/06/01〜」と実際より1年早く出ていた(2026-10-20)。
+    any_valid = np.zeros(len(dts), dtype=bool)
     for name in station_names:
         info = CAMERA_INFO.get(name, {})
         lat, lon = info.get("lat"), info.get("lon")
@@ -7116,6 +7144,7 @@ def _build_public_station_stats():
         primary = raw.map(mapping).to_numpy(dtype="float64")
         valid = ~np.isnan(primary) & fog_features.daylight_mask(dts, lat, lon)
         is_fog = np.isin(primary, list(fog_codes)) & valid
+        any_valid |= np.asarray(valid, dtype=bool)
         n, n_fog = int(valid.sum()), int(is_fog.sum())
         total_n += n
         total_fog += n_fog
@@ -7138,8 +7167,8 @@ def _build_public_station_stats():
         "stations": stations,
         "total_n": total_n,
         "total_fog": total_fog,
-        "period_start": dts.min().strftime("%Y/%m/%d") if len(dts) else None,
-        "period_end": dts.max().strftime("%Y/%m/%d") if len(dts) else None,
+        "period_start": dts[any_valid].min().strftime("%Y/%m/%d") if any_valid.any() else None,
+        "period_end": dts[any_valid].max().strftime("%Y/%m/%d") if any_valid.any() else None,
     }
 
 

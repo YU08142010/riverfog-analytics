@@ -1,0 +1,10 @@
+{% extends "public_base.html" %}
+{# 公開ページ・ログインしていない人向けの「ページが見つかりません」(2026-10-20。以前は英語の素の画面だった)。 #}
+{% block title %}ページが見つかりません{% endblock %}
+{% block content %}
+<div class="pf-card" style="text-align:center; padding:2rem 1.2rem;">
+    <h1 style="margin:0 0 0.6rem; font-size:1.4rem;">ページが見つかりません</h1>
+    <p class="pf-muted" style="margin:0 0 1.2rem;">URLが間違っているか、ページが移動・削除された可能性があります。</p>
+    <p style="margin:0;"><a href="{{ url_for('public_forecast') }}">発生予測のトップへ戻る</a></p>
+</div>
+{% endblock %}
