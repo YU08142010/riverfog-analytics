@@ -1605,7 +1605,6 @@ main:focus { outline: none; }
 .home-list li { font-size: 0.92rem; }
 a.station-chip { display: block; text-decoration: none; }
 a.station-chip:hover, a.station-chip:focus-visible { filter: brightness(0.95); box-shadow: 0 0 0 2px var(--color-primary); outline: none; }
-:root:not([data-theme="dark"]) { --glass-bg: rgba(255, 255, 255, 0.88); }
 
 /* サイドバーをしまう(2026-10-12) */
 .app-side-toggle { display: none; }
