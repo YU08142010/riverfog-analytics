@@ -62,6 +62,17 @@ def _prepare(path, hhmm, size, font):
     return im
 
 
+def cached_path(station, date):
+    """既に作成済みの動画があればそのパス、無ければNone(生成はしない)。
+    新規生成のレート制限で「安いキャッシュ配信」と「重い新規生成」を見分けるために使う。"""
+    import glob as _glob
+    d = OUT_DIR / date
+    if not d.is_dir():
+        return None
+    matches = sorted(d.glob(_glob.escape(station) + "_*.mp4"))
+    return matches[0] if matches else None
+
+
 def build(station, date):
     """動画のパス(作れなければNone)。同じ枚数で作ったものがあれば使い回す。"""
     frames = frames_for(station, date)

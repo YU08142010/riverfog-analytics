@@ -174,6 +174,30 @@ def _report_rate_limited(user_id):
         return False
 
 
+# 重い生成系エンドポイント(タイムラプス動画のffmpeg・論文図のmatplotlib約20枚・時間ごとの画像ZIP)の
+# ユーザー単位のレート制限(2026-10-21の監査)。これらはログイン必須だが無制限で、別の日付や地点を
+# 大量に要求すればCPU・メモリ・ディスクを圧迫できた。キーは(用途, user_id)で、実在ユーザー数しか
+# 増えないため無期限増加の心配はない(_report_rate_limitedと同じ考え方)。
+_heavy_attempts = {}
+_heavy_attempts_lock = threading.Lock()
+
+
+def _heavy_rate_limited(bucket, user_id, max_n, window):
+    key = (bucket, user_id)
+    now = datetime.now(JST)
+    with _heavy_attempts_lock:
+        attempts = [t for t in _heavy_attempts.get(key, []) if now - t < window]
+        if len(attempts) >= max_n:
+            _heavy_attempts[key] = attempts
+            return True
+        attempts.append(now)
+        _heavy_attempts[key] = attempts
+        return False
+
+
+HEAVY_RATE_WINDOW = timedelta(minutes=10)
+
+
 def _login_rate_limited(ip):
     now = datetime.now(JST)
     with _login_attempts_lock:
@@ -5218,6 +5242,9 @@ def images_thumb(date, hhmm, filename):
 def images_hour_zip(date, hhmm):
     date = _validate_date(date)
     hhmm = _validate_hhmm(hhmm)
+    # 全地点ぶんのZIPをメモリ上に構築するため重い。ユーザー単位でレート制限する(2026-10-21の監査)。
+    if _heavy_rate_limited("images_zip", session.get("user_id"), 10, HEAVY_RATE_WINDOW):
+        abort(429)
     hour_dir = IMAGE_DIR / date / hhmm
     if not hour_dir.is_dir():
         abort(404)
@@ -6468,6 +6495,9 @@ _PAPER_FIGURES = [
 def paper_figures_zip():
     """_PAPER_FIGURES をそれぞれのグラフのJSONから画像(PNG、白い背景・幅1400px・2倍)にしてZIPで返す。
     作れなかった図は飛ばして、ZIPの中の「作れなかった図.txt」に書く。ヒストグラムのCSVも入れる。"""
+    # matplotlibで約20枚描くため重い。ユーザー単位でレート制限する(2026-10-21の監査)。
+    if _heavy_rate_limited("paper_figures", session.get("user_id"), 5, HEAVY_RATE_WINDOW):
+        abort(429)
     buf = io.BytesIO()
     failed = []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -8062,6 +8092,10 @@ def gallery_page():
 def station_timelapse_video(name, date):
     name = _validate_station(name)
     date = _validate_date(date)
+    # 既に作成済みならそのまま返す(安い)。新規生成だけをレート制限する(ffmpegが重いため)。
+    cached = timelapse.cached_path(name, date)
+    if cached is None and _heavy_rate_limited("timelapse", session.get("user_id"), 20, HEAVY_RATE_WINDOW):
+        abort(429)
     try:
         path = timelapse.build(name, date)
     except Exception as e:
