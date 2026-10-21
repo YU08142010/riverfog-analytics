@@ -1,6 +1,10 @@
 <div class="sidebar-panel">
     <a href="{{ url_for('chat_page', new=1) }}" class="button" style="display:block; width:100%; text-align:center; box-sizing:border-box; margin-bottom:0.6rem;">+ 新規チャット</a>
-    <ul class="sidebar-list chat-sidebar-list">
+    <button type="button" class="chat-history-toggle" id="chat-history-toggle" aria-expanded="true" aria-controls="chat-sidebar-list">
+        <span>会話の履歴</span>
+        <span class="chat-history-caret" aria-hidden="true">▾</span>
+    </button>
+    <ul class="sidebar-list chat-sidebar-list" id="chat-sidebar-list">
         {% for c in conversations %}
         <li>
             <a href="{{ url_for('chat_page', c=c.id) }}"
@@ -19,6 +23,17 @@
 (function() {
     var sidebarList = document.querySelector(".chat-sidebar-list");
     if (!sidebarList) { return; }
+    // 会話の履歴(一覧)の収納・展開。状態はこの端末に記憶する。
+    var histToggle = document.getElementById("chat-history-toggle");
+    if (histToggle) {
+        var HKEY = "rfChatHistoryCollapsed";
+        try { if (localStorage.getItem(HKEY) === "1") { sidebarList.classList.add("collapsed"); histToggle.setAttribute("aria-expanded", "false"); } } catch (e) {}
+        histToggle.addEventListener("click", function() {
+            var collapsed = sidebarList.classList.toggle("collapsed");
+            histToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+            try { localStorage.setItem(HKEY, collapsed ? "1" : "0"); } catch (e) {}
+        });
+    }
     sidebarList.addEventListener("click", function(e) {
         var btn = e.target.closest(".chat-delete-btn");
         if (!btn) { return; }

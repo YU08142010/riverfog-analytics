@@ -62,6 +62,35 @@
     }
     refreshRemaining();
     input.focus();
+
+    // 長い発言(ユーザー/AI)は既定で折りたたみ、「全文を表示/折りたたむ」で展開できる。
+    var COLLAPSE_MAX = 190;
+    function enhanceCollapsible(el) {
+        var body = el.querySelector(".chat-message-body");
+        if (!body || el.dataset.enhanced) { return; }
+        el.dataset.enhanced = "1";
+        if (body.scrollHeight <= COLLAPSE_MAX + 24) { return; }
+        el.classList.add("chat-collapsible", "chat-collapsed");
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "chat-toggle";
+        btn.textContent = "全文を表示";
+        btn.addEventListener("click", function() {
+            var collapsed = el.classList.toggle("chat-collapsed");
+            btn.textContent = collapsed ? "全文を表示" : "折りたたむ";
+        });
+        el.appendChild(btn);
+    }
+    // サーバー描画済みの履歴を本文ラッパーで包み、長ければ折りたたむ。
+    Array.prototype.forEach.call(messages.querySelectorAll(".chat-message-user, .chat-message-ai"), function(el) {
+        if (!el.querySelector(".chat-message-body")) {
+            var body = document.createElement("div");
+            body.className = "chat-message-body";
+            while (el.firstChild) { body.appendChild(el.firstChild); }
+            el.appendChild(body);
+        }
+        enhanceCollapsible(el);
+    });
     messages.scrollTop = messages.scrollHeight;
 
     // Enterで送信、Shift+Enterで改行(IME変換確定のEnterでは送信しない)。
@@ -74,8 +103,17 @@
     function addMessage(text, who) {
         var wrap = document.createElement("div");
         wrap.className = "chat-message chat-message-" + who;
-        wrap.textContent = text;
-        messages.appendChild(wrap);
+        if (who === "user" || who === "ai") {
+            var body = document.createElement("div");
+            body.className = "chat-message-body";
+            body.textContent = text;
+            wrap.appendChild(body);
+            messages.appendChild(wrap);
+            enhanceCollapsible(wrap);
+        } else {
+            wrap.textContent = text;
+            messages.appendChild(wrap);
+        }
         messages.scrollTop = messages.scrollHeight;
         return wrap;
     }

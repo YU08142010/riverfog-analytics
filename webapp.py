@@ -564,8 +564,8 @@ GEMINI_LOG_DAYS = 14
 CHAT_DB_PATH = BASE_DIR / "data" / "chat.db"
 # 無料枠のクォータを画像分類・AI要約・エスカレーションと共有しているため、チャット単体に
 # 使いすぎないよう1日あたりの上限を設ける(.envで調整可能。詳しくはGemini状況ページ参照)。
-CHAT_DAILY_LIMIT_PER_USER = int(os.environ.get("AI_CHAT_DAILY_LIMIT_PER_USER", "10"))
-CHAT_DAILY_LIMIT_TOTAL = int(os.environ.get("AI_CHAT_DAILY_LIMIT_TOTAL", "50"))
+CHAT_DAILY_LIMIT_PER_USER = int(os.environ.get("AI_CHAT_DAILY_LIMIT_PER_USER", "25"))
+CHAT_DAILY_LIMIT_TOTAL = int(os.environ.get("AI_CHAT_DAILY_LIMIT_TOTAL", "150"))
 CHAT_QUESTION_MAX_LENGTH = 300
 
 FEEDBACK_BODY_MAX_LENGTH = 2000

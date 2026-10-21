@@ -2187,3 +2187,53 @@ table.obs-table th.sticky-col { z-index: 3; }
 .phenom-btn:disabled:hover { box-shadow: none; }
 .phenom-picker-secondary { margin-top: 0.3rem; }
 
+
+/* AIチャットの改善(2026-10-21): 会話欄を広く・読みやすく、長い発言と履歴一覧を折りたためるように */
+.chat-card { height: 80vh; min-height: 540px; }
+.chat-messages { gap: 0.7rem; padding: 1.1rem 1.3rem; font-size: 0.95rem; line-height: 1.7; }
+.chat-message { font-size: 0.95rem; line-height: 1.65; max-width: 92%; padding: 0.6rem 0.85rem; }
+.chat-form textarea { font-size: 0.95rem; }
+.chat-message-body { white-space: pre-wrap; }
+.chat-collapsible.chat-collapsed .chat-message-body {
+    max-height: 190px;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 68%, transparent 100%);
+}
+.chat-toggle {
+    display: inline-block;
+    margin-top: 0.4rem;
+    padding: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+    opacity: 0.85;
+}
+.chat-toggle:hover { opacity: 1; }
+.chat-history-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    width: 100%;
+    margin-bottom: 0.3rem;
+    padding: 0.35rem 0.45rem;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.chat-history-toggle:hover { background: var(--color-primary-light); }
+.chat-history-caret { transition: transform 0.15s ease; }
+.chat-history-toggle[aria-expanded="false"] .chat-history-caret { transform: rotate(-90deg); }
+.chat-sidebar-list { transition: max-height 0.2s ease, opacity 0.2s ease; }
+.chat-sidebar-list.collapsed { max-height: 0; overflow: hidden; opacity: 0; margin: 0; }
+@media (prefers-reduced-motion: reduce) { .chat-sidebar-list { transition: none; } }
