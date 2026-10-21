@@ -2237,3 +2237,18 @@ table.obs-table th.sticky-col { z-index: 3; }
 .chat-sidebar-list { transition: max-height 0.2s ease, opacity 0.2s ease; }
 .chat-sidebar-list.collapsed { max-height: 0; overflow: hidden; opacity: 0; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .chat-sidebar-list { transition: none; } }
+
+/* AIチャット: 回答のMarkdown整形・コピー・文字数カウンタ(2026-10-21) */
+.chat-message-body p { margin: 0 0 0.4rem; }
+.chat-message-body p:last-child { margin-bottom: 0; }
+.chat-ul, .chat-ol { margin: 0.25rem 0 0.4rem; padding-left: 1.25rem; }
+.chat-ul li, .chat-ol li { margin: 0.12rem 0; }
+.chat-code { background: rgba(120,120,120,0.18); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.86em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chat-pre { margin: 0.35rem 0; padding: 0.55rem 0.7rem; background: rgba(120,120,120,0.14); border-radius: var(--radius-sm); overflow-x: auto; }
+.chat-pre code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86em; white-space: pre; }
+.chat-message-ai a { color: inherit; text-decoration: underline; }
+.chat-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.45rem; }
+.chat-action-btn { margin: 0; padding: 0; background: none; border: none; color: inherit; font: inherit; font-size: 0.78rem; font-weight: 600; text-decoration: underline; cursor: pointer; opacity: 0.8; }
+.chat-action-btn:hover { opacity: 1; }
+.chat-counter { display: inline-block; margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
+.chat-counter-warn { color: var(--color-danger); font-weight: 600; }

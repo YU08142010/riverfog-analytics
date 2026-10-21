@@ -35,7 +35,7 @@
         <textarea name="question" id="chat-input" rows="2" maxlength="300" placeholder="例: 今日は川霧が出そうですか？" required></textarea>
         <button type="submit" class="button" id="chat-send-btn">送信</button>
     </form>
-    <p class="muted chat-footnote">無料枠のクォータ保護のため、1日あたりの質問回数に上限があります。回答はAIによる自動生成のため誤りを含むことがあります。</p>
+    <p class="muted chat-footnote"><span id="chat-counter" class="chat-counter">0 / 300字</span>無料枠のクォータ保護のため、1日あたりの質問回数に上限があります。回答はAIによる自動生成のため誤りを含むことがあります。</p>
 </div>
 <script>
 (function() {
@@ -65,32 +65,129 @@
 
     // 長い発言(ユーザー/AI)は既定で折りたたみ、「全文を表示/折りたたむ」で展開できる。
     var COLLAPSE_MAX = 190;
-    function enhanceCollapsible(el) {
-        var body = el.querySelector(".chat-message-body");
-        if (!body || el.dataset.enhanced) { return; }
-        el.dataset.enhanced = "1";
-        if (body.scrollHeight <= COLLAPSE_MAX + 24) { return; }
-        el.classList.add("chat-collapsible", "chat-collapsed");
-        var btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "chat-toggle";
-        btn.textContent = "全文を表示";
-        btn.addEventListener("click", function() {
-            var collapsed = el.classList.toggle("chat-collapsed");
-            btn.textContent = collapsed ? "全文を表示" : "折りたたむ";
+
+    function escapeHtml(s) {
+        return s.replace(/[&<>"']/g, function(c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
         });
-        el.appendChild(btn);
     }
-    // サーバー描画済みの履歴を本文ラッパーで包み、長ければ折りたたむ。
+    // インライン記法(入力はエスケープ済み): **強調**・`コード`・[文字](http...)
+    function inlineMd(s) {
+        s = s.replace(/`([^`]+)`/g, "<code class=\"chat-code\">$1</code>");
+        s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "<a href=\"$2\" target=\"_blank\" rel=\"noopener noreferrer\">$1</a>");
+        return s;
+    }
+    // ごく小さな安全Markdown。まずHTMLを全てエスケープし、既知の安全タグだけを付ける(XSS防止)。
+    function renderMarkdown(src) {
+        var lines = escapeHtml(src).replace(/\r\n?/g, "\n").split("\n");
+        var html = "", i = 0;
+        var isUl = function(s) { return /^\s*[-*・]\s+/.test(s); };
+        var isOl = function(s) { return /^\s*\d+[.)]\s+/.test(s); };
+        var isFence = function(s) { return /^\s*```/.test(s); };
+        while (i < lines.length) {
+            var line = lines[i];
+            if (isFence(line)) {
+                var buf = []; i++;
+                while (i < lines.length && !isFence(lines[i])) { buf.push(lines[i]); i++; }
+                i++;
+                html += "<pre class=\"chat-pre\"><code>" + buf.join("\n") + "</code></pre>";
+                continue;
+            }
+            if (isUl(line)) {
+                html += "<ul class=\"chat-ul\">";
+                while (i < lines.length && isUl(lines[i])) { html += "<li>" + inlineMd(lines[i].replace(/^\s*[-*・]\s+/, "")) + "</li>"; i++; }
+                html += "</ul>";
+                continue;
+            }
+            if (isOl(line)) {
+                html += "<ol class=\"chat-ol\">";
+                while (i < lines.length && isOl(lines[i])) { html += "<li>" + inlineMd(lines[i].replace(/^\s*\d+[.)]\s+/, "")) + "</li>"; i++; }
+                html += "</ol>";
+                continue;
+            }
+            if (line.trim() === "") { i++; continue; }
+            var para = [];
+            while (i < lines.length && lines[i].trim() !== "" && !isFence(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])) {
+                para.push(inlineMd(lines[i])); i++;
+            }
+            html += "<p>" + para.join("<br>") + "</p>";
+        }
+        return html;
+    }
+
+    function copyText(text, btn) {
+        function done() { var o = btn.textContent; btn.textContent = "コピーしました"; setTimeout(function() { btn.textContent = o; }, 1400); }
+        function fallback() {
+            var ta = document.createElement("textarea");
+            ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            try { document.execCommand("copy"); done(); } catch (e) {}
+            document.body.removeChild(ta);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, fallback);
+        } else { fallback(); }
+    }
+
+    // メッセージの仕上げ: AIはMarkdown整形＋コピー、長ければ折りたたみ。
+    function setupMessage(el, who, rawText) {
+        if (el.dataset.enhanced) { return; }
+        el.dataset.enhanced = "1";
+        var body = el.querySelector(".chat-message-body");
+        if (!body) { return; }
+        if (who === "ai") { body.innerHTML = renderMarkdown(rawText); }
+        var actions = document.createElement("div");
+        actions.className = "chat-actions";
+        if (who === "ai") {
+            var copyBtn = document.createElement("button");
+            copyBtn.type = "button"; copyBtn.className = "chat-action-btn";
+            copyBtn.textContent = "コピー";
+            copyBtn.addEventListener("click", function() { copyText(rawText, copyBtn); });
+            actions.appendChild(copyBtn);
+        }
+        if (body.scrollHeight > COLLAPSE_MAX + 24) {
+            el.classList.add("chat-collapsible", "chat-collapsed");
+            var toggle = document.createElement("button");
+            toggle.type = "button"; toggle.className = "chat-action-btn chat-toggle";
+            toggle.textContent = "全文を表示";
+            toggle.addEventListener("click", function() {
+                var collapsed = el.classList.toggle("chat-collapsed");
+                toggle.textContent = collapsed ? "全文を表示" : "折りたたむ";
+            });
+            actions.appendChild(toggle);
+        }
+        if (actions.childNodes.length) { el.appendChild(actions); }
+    }
+
+    // サーバー描画済みの履歴を本文ラッパーで包み、整形する。
     Array.prototype.forEach.call(messages.querySelectorAll(".chat-message-user, .chat-message-ai"), function(el) {
+        var who = el.classList.contains("chat-message-ai") ? "ai" : "user";
+        var raw;
         if (!el.querySelector(".chat-message-body")) {
+            raw = el.textContent;
             var body = document.createElement("div");
             body.className = "chat-message-body";
-            while (el.firstChild) { body.appendChild(el.firstChild); }
+            body.textContent = raw;
+            el.textContent = "";
             el.appendChild(body);
+        } else {
+            raw = el.querySelector(".chat-message-body").textContent;
         }
-        enhanceCollapsible(el);
+        setupMessage(el, who, raw);
     });
+
+    // 入力の文字数カウンタ(上限300字)。
+    var counter = document.getElementById("chat-counter");
+    function updateCounter() {
+        if (!counter) { return; }
+        var n = input.value.length;
+        counter.textContent = n + " / 300字";
+        counter.classList.toggle("chat-counter-warn", n >= 270);
+    }
+    input.addEventListener("input", updateCounter);
+    updateCounter();
+
     messages.scrollTop = messages.scrollHeight;
 
     // Enterで送信、Shift+Enterで改行(IME変換確定のEnterでは送信しない)。
@@ -109,7 +206,7 @@
             body.textContent = text;
             wrap.appendChild(body);
             messages.appendChild(wrap);
-            enhanceCollapsible(wrap);
+            setupMessage(wrap, who, text);
         } else {
             wrap.textContent = text;
             messages.appendChild(wrap);
@@ -162,6 +259,7 @@
         formData.set("question", question);
         addMessage(question, "user");
         input.value = "";
+        updateCounter();
         input.disabled = true;
         sendBtn.disabled = true;
         var thinking = addMessage("考え中...", "thinking");
