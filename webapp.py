@@ -119,6 +119,17 @@ _login_attempts_by_ip = {}
 LOGIN_ATTEMPT_SWEEP_INTERVAL = timedelta(hours=1)
 _login_attempts_last_sweep = datetime.now(JST)
 
+# サインアップ申請のレート制限(2026-10-21の監査で指摘)。/signupは無認証で公開URL(Funnel)から
+# 叩け、1回ごとにscrypt(約280ms・メモリ約32MB)が走るため、無制限だとCPU・メモリ枯渇のDoSと
+# 承認待ちキュー・DBの汚染が可能だった。新規登録は本来まれなので、ログインより厳しく制限する。
+SIGNUP_ATTEMPT_WINDOW = timedelta(hours=1)
+SIGNUP_ATTEMPT_MAX = 5            # 1IPあたり1時間に5回まで
+SIGNUP_PENDING_CAP = 100         # 承認待ち申請の総数の上限(多数IPからの分散floodでも膨張させない)
+SIGNUP_ATTEMPT_SWEEP_INTERVAL = timedelta(hours=1)
+_signup_attempts_lock = threading.Lock()
+_signup_attempts_by_ip = {}
+_signup_attempts_last_sweep = datetime.now(JST)
+
 
 def _client_ip():
     return request.remote_addr or "unknown"
@@ -175,6 +186,34 @@ def _login_rate_limited(ip):
 def _record_login_failure(ip):
     with _login_attempts_lock:
         _login_attempts_by_ip.setdefault(ip, []).append(datetime.now(JST))
+
+
+def _sweep_signup_attempts(now):
+    """_sweep_login_attemptsと同じく、二度と来ないIPのエントリが溜まり続けないよう全体を掃除する。"""
+    global _signup_attempts_last_sweep
+    if now - _signup_attempts_last_sweep < SIGNUP_ATTEMPT_SWEEP_INTERVAL:
+        return
+    _signup_attempts_last_sweep = now
+    for ip in list(_signup_attempts_by_ip.keys()):
+        attempts = [t for t in _signup_attempts_by_ip[ip] if now - t < SIGNUP_ATTEMPT_WINDOW]
+        if attempts:
+            _signup_attempts_by_ip[ip] = attempts
+        else:
+            del _signup_attempts_by_ip[ip]
+
+
+def _signup_rate_limited(ip):
+    now = datetime.now(JST)
+    with _signup_attempts_lock:
+        _sweep_signup_attempts(now)
+        attempts = [t for t in _signup_attempts_by_ip.get(ip, []) if now - t < SIGNUP_ATTEMPT_WINDOW]
+        _signup_attempts_by_ip[ip] = attempts
+        return len(attempts) >= SIGNUP_ATTEMPT_MAX
+
+
+def _record_signup_attempt(ip):
+    with _signup_attempts_lock:
+        _signup_attempts_by_ip.setdefault(ip, []).append(datetime.now(JST))
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 PRED_DIR = BASE_DIR / "data" / "predictions"
@@ -7647,6 +7686,10 @@ def member_avatar_file(user_id):
 def signup():
     error = None
     if request.method == "POST":
+        # レート制限は、重いscrypt計算やDB書き込みより前に判定する(連打を安く弾くため)。
+        if _signup_rate_limited(_client_ip()):
+            error = "新規登録の申請が多すぎます。しばらくしてから再度お試しください。"
+            return render_template("signup.html", error=error, submitted=False)
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
@@ -7659,9 +7702,15 @@ def signup():
         else:
             conn = _users_conn()
             try:
-                if users.email_taken(conn, email):
+                if users.count_signup_requests(conn) >= SIGNUP_PENDING_CAP:
+                    # 承認待ちキューが一杯。多数IPからの分散floodでDBを膨張させられないようにする
+                    # (管理者が承認/却下してキューを捌けば自然に空く)。
+                    error = "現在、新規登録の申請を受け付けられません。しばらくしてからお試しください。"
+                elif users.email_taken(conn, email):
                     error = "このメールアドレスは既に登録済み、または申請中です。"
                 else:
+                    # 実際に重い処理(ハッシュ化+登録)を行うのはここだけ。この経路に来た時だけ回数を数える。
+                    _record_signup_attempt(_client_ip())
                     requested_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
                     users.create_signup_request(
                         conn, name, email, users.generate_password_hash(password), requested_at,

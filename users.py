@@ -910,6 +910,13 @@ def list_signup_requests(conn, status="pending"):
     return [_request_row_to_dict(r) for r in rows]
 
 
+def count_signup_requests(conn, status="pending"):
+    """指定ステータスの申請数。/signupの受付上限(承認待ちキューの膨張・DoS対策)の判定に使う。"""
+    return conn.execute(
+        "SELECT COUNT(*) FROM signup_requests WHERE status = ?", (status,),
+    ).fetchone()[0]
+
+
 def get_signup_request(conn, request_id):
     row = conn.execute(
         "SELECT id, name, email, password_hash, requested_at, status FROM signup_requests WHERE id = ?",
@@ -2955,7 +2962,7 @@ __all__ = [
     "connect", "create_user", "get_user_by_email", "get_user_by_id", "verify_login",
     "list_users", "get_users_by_ids", "set_role", "update_user", "update_profile", "delete_user",
     "count_admins", "email_taken",
-    "create_signup_request", "list_signup_requests", "get_signup_request",
+    "create_signup_request", "list_signup_requests", "count_signup_requests", "get_signup_request",
     "approve_signup_request", "reject_signup_request", "generate_password_hash",
     "record_login", "record_logout", "login_history", "login_counts_by_day", "login_count",
     "login_counts_all", "login_counts_since", "last_login", "first_login", "last_logins_all", "login_streak",
