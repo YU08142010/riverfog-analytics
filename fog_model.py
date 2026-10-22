@@ -49,10 +49,17 @@ loglossも有意に改善し、3期間すべてで改善した)
 気候値との混合の代わりにロジスティック補正(F1が下がる)、検証期間の「川霧あり」の数を実際の数に合わせるしきい値(F1が下がる)。
 
 【期間の分け方】(すべて時系列順。未来のデータで過去を学習しない)
-  [ ........ 学習(inner) ........ | 検証 VALIDATION_WINDOW_DAYS日 | 評価 TEST_WINDOW_DAYS日 ]
+  [ ........ 学習(inner) ........ | 検証 VALIDATION_WINDOW_DAYS日(足りなければ広げる) | 評価 TEST_WINDOW_DAYS日 ]
   - 検証期間: ハイパーパラメータ・木の本数(early stopping)・しきい値の選択
   - 評価期間: 「学習+検証」で学習したモデルの成績(気候値と比較)と、劣化チェック
   - 本番用のモデル: 選んだ設定で全期間(評価期間も含む)を使って学習し直したもの
+
+【2026-10-22の改良】検証期間の川霧がMIN_POSITIVES_FOR_THRESHOLD件に満たない時、既定の14日のままだと
+しきい値等を選べず「前回の値→既定値0.05」への後戻りが続く。季節の変わり目で発生率が下がる時期ほど
+これが起きやすく、しきい値が今の(下がった)発生率に追従できない状態が続いていた(10月の実験評価で
+F1 0.3前後→0.0〜0.05まで悪化、precisionは保たれたままrecallだけ崩れる=しきい値が高すぎる典型的な
+症状)。件数を確保できるまで検証期間をさかのぼって広げるようにした(_adaptive_validation_start、
+上限VALIDATION_WINDOW_MAX_DAYS日)。
 """
 import csv
 import json
@@ -139,6 +146,11 @@ _FORECAST_VARS = {
 # 評価期間は7日だと川霧の実例が100件前後しかなく、週ごとの成績のぶれが大きかったため21日にした。
 TEST_WINDOW_DAYS = 21
 VALIDATION_WINDOW_DAYS = 14
+# 検証期間(既定14日)に川霧がMIN_POSITIVES_FOR_THRESHOLD件に満たない場合、足りるまで
+# さかのぼって広げる上限(2026-10-22〜、_adaptive_validation_start)。季節の変わり目で
+# 川霧が少ない期間が続くと、直近14日では毎回しきい値が選べず「前回の値→既定値0.05」への
+# 後戻りが続き、発生率が下がった今の状況に合わないまま固定されてしまう問題への対応。
+VALIDATION_WINDOW_MAX_DAYS = 60
 
 # 学習を行うための最低条件。満たさなければモデルを作らない(前回のモデルを使い続ける)。
 MIN_TRAIN_ROWS = 500
@@ -429,6 +441,31 @@ def _best_threshold(y_true, probs):
         if f1 > best_f1:
             best_t, best_f1 = float(t), float(f1)
     return best_t, best_f1
+
+
+def _adaptive_validation_start(frame, test_start):
+    """検証期間の開始時刻を選ぶ。既定(VALIDATION_WINDOW_DAYS日)で川霧の実例が
+    MIN_POSITIVES_FOR_THRESHOLD件に満たなければ、件数を確保できるまで(上限
+    VALIDATION_WINDOW_MAX_DAYS日まで)さかのぼって検証期間を広げる。戻り値:
+    (検証期間の開始時刻, 実際に使った日数)。
+
+    もともとは既定の日数で固定していたが、季節の変わり目で川霧が少ない期間が続くと
+    (2026-10の分析: 発生率が9月の約半分に下がり、検証期間に件数が足りない日が続いた)、
+    しきい値・候補モデル・気候値との混合比を選べないまま「前回の値→既定値0.05」への
+    後戻りが続き、発生率が下がった今の状況にしきい値が追従できなくなっていた。できるだけ
+    直近のデータで判断するという元の方針は保ちつつ、件数が足りない時だけ広げる。"""
+    days = VALIDATION_WINDOW_DAYS
+    val_start = test_start - pd.Timedelta(days=days)
+    is_before_test = frame["__datetime"] <= test_start
+    n_pos = int(frame.loc[is_before_test & (frame["__datetime"] > val_start), "__y"].sum())
+    while n_pos < MIN_POSITIVES_FOR_THRESHOLD and days < VALIDATION_WINDOW_MAX_DAYS:
+        days = min(days * 2, VALIDATION_WINDOW_MAX_DAYS)
+        val_start = test_start - pd.Timedelta(days=days)
+        n_pos = int(frame.loc[is_before_test & (frame["__datetime"] > val_start), "__y"].sum())
+    if days != VALIDATION_WINDOW_DAYS:
+        log.info("Validation window widened to %d days (%d fog rows) because the default %d days had too few",
+                  days, n_pos, VALIDATION_WINDOW_DAYS)
+    return val_start, days
 
 
 def _choose_threshold(y_true, probs):
@@ -828,14 +865,14 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
 
     data_end = frame["__datetime"].max()
     test_start = data_end - pd.Timedelta(days=TEST_WINDOW_DAYS)
-    val_start = test_start - pd.Timedelta(days=VALIDATION_WINDOW_DAYS)
+    val_start, val_days = _adaptive_validation_start(frame, test_start)
     is_test = frame["__datetime"] > test_start
     is_val = (frame["__datetime"] > val_start) & ~is_test
     train, inner, val, test = frame[~is_test], frame[~is_test & ~is_val], frame[is_val], frame[is_test]
     log.info(
-        "Training shared binary LightGBM: %d rows (%d fog), inner=%d / validation=%d (%d fog) / "
+        "Training shared binary LightGBM: %d rows (%d fog), inner=%d / validation=%d days %d rows (%d fog) / "
         "test=%d (%d fog), %d station(s), features=%s",
-        len(frame), int(frame["__y"].sum()), len(inner), len(val), int(val["__y"].sum()),
+        len(frame), int(frame["__y"].sum()), len(inner), val_days, len(val), int(val["__y"].sum()),
         len(test), int(test["__y"].sum()), frame["__station"].nunique(), weather_features,
     )
     if len(train) < MIN_TRAIN_ROWS or int(train["__y"].sum()) < MIN_TRAIN_POSITIVES:
@@ -1008,7 +1045,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
         "ensemble": {"models": ["default", *ensemble_models], "validation_rows": n_val_alt, "test_rows": n_test_alt},
         "n_train": len(frame), "n_train_fog": int(frame["__y"].sum()),
         "train_start": str(frame["__datetime"].min()), "train_end": str(data_end),
-        "validation_start": str(val_start), "test_start": str(test_start), "test_end": str(data_end),
+        "validation_start": str(val_start), "validation_days": val_days,
+        "test_start": str(test_start), "test_end": str(data_end),
     }
 
     models = {}
