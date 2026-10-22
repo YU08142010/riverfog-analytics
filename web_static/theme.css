@@ -95,6 +95,27 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 
 /* 空の背景のないページのカード: 下の「iOSの素材」で半透明+ぼかしにする(2026-10-16。以前は影なしの白い面) */
 
+/* ヘッダーのアイコン群(検索・全画面・文字の大きさ・ダーク/ライト・通知)を1つの帯にまとめる
+   (2026-10-22。iOSのコントロールセンターのように、関連する切り替えボタンをひとまとめの面に乗せる)。
+   個々のボタン自体の形・ホバー色は既存のまま変えない。 */
+:root .toolbar-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.05rem;
+    padding: 0.2rem;
+    border-radius: 999px;
+    background: var(--ios-fill);
+}
+/* バージョン表示: 生の文字列ではなく、小さなバッジに(更新履歴へのリンクなのは変えない) */
+:root .app-version {
+    background: var(--ios-fill);
+    padding: 0.18rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
 /* 切り替え(セグメント・ページのタブ): 灰色の溝に白いつまみ。選んだものは青で塗らない */
 :root .seg, :root .page-tabs, :root .pf-seg { background: var(--ios-fill); border: 0; border-radius: 10px; padding: 2px; gap: 0; }
 :root .seg-btn, :root .page-tabs a, :root .pf-seg button { border-radius: 8px; color: var(--ios-label); font-weight: 500; }
@@ -115,6 +136,35 @@ body { font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 /* 上の数字(天気アプリ風): 気温・地点数は細い字 */
 :root .wx-hero-temp { font-weight: 200; }
 :root .wx-hero-name { font-weight: 500; }
+
+/* メンバーランキングの上位にだけ付けていた淡い色のにじみを、他の「大きな数字」にも広げる
+   (2026-10-22、「iOS的な質感を他のページにも」)。現在の状況のタイルとゲームのポイント表示が対象。 */
+:root .stat-card { position: relative; overflow: hidden; }
+:root .stat-card::before {
+    content: "";
+    position: absolute;
+    top: -45%; right: -25%;
+    width: 75%; height: 140%;
+    background: radial-gradient(circle, rgba(0, 122, 255, 0.16), transparent 72%);
+    pointer-events: none;
+    z-index: 0;
+}
+:root .stat-card > * { position: relative; z-index: 1; }
+:root .points-hero {
+    position: relative;
+    display: inline-block;
+    font-size: 2.6rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+:root .points-hero::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -0.7em -1.2em;
+    background: radial-gradient(55% 55% at 28% 35%, rgba(0, 122, 255, 0.18), transparent 70%);
+}
+:root .points-hero .stat-unit { font-size: 1.1rem; font-weight: 500; margin-left: 0.25rem; color: var(--ios-secondary); }
 
 /* iOSの「大きなタイトル」: パンくずの最後(いまのページ)を大きな太字の題名に、その前は小さな青い戻り先に。
    上部に大きな名前が出るページ(ホーム・地点 = .wx-hero)と、空の背景のページは、今の白い枠のまま */

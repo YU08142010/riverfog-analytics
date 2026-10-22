@@ -763,20 +763,50 @@ button.button:disabled {
 .breadcrumb li:last-child { color: var(--color-text); font-weight: 500; }
 
 /* トップナビの項目を統合したページ内での切り替えタブ(地点/観測アーカイブ/分析/
-   コミュニティ等、1つのナビ項目に複数ページをまとめた場所で使う)。 */
+   コミュニティ等、1つのナビ項目に複数ページをまとめた場所で使う)。
+   地点一覧の並び順等で使う.seg/.seg-btn(下線ではなく、背景色のセグメントコントロール)と
+   見た目の作りをそろえる(2026-10-22。以前は下線タブのままで、theme.cssのiOS化が
+   パディング不足で効かず、ページによって切り替えUIの見た目が違って見えていた)。 */
 .page-tabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--glass-soft, rgba(127, 127, 127, 0.12));
+    border: 1px solid var(--color-border, rgba(127, 127, 127, 0.25));
     margin-bottom: 1.2rem;
-    border-bottom: 1px solid var(--color-border);
 }
 .page-tabs a {
+    display: inline-flex;
+    align-items: center;
     text-decoration: none;
-    font-size: 0.88rem;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    font-size: 0.85rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    min-height: 2rem;
     white-space: nowrap;
+    color: var(--color-text);
 }
-.page-tabs a:hover { color: var(--color-text); }
-.page-tabs a.active { border-bottom-color: var(--color-primary); }
+.page-tabs a:hover { background: var(--tint-bg-hover, rgba(74, 163, 255, 0.14)); }
+.page-tabs a.active { background: var(--color-primary); color: #fff; font-weight: 600; }
+
+/* 操作のヒントなど、長い地の文になりがちな説明を「短い見出し+1行」のまとまりに分けて読みやすくする
+   (2026-10-22。観測報告ページ等で使用)。 */
+.hint-list {
+    list-style: none;
+    margin: 0.8rem 0 0;
+    padding: 0;
+}
+.hint-list li {
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--color-border);
+    font-size: 0.86rem;
+    line-height: 1.6;
+    color: var(--color-text-muted);
+}
+.hint-list li:first-child { border-top: none; }
+.hint-list strong { display: block; color: var(--color-text); font-weight: 600; font-size: 0.86rem; }
 
 .toast-container {
     position: fixed;
@@ -1081,13 +1111,26 @@ table.obs-table {
     border-collapse: collapse;
     width: 100%;
     font-size: 0.82rem;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
+/* 枠で囲ったマス目ではなく、行の間だけ薄い区切り線を引くグルーピングリストの見た目にする
+   (2026-10-22。縦横すべてに罫線を引く表はiOSの設定・一覧アプリにはあまり出てこないため)。 */
 table.obs-table th, table.obs-table td {
-    border: 1px solid var(--color-border);
-    padding: 0.4rem 0.5rem;
+    border: 0;
+    border-bottom: 1px solid var(--color-border);
+    padding: 0.45rem 0.6rem;
     text-align: center;
     white-space: nowrap;
 }
+table.obs-table thead th {
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+table.obs-table tbody tr:last-child td { border-bottom: none; }
+table.obs-table tbody tr:hover td { background: var(--color-primary-light); }
 .table-scroll { overflow-x: auto; }
 
 /* 地点数だけ横に伸びる表(observations_date.html等)で、左端の時刻列を横スクロールしても

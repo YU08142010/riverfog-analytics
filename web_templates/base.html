@@ -110,6 +110,11 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
     <button type="button" class="app-side-toggle" id="app-side-toggle" aria-controls="app-side" aria-expanded="true" aria-label="メニューを閉じる" title="メニューを閉じる/開く">{{ icon("menu", size=20) }}</button>
     <h1><a href="{{ url_for('dashboard') }}" class="app-header-brand">川霧観測・予測</a></h1>
     <a href="{{ url_for('changelog_page') }}" class="app-version" title="更新履歴を見る">v{{ app_version }}</a>
+    {# ツールバーのアイコン群(検索・全画面・文字の大きさ・ダーク/ライト・通知)を1つの帯にまとめる
+       (2026-10-22。以前はアイコンが個別にただ並んでいるだけで、どれが1組の切り替え操作なのか
+       分かりにくかった)。ログイン状態に関わらず出るものだけをまとめ、アカウント系(設定・自分の
+       アバター)は従来どおりその外に置く。 #}
+    <div class="toolbar-group">
     <button type="button" class="spotlight-trigger" data-spotlight-open aria-label="検索(Ctrl+K)" title="検索(Ctrl+K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>検索</span><kbd>Ctrl K</kbd></button>
     {# 全画面表示(発表・展示でスクリーンに映す用)。見た目は通知ボタンと同じ。対応しない環境では出さない #}
     <span class="notif-bell-wrap fs-wrap" id="fs-wrap" hidden>
@@ -151,6 +156,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
             </div>
             {% endif %}
         </div>
+    </div>
     </div>
     {% if session.get('user_id') %}
     <a href="{{ url_for('settings_page') }}" class="theme-toggle theme-toggle-icon header-settings-link{{ ' active' if request.path.startswith('/settings') else '' }}" aria-label="設定" title="設定(通知・表示・プライバシー)">

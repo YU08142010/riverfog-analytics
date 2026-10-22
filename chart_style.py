@@ -22,8 +22,8 @@ INK_SECONDARY = "#52514e"  # しきい値などの注記線
 SURFACE_LIGHT = "#ffffff"
 SURFACE_DARK = "#1e2027"
 FONT = "Inter, 'Zen Kaku Gothic New', -apple-system, 'Hiragino Sans', 'Yu Gothic UI', 'Noto Sans JP', sans-serif"
-GRID = "rgba(20,30,50,0.09)"
-BASELINE = "rgba(20,30,50,0.28)"
+GRID = "rgba(20,30,50,0.06)"
+BASELINE = "rgba(20,30,50,0.18)"
 TICK = "#5c6370"
 TITLE_INK = "#1d1d1f"
 
