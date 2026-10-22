@@ -43,11 +43,6 @@ from flask import (
 )
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib import font_manager
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
@@ -78,13 +73,6 @@ from fog_features import (
     PHENOM_LABELS, PhenomCodeError, SLASH_COLOR, SUMMARY_FOG_CODES, decode_phenom_value,
     encode_phenom_codes, encode_phenomena_cell, format_phenom_display, phenom_label, primary_phenom_code,
 )
-
-# collect.py・fog_graphs.py と同じ日本語フォント設定（無ければグラフの日本語が文字化けするだけで、
-# 処理は止めない）。
-_NOTO_CJK_JP_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-if os.path.exists(_NOTO_CJK_JP_PATH):
-    font_manager.fontManager.addfont(_NOTO_CJK_JP_PATH)
-    matplotlib.rcParams["font.family"] = "Noto Sans CJK JP"
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -2087,40 +2075,14 @@ def _cached_png(cache_key, watch_paths, render_fn):
     return data
 
 
-def _chart_theme():
-    """グラフ描画時に使う配色テーマ('light'/'dark')。ダーク/ライト切替ボタン(base.html)が
-    localStorageと一緒にthemeクッキーにも同じ値を書き込むので、それをサーバー側の
-    matplotlib描画にも反映する(2026-09-12、分析ページのグラフがダークモードでも
-    白背景のまま浮いて見えるという指摘を受けて追加)。"""
-    return "dark" if request.cookies.get("theme") == "dark" else "light"
-
-
-# Plotly移行(2026-09-14)前からの唯一の配色定義。matplotlib版(_chart_rc_context、
-# PDFレポート専用)とPlotly版(ブラウザ側でのrelayout用、window.CHART_THEME_PALETTE)の
-# 両方がここを参照する。以前は同じ色をそれぞれ別々にハードコードしており、
-# 片方だけ配色を変えるとPDFとWebでグラフの見た目がずれていく懸念があったため、
-# 単一の定義に統一した(2026-09-14)。
+# Plotly版(ブラウザ側でのrelayout用、window.CHART_THEME_PALETTE)が参照する配色定義。
+# PDFレポート(_generate_report_pdf、web_admin.py)は独自の配色を持つため、ここには
+# 依存していない(以前はここに依存するmatplotlib版の_chart_theme/_chart_rc_contextが
+# あったが、PDFレポートがweb_admin.pyへ移った際に使われなくなったため削除した)。
 _CHART_THEME_PALETTE = {
-    # グリッドは控えめな細線(chart_style参照)。matplotlib(PDFレポート)でも使うため16進数で指定する。
     "light": {"fg": "#1d1d1f", "grid": "#e3e6ec"},
     "dark": {"fg": "#e6e8ee", "grid": "#2c3038"},
 }
-
-
-def _chart_rc_context():
-    """グラフの文字色・グリッド色をテーマに合わせ、背景を透過にするrcParamsのコンテキスト。
-    _cached_pngでキャッシュする場合は、cache_keyにテーマも含めること(サーバー全体で
-    共有するキャッシュのため、含めないと片方のテーマで生成された画像がもう片方の
-    利用者にも出てしまう)。matplotlibで描画するPDFレポート(_generate_report_pdf)専用。"""
-    pal = _CHART_THEME_PALETTE[_chart_theme()]
-    fg, grid = pal["fg"], pal["grid"]
-    return matplotlib.rc_context({
-        "text.color": fg, "axes.labelcolor": fg, "axes.edgecolor": fg,
-        "xtick.color": fg, "ytick.color": fg, "grid.color": grid,
-        "legend.labelcolor": fg, "figure.facecolor": "none",
-        "axes.facecolor": "none", "savefig.facecolor": "none",
-        "savefig.transparent": True,
-    })
 
 
 @app.context_processor
@@ -2146,35 +2108,6 @@ def _cached_chart_json(cache_key, watch_paths, render_fn):
     with _chart_json_cache_lock:
         _chart_json_cache[cache_key] = (mtimes, data)
     return data
-
-
-def _render_line_chart_png(dates, rates, title):
-    """日付ごとの的中率(%)を折れ線グラフのPNGバイト列にして返す。"""
-    fig, ax = plt.subplots(figsize=(9, 3.2))
-    if dates:
-        x = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
-        ax.plot(x, rates, marker="o", markersize=3, color="#1a5276", linewidth=1.4)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=10))
-        # データが1点、または期間が非常に短いと、軸の範囲をmatplotlibが自動決定できず
-        # 数年単位の既定レンジにフォールバックしてしまう（目盛りが7/1・1/1ばかりになる）。
-        # 明示的にデータの範囲＋余白でxlimを指定して防ぐ。
-        span = x[-1] - x[0]
-        pad = max(span * 0.1, timedelta(hours=12))
-        ax.set_xlim(x[0] - pad, x[-1] + pad)
-        fig.autofmt_xdate()
-    else:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("的中率(%)")
-    ax.set_title(title, fontsize=11)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
 
 
 def _render_line_chart_plotly(dates, rates, title, ytitle="的中率(%)", yrange=(0, 100), hoverformat="%{y:.1f}%"):
@@ -2618,43 +2551,6 @@ def _load_metrics_history_trend(station=None):
     return trend
 
 
-def _render_metrics_trend_png(trend, title="学習時のモデル精度推移(全地点平均)"):
-    """学習時のaccuracy・川霧F1の推移を折れ線グラフのPNGにして返す。station指定で絞り込んだ
-    trend(_load_metrics_history_trend参照)を渡せば地点別の推移にもなる。"""
-    fig, ax = plt.subplots(figsize=(9, 3.2))
-    all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
-    acc_pts = [(d, t["accuracy"]) for d, t in zip(all_dates, trend) if t["accuracy"] is not None]
-    fog_pts = [(d, t["fog_f1"]) for d, t in zip(all_dates, trend) if t["fog_f1"] is not None]
-
-    if all_dates:
-        if acc_pts:
-            xs, ys = zip(*acc_pts)
-            ax.plot(xs, ys, marker="o", markersize=3, color="#1a5276", linewidth=1.4, label="accuracy(平均,%)")
-        if fog_pts:
-            xs, ys = zip(*fog_pts)
-            ax.plot(xs, ys, marker="s", markersize=3, color="#c0392b", linewidth=1.4, label="川霧F1(平均,%)")
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=10))
-        span = max(all_dates) - min(all_dates)
-        pad = max(span * 0.1, timedelta(hours=12))
-        ax.set_xlim(min(all_dates) - pad, max(all_dates) + pad)
-        fig.autofmt_xdate()
-        ax.legend(loc="upper left", fontsize=8)
-    else:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("スコア(%)")
-    ax.set_title(title, fontsize=11)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
 def _render_metrics_trend_plotly(trend, title="学習時のモデル精度推移(全地点平均)"):
     """_render_metrics_trend_pngのPlotly版(2026-09-14)。"""
     all_dates = [datetime.strptime(t["date"], "%Y-%m-%d") for t in trend]
@@ -2732,29 +2628,6 @@ def _render_model_compare_plotly(state):
     return _chart_json(go.Figure(data=data, layout=layout))
 
 
-def _render_feature_importance_png(importance, top_n=15):
-    """特徴量重要度の上位top_n件を横棒グラフにする。"""
-    top = importance[:top_n]
-    fig_h = max(3.0, 0.35 * max(len(top), 1))
-    fig, ax = plt.subplots(figsize=(7.2, fig_h))
-    if not top:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-    else:
-        names = [n for n, _ in top][::-1]
-        vals = [v for _, v in top][::-1]
-        ax.barh(names, vals, color="#1a5276")
-        ax.set_xlabel("重要度(平均)")
-        for i, v in enumerate(vals):
-            ax.text(v, i, f" {v:.3f}", va="center", fontsize=8)
-    ax.set_title("特徴量の重要度(上位)", fontsize=11)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
 def _render_feature_importance_plotly(importance, top_n=15, title="特徴量の重要度(上位)", xlabel="重要度(割合)"):
     """_render_feature_importance_pngのPlotly版(2026-09-14)。matplotlib版は
     件数に応じてfigsizeの高さを変えていたが、Plotly版はlayout.heightをpx単位で
@@ -2786,39 +2659,6 @@ def _render_feature_importance_plotly(importance, top_n=15, title="特徴量の�
         "annotations": annotations,
     }
     return _chart_json(go.Figure(data=data, layout=layout))
-
-
-def _render_confusion_matrix_png(labels, matrix, title="混同行列(全地点合算)"):
-    """全地点分を合算した混同行列をヒートマップで表示する。管理者向け「モデル管理」
-    ページ(学習時の検証データが元)と、/accuracyページ(本番の予測ログが元、
-    _confusion_matrix_from_pairs参照)の両方でこの関数を共用する。"""
-    fig, ax = plt.subplots(figsize=(4.6, 4.0))
-    if matrix is None or len(labels) == 0:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-    else:
-        label_texts = [c if isinstance(c, str) else PHENOM_LABELS.get(c, f"コード{c}") for c in labels]
-        im = ax.imshow(matrix, cmap="Blues")
-        ax.set_xticks(range(len(labels)))
-        ax.set_yticks(range(len(labels)))
-        ax.set_xticklabels(label_texts, fontsize=9, rotation=30, ha="right")
-        ax.set_yticklabels(label_texts, fontsize=9)
-        ax.set_xlabel("予測")
-        ax.set_ylabel("実際")
-        vmax = matrix.max() if matrix.size else 0
-        for i in range(matrix.shape[0]):
-            for j in range(matrix.shape[1]):
-                v = matrix[i, j]
-                color = "white" if vmax and v > vmax * 0.6 else "#1c2733"
-                ax.text(j, i, str(int(v)), ha="center", va="center", color=color, fontsize=10)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    ax.set_title(title, fontsize=11)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
 
 
 def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地点合算)"):
@@ -2874,34 +2714,6 @@ def _render_confusion_matrix_plotly(labels, matrix, title="混同行列(全地�
     return _chart_json(go.Figure(data=data, layout=layout))
 
 
-def _render_lead_time_chart_png(by_lead_day):
-    """リードタイム(予測から何日後か)別の的中率を棒グラフにする。表だけだと
-    『日数が経つほど精度が落ちる』傾向が伝わりにくいための補足グラフ。"""
-    fig, ax = plt.subplots(figsize=(7, 3.2))
-    rows = [r for r in by_lead_day if r["n"] > 0]
-    if rows:
-        labels = [f"{r['lead_day']}日後" for r in rows]
-        rates = [100.0 * r["correct"] / r["n"] for r in rows]
-        x = list(range(len(rows)))
-        ax.bar(x, rates, color="#1a5276", width=0.6)
-        for i, (rate, r) in enumerate(zip(rates, rows)):
-            ax.text(i, rate + 2, f"{rate:.1f}%\n(n={r['n']})", ha="center", fontsize=8)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=9)
-    else:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("的中率(%)")
-    ax.set_title("リードタイム別の的中率", fontsize=11)
-    ax.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
 def _render_lead_time_chart_plotly(by_lead_day):
     """_render_lead_time_chart_pngのPlotly版(2026-09-14)。"""
     rows = [r for r in by_lead_day if r["n"] > 0]
@@ -2928,40 +2740,6 @@ def _render_lead_time_chart_plotly(by_lead_day):
         "annotations": annotations,
     }
     return _chart_json(go.Figure(data=data, layout=layout))
-
-
-def _render_region_compare_chart_png(region_summary):
-    """地域(会津/只見川)ごとに的中率と川霧F1を並べた棒グラフ。会津は観測開始が新しく
-    学習データが少ないため、只見川との差が一目でわかるようにする。"""
-    fig, ax = plt.subplots(figsize=(7, 3.4))
-    rows = [r for r in region_summary if r["n"] > 0]
-    if rows:
-        labels = [r["region"] for r in rows]
-        acc = [100.0 * r["correct"] / r["n"] for r in rows]
-        f1 = [100.0 * r["f1"] if r["f1"] is not None else 0 for r in rows]
-        x = np.arange(len(rows))
-        width = 0.32
-        ax.bar(x - width / 2, acc, width, color="#1a5276", label="的中率(%)")
-        ax.bar(x + width / 2, f1, width, color="#c0392b", label="川霧F1(%)")
-        for i, r in enumerate(rows):
-            ax.text(i - width / 2, acc[i] + 2, f"{acc[i]:.1f}", ha="center", fontsize=8)
-            label = f"{f1[i]:.1f}" if r["f1"] is not None else "データなし"
-            ax.text(i + width / 2, f1[i] + 2, label, ha="center", fontsize=8)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=9)
-        ax.legend(loc="upper right", fontsize=8)
-    else:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("スコア(%)")
-    ax.set_title("地域別の的中率・川霧F1", fontsize=11)
-    ax.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
 
 
 REGION_F1_HIDDEN = {"会津"}  # 分析ページの「地域別の的中率・川霧F1」で川霧F1を出さない地域
@@ -3002,42 +2780,6 @@ def _render_region_compare_chart_plotly(region_summary):
         "annotations": annotations,
     }
     return _chart_json(go.Figure(data=data, layout=layout))
-
-
-def _render_threshold_sweep_png(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
-    """川霧と判定するしきい値(fog_probがこの値以上なら「川霧」)を変えた場合の
-    precision(空振りの少なさ)・recall(見逃しの少なさ)・F1の変化を折れ線で示す。
-    現在採用中のしきい値(学習時に検証データでF1が最大になるよう選んだ値)を縦線で示し、
-    他のしきい値を選んだ場合とのトレードオフを比較できるようにする。"""
-    fig, ax = plt.subplots(figsize=(8, 3.4))
-    if sweep:
-        ts = [s["threshold"] for s in sweep]
-        precisions = [s["precision"] if s["precision"] is not None else float("nan") for s in sweep]
-        recalls = [s["recall"] if s["recall"] is not None else float("nan") for s in sweep]
-        f1s = [s["f1"] if s["f1"] is not None else float("nan") for s in sweep]
-        ax.plot(ts, precisions, marker="o", markersize=3, color="#2a78d6", linewidth=1.4, label="precision(空振りの少なさ)")
-        ax.plot(ts, recalls, marker="s", markersize=3, color="#eb6834", linewidth=1.4, label="recall(見逃しの少なさ)")
-        ax.plot(ts, f1s, marker="^", markersize=3, color="#16a085", linewidth=1.6, label="F1")
-        if current_threshold is not None:
-            # 以前はax.text(y=1.02)で縦線の上にラベルを浮かせていたが、タイトルと重なって
-            # 読みにくかったため、凡例の1エントリとして表示する方式に変更した。
-            ax.axvline(current_threshold, color="#7f2020", linestyle="--", linewidth=1.2,
-                       label=f"採用中({current_threshold:.2f})")
-        ax.legend(loc="upper right", fontsize=7.5, ncol=1, framealpha=0.9)
-        ax.set_xlim(0, 1)
-    else:
-        ax.text(0.5, 0.5, "データがありません", ha="center", va="center", transform=ax.transAxes)
-    ax.set_ylim(0, 1.05)
-    ax.set_xlabel("しきい値(この確率以上を「川霧」と判定)")
-    ax.set_ylabel("スコア")
-    ax.set_title(title, fontsize=11)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
 
 
 def _render_threshold_sweep_plotly(sweep, current_threshold=None, title="しきい値ごとのprecision/recall/F1"):
