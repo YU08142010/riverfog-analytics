@@ -63,9 +63,6 @@
     refreshRemaining();
     input.focus();
 
-    // 長い発言(ユーザー/AI)は既定で折りたたみ、「全文を表示/折りたたむ」で展開できる。
-    var COLLAPSE_MAX = 190;
-
     function escapeHtml(s) {
         return s.replace(/[&<>"']/g, function(c) {
             return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
@@ -130,7 +127,7 @@
         } else { fallback(); }
     }
 
-    // メッセージの仕上げ: AIはMarkdown整形＋コピー、長ければ折りたたみ。
+    // メッセージの仕上げ: AIはMarkdown整形＋コピー。
     function setupMessage(el, who, rawText) {
         if (el.dataset.enhanced) { return; }
         el.dataset.enhanced = "1";
@@ -145,17 +142,6 @@
             copyBtn.textContent = "コピー";
             copyBtn.addEventListener("click", function() { copyText(rawText, copyBtn); });
             actions.appendChild(copyBtn);
-        }
-        if (body.scrollHeight > COLLAPSE_MAX + 24) {
-            el.classList.add("chat-collapsible", "chat-collapsed");
-            var toggle = document.createElement("button");
-            toggle.type = "button"; toggle.className = "chat-action-btn chat-toggle";
-            toggle.textContent = "全文を表示";
-            toggle.addEventListener("click", function() {
-                var collapsed = el.classList.toggle("chat-collapsed");
-                toggle.textContent = collapsed ? "全文を表示" : "折りたたむ";
-            });
-            actions.appendChild(toggle);
         }
         if (actions.childNodes.length) { el.appendChild(actions); }
     }

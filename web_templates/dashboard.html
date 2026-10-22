@@ -5,7 +5,7 @@
 {% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
-<div class="{{ dashboard_theme_class or '' }}">
+<div class="dash-cards {{ dashboard_theme_class or '' }}">
 {% set ov = overview_weather_scene() %}
 {# 発生している地点の表示は前の形(2026-10-12に利用者の希望で戻した): 大きな数と、地域ごとの全地点の色分け。地図はその下。 #}
 <div class="wx-hero">
@@ -23,7 +23,40 @@
         <a class="wx-hero-stat" href="{{ url_for('public_forecast') }}"><b>3日</b><span>出やすさ(公開ページ)</span></a>
     </div>
 </div>
+{# 初めてのログインだけ出すミニガイド(2026-10-23): 項目が多く、どこから見ればいいか分からないとの
+   指摘を受けて追加。閉じると二度と出さない(user_settings.onboarding_seen)。 #}
+{% set up = user_prefs() %}
+{% if up and not up.onboarding_seen %}
+<div class="card onboarding-card" id="onboarding-card">
+    <button type="button" class="onboarding-close" id="onboarding-close" aria-label="このご案内を閉じる">{{ icon("close", size=16) }}</button>
+    <h2>はじめに</h2>
+    <ul class="onboarding-list">
+        <li><strong>お気に入り地点を選ぶ</strong><span class="muted"><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で選べます</span></li>
+        <li><strong>通知をオンにする</strong><span class="muted"><a href="{{ url_for('settings_page') }}#push">設定の「通知」</a>から</span></li>
+        <li><strong>Ctrl+K(⌘K)で検索</strong><span class="muted">地点名・メンバー名ですぐ開けます</span></li>
+    </ul>
+</div>
+<script>
+document.getElementById("onboarding-close").addEventListener("click", function() {
+    document.getElementById("onboarding-card").remove();
+    if (window.rfSaveQuickSetting) { window.rfSaveQuickSetting("onboarding_seen", "1"); }
+});
+</script>
+{% endif %}
+{# ページ内ジャンプ(2026-10-23): 項目が多く探しにくいとの指摘を受けて追加。settings.htmlの
+   セクション目次と同じ考え方(その場にあるカードだけを出す)。 #}
+<nav class="dash-jump" aria-label="ホーム画面内の項目">
+    {% if favorites or has_favorites_setting %}<a href="#dash-favorites">お気に入り</a>{% endif %}
+    <a href="#dash-status">現在の状況</a>
+    {% if home and 'map' not in dash_hidden %}<a href="#dash-map">地図</a>{% endif %}
+    {% if alerts %}<a href="#dash-alerts">アラート</a>{% endif %}
+    {% if ai_overall_summary %}<a href="#dash-ai_summary">AI要約</a>{% endif %}
+    <a href="#dash-latest_images">カメラ画像</a>
+    <a href="#dash-predictions">予測サマリー</a>
+</nav>
 {# お気に入りの地点(2026-10-13): プロフィールで選んだ地点を一番上に。いまの状態・今日/明日の出やすさ・24時間以内の予測。 #}
+{% if favorites or has_favorites_setting %}
+<div class="dash-card-slot" id="dash-favorites" data-card="favorites" style="order:{{ dash_rank['favorites'] }};{{ 'display:none;' if 'favorites' in dash_hidden else '' }}">
 {% if favorites %}
 <div class="card fav-card">
     <h2>お気に入りの地点</h2>
@@ -39,8 +72,10 @@
         {% endfor %}
     </div>
 </div>
-{% elif has_favorites_setting %}
+{% else %}
 <p class="fav-hint"><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>でお気に入りの地点を選ぶと、ここにいまの状態と今日の見込みが出ます。</p>
+{% endif %}
+</div>
 {% endif %}
 {% for ann in announcements_list %}
 <div class="card" style="border-left: 5px solid var(--color-primary); background: var(--color-primary-light);">
@@ -78,6 +113,7 @@ document.addEventListener("ajaxformsuccess", function(e) {
 });
 </script>
 
+<div class="dash-card-slot" id="dash-status" data-card="status" style="order:{{ dash_rank['status'] }};{{ 'display:none;' if 'status' in dash_hidden else '' }}">
 <div class="card">
     <h2>現在の状況</h2>
     {% if observations %}
@@ -130,9 +166,12 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <div class="empty-state">{{ icon("empty") }}<span>観測データがまだありません。</span></div>
     {% endif %}
 </div>
+</div>
 
-
-{% if home %}
+{% if home and 'map' not in dash_hidden %}
+{# 地図を非表示にした利用者には初期化(Leafletの地図生成)自体を省く(隠れた要素での初期化は
+   サイズ計算が崩れるため)。表示する場合は並び順(order)だけCSSで反映する。 #}
+<div class="dash-card-slot" id="dash-map" data-card="map" style="order:{{ dash_rank['map'] }};">
 {# 地図(2026-10-12): 「いま/1時間後/今日/明日」を切り替え、右(狭い画面では下)に1時間後の見込みと24時間の予測を出す。 #}
 <section class="home-hero" aria-label="いまの川霧と見込み">
     <div class="home-map-card card">
@@ -247,9 +286,11 @@ document.addEventListener("ajaxformsuccess", function(e) {
     window.addEventListener("resize", function() { map.invalidateSize(); });
 })();
 </script>
+</div>
 {% endif %}
 {% set alert_preview_n = 5 %}
 {% if alerts %}
+<div class="dash-card-slot" id="dash-alerts" data-card="alerts" style="order:{{ dash_rank['alerts'] }};{{ 'display:none;' if 'alerts' in dash_hidden else '' }}">
 <div class="card" style="border-left: 5px solid var(--color-danger); background: var(--color-danger-bg);">
     <h2 style="border-color: var(--color-danger);">川霧アラート(今後24時間)
         <span class="muted" style="font-size:0.8rem; font-weight:normal;">全{{ alerts|length }}件</span>
@@ -281,22 +322,18 @@ document.addEventListener("ajaxformsuccess", function(e) {
     </table>
     </div>
     {% if alerts|length > alert_preview_n %}
-    <button type="button" class="button" id="alert-toggle-btn"
+    {# 「もっと見る」の開閉は、どのページでも同じ操作感になるよう共通の仕組み(base_ui.js)を使う
+       (2026-10-23、以前はこの表だけ専用のJSを書いていた)。 #}
+    <button type="button" class="button expand-toggle" data-expand-target="alert-hidden-rows"
             data-more-label="&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示"
             data-less-label="&#9650; 閉じる">&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示</button>
-    <script>
-    document.getElementById("alert-toggle-btn").addEventListener("click", function() {
-        var rows = document.getElementById("alert-hidden-rows");
-        var wasHidden = rows.hidden;
-        rows.hidden = !wasHidden;
-        this.textContent = wasHidden ? this.dataset.lessLabel : this.dataset.moreLabel;
-    });
-    </script>
     {% endif %}
+</div>
 </div>
 {% endif %}
 
 {% if ai_overall_summary %}
+<div class="dash-card-slot" id="dash-ai_summary" data-card="ai_summary" style="order:{{ dash_rank['ai_summary'] }};{{ 'display:none;' if 'ai_summary' in dash_hidden else '' }}">
 <div class="card" style="border-left: 4px solid var(--color-primary);">
     <h2 style="display:flex; align-items:center; gap:0.4rem;">{{ icon("gemini") }}AI要約</h2>
     <p style="white-space:pre-wrap;">{{ ai_overall_summary }}</p>
@@ -304,10 +341,12 @@ document.addEventListener("ajaxformsuccess", function(e) {
         {{ ai_summary_generated_at }} 時点の観測に基づくGemini生成の要約です。内容は必ずしも正確とは限りません。
     </p>
 </div>
+</div>
 {% endif %}
 
 {% set mg = morning_gallery(3) %}
 {% if mg["items"] %}
+<div class="dash-card-slot" id="dash-morning_gallery" data-card="morning_gallery" style="order:{{ dash_rank['morning_gallery'] }};{{ 'display:none;' if 'morning_gallery' in dash_hidden else '' }}">
 <div class="card">
     <h2>{{ "今朝" if mg.today else "昨日の朝" }}の川霧</h2>
     <div class="dash-gallery">
@@ -321,8 +360,10 @@ document.addEventListener("ajaxformsuccess", function(e) {
     </div>
     <p style="margin:0.6rem 0 0;"><a href="{{ url_for('gallery_page', date=mg.date) }}">ほかの地点も見る →</a></p>
 </div>
+</div>
 {% endif %}
 
+<div class="dash-card-slot" id="dash-latest_images" data-card="latest_images" style="order:{{ dash_rank['latest_images'] }};{{ 'display:none;' if 'latest_images' in dash_hidden else '' }}">
 <div class="card">
     <h2>最新のカメラ画像</h2>
     {% if latest_image_date and latest_image_hour %}
@@ -360,7 +401,9 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <div class="empty-state">{{ icon("empty") }}<span>画像がまだありません。</span></div>
     {% endif %}
 </div>
+</div>
 
+<div class="dash-card-slot" id="dash-predictions" data-card="predictions" style="order:{{ dash_rank['predictions'] }};{{ 'display:none;' if 'predictions' in dash_hidden else '' }}">
 <div class="card">
     <h2>本日の予測サマリー</h2>
     {% if summary_files_by_region %}
@@ -381,6 +424,7 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <div class="empty-state">{{ icon("empty") }}<span>予測結果がまだありません。</span></div>
     {% endif %}
     <p><a class="button" href="{{ url_for('predictions_dates') }}">過去の予測を見る</a></p>
+</div>
 </div>
 
 </div>

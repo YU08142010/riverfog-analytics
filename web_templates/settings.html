@@ -33,6 +33,7 @@
     <a href="#push">通知</a>
     <a href="#display">表示</a>
     <a href="#menu">メニュー</a>
+    <a href="#dashboard">ホーム画面</a>
     <a href="#privacy">プライバシー</a>
     <a href="#install">ホーム画面に追加</a>
     <a href="#account">アカウント</a>
@@ -41,7 +42,7 @@
 
 <section class="card settings-card" id="push" aria-labelledby="h-push">
     <h2 id="h-push">通知</h2>
-    <p class="muted">川霧の予報・観測や、届いたメッセージを、サイトを閉じていてもスマホ・PCの通知でお知らせします(Web Push)。受け取る端末ごとにオンにしてください。</p>
+    <p class="muted">サイトを閉じていても届きます。端末ごとにオンにしてください。</p>
 
     <div class="push-device" id="push-device">
         <div class="push-device-state">
@@ -92,25 +93,24 @@
         {{ hour_select("push_digest_morning", s.push_digest_morning, [5, 6, 7, 8], "朝のまとめ(今日の見込み)", "送らない") }}
         {{ hour_select("push_digest_evening", s.push_digest_evening, [20, 21, 22], "夜のまとめ(明日の見込み)", "送らない") }}
         {{ seg_radio("push_digest_level", [(3, "出やすい地点だけ"), (2, "やや出やすい地点も")], s.push_digest_level, "まとめに含める地点") }}
-        <p class="muted set-note">当てはまる地点が無い日は送りません。夜のまとめは、毎晩19時半ごろの予測の更新が終わってから送ります。</p>
-        {{ toggle("push_fog_soon", s.push_fog_soon, "まもなく川霧が出やすくなるとき", "毎時の観測で更新した予測で、3時間以内に「発生可能性 高」の時刻がある地点(地点ごとに1日1回)") }}
-        {{ toggle("push_fog_nowcast", s.push_fog_nowcast, "1時間以内に川霧が出ていそうなとき(試験中)", "いまのカメラ画像と近くのアメダスの実測から出す「この後3時間」の1時間後の見込みが高い地点(地点ごとに1日1回)。試した期間では、通知のうち当たったのは4割ほどで、霧の1割ほどしか前もって知らせられませんでした") }}
-        {{ toggle("push_fog_now", s.push_fog_now, "川霧を観測したとき", "毎時のカメラ画像のAI判定で川霧だった地点(地点ごとに1日1回)") }}
-        {{ toggle("push_camera", s.push_camera, "カメラ画像が届かないとき", "対象の地点のカメラが半日ほど続けて取得できていないとき") }}
-        {{ toggle("push_monthly_report", s.push_monthly_report, "月ごとのレポート", "毎月1日の朝、前の月の川霧の観測と予測の成績のまとめ(PDF)ができたとき") }}
+        {{ toggle("push_fog_soon", s.push_fog_soon, "まもなく川霧が出やすくなるとき", "3時間以内に「高」の見込みがある地点(1日1回)") }}
+        {{ toggle("push_fog_nowcast", s.push_fog_nowcast, "1時間以内に川霧が出ていそうなとき(試験中)", "的中はまだ4割ほどです") }}
+        {{ toggle("push_fog_now", s.push_fog_now, "川霧を観測したとき", "地点ごとに1日1回") }}
+        {{ toggle("push_camera", s.push_camera, "カメラ画像が届かないとき", "半日ほど取得できないとき") }}
+        {{ toggle("push_monthly_report", s.push_monthly_report, "月ごとのレポート", "毎月1日、前月のまとめ(PDF)") }}
 
         <h3 class="set-subhead">メッセージ</h3>
         {{ toggle("push_dm", s.push_dm, "DMが届いたとき") }}
         {{ seg_radio("push_group", [("all", "すべて"), ("mention", "メンションだけ"), ("off", "通知しない")], s.push_group, "グループのメッセージ") }}
-        {{ toggle("push_preview", s.push_preview, "通知にメッセージの内容を表示する", "オフにすると「新しいメッセージが届きました」とだけ表示します(ロック画面で見られたくない場合)") }}
+        {{ toggle("push_preview", s.push_preview, "通知にメッセージの内容を表示する", "オフで「新しいメッセージが届きました」とだけ表示") }}
 
         {% if is_admin %}
         <h3 class="set-subhead">管理者</h3>
-        {{ toggle("push_admin", s.push_admin, "システムのお知らせ", "ディスク残量・毎時収集の停止・再起動の繰り返し・保留中の登録申請") }}
+        {{ toggle("push_admin", s.push_admin, "システムのお知らせ") }}
         {% endif %}
 
         <h3 class="set-subhead">静かな時間帯</h3>
-        {{ toggle("quiet_enabled", s.quiet_enabled, "この時間帯は通知しない", "時間帯が明けてもまだ当てはまる川霧の通知は、明けてから届きます") }}
+        {{ toggle("quiet_enabled", s.quiet_enabled, "この時間帯は通知しない", "明けてから届きます") }}
         <div class="set-inline" id="quiet-hours"{{ " hidden" if not s.quiet_enabled }}>
             {{ hour_select("quiet_start", s.quiet_start, hours, "開始") }}
             {{ hour_select("quiet_end", s.quiet_end, hours, "終了") }}
@@ -122,17 +122,15 @@
 
 <section class="card settings-card" id="display" aria-labelledby="h-display">
     <h2 id="h-display">表示</h2>
-    <p class="muted">ここで選んだ表示は、このアカウントでログインしたどの端末にも反映されます。</p>
     <form action="{{ url_for('settings_save', section='display') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {{ seg_radio("theme", [("device", "端末に合わせる"), ("light", "ライト"), ("dark", "ダーク")], s.theme, "テーマ") }}
-        {% if s.theme is none %}<p class="muted set-note">まだ選ばれていないため、いまは端末ごとに選んだテーマ(ヘッダーの月/太陽のボタン)で表示しています。</p>{% endif %}
         {{ seg_radio("text_size", [("normal", "標準"), ("large", "大きめ"), ("xlarge", "特大")], s.text_size, "文字の大きさ") }}
         <p class="muted set-note text-size-sample">あいうえお 川霧 6時 82%</p>
-        {{ toggle("reduce_motion", s.reduce_motion, "動きを減らす", "カードが浮かび上がる演出・数字のカウントアップ・ボタンの波紋などを止めます") }}
-        {{ toggle("calm_background", s.calm_background, "背景を動かさない", "地点ページ等の空の背景の霧・雨・雲の動きを止めます(電池の節約にも)") }}
+        {{ toggle("reduce_motion", s.reduce_motion, "動きを減らす") }}
+        {{ toggle("calm_background", s.calm_background, "背景を動かさない", "省電力にも") }}
         <label class="set-row">
-            <span class="set-row-text"><span class="set-row-label">最初に開くページ</span><small class="muted">ログインした直後と、ホーム画面のアイコン・ブックマークから開いたとき</small></span>
+            <span class="set-row-text"><span class="set-row-label">最初に開くページ</span></span>
             <select name="start_page">
                 {% for value, text in [("dashboard", "ホーム"), ("stations", "地点一覧"), ("map", "地図"), ("favorite", "お気に入りの最初の地点"), ("public", "公開ページ(予報)")] %}
                 <option value="{{ value }}"{{ " selected" if s.start_page == value }}>{{ text }}</option>
@@ -145,12 +143,10 @@
 
 <section class="card settings-card" id="menu" aria-labelledby="h-menu">
     <h2 id="h-menu">メニュー</h2>
-    <p class="muted">サイトのメニューに出す項目と並び、PCでのメニューの場所を選べます。このアカウントでログインしたどの端末にも反映されます。スマホなど狭い画面では、場所は画面下のタブと「メニュー」のままで、項目と並びだけが反映されます。</p>
     <form action="{{ url_for('settings_save', section='menu') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {{ seg_radio("nav_position", [("side", "横(左)"), ("top", "上")], s.nav_position, "PCでのメニューの場所") }}
         <h3 class="set-subhead">スマホの下のタブ</h3>
-        <p class="muted set-note">画面の狭い端末で、下のタブの左右(ホーム・メニュー)のあいだに出す3つを選べます。</p>
         {% set _tb = s.tabbar_items or [] %}
         <div class="tabbar-pick">
             {% for i in range(1, 4) %}
@@ -161,7 +157,7 @@
             </label>
             {% endfor %}
         </div>        <h3 class="set-subhead">出す項目と並び</h3>
-        <p class="muted set-note">チェックを外すとメニューに出しません(「設定」は外せません)。「↑」「↓」で並びを変えられます。同じまとまり(観測・予報・分析など)の項目は、まとまりの中でこの順に並びます。</p>
+        <p class="muted set-note">「設定」は外せません。↑↓で並べ替えられます。</p>
         <ul class="nav-custom" id="nav-custom">
             {% for it in app_nav_catalog() %}
             <li data-default="{{ it.default_index }}">
@@ -204,11 +200,54 @@
     })();
     </script>
 </section>
+<section class="card settings-card" id="dashboard" aria-labelledby="h-dashboard">
+    <h2 id="h-dashboard">ホーム画面</h2>
+    <form action="{{ url_for('settings_save', section='dashboard') }}" method="post" data-ajax data-ajax-reload="600" class="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <ul class="nav-custom" id="dash-custom">
+            {% for it in dash_card_catalog() %}
+            <li data-default="{{ it.default_index }}">
+                <input type="hidden" name="dashboard_order" value="{{ it.id }}">
+                <label class="nav-custom-label">
+                    <input type="checkbox" name="dashboard_show" value="{{ it.id }}"{{ " checked" if it.shown }}>
+                    <span>{{ it.label }}</span>
+                </label>
+                <span class="nav-custom-move">
+                    <button type="button" class="nav-up" aria-label="{{ it.label }}を上へ">↑</button>
+                    <button type="button" class="nav-down" aria-label="{{ it.label }}を下へ">↓</button>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="nav-custom-actions">
+            <button type="submit" class="button settings-save">ホーム画面の設定を保存</button>
+            <button type="button" class="button cancel" id="dash-reset">最初の並びに戻す</button>
+        </p>
+    </form>
+    <script>
+    (function() {
+        var list = document.getElementById("dash-custom");
+        if (!list) { return; }
+        list.addEventListener("click", function(e) {
+            var b = e.target.closest("button"); if (!b) { return; }
+            var li = b.closest("li");
+            if (b.classList.contains("nav-up") && li.previousElementSibling) { list.insertBefore(li, li.previousElementSibling); b.focus(); }
+            if (b.classList.contains("nav-down") && li.nextElementSibling) { list.insertBefore(li.nextElementSibling, li); b.focus(); }
+        });
+        document.getElementById("dash-reset").addEventListener("click", function() {
+            Array.prototype.slice.call(list.children).sort(function(a, b) { return a.dataset.default - b.dataset.default; })
+                .forEach(function(li) { list.appendChild(li); });
+            list.querySelectorAll('input[name="dashboard_show"][type="checkbox"]').forEach(function(c) { c.checked = true; });
+            if (window.showToast) { window.showToast("最初の並びにしました。「ホーム画面の設定を保存」で反映されます。"); }
+        });
+    })();
+    </script>
+</section>
 <section class="card settings-card" id="privacy" aria-labelledby="h-privacy">
     <h2 id="h-privacy">プライバシー</h2>
     <form action="{{ url_for('settings_save', section='privacy') }}" method="post" data-ajax class="settings-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        {{ toggle("show_online", s.show_online, "オンライン状態をほかの人に表示する", "オフにすると、メンバー一覧・DMで常にオフラインと表示され、最終アクセス日時も記録しません") }}
+        {{ toggle("show_online", s.show_online, "オンライン状態をほかの人に表示する", "オフで常にオフライン表示。最終アクセスも記録しません") }}
         {{ toggle("mute_profile_sounds", s.mute_profile_sounds, "ほかの人のプロフィールの効果音を鳴らさない") }}
         <button type="submit" class="button settings-save">プライバシーの設定を保存</button>
     </form>
@@ -216,7 +255,7 @@
 
 <section class="card settings-card" id="install" aria-labelledby="h-install">
     <h2 id="h-install">ホーム画面に追加</h2>
-    <p class="muted">スマホのホーム画面に追加すると、アプリのように全画面で開けます。iPhone・iPadでは、ホーム画面に追加して開いたときだけ通知を受け取れます。電波の弱い場所で最後に見た内容を出す機能も、追加しておくと使いやすくなります。</p>
+    <p class="muted">アプリのように開けます。iPhone・iPadは追加しないと通知を受け取れません。</p>
     <p class="install-state" id="install-state"></p>
     <p><button type="button" class="button" id="install-btn" hidden>この端末に追加する</button></p>
     <div class="install-steps">
@@ -255,8 +294,8 @@
 <section class="card settings-card" id="account" aria-labelledby="h-account">
     <h2 id="h-account">アカウント</h2>
     <ul class="settings-links">
-        <li><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール(自己紹介・お気に入り地点・プロフィール画像)</a></li>
-        <li><a href="{{ url_for('game_shop') }}">見た目のカスタマイズ(フレーム・称号・名前の色など、ポイントで交換)</a></li>
+        <li><a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a></li>
+        <li><a href="{{ url_for('game_shop') }}">見た目のカスタマイズ</a></li>
         <li><a href="{{ url_for('logout') }}">ログアウト</a></li>
     </ul>
 </section>

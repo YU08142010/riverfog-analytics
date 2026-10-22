@@ -25,6 +25,59 @@ window.addEventListener("pageshow", function(e) {
     if (e.persisted) { window.location.reload(); }
 });
 
+// 長い表・一覧の「もっと見る」の開閉(2026-10-23): ページごとに別々のJSを書くと操作感がページで
+// ばらつくため、どのページでも使える共通の仕組みにした。
+// <button class="expand-toggle" data-expand-target="対象のid" data-more-label="…" data-less-label="…">
+// + hiddenを付けた対象の要素、の組み合わせだけで動く(新しいJSを書く必要はない)。
+document.addEventListener("click", function(e) {
+    var btn = e.target.closest(".expand-toggle");
+    if (!btn) { return; }
+    var target = document.getElementById(btn.dataset.expandTarget);
+    if (!target) { return; }
+    var wasHidden = target.hidden;
+    target.hidden = !wasHidden;
+    btn.innerHTML = wasHidden ? btn.dataset.lessLabel : btn.dataset.moreLabel;
+    btn.setAttribute("aria-expanded", String(wasHidden));
+});
+
+// ホーム画面のカードの折りたたみ(2026-10-23): 項目が多すぎて分かりにくいとの指摘を受け、
+// カードの見出し(h2)にボタンを付けて中身を折りたためるようにした。開閉はこの端末のブラウザに
+// 覚える(カードごとのid、dashboard.htmlのdata-card)。表示/非表示・並びは別の仕組み(設定画面の
+// 「ホーム画面」、サーバー側)で扱うので、ここはあくまで「一時的にしまう」だけ。
+(function() {
+    var slots = document.querySelectorAll(".dash-card-slot[data-card]");
+    if (!slots.length) { return; }
+    var KEY = "rf-dash-collapsed", state = {};
+    try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) {}
+    slots.forEach(function(slot) {
+        var card = slot.querySelector(":scope > .card");
+        var h2 = card && card.querySelector(":scope > h2");
+        if (!card || !h2) { return; }
+        var id = slot.dataset.card;
+        var body = document.createElement("div");
+        body.className = "dash-card-body";
+        var node = h2.nextSibling;
+        while (node) { var next = node.nextSibling; body.appendChild(node); node = next; }
+        card.appendChild(body);
+        var btn = document.createElement("button");
+        btn.type = "button"; btn.className = "dash-card-collapse";
+        btn.setAttribute("aria-label", "折りたたむ/展開する");
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+        h2.appendChild(btn);
+        function apply(collapsed) {
+            body.hidden = collapsed;
+            btn.setAttribute("aria-expanded", String(!collapsed));
+            card.classList.toggle("is-collapsed", collapsed);
+        }
+        apply(!!state[id]);
+        btn.addEventListener("click", function() {
+            state[id] = !state[id];
+            apply(state[id]);
+            try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+        });
+    });
+})();
+
 // ヘッダーのボタンで変えたテーマ・文字の大きさを、ログイン中ならサーバーにも保存する(他の端末にも反映)。
 window.rfSaveQuickSetting = function(key, value) {
     if (!window.RF_BASE.loggedIn) { return; }

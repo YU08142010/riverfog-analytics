@@ -26,6 +26,10 @@ SETTINGS = {
     "nav_order": {"default": [], "type": "ids"},   # 項目の並び(空なら最初の並び)
     "nav_hidden": {"default": [], "type": "ids"},  # 出さない項目
     "tabbar_items": {"default": ["stations", "flow_fc", "gallery"], "type": "ids"},  # 狭い画面の下のタブの真ん中の3つ
+    # --- ホーム画面(2026-10-23): 情報が多すぎてわかりにくいとの指摘を受け、メニューと同じ考え方で
+    # カードの表示/非表示と並びを選べるようにした。ヒーロー・お知らせなど常に出すものは対象外 ---
+    "dashboard_order": {"default": [], "type": "ids"},   # カードの並び(空なら最初の並び)
+    "dashboard_hidden": {"default": [], "type": "ids"},  # 出さないカード
     # --- プライバシー ---
     "show_online": {"default": True, "type": bool},
     "mute_profile_sounds": {"default": False, "type": bool},
@@ -47,6 +51,8 @@ SETTINGS = {
     "quiet_enabled": {"default": False, "type": bool},
     "quiet_start": {"default": 22, "choices": HOUR_CHOICES},
     "quiet_end": {"default": 6, "choices": HOUR_CHOICES},
+    # 初回ログイン時のミニガイド(2026-10-23)を閉じたら立てる。閉じた後は二度と出さない。
+    "onboarding_seen": {"default": False, "type": bool},
 }
 
 
@@ -132,6 +138,11 @@ def from_form(form, section, current, station_names):
             # 画面の一覧(nav_order)のうち、チェック(nav_show)の外れているもの
             shown = set(form.getlist("nav_show"))
             out[key] = [s for s in form.getlist("nav_order") if _ID_RE.fullmatch(s) and s not in shown][:60]
+        elif key == "dashboard_order":
+            out[key] = [s for s in form.getlist("dashboard_order") if _ID_RE.fullmatch(s)][:60]
+        elif key == "dashboard_hidden":
+            shown = set(form.getlist("dashboard_show"))
+            out[key] = [s for s in form.getlist("dashboard_order") if _ID_RE.fullmatch(s) and s not in shown][:60]
         elif key in form:
             out[key] = parse_value(key, form.get(key), station_names)
     return out
@@ -141,6 +152,7 @@ def from_form(form, section, current, station_names):
 SECTIONS = {
     "display": ["theme", "text_size", "reduce_motion", "calm_background", "start_page"],
     "menu": ["nav_position", "nav_order", "nav_hidden", "tabbar_items"],
+    "dashboard": ["dashboard_order", "dashboard_hidden"],
     "privacy": ["show_online", "mute_profile_sounds"],
     "push": ["push_stations", "push_custom_stations", "push_digest_morning", "push_digest_evening",
              "push_digest_level", "push_fog_soon", "push_fog_now", "push_fog_nowcast", "push_camera", "push_monthly_report", "push_dm", "push_group",
@@ -148,7 +160,7 @@ SECTIONS = {
 }
 
 # ヘッダーのボタン(テーマ・文字の大きさ)から、ページを移らずに1項目だけ保存してよい項目
-QUICK_KEYS = {"theme", "text_size"}
+QUICK_KEYS = {"theme", "text_size", "onboarding_seen"}
 
 
 def in_quiet_hours(settings, hour):

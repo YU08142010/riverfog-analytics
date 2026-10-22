@@ -19,7 +19,7 @@
     var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     var MOD = IS_MAC ? "⌘" : "Ctrl";
     var KIND_LABEL = { station: "地点", public: "公開", page: "ページ", admin: "管理", date: "日付", recent: "最近",
-                       action: "操作", quick: "すぐ開く", month: "カレンダー" };
+                       action: "操作", quick: "すぐ開く", month: "カレンダー", member: "メンバー" };
     var KIND_ICON = {
         station: '<path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>',
         public: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.4-3.6-8.5s1.1-5.9 3.6-8.5z"/>',
@@ -28,7 +28,8 @@
         date: '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
         month: '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h2M12 14h2M16 14h0M8 17h2M12 17h2"/>',
         action: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
-        quick: '<path d="M5 12h12M13 6l6 6-6 6"/>'
+        quick: '<path d="M5 12h12M13 6l6 6-6 6"/>',
+        member: '<circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5"/>'
     };
 
     /* ---- 操作(Enterでその場で実行する候補) ---- */

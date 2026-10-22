@@ -27,7 +27,7 @@ from webapp import (ALLOWED_LOGS, CAMERA_HEALTH_DAYS, CHAT_DAILY_LIMIT_PER_USER,
     DB_CLEANUP_DEFAULT_DAYS, DB_PATH, DISK_USAGE_PARTS, EDITABLE_ENV_KEYS, ENV_PATH, GEMINI_LOG_DAYS, IMAGE_CLEANUP_DEFAULT_DAYS, 
     IMAGE_DIR, LOG_TAIL_LINES, MIN_PASSWORD_LENGTH, OBSERVER_ROLE_REGIONS, REPORT_RATE_LIMIT_WINDOW, 
     RESTORE_BACKUP_KEEP_GENERATIONS, RESTORE_CONFIRM_PHRASE, RESTORE_MAX_UNCOMPRESSED_BYTES, RESTORE_MAX_UPLOAD_BYTES, 
-    RUNNABLE_SCRIPTS, SMB_CONF_PATH, SMB_SHARE_NAME, STATION_REGION, SYSTEMD_UNITS, TTYD_BASE_PATH, _accuracy_summary_safe, 
+    RUNNABLE_SCRIPTS, SMB_CONF_PATH, SMB_SHARE_NAME, STATION_REGION, SYSTEMD_UNITS, _accuracy_summary_safe,
     _accuracy_trend_safe, _admin_overview, _announcements_conn, _cached_chart_json, _camera_uptime_stats, _crontab_safe, 
     _dir_size_bytes, _env_status, _finish, _gemini_log_stats, _human_size, _is_funnel_request, _is_script_running, 
     _maintenance_state, _network_failure_summary, _read_editable_env_values, _read_server_resources, _read_smb_share_config, 
@@ -433,11 +433,11 @@ def admin_status():
 
 @app.route("/admin/auth-check")
 def admin_auth_check():
-    """nginxのauth_request用。/admin/terminal-ws/(ttyd)と/cockpit-ui/(Cockpit)は
-    Flaskを通らずnginxから直接プロキシされるため、以前はtailnet内からなら誰でも
-    ttyd/CockpitのログインやBasic認証の総当たりを試せた(2026-10-08の監査で指摘)。
-    nginxがこのURLに副リクエストを送り、管理者としてログイン中(requires_adminと同じ条件)
-    の時だけ204を返して通す。リダイレクトはauth_requestでは使えないため401を返す。"""
+    """nginxのauth_request用。/cockpit-ui/(Cockpit)はFlaskを通らずnginxから直接
+    プロキシされるため、以前はtailnet内からなら誰でもCockpitのログイン画面で
+    Basic認証の総当たりを試せた(2026-10-08の監査で指摘)。nginxがこのURLに副リクエストを
+    送り、管理者としてログイン中(requires_adminと同じ条件)の時だけ204を返して通す。
+    リダイレクトはauth_requestでは使えないため401を返す。"""
     if session.get("user_id") and session.get("role") == "admin" and not _is_funnel_request():
         return "", 204
     return "", 401
@@ -765,17 +765,6 @@ def admin_backup_restore():
         if staging_dir is not None and staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
     return redirect(url_for("admin_disk"))
-
-
-@app.route("/admin/terminal")
-@requires_admin
-def admin_terminal():
-    """サーバーのシェルにブラウザからアクセスするためのページ(ttydをiframeで埋め込む)。
-    ttydはループバック限定で待ち受けており、nginxがTTYD_BASE_PATHを同一オリジンで
-    プロキシする(TTYD_BASE_PATHの定義部のコメント参照)。このページ自体がrequires_admin
-    配下なので、iframeのURLを受け取れるのは既に管理者と確認済みの閲覧者だけ。
-    認証自体はttyd側のBasic認証が別途行う(最後の防御層として残している)。"""
-    return render_template("admin_terminal.html", terminal_url=TTYD_BASE_PATH)
 
 
 @app.route("/admin/db")

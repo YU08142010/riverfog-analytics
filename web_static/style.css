@@ -2237,27 +2237,6 @@ table.obs-table th.sticky-col { z-index: 3; }
 .chat-message { font-size: 0.95rem; line-height: 1.65; max-width: 92%; padding: 0.6rem 0.85rem; }
 .chat-form textarea { font-size: 0.95rem; }
 .chat-message-body { white-space: pre-wrap; }
-.chat-collapsible.chat-collapsed .chat-message-body {
-    max-height: 190px;
-    overflow: hidden;
-    -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 68%, transparent 100%);
-}
-.chat-toggle {
-    display: inline-block;
-    margin-top: 0.4rem;
-    padding: 0;
-    background: none;
-    border: none;
-    color: inherit;
-    font: inherit;
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-decoration: underline;
-    cursor: pointer;
-    opacity: 0.85;
-}
-.chat-toggle:hover { opacity: 1; }
 .chat-history-toggle {
     display: flex;
     align-items: center;

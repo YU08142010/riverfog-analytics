@@ -2,10 +2,18 @@
    groupsはbase.htmlで1回だけ組み立てる(未読数などの問い合わせを1回にするため)。
    各項目: label, url, icon, active, badge(数。0なら出さない), badge_key(画面を開いたまま数を更新するもの) #}
 {% from "_icons.html" import icon %}
+{# グループ名だけでは中身が想像しづらいとの指摘(2026-10-23)を受け、1行だけ短い説明を添える。
+   項目の定義(webapp._app_nav_items)側を変えずに済むよう、ここだけで対応表を持つ。 #}
+{% set _group_hints = {
+    "観測": "地点の状況・報告",
+    "予報・分析": "予報を見る・調べる",
+    "コミュニティ": "ほかの利用者とつながる",
+    "その他": "設定・履歴",
+} %}
 {% macro nav_groups(groups, where) -%}
 {% for g in groups if g["items"] %}
 <div class="app-nav-group">
-    {% if g.title %}<div class="app-nav-title">{{ g.title }}</div>{% endif %}
+    {% if g.title %}<div class="app-nav-title">{{ g.title }}{% if _group_hints.get(g.title) %}<span class="app-nav-hint">{{ _group_hints[g.title] }}</span>{% endif %}</div>{% endif %}
     {% for it in g["items"] %}
     <a href="{{ it.url }}" class="app-nav-link{{ ' active' if it.active }}{{ ' app-nav-sheet-only' if it.sheet_only }}"{{ ' aria-current="page"' if it.active }} title="{{ it.label }}"{% if it.external %} target="_blank" rel="noopener"{% endif %}>
         <span class="app-nav-icon">{{ icon(it.icon, size=19) }}</span>

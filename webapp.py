@@ -469,18 +469,6 @@ def _tailscale_autoupdate_prefs():
     return None
 
 
-# ttydはBasic認証をかけた別プロセスとしてsystemdで動かしている(river-fog-terminal.service)。
-# 以前は全インターフェースにバインドしており、requires_admin・CSRF・Funnel判定を一切
-# 経由せずBasic認証(以前はsshuser:sshuserという弱い組み合わせ)だけを突破すれば誰でも
-# フルシェルを取れてしまっていた(2026-09-13の監査で最重要指摘事項)。ループバック
-# (127.0.0.1)限定にバインドしなおし、nginxが/admin/terminal-ws/として同一オリジンで
-# プロキシする(river-fog-nginx設定参照)ことで、このアプリの他の管理機能と同じ
-# allow/deny・X-Rf-Internalヘッダーの保護下に置いた。admin_terminal()はrequires_admin
-# 配下のページなので、そこに到達できる(=既に管理者と確認済みの)閲覧者だけがiframeの
-# URLを受け取れる。ttyd自身のBasic認証(ランダム生成したパスワードに変更済み)は
-# 最後の防御層として残す。
-TTYD_BASE_PATH = "/admin/terminal-ws/"
-
 # CockpitはOS標準でインストール済み(HTTPSのみ、自己署名証明書)。9090番は別オリジンかつ
 # X-Frame-Options: sameoriginを送るため、他オリジンからのiframe埋め込みができない
 # (自己署名証明書とは別の、ブラウザが強制するより根本的な制約)。nginx(8080番)がCockpitを
@@ -1577,6 +1565,7 @@ def _current_notifications():
 
     my_id = session.get("user_id")
     if my_id:
+        role = session.get("role")
         conn = _users_conn()
         try:
             unread = users.dm_unread_counts(conn, my_id)
@@ -1586,6 +1575,15 @@ def _current_notifications():
                 for c in conversations.values() if c is not None
             ]
             senders = users.get_users_by_ids(conn, other_ids)
+            group_unread = users.group_unread_count(conn, my_id)
+            obs_pending = 0
+            if _can_manage_observation_reports(role):
+                if role in ("admin", "observer"):
+                    obs_pending = users.pending_observation_report_count(conn)
+                else:
+                    region = _observer_region_for_role(role)
+                    obs_pending = users.pending_observation_report_count_for_stations(
+                        conn, _STATION_NAMES_BY_REGION.get(region, []))
         finally:
             conn.close()
         for cid, count in unread.items():
@@ -1601,6 +1599,22 @@ def _current_notifications():
                 "level": "info",
                 "message": f"{other['name']}さんから未読メッセージが{count}件あります",
                 "url": url_for("dm_thread", user_id=other_id),
+            })
+        # ナビの「メンバー・メッセージ」「観測の確認」のバッジと別々に確認しないと全体の未読/未対応が
+        # 分からなかったため、通知ベルにもまとめて出す(2026-10-23、UX改善の一環)。
+        if group_unread:
+            notifications.append({
+                "id": "group:unread",
+                "level": "info",
+                "message": f"グループチャットに未読メッセージが{group_unread}件あります",
+                "url": url_for("group_home"),
+            })
+        if obs_pending:
+            notifications.append({
+                "id": "obs:pending",
+                "level": "info",
+                "message": f"確認待ちの観測報告が{obs_pending}件あります",
+                "url": url_for("observation_reports"),
             })
 
     if session.get("role") == "admin":
@@ -1678,7 +1692,7 @@ PUSH_KEY_RE = re.compile(r"^[A-Za-z0-9_\-=]{8,200}$")
 # 正規の証明書のあるURL(Tailscale Funnel)。Service Worker・Web Pushは証明書が正しいHTTPSでしか動かず、
 # :8443(自己署名の証明書)で開いている人にはこちらで開き直すよう案内する。
 PUBLIC_SITE_URL = push_notify.VAPID_SUB
-SETTINGS_SECTION_LABELS = {"display": "表示", "privacy": "プライバシー", "push": "通知", "menu": "メニュー"}
+SETTINGS_SECTION_LABELS = {"display": "表示", "privacy": "プライバシー", "push": "通知", "menu": "メニュー", "dashboard": "ホーム画面"}
 
 
 def _current_user_settings():
@@ -1831,6 +1845,42 @@ def _app_nav_ordered(items, prefs):
     rank = {k: i for i, k in enumerate(order)}
     base = {it["id"]: i for i, it in enumerate(items)}
     return sorted(items, key=lambda it: (rank.get(it["id"], len(order) + base[it["id"]]),))
+
+
+# --- ホーム画面のカード(2026-10-23) ---------------------------------------------------------------
+# 情報が多すぎてどこに何があるか分かりにくいとの指摘を受け、メニュー(nav_order/nav_hidden)と同じ
+# 考え方で、利用者ごとにカードの表示/非表示・並びを選べるようにした。ヒーロー・お気に入りの案内・
+# お知らせは常に出す(メニューの「設定」と同様、外せない)ので対象外。
+DASH_CARD_IDS = ["favorites", "status", "map", "alerts", "ai_summary", "morning_gallery", "latest_images", "predictions"]
+DASH_CARD_LABELS = {
+    "favorites": "お気に入りの地点", "status": "現在の状況", "map": "地図といまの見込み",
+    "alerts": "川霧アラート(今後24時間)", "ai_summary": "AI要約", "morning_gallery": "今朝の川霧",
+    "latest_images": "最新のカメラ画像", "predictions": "本日の予測サマリー",
+}
+
+
+def _dash_card_prefs():
+    """ホームのdashboard()が使う: {カードid: 並びの順位}と、非表示にするカードidの集合。"""
+    prefs = _current_user_settings() if session.get("user_id") else {}
+    order = prefs.get("dashboard_order") or []
+    rank = {k: i for i, k in enumerate(order)}
+    base = {k: i for i, k in enumerate(DASH_CARD_IDS)}
+    hidden = set(prefs.get("dashboard_hidden") or [])
+    return {k: rank.get(k, len(order) + base[k]) for k in DASH_CARD_IDS}, hidden
+
+
+@app.context_processor
+def _inject_dash_cards():
+    def dash_card_catalog():
+        """設定画面の「ホーム画面」用: いまの並びの全カードと、表示しているか(app_nav_catalogと同じ形)。"""
+        prefs = _current_user_settings() if session.get("user_id") else {}
+        hidden = set(prefs.get("dashboard_hidden") or [])
+        order = prefs.get("dashboard_order") or []
+        rank = {k: i for i, k in enumerate(order)}
+        base = {k: i for i, k in enumerate(DASH_CARD_IDS)}
+        ordered = sorted(DASH_CARD_IDS, key=lambda k: rank.get(k, len(order) + base[k]))
+        return [{"id": k, "label": DASH_CARD_LABELS[k], "shown": k not in hidden, "default_index": base[k]} for k in ordered]
+    return {"dash_card_catalog": dash_card_catalog}
 
 
 # 狭い画面の下のタブ(2026-10-13): 左右の「ホーム」「メニュー」は固定で、真ん中の3つを設定で選べる。
@@ -4643,12 +4693,15 @@ def dashboard():
     favorites = [{"name": n, "now": obs_now.get(n), "lv": (pts.get(n) or {}).get("lv") or [], "alert": (pts.get(n) or {}).get("alert"),
                   "fog": bool((pts.get(n) or {}).get("fog"))} for n in fav_names]
     fog_names = {p["name"] for p in (home or {}).get("points", []) if p.get("fog")}
+    dash_rank, dash_hidden = _dash_card_prefs()
     return render_template(
         "dashboard.html",
         home=home,
         favorites=favorites,
         has_favorites_setting=bool(session.get("user_id")),
         fog_names=fog_names,
+        dash_rank=dash_rank,
+        dash_hidden=dash_hidden,
         dashboard_theme_class=dashboard_theme_class,
         observations=_latest_observations(),
         accuracy=_accuracy_summary_safe(),
@@ -5169,6 +5222,19 @@ def _spotlight_items():
     for name in STATION_NAMES:
         region = STATION_REGION.get(name) or ""
         add(name, "station_detail", "station", region, sub=region, name=name)
+    # メンバー名での検索(2026-10-23): 地点名では検索できるのにメンバー名では検索できず、
+    # 「メンバー・メッセージ」を開いて一覧から探すしかなかった(UX改善の指摘)。ログイン中の
+    # 利用者だけに限る(メンバー一覧自体がログイン必須のため、未ログインに名前を見せない)。
+    if session.get("user_id"):
+        conn = _users_conn()
+        try:
+            members = users.list_users(conn)
+        finally:
+            conn.close()
+        for u in members:
+            if u["id"] == session.get("user_id"):
+                continue
+            add(u["name"], "member_detail", "member", sub="メンバー", user_id=u["id"])
     if session.get("role") == "admin" and not _is_funnel_request():
         for label, endpoint, keywords in SPOTLIGHT_ADMIN_PAGES:
             add(label, endpoint, "admin", keywords)
