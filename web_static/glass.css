@@ -649,10 +649,13 @@ header h1 { letter-spacing: 0.03em; }
 }
 .context-menu, .back-to-top { background: var(--glass-bg-strong); box-shadow: var(--glass-shadow); }
 .station-card, .member-tile, .badge-tile { box-shadow: var(--glass-shadow); }
-/* 通知パネルの見出し・末尾の帯はposition:stickyで一覧の上に固定されるため、背景を
+/* 通知パネルの見出し・末尾の帯はposition:stickyで一覧の上/下に固定されるため、背景を
    透明にすると下をスクロールする通知の文字と重なって読めなくなる(2026-10-22に発覚)。
-   パネル本体と同じガラス面(半透明+ぼかし)を敷いて、スクロールしてきた文字を隠す。 */
-.notif-panel-header, .notif-footnote {
+   パネル本体と同じガラス面(半透明+ぼかし)を敷いて、スクロールしてきた文字を隠す。
+   末尾の注記(notif-footnote)が複数行あるとき、それぞれを個別にstickyにすると下端で
+   重なって表示が透けて見えていた(2026-10-23に発覚)。注記全体を1つの枠(notif-panel-footer)
+   にまとめ、その枠だけをstickyにする。 */
+.notif-panel-header, .notif-panel-footer {
     background: var(--glass-bg-strong);
     -webkit-backdrop-filter: var(--glass-filter);
     backdrop-filter: var(--glass-filter);

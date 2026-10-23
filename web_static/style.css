@@ -331,14 +331,20 @@ body {
 .notif-item.notif-level-warning { border-left-color: #b9770e; }
 .notif-item.notif-level-info { border-left-color: var(--color-primary); }
 .notif-empty { padding: 1rem; margin: 0; }
+/* 注記が複数(お気に入り絞り込み・既読の保存先・Web Pushの案内)あるとき、1行ずつに
+   position:sticky; bottom:0 を付けると、どれも同じ下端に固定されて重なってしまう
+   (2026-10-23に発覚)。まとめ枠(notif-panel-footer)だけをstickyにし、中身は普通に積む。 */
+.notif-panel-footer {
+    position: sticky;
+    bottom: 0;
+    border-top: 1px solid var(--color-border);
+}
 .notif-footnote {
     margin: 0;
     padding: 0.5rem 1rem;
     font-size: 0.74rem;
-    border-top: 1px solid var(--color-border);
-    position: sticky;
-    bottom: 0;
 }
+.notif-footnote + .notif-footnote { border-top: 1px solid var(--color-border); }
 
 /* AIチャットページ(/chat)。他のナビ項目(地点別・メンバー等)と同じく専用ページとして
    表示する(通知ベルのようなオーバーレイパネルにはしない)。 */

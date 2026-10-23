@@ -144,6 +144,11 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
         <div class="notif-panel" id="notif-panel" tabindex="-1" hidden>
             <div class="notif-panel-header">通知</div>
             <div id="notif-list"></div>
+            {# 複数行の注記(お気に入り絞り込み・既読の保存先・Web Pushの案内)はそれぞれ独立に
+               position:sticky; bottom:0 を持たせていたため、全部表示される状況(ログイン中+
+               お気に入り設定あり)では3つが下端で重なって表示が透けて見えていた(2026-10-23に発覚)。
+               まとめて1つの枠(notif-panel-footer)だけをstickyにし、中身は普通に積む。 #}
+            <div class="notif-panel-footer">
             {% if notifications_favorites_active() %}
             <p class="notif-footnote muted">お気に入り地点(<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で設定)だけに絞り込んで表示しています。</p>
             {% endif %}
@@ -155,6 +160,7 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
                 <button type="button" class="button cancel chat-notify-btn" id="chat-notify-btn">オンにする</button>
             </div>
             {% endif %}
+            </div>
         </div>
     </div>
     </div>
