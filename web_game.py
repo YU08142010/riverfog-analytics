@@ -2112,8 +2112,11 @@ def game_gamble_cancel(bet_id):
         if not users.use_consumable(conn, my_id, "withdraw_ticket"):
             return _finish("game_gamble", "見送り券を持っていません。", success=False)
         now_str = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-        users.cancel_fog_bet(conn, bet_id, now_str, 0)
-        users.grant_points(conn, my_id, f"gamble_withdraw:{bet_id}", 0, now_str)
+        # 賭けた分(bet_amount)を払い戻す。以前はここに0を渡しており、total_spent_pointsが
+        # 取り消し済みの賭けも「使った」扱いのまま数え続けるため、「全額払い戻しました」と
+        # 表示しながら実際には賭けた分を没収していた(2026-10-23に発覚)。
+        users.cancel_fog_bet(conn, bet_id, now_str, bet["bet_amount"])
+        users.grant_points(conn, my_id, f"gamble_withdraw:{bet_id}", bet["bet_amount"], now_str)
     finally:
         conn.close()
     return _finish("game_gamble", "賭けを取り消し、全額払い戻しました。")

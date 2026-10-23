@@ -692,10 +692,6 @@ def _compress_response(response):
 
 # 外部から読み込んでいるのは地図ページのLeaflet(cdnjs.cloudflare.com)と
 # OpenStreetMapのタイル画像(*.tile.openstreetmap.org)のみ(把握済み・確認済み)。
-# 管理者ターミナル(admin_terminal.html)は以前http://<host>:TTYD_PORTを別オリジンの
-# iframeとして埋め込んでいたが、ttydをループバック限定にしnginx配下の同一オリジン
-# (/admin/terminal-ws/)でプロキシする方式に変更したため、frame-srcを別途許可する
-# 必要が無くなった(2026-09-13の監査で指摘、admin_terminal()参照)。
 def _chart_json(fig):
     """グラフをJSONにする。サイト共通の見た目(chart_style.style_figure)を通してから変換する。"""
     return pio.to_json(chart_style.style_figure(fig))
@@ -5198,7 +5194,6 @@ SPOTLIGHT_ADMIN_PAGES = (
     ("環境変数", "admin_env", "環境 変数 env"),
     ("SMB共有", "admin_smb", "SMB 共有 ネットワーク"),
     ("Tailscale", "admin_tailscale", "Tailscale ネットワーク 公開"),
-    ("ターミナル", "admin_terminal", "ターミナル コマンド シェル"),
 )
 SPOTLIGHT_DATE_RULES = (
     ("観測データ", "/observations/<date>", "observations"),

@@ -33,6 +33,13 @@ EXPORT_XLSX_PATH = BASE_DIR / "data" / "只見川_エクスポート.xlsx"
 AIZU_TEMPLATE_XLSX = BASE_DIR / "template" / "header_template_aizu.xlsx"
 AIZU_EXPORT_XLSX_PATH = BASE_DIR / "data" / "会津_エクスポート.xlsx"
 
+# 日本語(CJK)フォント。OS標準でインストール済みのNoto Sans CJKを使う(月次レポートの
+# PDF・タイムラプス動画の字幕で使用)。以前はmonthly_report.py・timelapse.pyそれぞれに
+# 別々にハードコードされており、パスが変わった場合に片方だけ直し忘れる恐れがあった
+# (2026-10-23に指摘)。
+NOTO_CJK_REGULAR = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+NOTO_CJK_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+
 JST = timezone(timedelta(hours=9))
 
 # GEMINI_MODEL環境変数が未設定の場合のフォールバック値。collect.py・backfill_images.pyの
@@ -313,25 +320,44 @@ def request_with_dns_fallback(method, url, log=None, **kwargs):
             return requests.request(method, url, **kwargs)
 
 
+_dns_overrides = {}  # {hostname: ip} の上書き一覧。_dns_fallback_lockで保護する。
+_original_getaddrinfo = socket.getaddrinfo
+_dns_patch_installed = False
+
+
+def _getaddrinfo_with_overrides(host, *args, **kw):
+    ip = _dns_overrides.get(host)
+    if ip is not None:
+        host = ip
+    return _original_getaddrinfo(host, *args, **kw)
+
+
 @contextmanager
 def _patched_dns_for_hostname(hostname, ip):
     """socket.getaddrinfoを一時的に差し替え、指定したhostnameだけをipに解決させる。
-    他のホスト名の解決には影響しない(host == hostnameの時だけ書き換える)。
-    _dns_fallback_lockで排他しているため、複数スレッドが同時に差し替え/復元を行い
-    互いのパッチを消し合う競合は起きない。例外時も必ず元に戻す。"""
+    他のホスト名の解決には影響しない(_dns_overridesにそのhostnameのエントリが無い限り
+    元の挙動と同じ)。
+
+    以前はロック(_dns_fallback_lock)を「差し替えてから元に戻すまで」ずっと保持しており、
+    その間にくるまれたrequests.request()(遅い・リトライ込みのHTTP通信)の間も他スレッドの
+    差し替えを完全にブロックしていた。collect.pyのカメラ画像取得のようにThreadPoolExecutor
+    から並列に呼ばれる場面では、DNS障害時にこの排他がそのまま直列化を招き、収集全体が
+    時間超過しやすくなる(2026-10-23に発覚)。socket.getaddrinfo自体の差し替えは一度だけ
+    (プロセス寿命中ずっと有効のままでよい、_dns_overridesが空ならただの元の挙動)にし、
+    ロックは_dns_overrides辞書への出し入れという一瞬の操作だけを保護するようにした。
+    複数スレッドが別々のホスト名を同時にフォールバック解決しても、もう互いをブロックしない。
+    """
+    global _dns_patch_installed
     with _dns_fallback_lock:
-        original_getaddrinfo = socket.getaddrinfo
-
-        def _patched_getaddrinfo(host, *args, **kw):
-            if host == hostname:
-                host = ip
-            return original_getaddrinfo(host, *args, **kw)
-
-        socket.getaddrinfo = _patched_getaddrinfo
-        try:
-            yield
-        finally:
-            socket.getaddrinfo = original_getaddrinfo
+        if not _dns_patch_installed:
+            socket.getaddrinfo = _getaddrinfo_with_overrides
+            _dns_patch_installed = True
+        _dns_overrides[hostname] = ip
+    try:
+        yield
+    finally:
+        with _dns_fallback_lock:
+            _dns_overrides.pop(hostname, None)
 
 
 def build_data_backup_zip(dest_path, base_dir=BASE_DIR, include_env=True):

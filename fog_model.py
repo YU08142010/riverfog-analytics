@@ -995,7 +995,8 @@ def train_shared_model(main_df, phenom_df, phenom_cols, lat, lon,
     clim_threshold = (_best_threshold(thr_y, clim_val)[0]
                       if int(thr_y.sum()) >= MIN_POSITIVES_FOR_THRESHOLD else threshold)
     climatology = binary_metrics(y_test, (clim_test >= clim_threshold).astype(int), clim_test)
-    guard = _guard_against_climatology(y_test, p_test, clim_test)
+    guard = _guard_against_climatology(y_test, p_test, clim_test,
+                                        datetimes=eval_rows["__datetime"] if len(eval_rows) else None)
     log.info(
         "Test window (%s - %s, %s inputs, %d rows / %d fog): model AP=%s Brier=%s F1=%s recall=%s precision=%s"
         " / climatology AP=%s Brier=%s F1=%s",
@@ -1081,12 +1082,20 @@ def _fmt(v, digits=3):
     return "n/a" if v is None else f"{v:.{digits}f}"
 
 
+# RandomForestの欠測埋めの印(_fit_rf_xgboost・_rf_xgboost_proba)。「谷の深さ_1km/3km」
+# (周囲の平均標高−地点の標高)は、地点が周囲より高い場所にあると普通に負の値を取り、
+# -1付近の値も現実にありうるため、以前の-1はこの特徴量の実際の値と区別が付かなくなる
+# 恐れがあった(2026-10-23に発覚、診断用のRF+XGBoost比較にだけ影響し本番の予測には
+# 影響しない)。地形・気象のどの特徴量の実測値としても現実的にありえない値にする。
+_RF_MISSING_SENTINEL = -999
+
+
 def _fit_rf_xgboost(X, y, n_xgb, eval_set=None, sample_weight=None):
     """RandomForestとXGBoostを学習する(予測は2つの確率の平均、_rf_xgboost_proba)。
-    RandomForestは欠測を扱えないため、欠測(地形が取れなかった地点等)は-1で埋める。"""
+    RandomForestは欠測を扱えないため、欠測(地形が取れなかった地点等)は_RF_MISSING_SENTINELで埋める。"""
     from sklearn.ensemble import RandomForestClassifier
     from xgboost import XGBClassifier
-    rf = RandomForestClassifier(**HYBRID_RF_PARAMS).fit(X.fillna(-1), y, sample_weight=sample_weight)
+    rf = RandomForestClassifier(**HYBRID_RF_PARAMS).fit(X.fillna(_RF_MISSING_SENTINEL), y, sample_weight=sample_weight)
     xgb = XGBClassifier(**HYBRID_XGB_PARAMS, n_estimators=n_xgb,
                         early_stopping_rounds=EARLY_STOPPING_ROUNDS if eval_set is not None else None)
     if eval_set is not None:
@@ -1098,7 +1107,7 @@ def _fit_rf_xgboost(X, y, n_xgb, eval_set=None, sample_weight=None):
 
 def _rf_xgboost_proba(models, X):
     rf, xgb = models
-    return (rf.predict_proba(X.fillna(-1))[:, 1] + xgb.predict_proba(X)[:, 1]) / 2.0
+    return (rf.predict_proba(X.fillna(_RF_MISSING_SENTINEL))[:, 1] + xgb.predict_proba(X)[:, 1]) / 2.0
 
 
 def _f1_from_pred(y, pred):
@@ -1168,16 +1177,33 @@ def _compare_rf_xgboost(inner, val, train, thr_rows, eval_rows, weather_features
     return out
 
 
-def _guard_against_climatology(y, p_model, p_clim):
+def _guard_against_climatology(y, p_model, p_clim, datetimes=None):
     """評価期間の同じ行で、モデルと気候値の確率の誤差(Brier)を比べるブートストラップ。
+    同じ日の時刻・地点同士は互いに似ている(自己相関がある)ため、_compare_rf_xgboostと
+    同じく日を単位に復元抽出する(datetimesを渡した場合)。以前は行単位で復元抽出しており、
+    不確実性を過小評価して(prob_not_worseが実際より高く出て)境界的なケースで劣化した
+    モデルを本番に通してしまう可能性があった(2026-10-23に発覚)。datetimesを渡さない
+    呼び出しのために行単位の方式もフォールバックとして残す。
     戻り値: {"n", "brier_model", "brier_climatology", "prob_not_worse", "passed"}"""
     n = len(y)
     if n < MIN_ROWS_FOR_REGRESSION_CHECK:
         return {"n": n, "passed": True, "reason": "too few rows for the check"}
     y = np.asarray(y, dtype="float64")
     err_m, err_c = (np.asarray(p_model) - y) ** 2, (np.asarray(p_clim) - y) ** 2
-    idx = np.random.default_rng(1).integers(0, n, size=(REGRESSION_N_BOOTSTRAP, n))
-    prob_not_worse = float(np.mean(err_m[idx].mean(axis=1) <= err_c[idx].mean(axis=1)))
+    rng = np.random.default_rng(1)
+    if datetimes is not None and len(datetimes) == n:
+        days = pd.to_datetime(pd.Series(datetimes).reset_index(drop=True)).dt.normalize().to_numpy()
+        uniq = np.unique(days)
+        idx_by_day = [np.where(days == d)[0] for d in uniq]
+        model_means, clim_means = [], []
+        for _ in range(REGRESSION_N_BOOTSTRAP):
+            pick = np.concatenate([idx_by_day[i] for i in rng.integers(0, len(uniq), size=len(uniq))])
+            model_means.append(err_m[pick].mean())
+            clim_means.append(err_c[pick].mean())
+        prob_not_worse = float(np.mean(np.array(model_means) <= np.array(clim_means)))
+    else:
+        idx = rng.integers(0, n, size=(REGRESSION_N_BOOTSTRAP, n))
+        prob_not_worse = float(np.mean(err_m[idx].mean(axis=1) <= err_c[idx].mean(axis=1)))
     return {
         "n": n, "brier_model": float(err_m.mean()), "brier_climatology": float(err_c.mean()),
         "prob_not_worse": prob_not_worse, "passed": prob_not_worse >= 1.0 - REGRESSION_CONFIDENCE,

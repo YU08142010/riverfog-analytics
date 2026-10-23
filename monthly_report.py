@@ -25,10 +25,10 @@ from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import gallery  # noqa: E402
-from common import BASE_DIR, CAMERAS_CSV, JST  # noqa: E402
+from common import BASE_DIR, CAMERAS_CSV, JST, NOTO_CJK_REGULAR  # noqa: E402
 
 OUT_DIR = BASE_DIR / "data" / "reports"
-FONT_FILE = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+FONT_FILE = NOTO_CJK_REGULAR
 INK, MUTED, GRID = "#1d2733", "#5c6370", "#e3e7ec"
 BLUE, ORANGE, GRAY = "#2a78d6", "#e8693a", "#9a9a94"
 REGION_COLORS = {"只見川": BLUE, "会津": ORANGE}   # どの図でも同じ色にする
@@ -42,7 +42,10 @@ def _setup_font():
         name = font_manager.FontProperties(fname=FONT_FILE).get_name()
         plt.rcParams["font.family"] = [name, "DejaVu Sans"]
     except Exception:
-        pass
+        # 以前は何も記録せずに続けており、フォントが無いホストに移した場合などに
+        # 気付く手段がPDFを人が開いて文字化けを見るしかなかった(2026-10-23に発覚)。
+        # DejaVu Sansは日本語を描けないため、この経路に入ると本文が豆腐(□)になる。
+        log.warning("Failed to load the CJK font (%s); Japanese text in the PDF will not render correctly", FONT_FILE)
     plt.rcParams.update({"axes.edgecolor": GRID, "axes.labelcolor": MUTED, "xtick.color": MUTED, "ytick.color": MUTED,
                          "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": GRID,
                          "axes.axisbelow": True, "font.size": 9})

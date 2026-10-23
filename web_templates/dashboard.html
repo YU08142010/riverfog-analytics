@@ -323,10 +323,11 @@ document.addEventListener("ajaxformsuccess", function(e) {
     </div>
     {% if alerts|length > alert_preview_n %}
     {# 「もっと見る」の開閉は、どのページでも同じ操作感になるよう共通の仕組み(base_ui.js)を使う
-       (2026-10-23、以前はこの表だけ専用のJSを書いていた)。 #}
+       (2026-10-23、以前はこの表だけ専用のJSを書いていた)。base_ui.js側はtextContentで
+       差し込むため、ここは文字実体参照(&#9660;等)ではなくUnicode文字そのものを渡す。 #}
     <button type="button" class="button expand-toggle" data-expand-target="alert-hidden-rows"
-            data-more-label="&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示"
-            data-less-label="&#9650; 閉じる">&#9660; 残り{{ alerts|length - alert_preview_n }}件を表示</button>
+            data-more-label="▼ 残り{{ alerts|length - alert_preview_n }}件を表示"
+            data-less-label="▲ 閉じる">▼ 残り{{ alerts|length - alert_preview_n }}件を表示</button>
     {% endif %}
 </div>
 </div>

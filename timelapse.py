@@ -4,6 +4,7 @@
 - 作った動画は data/timelapse/<日付>/<地点>_<枚数>.mp4 に保存して使い回す(その日の画像が増えたら作り直す)。
 - 書き出しはffmpeg(サーバーに無ければ、pipで入れたimageio-ffmpegに同梱のもの)。
 """
+import logging
 import os
 import shutil
 import subprocess
@@ -13,11 +14,12 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from common import BASE_DIR
+from common import BASE_DIR, NOTO_CJK_BOLD
 
 IMAGE_DIR = BASE_DIR / "data" / "images"
 OUT_DIR = BASE_DIR / "data" / "timelapse"
-FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+FONT = NOTO_CJK_BOLD
+log = logging.getLogger("timelapse")
 FPS = 12   # 古いCPUで作るので控えめに(切り替えは十分なめらか)
 HOLD_SEC = 0.7
 FADE_SEC = 0.5
@@ -93,6 +95,9 @@ def build(station, date):
         try:
             font = ImageFont.truetype(FONT, 28)
         except OSError:
+            # load_default()のビットマップフォントは日本語を描けず、時刻ラベルの日本語部分
+            # (地点名)が文字化けする。以前は無言でこの経路に入っていた(2026-10-23に発覚)。
+            log.warning("Failed to load the CJK font (%s); the timestamp label may not render Japanese text", FONT)
             font = ImageFont.load_default()
         hold, fade = int(HOLD_SEC * FPS), int(FADE_SEC * FPS)
         out.parent.mkdir(parents=True, exist_ok=True)

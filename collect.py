@@ -1338,7 +1338,16 @@ def main():
     save_images(cameras, images_by_name, invalid_stations, run_time)
     prune_old_images()
 
-    append_row(cameras, phenom_by_name, weather, run_time)
+    # record_station_weather・generate_ai_summaries・nowcast.run_nowcast()はそれぞれ内部で
+    # 自分の失敗を外に漏らさないようになっている(互いに独立であるべきという意図)が、
+    # append_row自体は無防備で、ここで例外が起きるとmain()がここで止まり、後続の3つが
+    # 今回ぶんだけ丸ごと実行されずに終わっていた(2026-10-23に発覚)。weather.dbへの
+    # 記録はこの時間の観測そのものなので失敗したら気付けるよう通知もする。
+    try:
+        append_row(cameras, phenom_by_name, weather, run_time)
+    except Exception as e:
+        log.exception("Failed to record this hour's observation in weather.db")
+        send_alert(f"weather.dbへの記録に失敗しました: {e}", source="collect.py")
 
     record_station_weather(run_time)
     generate_ai_summaries(cameras, phenom_by_name, weather, run_time)

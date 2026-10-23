@@ -307,13 +307,20 @@ def admin_accounts_delete(user_id):
         message = f"{target['name']}さんのアカウントを削除しました。"
     finally:
         conn.close()
-    # chat.dbはusers.dbと別ファイルのためON DELETE CASCADEが効かない。ここで明示的に
-    # 削除しないとAIチャット履歴が孤立したまま残り続ける(2026-09-13の監査で指摘)。
+    # chat.db・announcements.dbはusers.dbと別ファイルのためON DELETE CASCADEが効かない。
+    # ここで明示的に削除しないと、AIチャット履歴・お知らせの回答が孤立したまま残り続ける
+    # (chat.dbは2026-09-13の監査で指摘済み。announcements.dbは同じ理由で漏れていたのを
+    # 2026-10-23に対応)。
     chat_conn = chat_log.connect(CHAT_DB_PATH)
     try:
         chat_log.delete_user_data(chat_conn, user_id)
     finally:
         chat_conn.close()
+    ann_conn = _announcements_conn()
+    try:
+        announcements.delete_user_data(ann_conn, user_id)
+    finally:
+        ann_conn.close()
     _record_audit("アカウント削除", f"{target['name']}({target['email']})を削除")
     if session.get("user_id") == user_id:
         session.clear()
@@ -328,18 +335,24 @@ def admin_accounts_delete(user_id):
 @requires_admin
 def admin_accounts_approve(request_id):
     conn = _users_conn()
+    dup_email = None
     try:
         req = users.get_signup_request(conn, request_id)
         created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
-        ok = users.approve_signup_request(conn, request_id, created_at)
+        try:
+            ok = users.approve_signup_request(conn, request_id, created_at)
+        except users.DuplicateEmailError as e:
+            ok, dup_email = False, str(e)
     finally:
         conn.close()
     if ok and req:
         _record_audit("登録申請承認", f"{req['name']}({req['email']})")
-    return _finish(
-        "admin_accounts", "承認してアカウントを作成しました。" if ok else "この申請は既に処理済みです。",
-        success=ok,
+    message = (
+        "承認してアカウントを作成しました。" if ok
+        else f"このメールアドレス({dup_email})は既に別のアカウントで使われています。" if dup_email
+        else "この申請は既に処理済みです。"
     )
+    return _finish("admin_accounts", message, success=ok)
 
 
 @app.route("/admin/accounts/requests/<int:request_id>/reject", methods=["POST"])
@@ -367,6 +380,7 @@ def admin_accounts_requests_bulk():
 
     conn = _users_conn()
     processed = []
+    dup_emails = []
     try:
         created_at = now_jst_naive().strftime("%Y-%m-%d %H:%M:%S")
         n = 0
@@ -377,10 +391,16 @@ def admin_accounts_requests_bulk():
                 continue
             req = users.get_signup_request(conn, rid)
             if action == "approve":
-                if users.approve_signup_request(conn, rid, created_at):
-                    n += 1
-                    if req:
-                        processed.append(req["email"])
+                try:
+                    if users.approve_signup_request(conn, rid, created_at):
+                        n += 1
+                        if req:
+                            processed.append(req["email"])
+                except users.DuplicateEmailError as e:
+                    # 1件がメール重複で失敗しても、残りの承認は続ける
+                    # (以前はここで未処理の例外が外へ漏れ、まだ処理していない残りの
+                    # 申請も含めてこの一括操作全体がエラー画面で止まっていた。2026-10-23に発覚)。
+                    dup_emails.append(str(e))
             else:
                 users.reject_signup_request(conn, rid)
                 n += 1
@@ -391,7 +411,10 @@ def admin_accounts_requests_bulk():
     verb = "承認" if action == "approve" else "拒否"
     if processed:
         _record_audit(f"登録申請一括{verb}", f"{n}件: " + "、".join(processed))
-    return _finish("admin_accounts", f"{n}件の申請を{verb}しました。")
+    message = f"{n}件の申請を{verb}しました。"
+    if dup_emails:
+        message += f" (メール重複のため見送り: {'、'.join(dup_emails)})"
+    return _finish("admin_accounts", message)
 
 
 @app.route("/admin/logs/<key>")
@@ -669,17 +692,36 @@ def _safe_extract_zip(zf, dest_dir):
     全件確認する（絶対パスや".."を含むエントリで想定外の場所に書き込まれるのを防ぐ）。
     また、展開後の合計サイズがRESTORE_MAX_UNCOMPRESSED_BYTESを超えないことも確認する
     (圧縮率の高いZIPでディスクを枯渇させるzip爆弾対策)。
+    以前はZIPのメタデータに書かれているfile_size(展開前にわかる申告値)の合計だけを
+    見て上限チェックしてから一括展開していたが、申告値は実際に解凍されるバイト数と
+    必ずしも一致しない(細工したZIPでメタデータだけ小さく見せかけられ、上限を
+    すり抜けてディスクを枯渇させられる)。1エントリずつ実際に書き込んだバイト数を
+    数えながら展開し、上限を超えた時点で打ち切るようにした(2026-10-23に発覚。管理者
+    専用の操作のため脅威は限定的だが、確認フレーズの誤入力等でも同じ経路を通るため直す)。
     """
     dest_dir = dest_dir.resolve()
-    total_size = 0
-    for member in zf.infolist():
+    members = zf.infolist()
+    for member in members:
         member_path = (dest_dir / member.filename).resolve()
         if member_path != dest_dir and dest_dir not in member_path.parents:
             raise ValueError(f"Unsafe path in zip: {member.filename}")
-        total_size += member.file_size
-        if total_size > RESTORE_MAX_UNCOMPRESSED_BYTES:
-            raise ValueError("展開後の合計サイズが上限を超えています")
-    zf.extractall(dest_dir)
+    total_written = 0
+    chunk_size = 1024 * 1024
+    for member in members:
+        target = (dest_dir / member.filename).resolve()
+        if member.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(member) as src, open(target, "wb") as dst:
+            while True:
+                chunk = src.read(chunk_size)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > RESTORE_MAX_UNCOMPRESSED_BYTES:
+                    raise ValueError("展開後の合計サイズが上限を超えています")
+                dst.write(chunk)
 
 
 @app.route("/admin/backup/restore", methods=["POST"])
@@ -752,13 +794,23 @@ def admin_backup_restore():
             "に退避してあります(問題なければ後で手動削除してください)。サービスを再起動します。",
             "success",
         )
-        subprocess.Popen(
-            ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
-            start_new_session=True,
-        )
     except Exception:
         log.exception("Backup restore failed")
         flash("復元に失敗しました。詳細はログを確認してください。", "error")
+    else:
+        # 復元自体はここまでで完了済み。再起動トリガーの発行が失敗しても、データの復元は
+        # 成功しているため「復元に失敗しました」という矛盾した表示を重ねて出さない
+        # (以前は同じtry/exceptの中にあり、Popen側だけが失敗した場合でも成功表示の後に
+        # 失敗表示が出てしまっていた。2026-10-23に発覚)。ログにだけ残し、手動での
+        # 再起動を案内する。
+        try:
+            subprocess.Popen(
+                ["/bin/sh", "-c", "sleep 1 && sudo -n systemctl restart river-fog-web.service"],
+                start_new_session=True,
+            )
+        except Exception:
+            log.exception("Backup restore succeeded but triggering the restart failed")
+            flash("復元は完了しましたが、自動再起動の開始に失敗しました。手動で再起動してください。", "error")
     finally:
         if tmp_zip_path.exists():
             tmp_zip_path.unlink()

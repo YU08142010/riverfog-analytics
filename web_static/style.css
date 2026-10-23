@@ -718,17 +718,6 @@ button.button:disabled {
 }
 .log-viewer.scrollable { max-height: 70vh; overflow-y: auto; }
 
-/* admin_terminal.htmlのターミナル埋め込み。以前は高さ固定600pxで、スマホ縦画面だと
-   画面の大半を占めて他の要素が見切れる/操作しづらかったため、ビューポート高さに応じて
-   可変にする(狭い画面ほど低く、広い画面では600pxを上限にする)。 */
-.terminal-frame {
-    height: min(600px, 70vh);
-    min-height: 320px;
-}
-@media (max-width: 640px) {
-    .terminal-frame { height: 60vh; min-height: 280px; }
-}
-
 /* admin_cockpit.htmlのCockpit埋め込み。項目一覧・グラフ等が多く縦に長いため、
    ターミナルより高さに余裕を持たせる。 */
 .cockpit-frame {

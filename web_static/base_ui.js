@@ -29,6 +29,11 @@ window.addEventListener("pageshow", function(e) {
 // ばらつくため、どのページでも使える共通の仕組みにした。
 // <button class="expand-toggle" data-expand-target="対象のid" data-more-label="…" data-less-label="…">
 // + hiddenを付けた対象の要素、の組み合わせだけで動く(新しいJSを書く必要はない)。
+// data-more-label・data-less-labelはtextContentで差し込む(HTMLとしては解釈しない)。
+// 今のところ呼び出し側は固定文字列しか渡していないが、将来どこかがここに利用者由来の
+// 文字列(メッセージ本文等)を渡した場合に備え、innerHTMLではなくtextContentにして
+// XSSの経路にならないようにしてある(2026-10-23の監査で指摘)。三角の記号は文字実体参照
+// (&#9660;等)ではなくUnicode文字そのものを渡すこと。
 document.addEventListener("click", function(e) {
     var btn = e.target.closest(".expand-toggle");
     if (!btn) { return; }
@@ -36,7 +41,7 @@ document.addEventListener("click", function(e) {
     if (!target) { return; }
     var wasHidden = target.hidden;
     target.hidden = !wasHidden;
-    btn.innerHTML = wasHidden ? btn.dataset.lessLabel : btn.dataset.moreLabel;
+    btn.textContent = wasHidden ? btn.dataset.lessLabel : btn.dataset.moreLabel;
     btn.setAttribute("aria-expanded", String(wasHidden));
 });
 

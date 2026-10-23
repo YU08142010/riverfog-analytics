@@ -182,6 +182,15 @@ def has_responded(conn, announcement_id, user_id):
     return row is not None
 
 
+def delete_user_data(conn, user_id):
+    """退会したユーザーの回答を削除する。announcements.dbはusers.dbとは別ファイルのSQLite
+    のため外部キーによるON DELETE CASCADEが効かない(chat.dbで2026-09-13の監査で指摘され
+    修正したのと同じ理由だが、こちらは2026-10-23まで未対応で孤立レコードが残っていた)。
+    admin_accounts_deleteからusers.delete_user()と一緒に呼ぶこと。"""
+    with conn:
+        conn.execute("DELETE FROM announcement_responses WHERE user_id = ?", (user_id,))
+
+
 def record_response(conn, announcement_id, user_id, choice_index, answer_text, submitted_at):
     with conn:
         conn.execute(

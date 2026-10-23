@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 import users
 import user_settings
+from common import send_alert
 
 log = logging.getLogger("push")
 
@@ -35,6 +36,11 @@ SENT_KEEP_DAYS = 14
 DIGEST_WINDOW_HOURS = 3       # 朝夕のまとめは、選んだ時刻からこの時間内に1回だけ送る
 SOON_LOOKAHEAD_HOURS = 3      # 「この後」=何時間先までの「発生可能性 高」を知らせるか
 NOW_MAX_AGE_MINUTES = 100     # これより古い観測では「いま観測」の通知を出さない(収集が止まった時の誤報防止)
+# 夜のまとめ(明日の見込み)が参照する予報の生成(run_at)が、これより古いまま止まっていたら
+# 送らない。以前は「今日生成された予報か」だけを見ており、生成が何日止まっていても
+# 1時間待てば無条件に古い予報のまま送り続けていた(「今日の見込み」のつもりで利用者に
+# 届くのに中身は何日も前のものという食い違いに誰も気付けなかった、2026-10-23に発覚)。
+STALE_FORECAST_DAYS = 2
 
 _users_db_path = None
 _now = None
@@ -42,6 +48,7 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="push")
 _lock = threading.Lock()
 _vapid = None
 _public_key = None
+_last_stale_forecast_alert_date = None  # send_alertを同じ日に何度も送らないための記録
 
 
 def init(users_db_path, now_fn):
@@ -246,7 +253,11 @@ def build_digest(forecast, day_index, targets, min_level):
 
 
 def _soon_stations(forecast, targets, now):
-    """この後SOON_LOOKAHEAD_HOURS時間以内に「発生可能性 高」の時刻がある地点 → {地点: 最初の時刻}。"""
+    """この後SOON_LOOKAHEAD_HOURS時間以内に「発生可能性 高」の時刻がある地点 → {地点: 最初の時刻}。
+    日ごとのhoursは0〜23で別々に区切られているため、23時台など日をまたぐ時間帯では
+    今日のhoursだけを見ても24時・25時が存在せず素通りしていた(2026-10-23に発覚、霧の
+    リスクが高いことが多い深夜直前の時間帯でちょうど通知が抜け落ちていた)。h>=24は
+    翌日(days[1])のhoursをh-24で引く。"""
     out = {}
     if not forecast or not forecast.get("days"):
         return out
@@ -257,10 +268,15 @@ def _soon_stations(forecast, targets, now):
         st = by_name.get(name)
         if not st:
             continue
-        hours = st["days"][0].get("hours") or {}
         for h in range(now.hour + 1, now.hour + 1 + SOON_LOOKAHEAD_HOURS):
-            if hours.get(h, 0) >= 3:
-                out[name] = h
+            if h < 24:
+                lv = (st["days"][0].get("hours") or {}).get(h, 0)
+            elif len(st["days"]) > 1:
+                lv = (st["days"][1].get("hours") or {}).get(h - 24, 0)
+            else:
+                lv = 0
+            if lv >= 3:
+                out[name] = h % 24
                 break
     return out
 
@@ -316,6 +332,22 @@ def run_scheduled(ctx):
     run_at = (forecast or {}).get("run_at") or ""
     nowcast_hits = _nowcast_hits(ctx.get("nowcast"), now)
 
+    forecast_too_stale = False
+    if run_at[:10]:
+        try:
+            stale_days = (now.date() - datetime.strptime(run_at[:10], "%Y-%m-%d").date()).days
+        except ValueError:
+            stale_days = None
+        if stale_days is not None and stale_days > STALE_FORECAST_DAYS:
+            forecast_too_stale = True
+            global _last_stale_forecast_alert_date
+            if _last_stale_forecast_alert_date != today:
+                _last_stale_forecast_alert_date = today
+                log.warning("Forecast hasn't updated in %d day(s) (last run_at=%s); holding back the evening digest",
+                            stale_days, run_at)
+                send_alert(f"川霧予報の生成が{stale_days}日止まっています(最終更新 {run_at})。"
+                           "夜のまとめ通知は古いデータのまま送らず見合わせています。", source="push_notify")
+
     for uid in ids:
         user = members.get(uid)
         if user is None:
@@ -330,8 +362,11 @@ def run_scheduled(ctx):
         for slot, day_index, hour in (("morning", 0, s["push_digest_morning"]), ("evening", 1, s["push_digest_evening"])):
             if hour is None or not (hour <= now.hour < hour + DIGEST_WINDOW_HOURS):
                 continue
-            # 夕方は、その日の夜の予測(19:30〜)が出てから送る。予測が止まっていても1時間待ったら前日分で送る。
+            # 夕方は、その日の夜の予測(19:30〜)が出てから送る。予測が止まっていても1時間待ったら前日分で送る
+            # (ただしSTALE_FORECAST_DAYSを超えて古いままなら、もはや「前日分」とは呼べないため送らない)。
             if slot == "evening" and run_at[:10] != today and now.hour < hour + 1:
+                continue
+            if slot == "evening" and forecast_too_stale:
                 continue
             d = build_digest(forecast, day_index, targets, s["push_digest_level"])
             if d:

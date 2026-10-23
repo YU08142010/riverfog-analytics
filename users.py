@@ -925,13 +925,24 @@ def get_signup_request(conn, request_id):
     return _request_row_to_dict(row) if row else None
 
 
+class DuplicateEmailError(Exception):
+    """承認しようとした申請のメールアドレスが既に別アカウントで使われている時に送出する。"""
+
+
 def approve_signup_request(conn, request_id, created_at):
     """申請を承認し、一般(general)ロールでアカウントを作成する。
     パスワードは申請時に既にハッシュ化済みのものをそのまま引き継ぐ(平文は扱わない)。
+
+    メールアドレスが既に別アカウントで使われている場合(同じメールで複数回申請された、
+    承認待ちの間に別経路で同じメールのアカウントができた等)はDuplicateEmailErrorを送出
+    する。以前はusers.emailのUNIQUE制約に任せきりで、この場合に生のsqlite3.IntegrityError
+    がそのまま呼び出し元(管理画面)に漏れ、エラー画面になっていた(2026-10-23に発覚)。
     """
     req = get_signup_request(conn, request_id)
     if req is None or req["status"] != "pending":
         return False
+    if get_user_by_email(conn, req["email"]) is not None:
+        raise DuplicateEmailError(req["email"])
     with conn:
         conn.execute(
             "INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?, ?, ?, 'general', ?)",
@@ -1475,11 +1486,12 @@ def resolve_fog_bet(conn, bet_id, status, resolved_at, payout):
 
 def get_fog_bet(conn, bet_id):
     row = conn.execute(
-        "SELECT id, user_id, station_name, window_start, status FROM fog_bets WHERE id = ?", (bet_id,)
+        "SELECT id, user_id, station_name, window_start, status, bet_amount FROM fog_bets WHERE id = ?", (bet_id,)
     ).fetchone()
     if row is None:
         return None
-    return {"id": row[0], "user_id": row[1], "station_name": row[2], "window_start": row[3], "status": row[4]}
+    return {"id": row[0], "user_id": row[1], "station_name": row[2], "window_start": row[3], "status": row[4],
+            "bet_amount": row[5]}
 
 
 def cancel_fog_bet(conn, bet_id, cancelled_at, refund):
@@ -1947,7 +1959,18 @@ def owned_cosmetic_ids(conn, user_id, category):
 def purchase_cosmetic(conn, user_id, category, item_id, cost, acquired_at, next_billing_at):
     """ポイント残高が足りているかは呼び出し側で確認してから使うこと。既に所持している
     アイテムの場合はUNIQUE制約により何もしない(二重購入・二重課金の防止)。next_billing_at
-    は購入時点で最初の1ヶ月分を含めた上での次回請求日(購入日+1ヶ月)を呼び出し側で計算して渡す。"""
+    は購入時点で最初の1ヶ月分を含めた上での次回請求日(購入日+1ヶ月)を呼び出し側で計算して渡す。
+
+    このため、呼び出しは必ずspend_points_if_available()のdo_spendコールバック経由にし、
+    既に開始済みのトランザクション(BEGIN IMMEDIATE)の中で呼ぶこと。それ以外の経路で
+    直接呼ぶと、残高チェックと消費の間に競合が起き、ポイントがマイナスになったり二重に
+    購入できてしまう(2026-10-23の監査で、将来の呼び出し元が踏み抜きやすい点として指摘)。
+    踏み抜きに早く気付けるよう、トランザクションの外からの呼び出しはここで弾く。"""
+    if not conn.in_transaction:
+        raise RuntimeError(
+            "purchase_cosmetic() must be called inside an existing transaction "
+            "(route it through spend_points_if_available()'s do_spend callback)"
+        )
     with conn:
         conn.execute(
             "INSERT OR IGNORE INTO user_cosmetics (user_id, category, item_id, cost, acquired_at, next_billing_at) "

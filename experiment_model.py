@@ -334,15 +334,23 @@ def _f1_at(y, p, thr):
 
 
 def pick_threshold(y, p):
+    """本番(fog_model._choose_threshold)と同じ決め方に合わせる: 検証データで到達できる
+    最大のF1の半分(確率が較正されていれば、これがF1を最大にするしきい値になる。
+    Lipton et al. 2014)。本番は2026-10-20にこの方式へ切り替えたが、このオフライン精度
+    比較は切り替え前の「F1を直接最大化する値」のままになっており、ここで比較している
+    モデル候補(V2〜V6)の成績が本番の実際の挙動を反映していなかった(2026-10-23に発覚)。
+
+    y.sum()==0の既定値0.15は、本番のDEFAULT_FOG_THRESHOLD(0.05)とは別物として意図的に
+    独立させている(このオフライン評価だけで使う値のため)。"""
     y = np.asarray(y); p = np.asarray(p)
     if y.sum() == 0:
         return 0.15
-    best_t, best_f = 0.15, -1.0
+    best_f = -1.0
     for t in THRESHOLD_GRID:
         f1, _, _ = _f1_at(y, p, t)
         if f1 > best_f:
-            best_t, best_f = float(t), f1
-    return best_t
+            best_f = f1
+    return max(float(THRESHOLD_GRID[0]), round(best_f / 2.0, 2))
 
 
 def inner_threshold(train, feats, climatology=False):
