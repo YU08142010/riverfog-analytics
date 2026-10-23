@@ -10,7 +10,7 @@
 <style>html{background:#eef3f9}:root[data-theme="dark"]{background:#101218}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){background:#101218}}</style>
 <title>{% block title %}川霧観測・予測{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}?v={{ app_version|default('') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='loading.css') }}?v={{ app_version|default('') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">

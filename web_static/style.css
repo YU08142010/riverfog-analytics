@@ -1349,8 +1349,11 @@ table.obs-table th.sticky-col { z-index: 3; }
     display: grid;
     /* タイルがガラス面(半透明+ぼかし)で背景の写真と馴染みやすく、0.8remでは隣接タイルが
        くっついて見えていた。同じ規模の大きめカード(.compare-grid・.gallery-grid等)と
-       揃えて1remにし、タイル間の余白をはっきりさせる(2026-10-23)。 */
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+       揃えて1remにし、タイル間の余白をはっきりさせる(2026-10-23)。
+       auto-fillだと行を埋めきれない枚数のとき(例: /gameの3枚)に空の列がそのまま幅を
+       取ってしまい、タイルが左側に小さく固まって見えていた。auto-fitなら空の列が畳まれ、
+       実際にあるタイルが1frで行いっぱいに広がる(2026-10-23、距離が近すぎるとの指摘で追加修正)。 */
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 1rem;
 }
 .member-tile {
