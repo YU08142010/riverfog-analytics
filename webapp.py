@@ -7806,9 +7806,13 @@ def gold_label(sample_id):
             _record_audit("正解セットの判定で観測を訂正",
                           f"{station} {dt}: {format_phenom_display(original)} → {format_phenom_display(corrected)}")
         corrected = gold_set.save_label(conn, sample, my_id, code, now_str, current, add_correction)
+        gem_note = ""
+        if users.grant_gems(conn, my_id, f"gold_label:{sample_id}", GEM_REWARD_GOLD_LABEL, now_str):
+            gem_note = f"(+{GEM_REWARD_GOLD_LABEL}ジェム)"
     finally:
         conn.close()
-    return _finish("gold_page", "判定を保存しました" + ("(AIの判定と違ったため、観測も訂正しました)。" if corrected else "。"),
+    return _finish("gold_page", "判定を保存しました" + gem_note +
+                   ("(AIの判定と違ったため、観測も訂正しました)。" if corrected else "。"),
                    _anchor="gold-next")
 
 
@@ -8308,8 +8312,8 @@ def _push_schedule_forever():
 
 import web_game  # noqa: E402
 from web_game import (CHAT_MESSAGE_POINTS, COMMENT_POST_POINTS, DAILY_LOGIN_BONUS_POINTS, 
-    DASHBOARD_THEME_BY_ID, GEM_REWARD_DIRECT_CORRECTION, GEM_REWARD_ON_APPROVE, GEM_REWARD_ON_SUBMIT, 
-    GEM_REWARD_TOTAL, IMPORTANCE_LABELS, IMPORTANCE_LEVELS, OBSERVATION_REPORT_REASON_MAX_LENGTH, 
+    DASHBOARD_THEME_BY_ID, GEM_REWARD_DIRECT_CORRECTION, GEM_REWARD_GOLD_LABEL, GEM_REWARD_ON_APPROVE,
+    GEM_REWARD_ON_SUBMIT, GEM_REWARD_TOTAL, IMPORTANCE_LABELS, IMPORTANCE_LEVELS, OBSERVATION_REPORT_REASON_MAX_LENGTH,
     OBSERVATION_REPORT_REWARD_POINTS, _charge_due_subscriptions, _check_economy_anomalies)  # noqa: E402
 globals().update({k: v for k, v in vars(web_game).items() if not k.startswith("__") and k not in globals()})
 
