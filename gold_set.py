@@ -29,6 +29,7 @@ AI_FOG_PER_DAY = 10
 OTHER_PER_DAY = 20
 BACKFILL_DAYS = 7          # 初回は過去この日数分を用意する
 MAX_LABELS_PER_SAMPLE = 2
+GOAL_TWO_RATER = 100       # 2人判定がそろった枚数の当面の目標(これくらいで指標が安定する)
 UNSURE_CODE = -1           # 「画像からは判定できない」
 START_DATE = "2026-10-02"  # これより前の日は作らない(気象のヒント付きの判定だった期間を避ける)
 
@@ -121,6 +122,22 @@ def remaining_count(conn, user_id, allowed_stations=None):
         "FROM gold_samples s LEFT JOIN gold_labels l ON l.sample_id = s.id GROUP BY s.id "
         "HAVING mine = 0 AND n < ?", (user_id, MAX_LABELS_PER_SAMPLE)).fetchall()
     return sum(1 for st, _, _ in rows if allowed_stations is None or st in allowed_stations)
+
+
+def progress(conn, user_id, allowed_stations=None):
+    """進捗: n_two=2人判定がそろった枚数、waiting_second=1人だけ判定済みで2人目を待つ枚数
+    (この人がまだ判定していないもの)、remaining=この人がまだ判定できる枚数。"""
+    rows = conn.execute(
+        "SELECT s.station_name, COUNT(l.user_id) AS n, "
+        "SUM(CASE WHEN l.user_id = ? THEN 1 ELSE 0 END) AS mine "
+        "FROM gold_samples s LEFT JOIN gold_labels l ON l.sample_id = s.id GROUP BY s.id",
+        (user_id,)).fetchall()
+    def ok(st):
+        return allowed_stations is None or st in allowed_stations
+    n_two = sum(1 for st, n, _ in rows if ok(st) and n >= MAX_LABELS_PER_SAMPLE)
+    waiting_second = sum(1 for st, n, mine in rows if ok(st) and n == 1 and mine == 0)
+    remaining = sum(1 for st, n, mine in rows if ok(st) and mine == 0 and n < MAX_LABELS_PER_SAMPLE)
+    return {"n_two": n_two, "waiting_second": waiting_second, "remaining": remaining, "goal": GOAL_TWO_RATER}
 
 
 def get_sample(conn, sample_id):

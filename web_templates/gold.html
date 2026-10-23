@@ -18,6 +18,20 @@
     </p>
 </div>
 
+<div class="card">
+    {% set pctw = 100 * prog.n_two / prog.goal %}{% if pctw > 100 %}{% set pctw = 100 %}{% endif %}
+    <div style="display:flex;flex-wrap:wrap;gap:0.4rem 1.2rem;justify-content:space-between;align-items:baseline;">
+        <div><span class="muted">2人で判定できた画像</span> <b style="font-size:1.1rem;">{{ prog.n_two }}</b> <span class="muted">/ {{ prog.goal }}（指標が安定する目安）</span></div>
+        <div><span class="muted">今日のあなたの判定</span> <b style="font-size:1.1rem;">{{ today_count }}</b> 枚</div>
+    </div>
+    <div style="height:10px;background:var(--color-border, #e3e3e3);border-radius:6px;overflow:hidden;margin-top:0.5rem;" role="img" aria-label="目標{{ prog.goal }}枚中{{ prog.n_two }}枚">
+        <div style="height:100%;width:{{ pctw|round(1) }}%;background:var(--color-primary, #2f7d6b);"></div>
+    </div>
+    {% if prog.waiting_second %}
+    <p class="muted" style="margin:0.6rem 0 0;"><strong>あと一歩: 2人目を待っている画像が {{ prog.waiting_second }} 枚</strong>あります。次に優先して表示されます（2人そろうと「正解」として使えます）。</p>
+    {% endif %}
+</div>
+
 {% if sample %}
 <div class="card gold-card">
     <h3 style="margin-top:0;">{{ sample.station_name }} <span class="muted" style="font-weight:400; font-size:0.9rem;">{{ sample.target_datetime[:16]|replace("-", "/") }}</span></h3>

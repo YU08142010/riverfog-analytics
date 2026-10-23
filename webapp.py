@@ -1573,6 +1573,7 @@ def _current_notifications():
             senders = users.get_users_by_ids(conn, other_ids)
             group_unread = users.group_unread_count(conn, my_id)
             obs_pending = 0
+            gold_remaining = 0
             if _can_manage_observation_reports(role):
                 if role in ("admin", "observer"):
                     obs_pending = users.pending_observation_report_count(conn)
@@ -1580,6 +1581,10 @@ def _current_notifications():
                     region = _observer_region_for_role(role)
                     obs_pending = users.pending_observation_report_count_for_stations(
                         conn, _STATION_NAMES_BY_REGION.get(region, []))
+                try:
+                    gold_remaining = gold_set.remaining_count(conn, my_id, _gold_allowed_stations())
+                except Exception as e:
+                    log.warning("Gold remaining count for nudge failed: %s", e)
         finally:
             conn.close()
         for cid, count in unread.items():
@@ -1611,6 +1616,13 @@ def _current_notifications():
                 "level": "info",
                 "message": f"確認待ちの観測報告が{obs_pending}件あります",
                 "url": url_for("observation_reports"),
+            })
+        if gold_remaining:
+            notifications.append({
+                "id": "gold:pending",
+                "level": "info",
+                "message": f"正解セットに未判定の画像が{gold_remaining}枚あります",
+                "url": url_for("gold_page"),
             })
 
     if session.get("role") == "admin":
@@ -7747,10 +7759,15 @@ def gold_page():
         sample = gold_set.next_sample(conn, my_id, allowed)
         remaining = gold_set.remaining_count(conn, my_id, allowed)
         mine = conn.execute("SELECT COUNT(*) FROM gold_labels WHERE user_id = ?", (my_id,)).fetchone()[0]
+        today = now_jst_naive().strftime("%Y-%m-%d")
+        today_count = conn.execute(
+            "SELECT COUNT(*) FROM gold_labels WHERE user_id = ? AND substr(labeled_at, 1, 10) = ?",
+            (my_id, today)).fetchone()[0]
+        prog = gold_set.progress(conn, my_id, allowed)
     finally:
         conn.close()
-    ctx = {"sample": sample, "remaining": remaining, "mine": mine, "phenom_style": PHENOM_STYLE,
-           "unsure_code": gold_set.UNSURE_CODE}
+    ctx = {"sample": sample, "remaining": remaining, "mine": mine, "today_count": today_count,
+           "prog": prog, "phenom_style": PHENOM_STYLE, "unsure_code": gold_set.UNSURE_CODE}
     if sample:
         dt = datetime.strptime(sample["target_datetime"], "%Y-%m-%d %H:%M:%S")
         ctx["target"] = _image_ref(sample["station_name"], dt)
