@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% from "_page_tabs.html" import page_tabs %}
+{% from "_page_header.html" import page_header %}
 {% block title %}観測報告{% endblock %}
 {% block content %}
+{{ page_header('観測報告') }}
 {{ page_tabs([
     {"label": "観測報告", "url": url_for('observation_reports'), "active": true},
     {"label": "正解セット", "url": url_for('gold_page'), "active": false},

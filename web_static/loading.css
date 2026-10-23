@@ -1,0 +1,26 @@
+/* ページ遷移中(リンククリック・フォーム送信)に画面上部に出す薄い帯(page_loading.js)。
+   SPAではなくフルページ遷移のため、サーバーの応答が来るまで「何も起きていないように見える」
+   白(または単色)画面になりがちな対策。遷移先が表示された時点でこの要素自体も破棄される。 */
+.rf-page-loading-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2.5px;
+    width: 0%;
+    background: linear-gradient(90deg, #0a84ff, #5ac8fa);
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-in;
+}
+.rf-page-loading-bar.is-active {
+    opacity: 1;
+    width: 72%;
+    transition: width 8s cubic-bezier(0.15, 0.8, 0.3, 1), opacity 0.15s ease-in;
+}
+/* 動きを減らす設定(OS設定 または このサイトの設定画面)では、伸びるアニメーションを省略し
+   即座にほぼ全幅で表示する(「読み込み中」であることは変わらず伝える)。 */
+.rf-reduce-motion .rf-page-loading-bar.is-active {
+    width: 96%;
+    transition: opacity 0.15s ease-in;
+}

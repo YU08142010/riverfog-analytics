@@ -41,6 +41,8 @@ log = logging.getLogger("camera_check")
 
 def connect():
     c = sqlite3.connect(DB, timeout=30)
+    c.execute("PRAGMA busy_timeout = 30000")
+    c.execute("PRAGMA journal_mode = WAL")
     c.execute("CREATE TABLE IF NOT EXISTS stats (station TEXT NOT NULL, datetime TEXT NOT NULL, edges BLOB NOT NULL, "
               "sharp REAL NOT NULL, lum REAL NOT NULL, PRIMARY KEY (station, datetime))")
     return c

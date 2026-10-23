@@ -10,6 +10,15 @@
     --color-success-bg: #eaf7ee;
     --color-accent: #7c3fa0;
     --color-accent-bg: #f3e8fa;
+
+    /* 余白スケール(4pxグリッド)。新しく書くCSSはここから選ぶ。既存のmargin/padding値を
+       一括で置き換えることはしていない(見た目が変わるリスクが大きいため)。 */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
 }
 
 /* ダークモード。以前一度削除された経緯があり、原因は現象コードのチップ・セルが
@@ -290,6 +299,14 @@ body {
     overflow-y: auto;
     color: var(--color-text);
     z-index: 20;
+    animation: uiPanelIn 0.16s var(--ease-out, ease) both;
+}
+@keyframes uiPanelIn {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .notif-panel { animation: none; }
 }
 @media (max-width: 640px) {
     /* right:0は.notif-bell-wrap(ベルアイコン自体の小さな箱)からの相対位置のため、
@@ -672,6 +689,24 @@ main {
     margin-top: 0;
     margin-bottom: 0.9rem;
 }
+
+/* ページ先頭の統一タイトル(_page_header.html)。ダッシュボード・AIチャットのように
+   ページ自体に既に強い見出し相当のもの(大きな数字のヒーロー、会話タイトル)がある
+   ページでは使わず、それ以外の一覧・設定系ページで使う。 */
+.page-header {
+    margin: var(--space-2) 0 var(--space-5);
+}
+.page-header-title {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.page-header-subtitle {
+    margin: var(--space-1) 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.92rem;
+}
 .card h3 { font-size: 0.95rem; font-weight: 600; }
 
 .muted { color: var(--color-text-muted); font-size: 0.9rem; }
@@ -841,11 +876,21 @@ button.button:disabled {
     justify-content: center;
     z-index: 1100;
     padding: 1rem;
+    animation: uiOverlayIn 0.15s ease both;
 }
 .modal-dialog {
     padding: 1.4rem 1.5rem;
     max-width: 420px;
     width: 100%;
+    animation: uiModalIn 0.2s var(--ease-out, ease) both;
+}
+@keyframes uiOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes uiModalIn {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .modal-overlay, .modal-dialog { animation: none; }
 }
 .modal-dialog p { margin: 0 0 1.2rem; white-space: pre-wrap; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
@@ -1469,7 +1514,9 @@ table.obs-table th.sticky-col { z-index: 3; }
     cursor: pointer;
     font-size: 0.72rem;
     font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s var(--ease-out, ease);
 }
+.ranking-toggle-btn:active { transform: scale(0.94); }
 .ranking-toggle-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
 .ranking-toggle-btn + .ranking-toggle-btn { margin-left: 0.3rem; }
 
@@ -2014,6 +2061,13 @@ table.obs-table th.sticky-col { z-index: 3; }
     font-size: 0.95rem;
     padding: 0 0.2rem;
     vertical-align: middle;
+    transition: transform 0.15s var(--spring, ease);
+}
+.star-toggle-btn:hover { transform: scale(1.15); }
+.star-toggle-btn:active { transform: scale(0.9); }
+@media (prefers-reduced-motion: reduce) {
+    .star-toggle-btn, .ranking-toggle-btn { transition: none; }
+    .star-toggle-btn:hover, .star-toggle-btn:active, .ranking-toggle-btn:active { transform: none; }
 }
 .file-tag-chip {
     display: inline-block;

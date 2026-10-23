@@ -5,9 +5,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- glass.cssの読み込み待ちの一瞬ブラウザ既定の白背景が見えてしまう(特にダーク時に白フラッシュする)のを
+     防ぐため、同じ色をここでも即時に適用する(glass.css側のhtml背景の値と必ず合わせること)。 -->
+<style>html{background:#eef3f9}:root[data-theme="dark"]{background:#101218}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){background:#101218}}</style>
 <title>{% block title %}川霧観測・予測{% endblock %} - 川霧観測・予測</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" id="favicon-link">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='loading.css') }}?v={{ app_version|default('') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
 <meta name="theme-color" content="#1b4a66">
@@ -19,6 +23,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='glass.css') }}?v={{ app_version|default('') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}?v={{ app_version|default('') }}">
 <script src="{{ url_for('static', filename='ui_motion.js') }}?v={{ app_version|default('') }}" defer></script>
+<script src="{{ url_for('static', filename='page_loading.js') }}?v={{ app_version|default('') }}" defer></script>
 <script src="{{ url_for('static', filename='shared.js') }}"></script>
 {% block extra_head %}{% endblock %}
 <script>

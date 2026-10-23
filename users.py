@@ -7,12 +7,19 @@
 import logging
 import re
 import sqlite3
+import threading
 from datetime import date, datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
 log = logging.getLogger("users")
 _foreign_keys_verified = False
+# connect()はリクエストのたびに呼ばれるため、スキーマ作成・カラム移行確認は
+# プロセスごとに1回だけ行う(毎回34テーブル分のCREATE TABLE/PRAGMAを打つのは
+# 無駄なオーバーヘッドになるため)。ロックは、複数スレッドが起動直後に同時に
+# connect()した際、_migrate_add_foreign_keys等のテーブル再作成処理が競合しないようにするため。
+_schema_ready = False
+_schema_lock = threading.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -235,6 +242,9 @@ CREATE TABLE IF NOT EXISTS dm_conversations (
     last_message_at TEXT NOT NULL,
     UNIQUE(user_a_id, user_b_id)
 );
+-- UNIQUE(user_a_id, user_b_id)はuser_a_id始まりの検索しか使えないため、
+-- 「WHERE user_a_id = ? OR user_b_id = ?」(会話一覧取得)のuser_b_id側用に別途必要。
+CREATE INDEX IF NOT EXISTS idx_dm_conversations_user_b_id ON dm_conversations(user_b_id);
 CREATE TABLE IF NOT EXISTS dm_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
@@ -602,27 +612,28 @@ def connect(db_path):
     conn = sqlite3.connect(db_path, timeout=30.0)
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA journal_mode = WAL")
-    # テーブル作り直し(移行)中はFK違反チェックを一時的に無効にする必要があるため、
-    # スキーマ確定後にONへ切り替える。
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.executescript(SCHEMA)
-    _ensure_profile_columns(conn)
-    _ensure_shared_files_columns(conn)
-    _ensure_fog_bets_columns(conn)
-    _ensure_subscription_billing_columns(conn)
-    _ensure_dm_messages_columns(conn)
-    _migrate_add_foreign_keys(conn)
-    _migrate_phenomena_corrections_nullable_source(conn)
-    _ensure_login_events_columns(conn)
-    _ensure_observation_report_importance_column(conn)
-    _ensure_observation_report_reason_column(conn)
+    global _schema_ready, _foreign_keys_verified
+    if not _schema_ready:
+        with _schema_lock:
+            if not _schema_ready:
+                # テーブル作り直し(移行)中はFK違反チェックを一時的に無効にする必要があるため、
+                # スキーマ確定後にONへ切り替える。
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.executescript(SCHEMA)
+                _ensure_profile_columns(conn)
+                _ensure_shared_files_columns(conn)
+                _ensure_fog_bets_columns(conn)
+                _ensure_subscription_billing_columns(conn)
+                _ensure_dm_messages_columns(conn)
+                _migrate_add_foreign_keys(conn)
+                _migrate_phenomena_corrections_nullable_source(conn)
+                _ensure_login_events_columns(conn)
+                _ensure_observation_report_importance_column(conn)
+                _ensure_observation_report_reason_column(conn)
+                _verify_foreign_keys(conn)
+                _foreign_keys_verified = True
+                _schema_ready = True
     conn.execute("PRAGMA foreign_keys = ON")
-    global _foreign_keys_verified
-    if not _foreign_keys_verified:
-        # connect()はリクエストのたびに呼ばれるため、この検証はプロセスごとに1回だけ
-        # 行う(毎回全34テーブル分PRAGMAを打つのは無駄なオーバーヘッドになるため)。
-        _verify_foreign_keys(conn)
-        _foreign_keys_verified = True
     return conn
 
 

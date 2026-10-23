@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_page_tabs.html" import page_tabs %}
+{% from "_page_header.html" import page_header %}
 {% block title %}ゲーム{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -8,6 +9,7 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ page_header('ゲーム') }}
 {{ page_tabs([
     {"label": "ゲーム", "url": url_for('game_home'), "active": request.path == url_for('game_home')},
     {"label": "デイリー", "url": url_for('game_daily'), "active": request.path.startswith('/game/daily')},

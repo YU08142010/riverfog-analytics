@@ -2,6 +2,7 @@
 {% from "_icons.html" import icon %}
 {% from "_avatar.html" import avatar_frame %}
 {% from "_page_tabs.html" import page_tabs %}
+{% from "_page_header.html" import page_header %}
 {% block title %}メンバー{% endblock %}
 {% block breadcrumb %}
 <ul class="breadcrumb">
@@ -10,6 +11,7 @@
 </ul>
 {% endblock %}
 {% block content %}
+{{ page_header('メンバー') }}
 {{ page_tabs([
     {"label": "メンバー", "url": url_for('members_list'), "active": request.path.startswith('/members')},
     {"label": "グループ", "url": url_for('group_home'), "active": request.path.startswith('/group'), "badge": group_unread_count()},

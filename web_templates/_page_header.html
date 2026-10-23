@@ -1,0 +1,6 @@
+{% macro page_header(title, subtitle=None) %}
+<div class="page-header">
+    <h2 class="page-header-title">{{ title }}</h2>
+    {% if subtitle %}<p class="page-header-subtitle">{{ subtitle }}</p>{% endif %}
+</div>
+{% endmacro %}

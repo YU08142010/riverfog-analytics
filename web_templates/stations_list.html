@@ -2,10 +2,12 @@
 {% from "_station_checkboxes.html" import station_checkboxes %}
 {% from "_page_tabs.html" import page_tabs %}
 {% from "_wx_icon.html" import wx_icon %}
+{% from "_page_header.html" import page_header %}
 {% block title %}地点別{% endblock %}
 {% block sidebar %}{% include "_station_sidebar.html" %}{% endblock %}
 {% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='weather_scene.css') }}?v={{ app_version|default('') }}">{% endblock %}
 {% block content %}
+{{ page_header('地点別') }}
 {{ page_tabs([
     {"label": "一覧", "url": url_for('stations_list'), "active": request.path.startswith('/stations')},
     {"label": "比較", "url": url_for('compare_stations'), "active": request.path.startswith('/compare')},
