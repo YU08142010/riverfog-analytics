@@ -7790,7 +7790,7 @@ def gold_label(sample_id):
     my_id = session.get("user_id")
     code = request.form.get("code", type=int)
     if code is None or not (code == gold_set.UNSURE_CODE or 0 <= code <= 10):
-        return _finish("gold_page", "現象を選んでください。", success=False)
+        return _finish("gold_page", "現象を選んでください。", success=False, _anchor="gold-next")
     conn = _users_conn()
     try:
         sample = gold_set.get_sample(conn, sample_id)
@@ -7808,7 +7808,8 @@ def gold_label(sample_id):
         corrected = gold_set.save_label(conn, sample, my_id, code, now_str, current, add_correction)
     finally:
         conn.close()
-    return _finish("gold_page", "判定を保存しました" + ("(AIの判定と違ったため、観測も訂正しました)。" if corrected else "。"))
+    return _finish("gold_page", "判定を保存しました" + ("(AIの判定と違ったため、観測も訂正しました)。" if corrected else "。"),
+                   _anchor="gold-next")
 
 
 @app.route("/gold/results")

@@ -1293,6 +1293,10 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .settings-main [hidden] { display: none !important; }
 
 /* ===== 正解セット(/gold、2026-10-09) ===== */
+/* 判定後にサーバーが#gold-nextへリダイレクトし、固定ヘッダーの下に画像とピッカーが
+   そのまま見える位置へ飛ぶ(2026-10-23)。これが無いと毎回ページ先頭の説明文まで
+   スクロールされ、1枚ごとに下へスクロールし直す必要があった。 */
+.gold-card { scroll-margin-top: calc(var(--header-h, 4.6rem) + 0.6rem); }
 .gold-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); gap: 0.8rem; align-items: start; }
 .gold-grid figure { margin: 0; }
 .gold-grid img { width: 100%; height: auto; display: block; border-radius: var(--radius-sm, 8px); }
