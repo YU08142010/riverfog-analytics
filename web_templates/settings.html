@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% from "_station_checkboxes.html" import station_checkboxes %}
 {% from "_icons.html" import icon %}
-{% from "_page_header.html" import page_header %}
 {% block title %}設定{% endblock %}
 {% block content %}
 {% macro toggle(name, checked, label, hint="") %}
@@ -29,7 +28,6 @@
     </select>
 </label>
 {% endmacro %}
-{{ page_header('設定') }}
 <div class="settings-layout">
 <nav class="settings-nav card" aria-label="設定の項目">
     <a href="#push">通知</a>

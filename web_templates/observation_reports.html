@@ -1,44 +1,29 @@
 {% extends "base.html" %}
 {% from "_page_tabs.html" import page_tabs %}
-{% from "_page_header.html" import page_header %}
 {% block title %}観測報告{% endblock %}
 {% block content %}
-{{ page_header('観測報告') }}
 {{ page_tabs([
     {"label": "観測報告", "url": url_for('observation_reports'), "active": true},
     {"label": "正解セット", "url": url_for('gold_page'), "active": false},
     {"label": "正解セットの結果", "url": url_for('gold_results'), "active": false},
 ]) }}
-<div class="card">
-    <h2>観測報告(未対応 <span id="report-count">{{ reports|length }}</span>件)</h2>
-    <p class="muted">
-        利用者が「この観測は間違っていると思う」で報告した内容と、前後の観測と食い違う1時間だけの
-        孤立したブレをシステムが自動検知した内容の確認待ちキューです。対象時刻の前後1時間ずつを含む
-        3枚の画像と現象判定を見比べたうえで、訂正するか却下するか判断してください(自動では訂正されません)。
-        {% if session.get("role") != "admin" %}担当地域(会津/只見川のどちらか一方)の報告のみ表示しています。{% endif %}
-    </p>
-    <ul class="hint-list">
-        <li><strong>赤字の注意表示</strong>前後が同じ判定で対象時刻だけ違う場合、孤立したブレの可能性として出ます。</li>
-        <li><strong>ジェム</strong>自動検知分を実際に訂正すると、報告者の代わりに確認した本人に付与されます。</li>
-        <li><strong>数字キー(0〜9、雨は「-」)</strong>カードのボタンにマウスを乗せる/フォーカスした状態で現象を選べます。</li>
-        <li><strong>Enter / x</strong>フォーカスした状態で、訂正を確定/却下します。</li>
-        <li><strong>+ もう1つの現象を追加</strong>同時発生(例: 雨と川霧)の2つ目は、追加後 Shift+数字キーでも選べます。</li>
-        <li><strong>J / K</strong>次・前の報告に移れます。訂正・却下した報告はその場で消え、次の報告に自動で移ります。</li>
-    </ul>
-</div>
+<p class="obs-reports-intro">
+    未対応 <strong id="report-count">{{ reports|length }}</strong>件。画像を見比べて、訂正するか却下するか選んでください。
+    {% if session.get("role") != "admin" %}担当地域の報告のみ表示しています。{% endif %}
+    <span class="muted">J/Kで前後の報告へ、複数現象は「+ もう1つの現象を追加」から選べます。</span>
+</p>
 
-{% if stale_auto_count %}
-<div class="card bulk-card">
-    <p style="margin:0 0 0.6rem;"><b>{{ stale_auto_count }}件</b>は、見直す必要の低い自動検知です({{ stale_auto_days }}日より前のもの、または前後と比べて「この地点の霧かどうか」が変わらないブレ。後者は学習のラベルに影響せず、新しく積むのもやめました)。まとめて閉じられます(「問題なしと判断」と同じ扱い。学習のラベルは変わりません)。</p>
+{% if stale_auto_count or own_judge_disagree_count %}
+<div class="report-notice-bar">
+    {% if own_judge_disagree_count %}
+    <p>自動判定と食い違う報告が<strong>{{ own_judge_disagree_count }}件</strong>あります(先頭に表示)。</p>
+    {% endif %}
+    {% if stale_auto_count %}
     <form method="post" action="{{ url_for('observation_reports_bulk_dismiss') }}" data-confirm="{{ stale_auto_count }}件の自動検知をまとめて閉じますか？">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="button cancel">自動検知 {{ stale_auto_count }}件をまとめて閉じる</button>
+        <p>見直す必要の低い自動検知が<strong>{{ stale_auto_count }}件</strong>あります。<button type="submit" class="button cancel">まとめて閉じる</button></p>
     </form>
-</div>
-{% endif %}
-{% if own_judge_disagree_count %}
-<div class="card oj-summary">
-    <p style="margin:0;"><b>{{ own_judge_disagree_count }}件</b>は、自前の画像判定(Geminiとは別の判定)が今の判定と違う、と自信を持って判定したものです。ラベルの誤りの可能性が高いので、先頭に並べています。</p>
+    {% endif %}
 </div>
 {% endif %}
 {% if reports %}

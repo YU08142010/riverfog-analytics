@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 {% from "_tab_groups.html" import analysis_tabs, data_tabs %}
-{% from "_page_header.html" import page_header %}
 {% block title %}予測精度{% endblock %}
 {% block content %}
-{{ page_header('予測精度') }}
 {{ analysis_tabs() }}
 {# 論文用の図をまとめて保存(2026-10-14) #}
 <div class="paper-figs">

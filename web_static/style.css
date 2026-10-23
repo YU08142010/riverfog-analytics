@@ -689,24 +689,6 @@ main {
     margin-top: 0;
     margin-bottom: 0.9rem;
 }
-
-/* ページ先頭の統一タイトル(_page_header.html)。ダッシュボード・AIチャットのように
-   ページ自体に既に強い見出し相当のもの(大きな数字のヒーロー、会話タイトル)がある
-   ページでは使わず、それ以外の一覧・設定系ページで使う。 */
-.page-header {
-    margin: var(--space-2) 0 var(--space-5);
-}
-.page-header-title {
-    margin: 0;
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-}
-.page-header-subtitle {
-    margin: var(--space-1) 0 0;
-    color: var(--color-text-muted);
-    font-size: 0.92rem;
-}
 .card h3 { font-size: 0.95rem; font-weight: 600; }
 
 .muted { color: var(--color-text-muted); font-size: 0.9rem; }
@@ -2176,6 +2158,34 @@ table.obs-table th.sticky-col { z-index: 3; }
 
 /* 観測報告(admin_observation_reports.html)。以前は表の1セルに80px幅で3枚並べていて
    見比べにくかったため、1件1カードのレイアウトに変え、画像を大きく表示する。 */
+.obs-reports-intro {
+    margin: 0 0 1rem;
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+}
+.obs-reports-intro strong { color: var(--color-text); }
+.obs-reports-intro .muted { display: block; margin-top: 0.2rem; font-size: 0.8rem; }
+
+/* まとめて閉じる等の二次的な案内は、報告カードと同じ.card(白背景・影つき)にすると
+   本体のカードと見分けがつかず「カードの山」に埋もれるため、軽量な帯で表示する。 */
+.report-notice-bar {
+    margin: 0 0 1rem;
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
+}
+.report-notice-bar form { margin: 0; }
+.report-notice-bar p {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+}
+.report-notice-bar p + p { margin-top: 0.4rem; }
+
 .observation-report-card { padding-bottom: 1.1rem; }
 .observation-report-head { margin-bottom: 0.8rem; }
 .observation-report-images {
