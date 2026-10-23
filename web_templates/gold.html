@@ -13,7 +13,7 @@
         毎日、日中の画像から無作為に選んだものを、AIの判定を見ずに判定してください。AIのラベルと予測が
         本当はどれくらい当たっているかを測るための「正解」になります(1枚につき2人まで、互いの判定は見えません)。
         いちばん大きい画像が判定する画像です。右側の3枚(1時間前・1時間後・同じカメラの見通しの良い時)は見比べ用です。
-        数字キー(0〜9、雨は「-」)で選び、Enterで保存できます。画像から判断できなければ「判定できない」を選んでください。
+        数字キー(0〜8)で選び、Enterで保存できます。画像から判断できなければ「判定できない」を選んでください。
         あなたの判定はこれまでに{{ mine }}枚です。
     </p>
 </div>
@@ -48,9 +48,9 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="code" id="gold-code" value="">
             <div class="gold-picker" role="radiogroup" aria-label="現象">
-                {% for c in range(11) %}
+                {% for c in range(9) %}
                 <button type="button" class="gold-btn" data-code="{{ c }}" aria-pressed="false">
-                    <span class="phenom-dot" style="background:{{ phenom_style[c].bg }};"></span>{{ phenom_style[c].label if c else "現象なし" }}<span class="phenom-key">{{ "-" if c == 10 else c }}</span>
+                    <span class="phenom-dot" style="background:{{ phenom_style[c].bg }};"></span>{{ phenom_style[c].label if c else "現象なし" }}<span class="phenom-key">{{ c }}</span>
                 </button>
                 {% endfor %}
                 <button type="button" class="gold-btn gold-unsure" data-code="{{ unsure_code }}" aria-pressed="false">判定できない<span class="phenom-key">u</span></button>
@@ -88,8 +88,7 @@
         if (e.ctrlKey || e.metaKey || e.altKey) { return; }
         var tag = (e.target.tagName || "").toLowerCase();
         if (tag === "input" || tag === "textarea" || tag === "select") { return; }
-        if (/^[0-9]$/.test(e.key)) { pick(e.key); e.preventDefault(); }
-        else if (e.key === "-") { pick("10"); e.preventDefault(); }
+        if (/^[0-8]$/.test(e.key)) { pick(e.key); e.preventDefault(); }
         else if (e.key === "u" || e.key === "U") { pick("{{ unsure_code }}"); e.preventDefault(); }
         else if (e.key === "Enter" && input.value !== "") { e.preventDefault(); submit.click(); }
     });

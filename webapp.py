@@ -7828,7 +7828,8 @@ def gold_page():
 def gold_label(sample_id):
     my_id = session.get("user_id")
     code = request.form.get("code", type=int)
-    if code is None or not (code == gold_set.UNSURE_CODE or 0 <= code <= 10):
+    # 霧雨・雨(9・10)は選択肢から外している(外部の実測・予報に一本化、2026-10-23)。
+    if code is None or not (code == gold_set.UNSURE_CODE or 0 <= code <= 8):
         return _finish("gold_page", "現象を選んでください。", success=False, _anchor="gold-next")
     conn = _users_conn()
     try:
