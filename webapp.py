@@ -574,6 +574,7 @@ log = logging.getLogger("webapp")
 # 必ずここ(webapp.py自身のbasicConfig呼び出しの後)でimportする。
 import chat_log
 import collect
+import rain_status
 
 def _load_or_create_secret_key():
     """SECRET_KEYを.envから読む。無ければ生成して.envに書き込み、以後は固定する。
@@ -1824,7 +1825,7 @@ def _app_nav_items(obs_pending=0, community_unread=0):
     items += [
         ("public", "予報・分析", "予報(公開ページ)", url_for("public_forecast"), "forecast", False),
         ("simulator", "予報・分析", "シミュレーター", url_for("simulator_page"), "simulator", p.startswith(url_for("simulator_page"))),
-        ("analysis", "予報・分析", "分析", url_for("weather_fog_graph_page"), "accuracy", analysis or p.startswith("/reports")),
+        ("analysis", "予報・分析", "分析", url_for("river_fog_histogram_page"), "accuracy", analysis or p.startswith("/reports")),
         ("data", "予報・分析", "データ", url_for("observations_dates"), "data", p.startswith(data_paths)),
     ]
     if logged_in:
@@ -5163,7 +5164,6 @@ SPOTLIGHT_PAGES = (
     ("カメラ画像", "images_dates", "画像 写真 カメラ"),
     ("予測結果", "predictions_dates", "予報 予測グラフ"),
     ("予測精度", "accuracy_page", "精度 的中率 F1 特徴量 重要度 分析"),
-    ("気象と川霧のグラフ", "weather_fog_graph_page", "分析 グラフ 気象"),
     ("観測報告", "observation_reports", "報告 訂正"),
     ("コミュニティ", "members_list", "メンバー 仲間 チャット"),
     ("AIチャット", "chat_page", "AI チャット 質問 Gemini"),
@@ -5176,7 +5176,7 @@ SPOTLIGHT_PAGES = (
     ("グループ", "group_home", "グループ チャット 投票"),
     ("共有ファイル", "shared_files_page", "ファイル 共有 アップロード ダウンロード"),
     ("期間レポート", "period_report", "レポート 期間 集計 まとめ"),
-    ("川霧の時刻分布", "river_fog_histogram_page", "ヒストグラム 分布 時刻 分析"),
+    ("川霧の時刻分布", "river_fog_histogram_page", "ヒストグラム 分布 時刻 分析 気象 箱ひげ図"),
     ("更新履歴", "changelog_page", "バージョン 変更履歴"),
     ("公開ページ(出やすさ)", "public_forecast", "公開 一般向け 出やすさ"),
     ("この情報について(公開)", "public_about", "公開 説明 仕組み"),
@@ -5297,6 +5297,20 @@ def _inject_spotlight():
     return {"spotlight_items": _spotlight_items}
 
 
+def _rain_combined_label(fog_label, raining):
+    """雨(アメダス実測/Open-Meteo予報由来)をラベルの先頭に付け加える(例:
+    「発生可能性 高」→「雨 発生可能性 高」)。raining=False/Noneならfog_labelのまま。
+    fog_labelが既に雨由来(カメラ画像をGeminiが「雨」「霧雨」と判定した場合)の二重表記は避ける。"""
+    if not raining:
+        return fog_label
+    if fog_label and (fog_label.startswith("雨") or fog_label.startswith("霧雨")):
+        return fog_label
+    return f"雨 {fog_label}" if fog_label else "雨"
+
+
+app.jinja_env.globals["rain_label"] = _rain_combined_label
+
+
 def _station_card_data():
     """地点一覧(天気アプリの都市リスト風)のカード用データ。"""
     observations = None
@@ -5307,6 +5321,7 @@ def _station_card_data():
     current_by_name = {s["name"]: s for s in observations["stations"]} if observations else {}
     forecast = _public_forecast_safe() or {}
     today_by_name = {s["name"]: s["days"][0] for s in forecast.get("stations", []) if s.get("days")}
+    rain_now_by_name = {s["name"]: (s.get("now") or {}).get("rain") for s in forecast.get("stations", [])}
     temps = {}
     try:
         conn = station_weather.connect(STATION_WEATHER_DB_PATH)
@@ -5322,14 +5337,15 @@ def _station_card_data():
     cards = {}
     for name in STATION_NAMES:
         cur = current_by_name.get(name)
-        today = today_by_name.get(name) or {"max": 0, "hours": {}}
+        today = today_by_name.get(name) or {"max": 0, "hours": {}, "rain_hours": []}
         high_hours = sorted(h for h, lv in today["hours"].items() if lv == 3)
+        today_label = PUBLIC_LEVELS[today["max"]]["label"] if today["max"] else None
         cards[name] = {
             "wx": _weather_scene(name, cur["code"] if cur else None),
-            "label": cur["label"] if cur else "観測なし",
+            "label": _rain_combined_label(cur["label"] if cur else "観測なし", rain_now_by_name.get(name)),
             "temp": temps.get(name),
             "today_level": today["max"],
-            "today_label": PUBLIC_LEVELS[today["max"]]["label"] if today["max"] else None,
+            "today_label": _rain_combined_label(today_label, today.get("rain_hours")),
             "high_hours": (f"{high_hours[0]}時" + (f"〜{high_hours[-1]}時" if len(high_hours) > 1 else "")) if high_hours else None,
         }
     observed_at = observations["datetime"].strftime("%m/%d %H:%M") if observations else None
@@ -6093,7 +6109,8 @@ def _inject_weather_scene():
 
 def _station_hourly(name):
     """地点ページの「時間ごとの出やすさ」の帯(天気アプリ風)。今日の残りと明日の日中の各時刻。
-    戻り値: [{"day": "今日"/"明日" (日の変わり目のみ), "label": "今"/"6時", "level", "short", "now"}, ...]"""
+    戻り値: [{"day": "今日"/"明日" (日の変わり目のみ), "label": "今"/"6時", "level", "short", "now", "rain"}, ...]
+    rain(Open-Meteoの予報降水量由来)はその時刻の雨の有無。"""
     data = _public_forecast_safe() or {}
     station = next((s for s in data.get("stations", []) if s["name"] == name), None)
     if not station:
@@ -6102,6 +6119,7 @@ def _station_hourly(name):
     out = []
     for di, day in enumerate(data.get("days", [])[:2]):
         hours = station["days"][di]["hours"]
+        rain_hours = set(station["days"][di].get("rain_hours") or [])
         first = True
         for h in sorted(hours):
             if di == 0 and h < now.hour:
@@ -6109,15 +6127,15 @@ def _station_hourly(name):
             lv = hours[h]
             is_now = di == 0 and h == now.hour
             out.append({"day": day["label"] if first else None, "label": "今" if is_now else f"{h}時",
-                        "level": lv, "short": PUBLIC_LEVELS[lv]["short"], "now": is_now})
+                        "level": lv, "short": PUBLIC_LEVELS[lv]["short"], "now": is_now, "rain": h in rain_hours})
             first = False
     return out
 
 
 def _station_days(name):
     """地点ページの「この先3日の見込み」のカード(公開ページの日付カードと同じ3段階)。
-    戻り値: [{"label": "今日", "date": "10/8(木)", "level": 0〜3, "short": "高"等, "span": "6時〜7時"}, ...]
-    (level 0は、その日の日中の予測が無い)。"""
+    戻り値: [{"label": "今日", "date": "10/8(木)", "level": 0〜3, "short": "高"等, "span": "6時〜7時", "rain": bool}, ...]
+    (level 0は、その日の日中の予測が無い。rainはその日のいずれかの時刻にOpen-Meteoの予報降水量がある)。"""
     data = _public_forecast_safe() or {}
     station = next((s for s in data.get("stations", []) if s["name"] == name), None)
     if not station:
@@ -6131,7 +6149,8 @@ def _station_days(name):
             hs = sorted(h for h, lv in hours.items() if lv == top)
             span = f"{hs[0]}時" + (f"〜{hs[-1]}時" if len(hs) > 1 else "")
         out.append({"label": day["label"], "date": day.get("date_label", ""), "level": top,
-                    "short": PUBLIC_LEVELS[top]["short"] if top in PUBLIC_LEVELS else "-", "span": span})
+                    "short": PUBLIC_LEVELS[top]["short"] if top in PUBLIC_LEVELS else "-", "span": span,
+                    "rain": bool(d.get("rain_hours"))})
     return out
 
 
@@ -6179,12 +6198,19 @@ def station_detail(name):
     nav_prev = order[i - 1] if i > 0 else None
     nav_next = order[i + 1] if 0 <= i < len(order) - 1 else None
 
+    # 現在の雨の有無(アメダス実測由来)を、公開予報データ(5分キャッシュ)から取る(2026-10-23)。
+    forecast_for_station = _public_forecast_safe() or {}
+    fc_station = next((s for s in forecast_for_station.get("stations", []) if s["name"] == name), None)
+    current_rain = (fc_station.get("now") or {}).get("rain") if fc_station else None
+    current_label = _rain_combined_label(current["label"], current_rain) if current else None
+
     return render_template(
         "station_detail.html",
         name=name,
         nav_prev=nav_prev,
         nav_next=nav_next,
         current=current,
+        current_label=current_label,
         station_weather_latest=station_weather_latest,
         observations_datetime=observations["datetime"] if observations else None,
         latest_pred_date=latest_pred_date,
@@ -6208,17 +6234,6 @@ def station_detail(name):
     )
 
 
-@app.route("/graphs/weather-fog")
-def weather_fog_graph_page():
-    """気象条件(気温・湿度・風速・降水量)ごとに、川霧が発生した/しなかった日でどう
-    分布が違うかを箱ひげ図で比較するページ。地点はクエリパラメータで切り替える。"""
-    station = _validate_station(request.args.get("station", STATION_NAMES[0]))
-    return render_template(
-        "weather_fog_graph.html", station=station, station_names=STATION_NAMES,
-        active_names=[station],
-    )
-
-
 @app.route("/graphs/weather-fog.json")
 def weather_fog_graph_png():
     station = _validate_station(request.args.get("station", STATION_NAMES[0]))
@@ -6238,10 +6253,11 @@ def weather_fog_graph_png():
 
 @app.route("/river-fog-histogram")
 def river_fog_histogram_page():
-    """全地点合算・川霧発生時のみに絞った気象条件ヒストグラムの専用ページ。
-    「気象と川霧」ページ(/graphs配下)とはナビの見た目上のアクティブ判定が
-    衝突しないよう、あえて/graphs以下ではないパスにしている。
-    ?compare=1 で、気象要素ごとの図を「川霧あり・なし」の比較にする(2026-10-14)。"""
+    """気象条件ごとに川霧が発生した/しなかった日でどう分布が違うかを見るページ。
+    既定(view=hist)は全地点合算のヒストグラム、view=box&station=<地点名> で地点別の箱ひげ図。
+    どちらも「気象条件ごとの分布の違い」という同じ問いにグラフの種類が違うだけだったため、
+    元は別ページだった箱ひげ図(/graphs/weather-fog)をここに統合した(2026-10-23)。
+    ?compare=1 で、ヒストグラムの図を「川霧あり・なし」の比較にする(2026-10-14)。"""
     conn = _users_conn()
     try:
         correction_counts = users.phenomena_correction_counts_by_station(conn)
@@ -6250,8 +6266,10 @@ def river_fog_histogram_page():
     compare = request.args.get("compare") == "1"
     hist_items = [{"index": i, "label": label, "file": re.sub(r"[(（].*", "", label)}
                   for i, (_, label, _) in enumerate(_RIVER_FOG_HISTOGRAM_FEATURES)]
+    view = "box" if request.args.get("view") == "box" else "hist"
+    box_station = _validate_station(request.args.get("station", STATION_NAMES[0])) if view == "box" else None
     return render_template("river_fog_histogram.html", correction_counts=correction_counts, hist_items=hist_items,
-                           compare=compare)
+                           compare=compare, view=view, box_station=box_station, station_names=STATION_NAMES)
 
 
 @app.route("/graphs/weather-fog-histogram.json")
@@ -6950,16 +6968,34 @@ def _build_public_forecast():
         log.warning("Public page: failed to load observations: %s", e)
     obs_by_name = _public_now_by_station(observations)
 
+    # 雨はこのアプリの予測対象外(fog_features.target_codesは元々コード9・10を含まない)。
+    # 「いま」はアメダス実測、「これから」はOpen-Meteoの予報降水量を使い、雨かどうかを別途
+    # 判定して「雨」を予報表示の先頭に添える(2026-10-23)。取得に失敗しても予報自体は止めない。
+    rain_hours_by_station = {}
+    try:
+        coords_by_name = {n: (CAMERA_INFO[n]["lat"], CAMERA_INFO[n]["lon"]) for n in STATION_NAMES
+                           if CAMERA_INFO.get(n, {}).get("lat") is not None}
+        rain_hours_by_station = rain_status.forecast_rain_hours(coords_by_name, PUBLIC_DAYS_AHEAD)
+    except Exception as e:
+        log.warning("Public page: failed to load rain forecast: %s", e)
+
     stations = []
     for name in STATION_NAMES:
         info = CAMERA_INFO.get(name, {})
         levels = by_station.get(name, {})
+        rain_hours = rain_hours_by_station.get(name, {})
         day_levels = []
         for d in days:
             prefix = d.strftime("%Y-%m-%d")
             hours = {int(k[11:13]): v for k, v in levels.items() if k.startswith(prefix)}
-            day_levels.append({"max": max(hours.values()) if hours else 0, "hours": hours})
+            rain = sorted(int(k[11:13]) for k, v in rain_hours.items() if v and k.startswith(prefix))
+            day_levels.append({"max": max(hours.values()) if hours else 0, "hours": hours, "rain_hours": rain})
         obs = obs_by_name.get(name)
+        try:
+            now_rain = rain_status.current_rain(name, CAMERA_INFO)
+        except Exception as e:
+            log.warning("Public page: failed to load current rain for %s: %s", name, e)
+            now_rain = None
         stations.append({
             "name": name,
             "region": STATION_REGION.get(name) or "その他",
@@ -6967,7 +7003,7 @@ def _build_public_forecast():
             "lon": info.get("lon"),
             "days": day_levels,
             "now": {"label": obs["label"], "fog": obs.get("code") in fog_features.target_codes(name), "code": obs.get("code"),
-                    "at": obs.get("at")} if obs else None,
+                    "at": obs.get("at"), "rain": now_rain} if obs else None,
         })
 
     stale = True
@@ -7107,7 +7143,8 @@ def _public_station_weather(name):
 
 
 def _public_station_outlook(station, data):
-    """地点ページの見出しの下に出す、日ごとの見込みの1行(「本日 6〜7時に「高」」など)。"""
+    """地点ページの見出しの下に出す、日ごとの見込みの1行(「本日 6〜7時に「高」」など)。
+    rainは、その見込みの時間帯(span)に雨の予報(Open-Meteo)が重なっているかどうか。"""
     out = []
     if not station or not data:
         return out
@@ -7117,8 +7154,10 @@ def _public_station_outlook(station, data):
             continue
         hours = sorted(h for h, lv in d["hours"].items() if lv == top)
         span = f"{hours[0]}時" + (f"〜{hours[-1]}時" if len(hours) > 1 else "")
+        rain_hours = set(d.get("rain_hours") or [])
         out.append({"day": day["label"], "date": day["date_label"], "level": top,
-                    "short": PUBLIC_LEVELS[top]["short"], "span": span})
+                    "short": PUBLIC_LEVELS[top]["short"], "span": span,
+                    "rain": bool(rain_hours & set(hours))})
     return out
 
 

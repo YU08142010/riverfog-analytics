@@ -4,6 +4,34 @@
 {% block content %}
 {{ analysis_tabs() }}
 <div class="card">
+    <h2 style="margin-top:0;">気象条件と川霧の関係</h2>
+    <p class="muted" style="font-size:0.85rem;">気象条件(気温・湿度・風速・降水量など)ごとに、川霧が発生した/しなかった日でどう分布が違うかを見られます。</p>
+    <div class="seg hist-mode" role="group" aria-label="図の種類">
+        <a class="seg-btn" href="{{ url_for('river_fog_histogram_page') }}" {% if view != "box" %}aria-current="page"{% endif %}>ヒストグラム(全地点合算)</a>
+        <a class="seg-btn" href="{{ url_for('river_fog_histogram_page', view='box', station=box_station or station_names[0]) }}" {% if view == "box" %}aria-current="page"{% endif %}>箱ひげ図(地点別)</a>
+    </div>
+</div>
+
+{% if view == "box" %}
+<div class="card">
+    <h2 style="margin-top:0;">気象条件別の川霧発生状況(地点別)</h2>
+    <label class="muted" style="font-size:0.85rem;">地点</label><br>
+    <select onchange="location.href='{{ url_for('river_fog_histogram_page') }}?view=box&station=' + encodeURIComponent(this.value)">
+        {% for region_label in ["只見川", "会津"] %}
+        {% set region_names = station_names|select("in", station_names_by_region.get(region_label, []))|list %}
+        {% if region_names %}
+        <optgroup label="{{ region_label }}">
+            {% for s in region_names %}
+            <option value="{{ s }}" {{ "selected" if s == box_station }}>{{ s }}</option>
+            {% endfor %}
+        </optgroup>
+        {% endif %}
+        {% endfor %}
+    </select>
+    <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="{{ box_station }}の気象条件別川霧発生状況" data-chart-url="{{ url_for('weather_fog_graph_png', station=box_station) }}"></div></div>
+</div>
+{% else %}
+<div class="card">
     <h2 style="margin-top:0;">全地点合算：川霧発生時の気象条件ヒストグラム</h2>
     <div class="chart-wrap"><div class="spinner"></div><div class="chart-themed" role="img" aria-label="全地点合算の川霧発生時の気象条件ヒストグラム" data-chart-url="{{ url_for('weather_fog_histogram_png') }}"></div></div>
 </div>
@@ -45,6 +73,7 @@
         {% endfor %}
     </div>
 </div>
+{% endif %}
 {% if correction_counts %}
 <div class="card">
     <h2>画像判定の訂正状況(地点別)</h2>

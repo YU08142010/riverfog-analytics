@@ -1034,6 +1034,7 @@ html.rf-zoom-open, html.rf-zoom-open body { overflow: hidden; }
 .wx-day-dot.lv2 { background: #8fbcd8; color: #0f2a3d; }
 .wx-day-dot.lv1, .wx-day-dot.lv0 { background: rgba(120, 130, 150, 0.18); color: var(--color-text-muted); }
 .wx-day-text { font-size: 0.86rem; font-weight: 600; }
+.wx-day-rain { font-size: 0.72rem; font-weight: 700; color: var(--color-primary); }
 .wx-day-span { font-size: 0.75rem; color: var(--color-text-muted); min-height: 1em; }
 .card.wx-day-card.lv3 { box-shadow: inset 0 0 0 1.5px rgba(31, 95, 139, 0.6); }
 @media (max-width: 420px) { .wx-days { gap: 0.45rem; } .wx-day-text { font-size: 0.78rem; } }

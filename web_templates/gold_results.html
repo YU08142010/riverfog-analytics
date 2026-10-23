@@ -50,12 +50,11 @@
 {% if r.model %}
 <div class="card">
     <h3>予測の本当の精度(川霧、{{ r.model.n }}枚)</h3>
-    <p class="muted">前日の夜の本番の予測を、人の判定(正解セット)とAIのラベルのそれぞれで答え合わせしたものです。分析ページの精度はAIのラベルで測っています。</p>
+    <p class="muted">前日の夜の本番の予測を、人の判定(正解セット)で答え合わせしたものです。分析ページの精度はAIのラベルで測っているため、ここでは人の判定だけに絞った精度を示します。</p>
     <table class="obs-table gold-table">
-        <thead><tr><th>答え合わせに使ったもの</th><th>適合率</th><th>再現率</th><th>F1</th></tr></thead>
+        <thead><tr><th>適合率</th><th>再現率</th><th>F1</th></tr></thead>
         <tbody>
-            <tr><th>人の判定</th><td>{{ pct(r.model.vs_human.precision) }}</td><td>{{ pct(r.model.vs_human.recall) }}</td><td>{{ pct(r.model.vs_human.f1) }}</td></tr>
-            <tr><th>AIのラベル</th><td>{{ pct(r.model.vs_ai_label.precision) }}</td><td>{{ pct(r.model.vs_ai_label.recall) }}</td><td>{{ pct(r.model.vs_ai_label.f1) }}</td></tr>
+            <tr><td>{{ pct(r.model.vs_human.precision) }}</td><td>{{ pct(r.model.vs_human.recall) }}</td><td>{{ pct(r.model.vs_human.f1) }}</td></tr>
         </tbody>
     </table>
 </div>

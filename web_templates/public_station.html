@@ -34,6 +34,9 @@
 .pf-days-table th.pf-now-col { color: var(--pf-text); }
 .pf-days-table th.pf-now-col::after { content: "今"; display: block; font-size: 0.62rem; line-height: 1; color: #2fa66a; font-weight: 700; }
 .pf-days-table td.pf-now-col { box-shadow: inset 0 0 0 2px color-mix(in srgb, #2fa66a 75%, transparent); }
+/* 雨の予報(Open-Meteo由来、2026-10-23)。セルが小さく文字を足す余地が無いため、下端に細い
+   青い帯を足すだけにする(詳細はtitleのツールチップで「雨の予報あり」と出す)。 */
+.pf-days-table td.pf-rain { box-shadow: inset 0 -3px 0 var(--pf-primary); }
 .pf-bar i { background: color-mix(in srgb, var(--pf-lv3) 55%, var(--pf-lv1)); transition: background 0.2s; }
 .pf-bar.pf-cur i { background: var(--pf-lv3); }
 .pf-bar.pf-cur span.v { color: var(--pf-text); font-weight: 700; }
@@ -55,13 +58,13 @@
 <div class="wx-hero">
     <div class="wx-hero-name">{{ name }}</div>
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
-    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ station.now.label if station and station.now else "観測なし" }}{% if station and station.now and station.now.at is not none %}({{ station.now.at }}時){% endif %}</div>
+    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ rain_label(station.now.label, station.now.rain) if station and station.now else "観測なし" }}{% if station and station.now and station.now.at is not none %}({{ station.now.at }}時){% endif %}</div>
     <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} 観測{% endif %}</div>
     {% if name in lens_haze_stations %}<div class="wx-hero-sub">※本地点のカメラはレンズが曇りやすく、現況の判定は参考値である</div>{% endif %}
     {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
     {% if station %}
     <div class="pf-outlook" aria-label="3日間の見込み">
-        {% for o in outlook %}<span><b class="pf-lv{{ o.level }}">{{ o.short }}</b>{{ o.day }} {{ o.span }}</span>{% else %}<span class="pf-calm">3日間とも発生可能性「中」以上の時間帯はない</span>{% endfor %}
+        {% for o in outlook %}<span><b class="pf-lv{{ o.level }}">{{ o.short }}</b>{{ o.day }} {{ o.span }}{% if o.rain %}・雨{% endif %}</span>{% else %}<span class="pf-calm">3日間とも発生可能性「中」以上の時間帯はない</span>{% endfor %}
     </div>
     {% endif %}
 </div>
@@ -75,11 +78,13 @@
         <tbody>
         {% for d in data.days %}
         {% set hours = station.days[loop.index0].hours %}
+        {% set rain_hours = station.days[loop.index0].rain_hours %}
         <tr>
             <th class="pf-dl">{{ d.label }}<br><span class="pf-muted" style="font-weight:400;">{{ d.date_label }}</span></th>
             {% for h in range(5, 19) %}
             {% set lv = hours.get(h, 0) %}
-            <td class="pf-lv{{ lv }}{% if h == now_hour and d.label == '今日' %} pf-now-col{% endif %}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間(対象外)' }}">{{ levels[lv].short if lv >= 2 else "" }}</td>
+            {% set rains = h in rain_hours %}
+            <td class="pf-lv{{ lv }}{% if rains %} pf-rain{% endif %}{% if h == now_hour and d.label == '今日' %} pf-now-col{% endif %}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間(対象外)' }}{% if rains %}・雨の予報あり{% endif %}">{{ levels[lv].short if lv >= 2 else "" }}</td>
             {% endfor %}
         </tr>
         {% endfor %}
@@ -97,7 +102,7 @@
 <div class="pf-card">
     <h2>現況(観測)</h2>
     <div class="pf-now-box">
-        <span class="pf-now-label">{{ station.now.label }}{% if station.now.at is not none %}<small style="font-size:0.8rem; font-weight:400;">({{ station.now.at }}時の観測)</small>{% endif %}</span>
+        <span class="pf-now-label">{{ rain_label(station.now.label, station.now.rain) }}{% if station.now.at is not none %}<small style="font-size:0.8rem; font-weight:400;">({{ station.now.at }}時の観測)</small>{% endif %}</span>
         <span class="pf-muted">{{ data.observed_at }} 時点のカメラ画像をAIで判定した結果(誤判定を含む場合がある)。</span>
     </div>
 </div>

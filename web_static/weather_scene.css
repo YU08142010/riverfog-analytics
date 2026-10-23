@@ -406,6 +406,10 @@ a.wx-hero-stat:hover { background: rgba(255, 255, 255, 0.26); }
 .wx-hour.now .lv1 { color: #fff; background: rgba(255, 255, 255, 0.25); }
 .wx-hour small { font-size: 0.68rem; opacity: 0.85; }
 .wx-hour-day { flex: 0 0 auto; align-self: center; writing-mode: vertical-rl; font-size: 0.72rem; font-weight: 700; color: var(--color-text-muted); padding: 0 0.1rem; }
+/* 雨の予報(Open-Meteo由来、2026-10-23)。川霧とは別枠の小さな青い印として、高さやすさの丸とは
+   別に添える(雨は予測対象外=このアプリのモデルの判定ではないことが分かるよう、見た目を分ける)。 */
+.wx-hour-rain { font-size: 0.65rem; font-weight: 700; color: var(--color-primary); }
+.wx-hour.now .wx-hour-rain { color: #cfe8ff; }
 /* ==========================================================================
    ダークモード(2026-10-08): 空の絵は時間帯・天気で決まるため、ダークモードでも昼の明るい空が
    出て、その上の半透明のカードに明るい文字が乗り、読めなくなっていた。ダークモードでは空を

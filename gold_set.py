@@ -241,9 +241,7 @@ def results(conn):
         if len(m):
             w2 = m["weight"].astype(float).values
             pred = (m["pred"].astype(int) == 1).values
-            out["model"] = {"n": int(len(m)),
-                            "vs_human": _prf(pred, (m["h_g"] == 1).values, w2),
-                            "vs_ai_label": _prf(pred, (m["ai_g"] == 1).values, w2)}
+            out["model"] = {"n": int(len(m)), "vs_human": _prf(pred, (m["h_g"] == 1).values, w2)}
     except Exception as e:  # noqa: BLE001
         out["model_error"] = str(e)[:200]
     return out
