@@ -1355,6 +1355,10 @@ table.obs-table th.sticky-col { z-index: 3; }
        実際にあるタイルが1frで行いっぱいに広がる(2026-10-23、距離が近すぎるとの指摘で追加修正)。 */
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 1rem;
+    /* .member-gridは.cardではないため、.cardのmargin-bottom(1.4rem)を持たず、次のカード
+       (例: /gameの「最近の賭け」)とくっついて見えていた。同じ余白をここにも付ける
+       (2026-10-23、タイルの行とその下のカードの距離が近いとの指摘で追加修正)。 */
+    margin-bottom: 1.4rem;
 }
 .member-tile {
     display: block;
