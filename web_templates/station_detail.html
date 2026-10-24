@@ -72,6 +72,11 @@
 
     {% if current %}
     <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>
+    <a href="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}" target="_blank" rel="noopener">
+        <img class="st-now-photo" src="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}"
+             alt="{{ name }}の{{ observations_datetime.strftime('%H:%M') }}時点のカメラ画像" loading="lazy"
+             onerror="this.closest('a').hidden = true;">
+    </a>
     <div class="station-chip" style="display:inline-block; background:{{ current.color }}; color:{{ current.text_color }}; padding:0.6rem 1rem; font-size:0.95rem;">
         現在の現象: {{ current.label }}
     </div>

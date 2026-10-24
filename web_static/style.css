@@ -1149,6 +1149,17 @@ img.full-graph {
     .timelapse-img { height: 320px; }
 }
 
+/* 地点ページ「いま」タブの、現在の判定に使った画像そのもの(2026-10-24)。
+   タイムラプス(「動画」タブ)とは別に、現況の判定の下にも直接見えるようにする。 */
+.st-now-photo {
+    display: block;
+    width: 100%;
+    max-width: 420px;
+    height: auto;
+    border-radius: 12px;
+    margin: 0 0 0.8rem;
+}
+
 table.obs-table {
     border-collapse: collapse;
     width: 100%;
