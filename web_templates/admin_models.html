@@ -6,8 +6,31 @@
     <p class="muted">
         モデルの精度・F1・モデル方式の比較・混同行列・特徴量重要度・地点別のモデル状況は、
         管理者専用にする理由が無いため<a href="{{ url_for('accuracy_page') }}">分析ページ</a>に統合しました。
-        ここには運用ログ(モデルの自動ロールバック履歴)だけを残しています。
     </p>
+</div>
+
+<div class="card">
+    <h2>再学習</h2>
+    <p class="muted">
+        毎日夜間に自動で再学習しています(前回より明らかに悪化していれば自動で前回のモデルに戻します)。
+        正解セットのラベルを増やした直後などに今すぐ試したい場合は、まず「試す」でログを確認してから反映してください。
+        反映後の答え合わせは<a href="{{ url_for('gold_results') }}">正解セットの結果</a>の「予測の本当の精度」で確認できます(新しい予測が記録されてから)。
+    </p>
+    {% if predict_running %}
+    <p class="muted">predict.py は実行中です…</p>
+    {% else %}
+    <div style="display:flex; flex-wrap:wrap; gap:0.6rem;">
+        <form method="post" action="{{ url_for('admin_models_retrain_preview') }}" data-ajax>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button cancel">再学習を試す(反映しない)</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_run', key='predict') }}" data-ajax data-ajax-reload>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button">今すぐ再学習して反映</button>
+        </form>
+        <a href="{{ url_for('admin_log', key='predict') }}" class="button cancel" style="text-decoration:none;">ログを見る</a>
+    </div>
+    {% endif %}
 </div>
 
 <div class="card">

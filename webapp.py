@@ -3858,23 +3858,25 @@ def _is_script_running(script_name):
     return True
 
 
-def _run_script_async(script_name):
+def _run_script_async(script_name, extra_args=()):
     """バッチスクリプトをwebappから切り離したプロセスとしてバックグラウンド起動する
     （webapp自体の再起動・停止で巻き添えにならないようにstart_new_session=Trueにする）。
     ログはスクリプト自身がlogs/配下に書くため、標準出力は捨てる。起動時の予期しない失敗
     （import例外等）だけは拾えるよう、標準エラーだけは小さなデバッグログに残す。
-    PIDはファイルに記録し、_is_script_runningの二重起動チェックに使う。
+    PIDはファイルに記録し、_is_script_runningの二重起動チェックに使う(extra_argsを付けて
+    起動しても、二重起動チェックはscript_name単位のまま。例えばpredict.pyは--dry-run有無に
+    関わらず同じロックを使い、同時に2つ走らないようにする)。
     """
     debug_log = BASE_DIR / "logs" / f"{script_name}.launch_debug.log"
     try:
         with open(debug_log, "ab") as stderr_f:
             proc = subprocess.Popen(
-                [str(VENV_PYTHON), str(BASE_DIR / script_name)],
+                [str(VENV_PYTHON), str(BASE_DIR / script_name), *extra_args],
                 cwd=str(BASE_DIR), stdout=subprocess.DEVNULL, stderr=stderr_f,
                 start_new_session=True,
             )
         _pid_file(script_name).write_text(str(proc.pid))
-        log.info("Launched %s as pid %d", script_name, proc.pid)
+        log.info("Launched %s%s as pid %d", script_name, (" " + " ".join(extra_args)) if extra_args else "", proc.pid)
     except Exception:
         log.exception("Failed to launch %s", script_name)
 

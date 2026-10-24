@@ -559,7 +559,8 @@ def admin_restart():
 def admin_models():
     """モデルの精度・F1・混同行列・特徴量重要度・地点別状況は、2026-09-12に
     /accuracy(分析ページ、管理者専用ではない)へ統合した。ここにはpredict.logの
-    ロールバック履歴(モデルの自動ロールバックという運用上の出来事のログ)のみ残す。"""
+    ロールバック履歴(モデルの自動ロールバックという運用上の出来事のログ)と、
+    再学習の手動トリガー(2026-10-24追加)を置く。"""
     rollback_lines = []
     predict_log_path = ALLOWED_LOGS.get("predict")
     if predict_log_path and predict_log_path.exists():
@@ -569,7 +570,22 @@ def admin_models():
         except Exception as e:
             log.warning("Failed to scan predict.log for rollbacks: %s", e)
 
-    return render_template("admin_models.html", rollback_lines=rollback_lines[-50:])
+    return render_template("admin_models.html", rollback_lines=rollback_lines[-50:],
+                            predict_running=_is_script_running(RUNNABLE_SCRIPTS["predict"]))
+
+
+@app.route("/admin/models/retrain_preview", methods=["POST"])
+@requires_admin
+def admin_models_retrain_preview():
+    """predict.pyを--dry-runで動かす: 学習・検証(前回モデルとの回帰チェック含む)は本番と
+    同じだが、モデルファイルの上書きと予測結果の保存は行わない。ログを見てから、問題なければ
+    (下の)「今すぐ再学習して反映」で本番反映する。"""
+    script = RUNNABLE_SCRIPTS["predict"]
+    if _is_script_running(script):
+        return _finish("admin_models", f"{script} は既に実行中のため、開始しませんでした。", success=False)
+    _run_script_async(script, extra_args=["--dry-run"])
+    _record_audit("モデルの再学習(確認のみ・反映しない)を開始")
+    return _finish("admin_models", "再学習(確認のみ)を開始しました。数分後にログで結果を確認してください。")
 
 
 def _image_archive_day_dirs():
