@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_page_tabs.html" import page_tabs %}
 {% block title %}{{ "川霧の流れ図" if mode == "obs" else "見頃カレンダー" }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">{% endblock %}
 {% block content %}
 {{ page_tabs([
     {"label": "一覧", "url": url_for('stations_list'), "active": false},
@@ -61,7 +62,7 @@
 
 <div class="flow-layout">
     <div class="card flow-map-card">
-        <svg id="flow-map" class="flow-map" viewBox="0 0 300 300" role="img" aria-label="地点の地図(色はスライダーの時刻)"></svg>
+        <div id="flow-map" class="flow-map" role="application" aria-label="地点の地図(色はスライダーの時刻)"></div>
         <div class="flow-player">
             <button type="button" class="button cancel small-btn" id="flow-play">▶ 再生</button>
             <input type="range" id="flow-hour" min="{{ hours[0] }}" max="{{ hours[-1] }}" value="{{ 7 }}" aria-label="時刻">
@@ -96,11 +97,12 @@
     </div>
 </div>
 
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var MODE = {{ mode|tojson }}, COORDS = {{ coords|tojson }}, PC = {{ phenom_colors|tojson }};
     var hours = {{ hours|tojson }};
-    var grid = document.getElementById("flow-grid"), svg = document.getElementById("flow-map");
+    var grid = document.getElementById("flow-grid"), mapEl = document.getElementById("flow-map");
     var slider = document.getElementById("flow-hour"), hourLabel = document.getElementById("flow-hour-label");
     var playBtn = document.getElementById("flow-play"), timer = null;
     // 観測: 現象の色(川霧1〜3・全体霧4〜6は濃さ、層雲・雨はその色、現象なしは薄い)。予報: 出やすさの3段階
@@ -115,32 +117,34 @@
         var col = MODE === "obs" ? obsColor(td.dataset.c) : LV[td.dataset.lv];
         if (col) { td.style.background = col; }
     });
-    // 地図: 緯度経度を枠に収める(北が上)
+    // 地図: ホームの地図と同じ実際の地図(Leaflet + OpenStreetMap)に地点を表示する
     var names = Object.keys(COORDS).filter(function(n) { return COORDS[n][0] !== null; });
-    var lats = names.map(function(n) { return COORDS[n][0]; }), lons = names.map(function(n) { return COORDS[n][1]; });
-    var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
-    var minLon = Math.min.apply(null, lons), maxLon = Math.max.apply(null, lons);
-    var midLat = (minLat + maxLat) / 2, kx = Math.cos(midLat * Math.PI / 180);
-    var spanX = (maxLon - minLon) * kx || 0.01, spanY = (maxLat - minLat) || 0.01, scale = 260 / Math.max(spanX, spanY);
-    var ox = (300 - spanX * scale) / 2, oy = (300 - spanY * scale) / 2;
-    var NS = "http://www.w3.org/2000/svg", dots = {};
-    names.forEach(function(n) {
-        var x = ox + (COORDS[n][1] - minLon) * kx * scale, y = 300 - oy - (COORDS[n][0] - minLat) * scale;
-        var c = document.createElementNS(NS, "circle");
-        c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1)); c.setAttribute("r", "6");
-        c.setAttribute("class", "flow-dot");
-        var t = document.createElementNS(NS, "title"); t.textContent = n; c.appendChild(t);
-        svg.appendChild(c); dots[n] = c;
-    });
+    var markers = {};
+    if (typeof L === "undefined") {
+        mapEl.classList.add("home-map-error"); mapEl.textContent = "地図を読み込めませんでした。";
+    } else {
+        var map = L.map(mapEl, {zoomControl: true, scrollWheelZoom: false, tap: true});
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+        mapEl.addEventListener("click", function() { map.scrollWheelZoom.enable(); }, {once: true});
+        var bounds = [];
+        names.forEach(function(n) {
+            var m = L.circleMarker([COORDS[n][0], COORDS[n][1]], {radius: 8, weight: 1.5, color: "#2c3e50", fillColor: "transparent", fillOpacity: 0.5});
+            m.bindTooltip(n, {direction: "top", offset: [0, -6]});
+            m.addTo(map); markers[n] = m; bounds.push([COORDS[n][0], COORDS[n][1]]);
+        });
+        if (bounds.length) { map.fitBounds(bounds, {padding: [24, 24]}); }
+        window.addEventListener("resize", function() { map.invalidateSize(); });
+    }
     function cellOf(name, h) { return grid.querySelector('tr[data-name="' + CSS.escape(name) + '"] td[data-h="' + h + '"]'); }
     function show(h) {
         h = +h; slider.value = h; hourLabel.textContent = h + "時";
         grid.querySelectorAll("th[data-h], td[data-h]").forEach(function(el) { el.classList.toggle("is-now", +el.dataset.h === h); });
         names.forEach(function(n) {
             var td = cellOf(n, h), col = td ? td.style.background : "";
-            dots[n].style.fill = col || "transparent";
-            dots[n].style.strokeDasharray = col ? "" : "2 2";
-            var t = dots[n].querySelector("title"); t.textContent = n + " " + h + "時: " + (td ? (td.getAttribute("title") || "").split(": ").pop() : "");
+            var m = markers[n];
+            if (!m) { return; }
+            m.setStyle({fillColor: col || "transparent", fillOpacity: col ? 0.92 : 0.5, dashArray: col ? null : "2,2"});
+            m.setTooltipContent(n + " " + h + "時: " + (td ? (td.getAttribute("title") || "").split(": ").pop() : ""));
         });
     }
     slider.addEventListener("input", function() { stop(); show(slider.value); });

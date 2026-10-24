@@ -1362,8 +1362,9 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .flow-note { font-size: 0.82rem; margin-bottom: 0; }
 .flow-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .flow-map-card { position: sticky; top: calc(var(--header-h, 60px) + 0.8rem); margin: 0; }
-.flow-map { width: 100%; height: auto; display: block; background: var(--glass-soft, rgba(127, 127, 127, 0.08)); border-radius: 12px; }
-.flow-dot { stroke: rgba(0, 0, 0, 0.35); stroke-width: 1; transition: fill 0.25s ease; }
+.flow-map { width: 100%; height: min(55vh, 480px); min-height: 300px; display: block; background: var(--glass-soft, rgba(127, 127, 127, 0.08)); border-radius: 12px; overflow: hidden; z-index: 0; }
+:root[data-theme="dark"] .flow-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .flow-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); } }
 .flow-player { display: flex; align-items: center; gap: 0.5rem; margin: 0.6rem 0; }
 .flow-player input[type="range"] { flex: 1; }
 .flow-player .button { margin: 0; white-space: nowrap; }
@@ -1383,7 +1384,7 @@ html.rf-calm-bg .wx-scene::before, html.rf-calm-bg .wx-scene::after { animation:
 .flow-grid td.is-dark { background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.18) 0 3px, transparent 3px 6px) !important; }
 .flow-grid td.is-now { outline: 2px solid var(--color-primary); outline-offset: 0; }
 .flow-best { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.3rem 1rem; }
-@media (max-width: 760px) { .flow-layout { grid-template-columns: minmax(0, 1fr); } .flow-map-card { position: static; } .flow-map { max-width: 360px; margin: 0 auto; } }.export-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0; }
+@media (max-width: 760px) { .flow-layout { grid-template-columns: minmax(0, 1fr); } .flow-map-card { position: static; } .flow-map { height: 56vh; min-height: 260px; } }.export-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0; }
 .export-row input[type="date"] { margin-left: 0.4rem; }
 .export-parts { border: 1px solid var(--color-border); border-radius: 12px; padding: 0.6rem 0.9rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem; align-items: center; }
 .export-parts legend { padding: 0 0.3rem; font-weight: 600; }
