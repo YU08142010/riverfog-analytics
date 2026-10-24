@@ -33,7 +33,7 @@
         <div class="ranking-info">
             <a href="{{ url_for('member_detail', user_id=m.id) }}" class="ranking-name {{ m.name_color_class }}">{{ m.name }}</a>
             <div class="ranking-bar-track">
-                <div class="ranking-bar-fill" style="width: {{ (100.0 * m[count_key] / items[0][count_key]) | round(1) }}%;"></div>
+                <div class="ranking-bar-fill" style="width: {{ ((100.0 * m[count_key] / items[0][count_key]) | round(1)) if items[0][count_key] else 0 }}%;"></div>
             </div>
         </div>
         <div class="ranking-stats">
@@ -83,7 +83,7 @@
         {% if r.entries %}
         {{ render_ranking(r.entries, r.count_key, unit=r.unit, show_streak=False) }}
         {% else %}
-        <p class="muted">今月はまだ記録がありません。</p>
+        <p class="muted">{{ r.empty_text or "今月はまだ記録がありません。" }}</p>
         {% endif %}
     </div>
     {% endfor %}

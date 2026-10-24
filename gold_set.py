@@ -173,6 +173,23 @@ def _consensus(codes):
     return gs[0] if all(g == gs[0] for g in gs) else "split"
 
 
+def user_accuracy(conn, user_id):
+    """個人の正解セット成績(ランキング・バッジ・個人ダッシュボード用)。1枚は最大2人までしか
+    判定しないため、比較対象は常に「もう一人(いれば)」で、一致率はその人とどれだけ現象の
+    まとまり(group)が合っていたかで測る(2人そろっていない画像は比較対象外)。"""
+    rows = conn.execute(
+        "SELECT l.code, o.code AS other_code FROM gold_labels l "
+        "LEFT JOIN gold_labels o ON o.sample_id = l.sample_id AND o.user_id != l.user_id "
+        "WHERE l.user_id = ?", (user_id,)
+    ).fetchall()
+    n_mine = len(rows)
+    compared = [(c, oc) for c, oc in rows if oc is not None]
+    n_compared = len(compared)
+    n_agree = sum(1 for c, oc in compared if group(c) == group(oc))
+    rate = n_agree / n_compared if n_compared else None
+    return {"n_mine": n_mine, "n_compared": n_compared, "n_agree": n_agree, "rate": rate}
+
+
 def _prf(pred, truth, weight):
     tp = float(((pred) & (truth)) @ weight)
     fp = float(((pred) & (~truth)) @ weight)

@@ -1278,6 +1278,24 @@ def comment_count(conn, user_id):
     return row[0] if row else 0
 
 
+def observation_report_count(conn, user_id):
+    """そのユーザーが送った観測報告の総数(実績バッジの判定に使う)。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM observation_reports WHERE reported_by = ?", (user_id,)
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def observation_report_counts_since(conn, since_str):
+    """指定日時以降の観測報告数を1クエリでまとめて返す(月間ランキング用)。"""
+    rows = conn.execute(
+        "SELECT reported_by, COUNT(*) FROM observation_reports WHERE reported_by IS NOT NULL AND reported_at >= ? "
+        "GROUP BY reported_by",
+        (since_str,),
+    ).fetchall()
+    return {uid: c for uid, c in rows}
+
+
 def list_station_comments(conn, station_name):
     """指定地点のコメントを古い順で返す(掲示板表示用)。"""
     rows = conn.execute(

@@ -13,6 +13,7 @@ import fog_data
 from fog_features import SUMMARY_FOG_CODES, encode_phenomena_cell, primary_phenom_code
 import chat_log
 import collect
+import gold_set
 
 from webapp import (ACCURACY_SUMMARY_CACHE_SECONDS, AVATAR_SIZE, CHAT_DB_PATH, CLAMAV_RESCAN_DIRS, CLAMAV_RESCAN_LOG_PATH, 
     CLAMAV_SIGNATURE_STALE_DAYS, DATE_RE, FEEDBACK_BODY_MAX_LENGTH, FEEDBACK_SUMMARY_SYSTEM_INSTRUCTION, IMAGE_DIR, 
@@ -923,6 +924,9 @@ def _award_monthly_ranking_rewards(conn):
             )
 
 
+GOLD_ACCURACY_RANKING_MIN_COMPARED = 3  # 正解セットの一致率ランキングに出すための最低比較件数(少数で荒れないように)
+
+
 @app.route("/members")
 def members_list():
     """ログイン中の全ユーザーが見られるメンバー一覧。個々のログイン履歴・
@@ -939,6 +943,8 @@ def members_list():
         month_message_counts = users.message_counts_since(conn, month_start)
         month_gamble_win_counts = users.won_bet_counts_since(conn, month_start)
         month_points_earned = users.points_earned_since(conn, month_start)
+        month_observation_report_counts = users.observation_report_counts_since(conn, month_start)
+        gold_accuracy_by_id = {u["id"]: gold_set.user_accuracy(conn, u["id"]) for u in all_users}
         last_logins = users.last_logins_all(conn)
         streaks = users.login_streaks_all(conn, today)
         last_active = users.last_active_all(conn)
@@ -954,6 +960,9 @@ def members_list():
             "month_message_count": month_message_counts.get(u["id"], 0),
             "month_gamble_win_count": month_gamble_win_counts.get(u["id"], 0),
             "month_points_earned": month_points_earned.get(u["id"], 0),
+            "month_observation_report_count": month_observation_report_counts.get(u["id"], 0),
+            "gold_accuracy_pct": round((gold_accuracy_by_id[u["id"]]["rate"] or 0) * 100),
+            "gold_compared": gold_accuracy_by_id[u["id"]]["n_compared"],
             "last_login": last_logins.get(u["id"]),
             "streak": streaks.get(u["id"], 0),
             "favorite_stations": [s for s in u["favorite_stations"].split(",") if s],
@@ -1006,6 +1015,24 @@ def members_list():
             "entries": sorted(
                 [m for m in members if m["month_points_earned"] > 0],
                 key=lambda m: -m["month_points_earned"],
+            )[:5],
+        },
+        {
+            "id": "obs_report", "label": "観測報告数", "unit": "件",
+            "count_key": "month_observation_report_count",
+            "entries": sorted(
+                [m for m in members if m["month_observation_report_count"] > 0],
+                key=lambda m: -m["month_observation_report_count"],
+            )[:5],
+        },
+        {
+            # 正解セットは数が少ないため、月間ではなくこれまでの累計(2人判定がそろった分のみ)で見る。
+            "id": "gold_accuracy", "label": "正解セットの一致率", "unit": "%",
+            "count_key": "gold_accuracy_pct",
+            "empty_text": "まだ2人判定がそろった正解セットの記録がありません。",
+            "entries": sorted(
+                [m for m in members if m["gold_compared"] >= GOLD_ACCURACY_RANKING_MIN_COMPARED],
+                key=lambda m: -m["gold_accuracy_pct"],
             )[:5],
         },
     ]
