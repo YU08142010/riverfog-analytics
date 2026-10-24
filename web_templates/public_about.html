@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% block title %}研究の概要{% endblock %}
+{% block title %}{{ pf_t('about_title') }}{% endblock %}
 {% block extra_head %}
 <style>
 .pf-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.8rem; }
@@ -37,85 +37,85 @@
 {% endblock %}
 {% block content %}
 <div class="pf-card">
-    <h2>研究の概要</h2>
-    <p>本研究は、河川上に発生する霧(川霧)の発生時刻・地点を、気象データと機械学習により予測することを目的とする。本ページでは、只見川および会津地方の河川カメラ設置地点を対象に、日中の各時刻について3日先までの発生可能性を試験的に公開している。</p>
-    <p class="pf-muted">本ページの内容は研究段階の予測モデルによる計算結果であり、気象庁の予報ではない。</p>
+    <h2>{{ pf_t('about_title') }}</h2>
+    <p>{{ pf_t('about_intro') }}</p>
+    <p class="pf-muted">{{ pf_t('about_intro_note') }}</p>
 </div>
 
 {% if stats %}
 <div class="pf-card">
-    <h2>データの規模</h2>
+    <h2>{{ pf_t('about_data_scale') }}</h2>
     <div class="pf-stats">
-        <div class="pf-stat"><div class="v">{{ stats.stations|length }}</div><div class="k">対象地点数</div></div>
-        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_n) }}</div><div class="k">日中の判定件数(地点×時刻)</div></div>
-        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_fog) }}</div><div class="k">うち川霧ありと判定された件数</div></div>
-        <div class="pf-stat"><div class="v" style="font-size:1.05rem;">{{ stats.period_start }}<br>〜{{ stats.period_end }}</div><div class="k">記録期間(開始時期は地点により異なる)</div></div>
+        <div class="pf-stat"><div class="v">{{ stats.stations|length }}</div><div class="k">{{ pf_t('about_stat_stations') }}</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_n) }}</div><div class="k">{{ pf_t('about_stat_total_n') }}</div></div>
+        <div class="pf-stat"><div class="v">{{ "{:,}".format(stats.total_fog) }}</div><div class="k">{{ pf_t('about_stat_total_fog') }}</div></div>
+        <div class="pf-stat"><div class="v" style="font-size:1.05rem;">{{ stats.period_start }}<br>〜{{ stats.period_end }}</div><div class="k">{{ pf_t('about_stat_period') }}</div></div>
     </div>
 </div>
 {% endif %}
 
 <div class="pf-card">
-    <h2>手法</h2>
+    <h2>{{ pf_t('about_method') }}</h2>
     <ol class="pf-steps">
-        <li><b><i>1</i>観測</b>国土交通省の河川カメラ画像を1時間ごとに収集する。</li>
-        <li><b><i>2</i>判定</b>画像をマルチモーダルAI(Google Gemini)で判定し、川霧の有無を記録する。目視で確認・修正した記録も併用する。</li>
-        <li><b><i>3</i>学習</b>川霧の有無と同時刻の気象要素(気温・湿度・風など)の関係を、勾配ブースティング決定木(LightGBM)により学習する。</li>
-        <li><b><i>4</i>予測</b>気象予報値を入力し、地点・時刻ごとの川霧発生確率を算出する。モデルは毎日、最新のデータで再学習する。当日の残りの時間(最大8時間先)は、毎時のカメラ観測(各地点の直近の霧の有無と、全地点のうち霧の地点の割合)を入力に加えた別のモデルで予測し直す。</li>
+        <li><b><i>1</i>{{ pf_t('about_step1_title') }}</b>{{ pf_t('about_step1_body') }}</li>
+        <li><b><i>2</i>{{ pf_t('about_step2_title') }}</b>{{ pf_t('about_step2_body') }}</li>
+        <li><b><i>3</i>{{ pf_t('about_step3_title') }}</b>{{ pf_t('about_step3_body') }}</li>
+        <li><b><i>4</i>{{ pf_t('about_step4_title') }}</b>{{ pf_t('about_step4_body') }}</li>
     </ol>
 </div>
 
 <div class="pf-card">
-    <h2>3段階の判定基準</h2>
+    <h2>{{ pf_t('about_levels_title') }}</h2>
     <table class="pf-levels">
-        <tr><td><span class="pf-badge pf-lv3">{{ levels[3].label }}</span></td>
-            <td>予測確率が判定閾値以上の時間帯。閾値は原則として、過去の予報値を入力とした検証データでF1値が最大となるよう決定している{% if data and data.metrics.f1 is not none %}(現行の閾値における適合率は約{{ (data.metrics.precision * 100)|round|int }}%){% endif %}。</td></tr>
-        <tr><td><span class="pf-badge pf-lv2">{{ levels[2].label }}</span></td>
-            <td>予測確率が閾値未満かつ閾値の{{ (mid_ratio * 100)|int }}%以上の時間帯。</td></tr>
-        <tr><td><span class="pf-badge pf-lv1">{{ levels[1].label }}</span></td>
-            <td>上記以外の時間帯。</td></tr>
-        <tr><td>空欄</td>
-            <td>日の出前・日の入り後の時間帯。カメラ画像による判定ができないため予測対象外とした。</td></tr>
+        <tr><td><span class="pf-badge pf-lv3">{{ pf_label(levels[3].label) }}</span></td>
+            <td>{{ pf_t('about_levels_high_desc', precision_note=(pf_t('about_levels_high_precision', pct=(data.metrics.precision * 100)|round|int) if data and data.metrics.f1 is not none else "")) }}</td></tr>
+        <tr><td><span class="pf-badge pf-lv2">{{ pf_label(levels[2].label) }}</span></td>
+            <td>{{ pf_t('about_levels_mid_desc', pct=(mid_ratio * 100)|int) }}</td></tr>
+        <tr><td><span class="pf-badge pf-lv1">{{ pf_label(levels[1].label) }}</span></td>
+            <td>{{ pf_t('about_levels_low_desc') }}</td></tr>
+        <tr><td>{{ pf_t('about_levels_blank_label') }}</td>
+            <td>{{ pf_t('about_levels_blank_desc') }}</td></tr>
     </table>
 </div>
 
 {% if data and data.metrics.f1 is not none %}
 <div class="pf-card">
-    <h2>予測精度の検証</h2>
-    <p class="pf-muted" style="margin-top:0;">学習に用いていない直近期間({{ data.metrics.test_start }}〜{{ data.metrics.test_end }})について、実際の予報値を入力として評価した結果(日中のみ)。</p>
+    <h2>{{ pf_t('about_accuracy_title') }}</h2>
+    <p class="pf-muted" style="margin-top:0;">{{ pf_t('about_accuracy_note', start=data.metrics.test_start, end=data.metrics.test_end) }}</p>
     <div class="pf-stats">
-        <div class="pf-stat"><div class="v">{{ (data.metrics.precision * 100)|round|int }}%</div><div class="k">適合率(「高」と予測した時刻のうち実際に発生した割合)</div></div>
-        <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">再現率(実際の発生のうち「高」と予測できた割合)</div></div>
-        <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">F1値<br>参考: 気候値(地点・時刻別の過去の発生率)による予測 {{ "%.2f"|format(data.metrics.f1_climatology) }}</div></div>
+        <div class="pf-stat"><div class="v">{{ (data.metrics.precision * 100)|round|int }}%</div><div class="k">{{ pf_t('about_metric_precision') }}</div></div>
+        <div class="pf-stat"><div class="v">{{ (data.metrics.recall * 100)|round|int }}%</div><div class="k">{{ pf_t('about_metric_recall') }}</div></div>
+        <div class="pf-stat"><div class="v">{{ "%.2f"|format(data.metrics.f1) }}</div><div class="k">{{ pf_t('about_metric_f1', clim=("%.2f"|format(data.metrics.f1_climatology)))|safe }}</div></div>
     </div>
     {% if data.metrics.f1_climatology is not none %}
     {% set top = [data.metrics.f1, data.metrics.f1_climatology]|max %}
-    <div class="pf-compare" role="img" aria-label="F1値の比較: 本モデル {{ '%.2f'|format(data.metrics.f1) }}、気候値 {{ '%.2f'|format(data.metrics.f1_climatology) }}">
-        <div class="pf-compare-row"><span>本モデル</span><i style="--w: {{ (data.metrics.f1 / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1) }}</b></div>
-        <div class="pf-compare-row pf-compare-base"><span>気候値</span><i style="--w: {{ (data.metrics.f1_climatology / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1_climatology) }}</b></div>
-        <small>F1値(大きいほど良い)。気候値は地点・時刻別の過去の発生率だけを用いた予測。</small>
+    <div class="pf-compare" role="img" aria-label="{{ pf_t('about_compare_aria', model=('%.2f'|format(data.metrics.f1)), clim=('%.2f'|format(data.metrics.f1_climatology))) }}">
+        <div class="pf-compare-row"><span>{{ pf_t('about_compare_model') }}</span><i style="--w: {{ (data.metrics.f1 / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1) }}</b></div>
+        <div class="pf-compare-row pf-compare-base"><span>{{ pf_t('about_compare_climatology') }}</span><i style="--w: {{ (data.metrics.f1_climatology / top * 100)|round(1) }}%"></i><b>{{ "%.2f"|format(data.metrics.f1_climatology) }}</b></div>
+        <small>{{ pf_t('about_compare_caption') }}</small>
     </div>
     {% endif %}
-    <p class="pf-muted">川霧は日中の発生率が約2%と稀な現象であり、現段階の予測精度は限定的である。気候値による予測を上回ることを基準に、モデルの改良を継続している。</p>
+    <p class="pf-muted">{{ pf_t('about_accuracy_footer') }}</p>
 </div>
 {% endif %}
 
 <div class="pf-card">
-    <h2>利用上の注意</h2>
+    <h2>{{ pf_t('about_notes_title') }}</h2>
     <ul>
-        <li>本ページは研究目的の試験公開であり、内容の変更や公開の停止を予告なく行うことがある。</li>
-        <li>予測には誤りが含まれる。移動・撮影・観光等の判断に用いる場合は、気象庁の情報等と併せ、利用者の責任において判断されたい。</li>
-        <li>「現況」欄はカメラ画像のAI判定による観測値であり、誤判定を含む場合がある。</li>
+        <li>{{ pf_t('about_note1') }}</li>
+        <li>{{ pf_t('about_note2') }}</li>
+        <li>{{ pf_t('about_note3') }}</li>
     </ul>
 </div>
 
 <div class="pf-card">
-    <h2>データの出典</h2>
+    <h2>{{ pf_t('about_sources_title') }}</h2>
     <ul>
-        <li>気象の予報値・過去値: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)</li>
-        <li>過去の気象観測: 気象庁</li>
-        <li>河川カメラの画像: 国土交通省「川の防災情報」</li>
-        <li>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>(地理院タイル・淡色地図)</li>
+        <li>{{ pf_t('about_source_forecast')|safe }}</li>
+        <li>{{ pf_t('about_source_observed') }}</li>
+        <li>{{ pf_t('about_source_camera') }}</li>
+        <li>{{ pf_t('about_source_map')|safe }}</li>
     </ul>
-    <p class="pf-muted">研究関係者は、右上の「関係者ログイン」から研究用サイトを利用できる。</p>
+    <p class="pf-muted">{{ pf_t('about_staff_note') }}</p>
 </div>
 {% endblock %}

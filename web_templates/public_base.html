@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ pf_lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<meta name="description" content="只見川・会津地方の河川カメラ設置地点を対象に、3日先までの川霧の発生可能性を機械学習で予測する研究の試験公開ページ。">
+<meta name="description" content="{{ pf_t('meta_description') }}">
 <meta property="og:type" content="website">
-<meta property="og:title" content="川霧発生予測(試験公開)">
-<meta property="og:description" content="只見川・会津地方における川霧の発生時刻・地点を機械学習で予測する研究の試験公開。">
+<meta property="og:title" content="{{ pf_t('og_title') }}">
+<meta property="og:description" content="{{ pf_t('og_description') }}">
 <!-- このページ自体の背景(--pf-bg)はすぐ下のインラインstyleで決まるが、それより先に
      読み込まれるコンポーネントも白く見えないよう、同じ色をここでも即時に適用しておく。 -->
 <style>html{background:#f3f6f8}:root[data-theme="dark"]{background:#11181e}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){background:#11181e}}</style>
-<title>{% block title %}発生予測{% endblock %} - 川霧発生予測(試験公開)</title>
+<title>{% block title %}{{ pf_t('nav_forecast') }}{% endblock %} - {{ pf_t('site_title_suffix') }}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='loading.css') }}?v={{ app_version|default('') }}">
 <script>
@@ -120,6 +120,9 @@ a { color: var(--pf-primary); }
 }
 .pf-nav a:hover, .pf-nav a.active { background: rgba(255, 255, 255, 0.16); }
 .pf-nav a.pf-login { border: 1px solid rgba(255, 255, 255, 0.6); }
+.pf-lang { display: inline-flex; gap: 0.15rem; }
+.pf-lang a { padding: 0.35rem 0.55rem; font-size: 0.8rem; font-weight: 600; opacity: 0.75; }
+.pf-lang a.active { opacity: 1; }
 .pf-theme { background: none; border: 0; color: #fff; font-size: 0.8rem; cursor: pointer; opacity: 0.8; padding: 0.35rem; }
 main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 .pf-card {
@@ -222,31 +225,36 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 {% block extra_head %}{% endblock %}
 </head>
 <body>
-<a class="pf-skip" href="#pf-main">本文へ移動</a>
+<a class="pf-skip" href="#pf-main">{{ pf_t('skip_to_content') }}</a>
 {% block body_background %}{% endblock %}
 <header class="pf-header">
     <div class="pf-header-inner">
         <a class="pf-brand" href="{{ url_for('public_forecast') }}">
             <span class="pf-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0 2.8-1.1 4-.6" opacity=".55"/><path d="M3 12.5c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0 2.8-1.1 4-.6" opacity=".8"/><path d="M3 17c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0 2.8-1.1 4-.6"/></svg></span>
             <span class="pf-brand-text">
-                <strong>川霧発生予測</strong>
-                <span>只見川・会津地方 研究成果の試験公開</span>
+                <strong>{{ pf_t('brand_name') }}</strong>
+                <span>{{ pf_t('brand_tagline') }}</span>
             </span>
         </a>
         <nav class="pf-nav">
-            <a href="{{ url_for('public_forecast') }}" class="{{ 'active' if request.path == url_for('public_forecast') else '' }}">発生予測</a>
-            <a href="{{ url_for('public_about') }}" class="{{ 'active' if request.path == url_for('public_about') else '' }}">研究の概要</a>
+            <a href="{{ url_for('public_forecast') }}" class="{{ 'active' if request.path == url_for('public_forecast') else '' }}">{{ pf_t('nav_forecast') }}</a>
+            <a href="{{ url_for('public_about') }}" class="{{ 'active' if request.path == url_for('public_about') else '' }}">{{ pf_t('nav_about') }}</a>
             {% if session.get('user_id') %}
-            <a href="{{ url_for('dashboard') }}" class="pf-login">研究サイトへ</a>
+            <a href="{{ url_for('dashboard') }}" class="pf-login">{{ pf_t('nav_to_site') }}</a>
             {% else %}
-            <a href="{{ url_for('login') }}" class="pf-login">関係者ログイン</a>
+            <a href="{{ url_for('login') }}" class="pf-login">{{ pf_t('nav_login') }}</a>
             {% endif %}
+            <span class="pf-lang" aria-label="Language">
+                {% for code in pf_langs %}
+                <a href="{{ pf_lang_urls[code] }}" class="{{ 'active' if pf_lang == code }}" hreflang="{{ code }}">{{ code|upper }}</a>
+                {% endfor %}
+            </span>
             <span class="pf-tools">
-            <button type="button" class="pf-theme pf-fs" id="pf-fs-btn" aria-label="全画面で表示する" title="全画面で表示する" aria-pressed="false" hidden>
+            <button type="button" class="pf-theme pf-fs" id="pf-fs-btn" aria-label="{{ pf_t('fullscreen_btn') }}" title="{{ pf_t('fullscreen_btn') }}" aria-pressed="false" hidden>
                 <svg class="pf-i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
                 <svg class="pf-i-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
             </button>
-            <button type="button" class="pf-theme" id="pf-theme-btn" aria-label="表示の明暗を切り替える" title="表示の明暗を切り替える">
+            <button type="button" class="pf-theme" id="pf-theme-btn" aria-label="{{ pf_t('theme_btn') }}" title="{{ pf_t('theme_btn') }}">
                 <svg class="pf-i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
                 <svg class="pf-i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
             </button>
@@ -258,11 +266,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 {% block content %}{% endblock %}
 </main>
 <footer class="pf-footer">
-    <p><strong>本サイトの内容(予測・カメラ画像・データ・画面のスクリーンショット)を、許可なくSNS・Webサイト等に公開・転載しないこと。</strong></p>
-    <p>本ページは研究段階の川霧予測モデルによる試験的な計算結果であり、気象庁の予報ではない。予測には誤りが含まれるため、行動の判断に用いる場合は利用者の責任において判断されたい。</p>
-    <p>気象データ: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>(CC BY 4.0)・気象庁<br>河川カメラ: 国土交通省「川の防災情報」<br>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>(淡色地図)</p>
-    <p><a href="{{ url_for('public_terms') }}">利用規約</a></p>
-    <p class="pf-footer-meta">只見川・会津地方 川霧発生予測(試験公開){% if app_version %} v{{ app_version }}{% endif %}</p>
+    <p><strong>{{ pf_t('footer_no_republish') }}</strong></p>
+    <p>{{ pf_t('footer_disclaimer') }}</p>
+    <p>{{ pf_t('footer_sources')|safe }}</p>
+    <p><a href="{{ url_for('public_terms') }}">{{ pf_t('footer_terms_link') }}</a></p>
+    <p class="pf-footer-meta">{{ pf_t('footer_meta') }}{% if app_version %} v{{ app_version }}{% endif %}</p>
 </footer>
 <script>
 (function() {
@@ -288,11 +296,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 16px 2.5rem; }
 <div class="pf-notice" id="pf-notice" role="dialog" aria-modal="true" aria-labelledby="pf-notice-title" aria-describedby="pf-notice-lead" hidden
      data-key="rf-pub-terms-{{ terms_version }}"{% if request.path == url_for('public_terms') %} data-skip="1"{% endif %}>
     <div class="pf-notice-box">
-        <h2 id="pf-notice-title">利用規約への同意</h2>
-        <p id="pf-notice-lead"><strong>このサイトの内容を、許可なくネット上に公開しないでください。</strong>ご利用の前に、利用規約をお読みいただき、同意をお願いします。</p>
-        <div class="pf-notice-terms" tabindex="0" aria-label="利用規約の本文">{% include "_terms_body.html" %}</div>
-        <label class="pf-notice-check"><input type="checkbox" id="pf-notice-box"> 利用規約を読み、同意します</label>
-        <button type="button" class="pf-notice-ok" id="pf-notice-ok" disabled>同意して見る</button>
+        <h2 id="pf-notice-title">{{ pf_t('terms_notice_title') }}</h2>
+        <p id="pf-notice-lead">{{ pf_t('terms_notice_lead')|safe }}</p>
+        <div class="pf-notice-terms" tabindex="0" aria-label="{{ pf_t('terms_title') }}">{% include "_terms_body.html" %}</div>
+        <label class="pf-notice-check"><input type="checkbox" id="pf-notice-box"> {{ pf_t('terms_notice_check') }}</label>
+        <button type="button" class="pf-notice-ok" id="pf-notice-ok" disabled>{{ pf_t('terms_notice_ok') }}</button>
     </div>
 </div><style>
 .pf-notice { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 16px;

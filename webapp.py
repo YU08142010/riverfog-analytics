@@ -33,7 +33,7 @@ import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -54,6 +54,7 @@ from common import (
     now_jst_naive, representative_coords, send_alert,
 )
 import announcements
+import i18n_public
 import users
 import user_settings
 import push_notify
@@ -1671,6 +1672,40 @@ def _current_notifications():
                 "url": url_for("admin_log", key="webapp"),
             })
     return notifications
+
+
+@app.after_request
+def _persist_pf_lang(resp):
+    """公開ページ(/forecast以下)の言語切替(?lang=ja/en)を、選んだ時だけこの端末に覚える
+    (i18n_public.py参照、2026-10-24)。"""
+    lang = request.args.get("lang")
+    if lang in i18n_public.PUBLIC_LANGS and request.cookies.get(i18n_public.PUBLIC_LANG_COOKIE) != lang:
+        resp.set_cookie(i18n_public.PUBLIC_LANG_COOKIE, lang, max_age=60 * 60 * 24 * 365, samesite="Lax")
+    return resp
+
+
+@app.context_processor
+def _inject_pf_i18n():
+    """公開ページの日英切替(pf_t・pf_label)をテンプレート全体に注入する。公開ページ以外では
+    参照されないため、計算コストはほぼ無い(辞書引きのみ)。"""
+    lang = i18n_public.resolve_lang(request)
+
+    def pf_t(key, **kwargs):
+        return i18n_public.t(lang, key, **kwargs)
+
+    def pf_label(text):
+        return i18n_public.label(lang, text)
+
+    args = request.args.to_dict(flat=True)
+    lang_urls = {}
+    for code in i18n_public.PUBLIC_LANGS:
+        a = dict(args)
+        a["lang"] = code
+        lang_urls[code] = request.path + "?" + urlencode(a)
+    return {
+        "pf_lang": lang, "pf_t": pf_t, "pf_label": pf_label, "pf_langs": i18n_public.PUBLIC_LANGS,
+        "pf_lang_urls": lang_urls, "pf_js_strings": i18n_public.js_strings(lang),
+    }
 
 
 @app.context_processor
@@ -7163,7 +7198,7 @@ def _public_station_outlook(station, data):
         span = f"{hours[0]}時" + (f"〜{hours[-1]}時" if len(hours) > 1 else "")
         rain_hours = set(d.get("rain_hours") or [])
         out.append({"day": day["label"], "date": day["date_label"], "level": top,
-                    "short": PUBLIC_LEVELS[top]["short"], "span": span,
+                    "short": PUBLIC_LEVELS[top]["short"], "span": span, "hours": hours,
                     "rain": bool(rain_hours & set(hours))})
     return out
 

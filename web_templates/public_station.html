@@ -54,64 +54,64 @@
 {% endblock %}
 {% block body_background %}{% with wx = weather_scene(name, station.now.code if station and station.now else None) %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block content %}
-<a class="pf-back" href="{{ url_for('public_forecast') }}">← 全地点の予測に戻る</a>
+<a class="pf-back" href="{{ url_for('public_forecast') }}">{{ pf_t('station_back') }}</a>
 <div class="wx-hero">
     <div class="wx-hero-name">{{ name }}</div>
     {% if weather and weather.temp is not none and weather.temp == weather.temp %}<div class="wx-hero-temp">{{ "%.0f"|format(weather.temp) }}°</div>{% endif %}
-    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ rain_label(station.now.label, station.now.rain) if station and station.now else "観測なし" }}{% if station and station.now and station.now.at is not none %}({{ station.now.at }}時){% endif %}</div>
-    <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} 観測{% endif %}</div>
-    {% if name in lens_haze_stations %}<div class="wx-hero-sub">※本地点のカメラはレンズが曇りやすく、現況の判定は参考値である</div>{% endif %}
-    {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">この地点の河川カメラ(国土交通省「川の防災情報」)</a></div>{% endif %}
+    <div class="wx-hero-cond">{{ wx_icon(weather_scene(name, station.now.code if station and station.now else None)) }}{{ pf_label(rain_label(station.now.label, station.now.rain)) if station and station.now else pf_t('station_no_observation') }}{% if station and station.now and station.now.at is not none %}{{ pf_t('station_now_at', hour=station.now.at) }}{% endif %}</div>
+    <div class="wx-hero-sub">{{ region or "" }}{% if data and data.observed_at %} ・ {{ data.observed_at[5:] }} {{ "observed" if pf_lang == 'en' else "観測" }}{% endif %}</div>
+    {% if name in lens_haze_stations %}<div class="wx-hero-sub">{{ pf_t('station_lens_haze_note') }}</div>{% endif %}
+    {% if official_url %}<div class="wx-hero-sub"><a href="{{ official_url }}" target="_blank" rel="noopener" style="color:#fff;">{{ pf_t('station_official_link') }}</a></div>{% endif %}
     {% if station %}
-    <div class="pf-outlook" aria-label="3日間の見込み">
-        {% for o in outlook %}<span><b class="pf-lv{{ o.level }}">{{ o.short }}</b>{{ o.day }} {{ o.span }}{% if o.rain %}・雨{% endif %}</span>{% else %}<span class="pf-calm">3日間とも発生可能性「中」以上の時間帯はない</span>{% endfor %}
+    <div class="pf-outlook" aria-label="{{ pf_t('station_outlook_aria') }}">
+        {% for o in outlook %}{% set span = (o.hours[0]|string + ':00–' + o.hours[-1]|string + ':00') if (pf_lang == 'en' and o.hours|length > 1) else (o.hours[0]|string + ':00') if pf_lang == 'en' else o.span %}<span><b class="pf-lv{{ o.level }}">{{ pf_label(o.short) }}</b>{{ pf_label(o.day) }} {{ span }}{% if o.rain %}・{{ "rain" if pf_lang == 'en' else '雨' }}{% endif %}</span>{% else %}<span class="pf-calm">{{ pf_t('station_outlook_calm') }}</span>{% endfor %}
     </div>
     {% endif %}
 </div>
 
 <div class="pf-card">
-    <h2>3日間の発生予測</h2>
+    <h2>{{ pf_t('station_3day_title') }}</h2>
     {% if station %}
     <div class="pf-table-wrap">
     <table class="pf-days-table">
-        <thead><tr><th></th>{% for h in range(5, 19) %}<th{% if h == now_hour %} class="pf-now-col"{% endif %}>{{ h }}時</th>{% endfor %}</tr></thead>
+        <thead><tr><th></th>{% for h in range(5, 19) %}<th{% if h == now_hour %} class="pf-now-col"{% endif %}>{{ h }}{{ "" if pf_lang == 'en' else "時" }}</th>{% endfor %}</tr></thead>
         <tbody>
         {% for d in data.days %}
         {% set hours = station.days[loop.index0].hours %}
         {% set rain_hours = station.days[loop.index0].rain_hours %}
         <tr>
-            <th class="pf-dl">{{ d.label }}<br><span class="pf-muted" style="font-weight:400;">{{ d.date_label }}</span></th>
+            <th class="pf-dl">{{ pf_label(d.label) }}<br><span class="pf-muted" style="font-weight:400;">{{ d.date_label }}</span></th>
             {% for h in range(5, 19) %}
             {% set lv = hours.get(h, 0) %}
             {% set rains = h in rain_hours %}
-            <td class="pf-lv{{ lv }}{% if rains %} pf-rain{% endif %}{% if h == now_hour and d.label == '今日' %} pf-now-col{% endif %}" title="{{ h }}時: {{ levels[lv].label if lv else '夜間(対象外)' }}{% if rains %}・雨の予報あり{% endif %}">{{ levels[lv].short if lv >= 2 else "" }}</td>
+            <td class="pf-lv{{ lv }}{% if rains %} pf-rain{% endif %}{% if h == now_hour and d.label == '今日' %} pf-now-col{% endif %}" title="{{ h }}{{ '' if pf_lang == 'en' else '時' }}: {{ pf_label(levels[lv].label) if lv else pf_t('station_night_na') }}{% if rains %}・{{ pf_t('station_rain_forecast') }}{% endif %}">{{ pf_label(levels[lv].short) if lv >= 2 else "" }}</td>
             {% endfor %}
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">高・中 = 発生可能性の段階(色の薄いマスは「低」)、空欄 = 夜間(対象外)。{% if data.run_at %}{{ data.run_at[:16] }} 時点の計算結果{% if data.nowcast %}(本日の残りの時間は {{ data.nowcast.issued_at }} の観測を加えて再計算){% endif %}。{% endif %}</p>
+    <p class="pf-muted" style="margin-bottom:0;">{{ pf_t('station_days_caption') }}{% if data.run_at %}{{ " " if pf_lang == 'en' else "" }}{{ pf_t('station_days_asof', time=data.run_at[:16]) }}{% if data.nowcast %}{{ pf_t('station_days_nowcast', time=data.nowcast.issued_at) }}{% endif %}{{ "" if pf_lang == 'en' else "。" }}{% endif %}</p>
     {% else %}
-    <p>本地点の予測は現在算出されていない。</p>
+    <p>{{ pf_t('station_no_forecast_yet') }}</p>
     {% endif %}
 </div>
 
 <div class="pf-two">
 {% if station and station.now and data.observed_at %}
 <div class="pf-card">
-    <h2>現況(観測)</h2>
+    <h2>{{ pf_t('station_now_title') }}</h2>
     <div class="pf-now-box">
-        <span class="pf-now-label">{{ rain_label(station.now.label, station.now.rain) }}{% if station.now.at is not none %}<small style="font-size:0.8rem; font-weight:400;">({{ station.now.at }}時の観測)</small>{% endif %}</span>
-        <span class="pf-muted">{{ data.observed_at }} 時点のカメラ画像をAIで判定した結果(誤判定を含む場合がある)。</span>
+        <span class="pf-now-label">{{ pf_label(rain_label(station.now.label, station.now.rain)) }}{% if station.now.at is not none %}<small style="font-size:0.8rem; font-weight:400;">{{ pf_t('station_now_at', hour=station.now.at) }}</small>{% endif %}</span>
+        <span class="pf-muted">{{ pf_t('station_now_note', time=data.observed_at) }}</span>
     </div>
 </div>
 {% endif %}
 {% if lat is not none and lon is not none %}
 <div class="pf-card">
-    <h2>位置</h2>
-    <div id="pf-st-map" role="img" aria-label="{{ name }}の位置の地図"></div>
-    <p class="pf-muted" style="margin:0.5rem 0 0;">{{ region or "" }} 緯度 {{ "%.4f"|format(lat) }}、経度 {{ "%.4f"|format(lon) }}</p>
+    <h2>{{ pf_t('station_location_title') }}</h2>
+    <div id="pf-st-map" role="img" aria-label="{{ pf_t('station_map_aria', name=name) }}"></div>
+    <p class="pf-muted" style="margin:0.5rem 0 0;">{{ pf_t('station_coords', region=(region or ""), lat=("%.4f"|format(lat)), lon=("%.4f"|format(lon))) }}</p>
 </div>
 {% endif %}
 </div>
@@ -121,7 +121,7 @@
 (function() {
     var box = document.getElementById("pf-st-map");
     if (!box) { return; }
-    if (typeof L === "undefined") { box.textContent = "地図を読み込めなかった。"; return; }
+    if (typeof L === "undefined") { box.textContent = {{ pf_t('map_load_failed')|tojson }}; return; }
     var pos = [{{ lat }}, {{ lon }}];
     var map = L.map(box, {scrollWheelZoom: false, zoomControl: true}).setView(pos, 12);
     L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {maxZoom: 18, minZoom: 5,
@@ -132,12 +132,13 @@
 </script>
 {% endif %}
 
+{% set fw = pf_label(fog_word(name)) %}
 {% macro bars(items, unit, current=None) %}
 {% set ns = namespace(mx=0) %}
 {% for it in items %}{% if it.rate is not none and it.rate > ns.mx %}{% set ns.mx = it.rate %}{% endif %}{% endfor %}
-<div class="pf-bars" role="img" aria-label="{{ unit }}ごとの{{ fog_word(name) }}の割合">
+<div class="pf-bars" role="img" aria-label="{{ pf_t('station_bar_aria', unit=unit, word=fw) }}">
     {% for it in items %}
-    <div class="pf-bar{% if it.key == current %} pf-cur{% endif %}" title="{{ it.key }}{{ unit }}: {{ '%.1f%%'|format(it.rate * 100) if it.rate is not none else 'データ不足' }}(判定{{ it.n }}件)">
+    <div class="pf-bar{% if it.key == current %} pf-cur{% endif %}" title="{{ pf_t('station_bar_title_pct', key=it.key, unit=unit, pct=('%.1f'|format(it.rate * 100)), n=it.n) if it.rate is not none else pf_t('station_bar_insufficient') }}">
         {% if it.rate is not none %}
         <span class="v">{{ '%.0f'|format(it.rate * 100) if it.rate >= 0.1 else '%.1f'|format(it.rate * 100) }}</span>
         <i style="height: {{ (it.rate / ns.mx * 100) if ns.mx > 0 else 0 }}%;"></i>
@@ -151,22 +152,22 @@
 {% endmacro %}
 
 <div class="pf-card">
-    <h2>過去の発生傾向</h2>
+    <h2>{{ pf_t('station_history_title') }}</h2>
     {% if stats and stats.n %}
-    <p style="margin-top:0;">日中の判定 <b>{{ "{:,}".format(stats.n) }}</b> 件のうち、{{ fog_word(name) }}ありは <b>{{ "{:,}".format(stats.n_fog) }}</b> 件(発生率 <b>{{ "%.1f"|format(stats.rate * 100) }}%</b>)である。</p>
+    <p style="margin-top:0;">{{ pf_t('station_history_summary', n=("{:,}".format(stats.n)), word=fw, n_fog=("{:,}".format(stats.n_fog)), rate=('%.1f'|format(stats.rate * 100)))|safe }}</p>
     <div class="pf-two">
         <div>
-            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">月別発生率(%)</h3>
-            {{ bars(stats.by_month, "月", now_month) }}
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">{{ pf_t('station_by_month') }}</h3>
+            {{ bars(stats.by_month, pf_t('unit_month'), now_month) }}
         </div>
         <div>
-            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">時刻別発生率(%)</h3>
-            {{ bars(stats.by_hour, "時", now_hour) }}
+            <h3 style="font-size:0.95rem; margin:0.4rem 0 0;">{{ pf_t('station_by_hour') }}</h3>
+            {{ bars(stats.by_hour, pf_t('unit_hour'), now_hour) }}
         </div>
     </div>
-    <p class="pf-muted" style="margin-bottom:0;">数値は各月・各時刻の{{ fog_word(name) }}の発生率(%)。判定件数が{{ min_n }}件未満の区分は「-」とした。2026年8月以前は、別手法で収集し目視で確認した記録である。</p>
+    <p class="pf-muted" style="margin-bottom:0;">{{ pf_t('station_history_footer', word=fw, min_n=min_n) }}</p>
     {% else %}
-    <p class="pf-muted">集計は準備中である。</p>
+    <p class="pf-muted">{{ pf_t('station_history_pending') }}</p>
     {% endif %}
 </div>
 {% endblock %}

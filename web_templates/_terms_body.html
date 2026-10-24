@@ -1,5 +1,86 @@
 {# 利用規約の本文(2026-10-13 下書き)。研究用サイト(/terms)・公開ページ(/forecast/terms と最初の同意の画面)で共通。
-   文面を大きく変えたら webapp.TERMS_VERSION を上げる(全員にもう一度同意を求める)。 #}
+   文面を大きく変えたら webapp.TERMS_VERSION を上げる(全員にもう一度同意を求める)。
+   英語版(2026-10-24、pf_lang=='en'の時だけ出る)は日本語版の対訳。内容を変えたら両方直すこと。 #}
+{% if pf_lang == 'en' %}
+<div class="terms-body">
+    <p class="terms-meta">River Fog Observation &amp; Forecast — Terms of Use (version {{ terms_version }})</p>
+
+    <h3>Article 1 (Purpose and scope)</h3>
+    <p>These terms set out the conditions for using this site (the public pages for general visitors, and the
+    pages for research staff), which is operated for research on observing and forecasting river fog in the
+    Tadami River / Aizu area. By using this site, you (the "user") agree to these terms.</p>
+
+    <h3>Article 2 (Pilot publication)</h3>
+    <ol>
+        <li>This site is a research pilot. Forecasts and classifications are computed results from AI
+        classification of camera images and machine learning, and may contain errors. They are not forecasts
+        from the Japan Meteorological Agency.</li>
+        <li>The operator does not guarantee the accuracy, completeness, or timeliness of this site's content, nor
+        that the site will always be available.</li>
+    </ol>
+
+    <h3>Article 3 (No unauthorized publication or republication)</h3>
+    <ol>
+        <li>Do not publish, republish, or redistribute this site's forecasts, camera images, observation data,
+        screenshots, or any other content on social media, blogs, websites, video, news media, etc., without the
+        operator's permission.</li>
+        <li>This also applies to data received through research exports (ZIP, etc.). If you wish to use it for
+        research, education, or presentations, please contact the operator beforehand.</li>
+        <li>You may share this site's URL with others, but please do not copy and publish its content.</li>
+    </ol>
+
+    <h3>Article 4 (Terms for source data)</h3>
+    <p>River camera images are from the Ministry of Land, Infrastructure, Transport and Tourism's "River
+    Disaster Prevention Information," weather data from Open-Meteo (CC BY 4.0) and the Japan Meteorological
+    Agency, and maps from the Geospatial Information Authority of Japan and OpenStreetMap. Please also follow each
+    source's own terms of use.</p>
+
+    <h3>Article 5 (Staff pages and accounts)</h3>
+    <ol>
+        <li>Pages for research staff may only be used by people approved by the operator.</li>
+        <li>Do not lend or share your account or password with others. You are responsible for managing your own
+        password.</li>
+        <li>If you suspect unauthorized use, contact the operator immediately.</li>
+    </ol>
+
+    <h3>Article 6 (Comments, reports, and other posts)</h3>
+    <ol>
+        <li>When posting comments or observation reports, base them on fact and do not infringe on others'
+        rights.</li>
+        <li>Submitted reports may be used for research (such as correcting observation records or checking
+        forecast accuracy). The operator may review or delete posts at its discretion.</li>
+    </ol>
+    <h3>Article 7 (Prohibited conduct)</h3>
+    <ul>
+        <li>Acts that violate laws or public order and morals</li>
+        <li>Acts that infringe on others' rights (copyright, portrait rights, privacy, etc.)</li>
+        <li>Defamation or harassment of other users</li>
+        <li>Deliberately posting false observations or reports</li>
+        <li>Excessive or unauthorized access, probing for or exploiting vulnerabilities, or other acts that
+        interfere with operating the site</li>
+        <li>Any other conduct the operator deems inappropriate</li>
+    </ul>
+
+    <h3>Article 8 (Record keeping)</h3>
+    <p>For secure operation, the staff pages store login and activity records, and the date/time you agreed to
+    these terms.</p>
+
+    <h3>Article 9 (Safety and disclaimer)</h3>
+    <ol>
+        <li>When going out to observe or photograph river fog, pay close attention to weather, footing, and
+        traffic, and do not enter restricted areas.</li>
+        <li>The operator is not liable for any damage arising from your use of this site or from actions based on
+        its forecasts or other content.</li>
+    </ol>
+
+    <h3>Article 10 (Changes or suspension of content; changes to these terms)</h3>
+    <p>The operator may change this site's content or suspend its operation without notice, and may also change
+    these terms. If these terms are changed, we will ask you to agree again.</p>
+
+    <h3>Article 11 (Inquiries)</h3>
+    <p>For inquiries about this site or these terms, please contact the operator (the research lead).</p>
+</div>
+{% else %}
 <div class="terms-body">
     <p class="terms-meta">川霧観測・予測 利用規約(版 {{ terms_version }})</p>
 
@@ -59,3 +140,4 @@
     <h3>第11条(問い合わせ)</h3>
     <p>本サイトや、この規約についての問い合わせは、運営者(研究の担当者)までお願いします。</p>
 </div>
+{% endif %}

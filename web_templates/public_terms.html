@@ -1,8 +1,8 @@
 {% extends "public_base.html" %}
-{% block title %}利用規約{% endblock %}
+{% block title %}{{ pf_t('terms_title') }}{% endblock %}
 {% block content %}
 <section class="pf-card terms-card">
-    <h2>利用規約</h2>
+    <h2>{{ pf_t('terms_title') }}</h2>
     {% include "_terms_body.html" %}
 </section>
 {% endblock %}
