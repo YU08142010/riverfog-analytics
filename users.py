@@ -1286,6 +1286,18 @@ def observation_report_count(conn, user_id):
     return row[0] if row else 0
 
 
+def observation_report_status_counts(conn, user_id):
+    """そのユーザーが送った観測報告を状態別に集計する(個人ダッシュボード用)。
+    status: pending(確認待ち)・resolved(訂正に反映された)・dismissed(問題なしと判断された)。"""
+    rows = conn.execute(
+        "SELECT status, COUNT(*) FROM observation_reports WHERE reported_by = ? GROUP BY status", (user_id,)
+    ).fetchall()
+    out = {"pending": 0, "resolved": 0, "dismissed": 0}
+    for status, c in rows:
+        out[status] = c
+    return out
+
+
 def observation_report_counts_since(conn, since_str):
     """指定日時以降の観測報告数を1クエリでまとめて返す(月間ランキング用)。"""
     rows = conn.execute(

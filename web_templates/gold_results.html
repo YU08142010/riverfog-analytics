@@ -22,6 +22,22 @@
     </div>
 </div>
 
+{% if mine %}
+<div class="card">
+    <h3>あなたの成績</h3>
+    <div class="stat-grid gold-stats">
+        <div><span class="muted">正解セットで判定した画像</span><b>{{ mine.n_mine }}</b></div>
+        <div><span class="muted">もう一人と比較できた画像</span><b>{{ mine.n_compared }}</b></div>
+        <div><span class="muted">一致率</span><b>{{ pct(mine.rate) }}</b></div>
+        <div><span class="muted">送った観測報告</span><b>{{ mine.obs_report.pending + mine.obs_report.resolved + mine.obs_report.dismissed }}</b></div>
+    </div>
+    <p class="muted">
+        観測報告の内訳: 訂正に反映された{{ mine.obs_report.resolved }}件・問題なしと判断された{{ mine.obs_report.dismissed }}件・確認待ち{{ mine.obs_report.pending }}件。
+        {% if mine.n_compared == 0 %}正解セットの一致率は、同じ画像をもう一人が判定し終わると表示されます。{% endif %}
+    </p>
+</div>
+{% endif %}
+
 {% if r.ai_label %}
 <div class="card">
     <h3>AIのラベルの正しさ({{ r.ai_label.n }}枚)</h3>

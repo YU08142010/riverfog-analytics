@@ -7859,12 +7859,17 @@ def gold_label(sample_id):
 @app.route("/gold/results")
 @requires_observer
 def gold_results():
+    my_id = session.get("user_id")
     conn = _users_conn()
     try:
         res = gold_set.results(conn)
+        mine = None
+        if my_id:
+            mine = gold_set.user_accuracy(conn, my_id)
+            mine["obs_report"] = users.observation_report_status_counts(conn, my_id)
     finally:
         conn.close()
-    return render_template("gold_results.html", r=res, group_names=GOLD_GROUP_NAMES)
+    return render_template("gold_results.html", r=res, group_names=GOLD_GROUP_NAMES, mine=mine)
 
 
 GOLD_GROUP_NAMES = {0: "現象なし", 1: "川霧", 2: "全体霧", 3: "層雲", 4: "霧雨・雨"}
