@@ -263,6 +263,7 @@ window.RF_BASE = {
     // 反映されないため)。他のページを見ている間も反映されるよう、ページ共通で
     // 軽量なステータスAPIを定期的に叩く。
     var communityBadges = document.querySelectorAll('[data-badge="community"]'), menuDot = document.querySelector("[data-badge-dot]");
+    var obsBadges = document.querySelectorAll('[data-badge="obs"]');
     function watchedUserIds() {
         var ids = {};
         document.querySelectorAll("[data-user-id]").forEach(function(el) {
@@ -363,8 +364,11 @@ window.RF_BASE = {
             .then(function(data) {
                 checkChatNotice(data);
                 var total = (data.dm_unread || 0) + (data.group_unread || 0);
+                var obsPending = data.obs_pending || 0;
                 communityBadges.forEach(function(b) { b.textContent = total; b.hidden = !total; });
-                if (menuDot) { menuDot.hidden = !(total || {{ obs_pending }}); }
+                obsBadges.forEach(function(b) { b.textContent = obsPending; b.hidden = !obsPending; });
+                if (menuDot) { menuDot.hidden = !(total || obsPending); }
+                if (window.RF_BASE && window.RF_BASE.updateNotifications) { window.RF_BASE.updateNotifications(data.notifications || []); }
                 var online = {};
                 (data.online_user_ids || []).forEach(function(id) { online[id] = true; });
                 document.querySelectorAll("[data-user-id]").forEach(function(el) {

@@ -1426,25 +1426,29 @@ def _inject_pending_signup_count():
     return {"pending_signup_count": pending_signup_count}
 
 
+def _compute_pending_observation_report_count(role):
+    """役割に応じた未対応の観測報告数(管理者・観測者は全件、会津観測者/只見観測者は担当地域分だけ、
+    それ以外のロールには出さない)。トップバーのバッジ(ページ読み込み時)と/api/nav_status
+    (開いたままの更新)の両方から呼ぶ。"""
+    if not _can_manage_observation_reports(role):
+        return 0
+    conn = _users_conn()
+    try:
+        if role in ("admin", "observer"):
+            return users.pending_observation_report_count(conn)
+        region = _observer_region_for_role(role)
+        return users.pending_observation_report_count_for_stations(
+            conn, _STATION_NAMES_BY_REGION.get(region, []),
+        )
+    finally:
+        conn.close()
+
+
 @app.context_processor
 def _inject_pending_observation_report_count():
-    """トップバーの「観測報告」に未対応件数のバッジを出すため注入する。管理者・観測者は
-    全件、会津観測者/只見観測者は担当地域分だけをカウントする(それ以外のロールには
-    出さない)。"""
+    """トップバーの「観測報告」に未対応件数のバッジを出すため注入する。"""
     def pending_observation_report_count():
-        role = session.get("role")
-        if not _can_manage_observation_reports(role):
-            return 0
-        conn = _users_conn()
-        try:
-            if role in ("admin", "observer"):
-                return users.pending_observation_report_count(conn)
-            region = _observer_region_for_role(role)
-            return users.pending_observation_report_count_for_stations(
-                conn, _STATION_NAMES_BY_REGION.get(region, []),
-            )
-        finally:
-            conn.close()
+        return _compute_pending_observation_report_count(session.get("role"))
     return {"pending_observation_report_count": pending_observation_report_count}
 
 
@@ -1821,7 +1825,7 @@ def _app_nav_items(obs_pending=0, community_unread=0):
     ]
     if obs_role:
         items.append(("review", "観測", "観測の確認", url_for("observation_reports"), "error",
-                      p.startswith("/observation_reports") or p.startswith("/gold"), obs_pending))
+                      p.startswith("/observation_reports") or p.startswith("/gold"), obs_pending, "obs"))
     items += [
         ("public", "予報・分析", "予報(公開ページ)", url_for("public_forecast"), "forecast", False),
         ("simulator", "予報・分析", "シミュレーター", url_for("simulator_page"), "simulator", p.startswith(url_for("simulator_page"))),
@@ -7494,12 +7498,14 @@ def _inject_group_unread_count():
 
 @app.route("/api/nav_status")
 def api_nav_status():
-    """base.htmlのグローバルポーラーが15秒おきに叩く軽量API。ナビの未読バッジと、
-    現在のページに映っているメンバー(data-user-id属性を持つ要素)のオンライン状況を、
-    スレッドを開いていなくても・タブを切り替えなくても更新できるようにする。"""
+    """base.htmlのグローバルポーラーが15秒おきに叩く軽量API。ナビの未読バッジ・観測報告の
+    未対応バッジ・通知ベル(川霧アラート等)、現在のページに映っているメンバー(data-user-id
+    属性を持つ要素)のオンライン状況を、スレッドを開いていなくても・タブを切り替えなくても
+    更新できるようにする(2026-10-24: 通知ベル・観測報告バッジは従来ページ読み込み時にしか
+    更新されなかったため追加)。"""
     my_id = session.get("user_id")
     if not my_id:
-        return jsonify({"dm_unread": 0, "group_unread": 0, "online_user_ids": []})
+        return jsonify({"dm_unread": 0, "group_unread": 0, "online_user_ids": [], "obs_pending": 0, "notifications": []})
     ids_param = request.args.get("ids", "")
     watch_ids = [int(i) for i in ids_param.split(",") if i.strip().isdigit()][:100]
     conn = _users_conn()
@@ -7510,7 +7516,14 @@ def api_nav_status():
     finally:
         conn.close()
     online_ids = [uid for uid in watch_ids if _is_online(last_active.get(uid))]
-    return jsonify({"dm_unread": dm_unread, "group_unread": group_unread, "online_user_ids": online_ids})
+    obs_pending = _compute_pending_observation_report_count(session.get("role"))
+    try:
+        notifications = _current_notifications()
+    except Exception as e:
+        log.warning("Failed to build notifications for /api/nav_status: %s", e)
+        notifications = []
+    return jsonify({"dm_unread": dm_unread, "group_unread": group_unread, "online_user_ids": online_ids,
+                    "obs_pending": obs_pending, "notifications": notifications})
 
 
 # (web_game.py に移した: 行 7538〜9784 にあった部分。webapp.py の最後で読み込む)

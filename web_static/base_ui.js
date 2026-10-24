@@ -743,5 +743,12 @@ document.addEventListener("submit", function(e) {
     });
     renderList();
     updateBadge();
+    // base.htmlの共通ポーラー(/api/nav_status、15秒おき)から、ページを開いたままでも
+    // 川霧アラート等を反映できるようにする(2026-10-24まではページ読み込み時の内容のまま固定だった)。
+    window.RF_BASE.updateNotifications = function(fresh) {
+        notifications = fresh || [];
+        renderList();
+        updateBadge();
+    };
 })();
 
