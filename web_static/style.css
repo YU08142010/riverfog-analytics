@@ -362,6 +362,26 @@ body {
     font-size: 0.74rem;
 }
 .notif-footnote + .notif-footnote { border-top: 1px solid var(--color-border); }
+/* 通知が少ないとき、お気に入り絞り込み・既読の保存先の説明が通知一覧より目立って
+   見えていた(2026-10-24)。sticky枠(notif-panel-footer、機能のあるWeb Push案内用)とは
+   別に、純粋な説明だけをここにまとめ、閉じるとこの端末では以後出さない。 */
+.notif-info { position: relative; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); padding-right: 2rem; }
+.notif-info .notif-footnote { padding-right: 0; }
+.notif-info-close {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.5rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: none;
+    background: none;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 50%;
+}
+.notif-info-close:hover { background: var(--color-bg); color: var(--color-text); }
 
 /* AIチャットページ(/chat)。他のナビ項目(地点別・メンバー等)と同じく専用ページとして
    表示する(通知ベルのようなオーバーレイパネルにはしない)。 */

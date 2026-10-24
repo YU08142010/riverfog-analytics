@@ -652,6 +652,20 @@ document.addEventListener("submit", function(e) {
     var badge = document.getElementById("notif-badge");
     var list = document.getElementById("notif-list");
     if (!bellBtn || !panel || !badge || !list) { return; }
+    // 「お気に入り絞り込み」「既読の保存先」の説明は、通知が少ないと一覧より目立って
+    // しまっていた(2026-10-24)。×を押したら以後この端末では出さない。
+    var INFO_DISMISSED_KEY = "notif-info-dismissed";
+    var info = document.getElementById("notif-info");
+    var infoClose = document.getElementById("notif-info-close");
+    if (info && infoClose) {
+        var infoDismissed = false;
+        try { infoDismissed = localStorage.getItem(INFO_DISMISSED_KEY) === "1"; } catch (e) {}
+        info.hidden = infoDismissed;
+        infoClose.addEventListener("click", function() {
+            info.hidden = true;
+            try { localStorage.setItem(INFO_DISMISSED_KEY, "1"); } catch (e) {}
+        });
+    }
 
     function loadRead() {
         try {

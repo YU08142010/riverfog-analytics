@@ -152,12 +152,20 @@ window.RF_PREFS = {{ ({"theme": _up.theme, "text_size": _up.text_size, "reduce_m
             {# 複数行の注記(お気に入り絞り込み・既読の保存先・Web Pushの案内)はそれぞれ独立に
                position:sticky; bottom:0 を持たせていたため、全部表示される状況(ログイン中+
                お気に入り設定あり)では3つが下端で重なって表示が透けて見えていた(2026-10-23に発覚)。
-               まとめて1つの枠(notif-panel-footer)だけをstickyにし、中身は普通に積む。 #}
+               まとめて1つの枠(notif-panel-footer)だけをstickyにし、中身は普通に積む。
+               さらに、通知が少ないときはこの説明群の方が通知一覧より目立ってしまっていた
+               (2026-10-24に指摘)。毎回の操作を伴わない純粋な説明2つ(お気に入り絞り込み・
+               既読の保存先)は1つにまとめ、×を押したら以後この端末では出さない
+               (notif-info-dismissed、base_ui.js)。Web Push設定リンクとチャット通知の
+               切り替えは機能そのものなので、常時表示のまま残す。 #}
+            <div class="notif-info" id="notif-info" hidden>
+                <button type="button" class="notif-info-close" id="notif-info-close" aria-label="この説明を閉じる">&times;</button>
+                {% if notifications_favorites_active() %}
+                <p class="notif-footnote muted">お気に入り地点(<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で設定)だけに絞り込んで表示しています。</p>
+                {% endif %}
+                <p class="notif-footnote muted">既読状態はこの端末のブラウザにのみ保存されます(他の端末では未読のまま表示されます)。</p>
+            </div>
             <div class="notif-panel-footer">
-            {% if notifications_favorites_active() %}
-            <p class="notif-footnote muted">お気に入り地点(<a href="{{ url_for('member_detail', user_id=session.get('user_id')) }}">プロフィール</a>で設定)だけに絞り込んで表示しています。</p>
-            {% endif %}
-            <p class="notif-footnote muted">既読状態はこの端末のブラウザにのみ保存されます(他の端末では未読のまま表示されます)。</p>
             {% if session.get('user_id') %}
             <p class="notif-footnote"><a href="{{ url_for('settings_page') }}#push">サイトを閉じていてもスマホ・PCに通知を届ける(設定)</a></p>
             <div class="chat-notify-row" id="chat-notify-row" hidden>
