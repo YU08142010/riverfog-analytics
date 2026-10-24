@@ -4022,11 +4022,12 @@ def _write_editable_env_values(updates):
     ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
-def _camera_uptime_stats(days=CAMERA_HEALTH_DAYS):
-    """直近days日間、各地点で「使える写真」が撮れた割合を計算する
+def _camera_uptime_stats(days=CAMERA_HEALTH_DAYS, offset=0):
+    """直近days日間(offset日前から数えて)、各地点で「使える写真」が撮れた割合を計算する
     (_unavailableでない.jpgがある = 成功、フォルダはあるがファイルが無い/_unavailable = 失敗)。
+    offsetを1週間分にすると、前の期間との比較(傾向)に使える。
     """
-    date_dirs = _sorted_subdirs(IMAGE_DIR)[:days]
+    date_dirs = _sorted_subdirs(IMAGE_DIR)[offset:offset + days]
     ok_counts = {name: 0 for name in STATION_NAMES}
     total_counts = {name: 0 for name in STATION_NAMES}
     for date in date_dirs:

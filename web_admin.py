@@ -861,6 +861,11 @@ def admin_db_cleanup():
 @requires_admin
 def admin_camera_health():
     rows = _camera_uptime_stats()
+    prev_by_station = {r["station"]: r["rate"] for r in _camera_uptime_stats(offset=CAMERA_HEALTH_DAYS)}
+    for r in rows:
+        prev_rate = prev_by_station.get(r["station"])
+        r["prev_rate"] = prev_rate
+        r["delta"] = (r["rate"] - prev_rate) if r["rate"] is not None and prev_rate is not None else None
     return render_template("admin_camera_health.html", rows=rows, days=CAMERA_HEALTH_DAYS)
 
 

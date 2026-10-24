@@ -5,11 +5,12 @@
 <div class="card">
     <h2>地点ごとのカメラ稼働率(直近{{ days }}日)</h2>
     <p class="muted">「使える写真」が撮れた割合です。低い地点はカメラ側の障害や設置状況を確認してください。
-        70%未満の地点は赤字で強調表示しています(この数値に厳密な根拠があるわけではなく、目安です)。</p>
+        70%未満の地点は赤字で強調表示しています(この数値に厳密な根拠があるわけではなく、目安です)。
+        「前の{{ days }}日間との差」は、さらにその前の{{ days }}日間と比べた変化です。10pt以上の悪化は赤字で強調しています。</p>
     {% if rows %}
     <div class="table-scroll">
     <table class="obs-table" style="width:100%;">
-        <thead><tr><th>地点</th><th>成功率</th><th>成功/合計</th></tr></thead>
+        <thead><tr><th>地点</th><th>成功率</th><th>成功/合計</th><th>前の{{ days }}日間との差</th></tr></thead>
         <tbody>
         {% for r in rows %}
         <tr>
@@ -18,6 +19,14 @@
                 {{ "%.0f"|format(r.rate) + "%" if r.rate is not none else "データなし" }}
             </td>
             <td>{{ r.ok }}/{{ r.total }}</td>
+            <td>
+                {% if r.delta is none %}<span class="muted">-</span>
+                {% elif r.delta <= -10 %}<span style="color:var(--color-danger); font-weight:600;">▼{{ "%.0f"|format(-r.delta) }}pt 悪化</span>
+                {% elif r.delta < 0 %}<span class="muted">▼{{ "%.0f"|format(-r.delta) }}pt</span>
+                {% elif r.delta == 0 %}<span class="muted">変化なし</span>
+                {% else %}<span class="muted">▲{{ "%.0f"|format(r.delta) }}pt</span>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         </tbody>
