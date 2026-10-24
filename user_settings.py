@@ -40,6 +40,7 @@ SETTINGS = {
     "push_digest_evening": {"default": 20, "choices": [None, 20, 21, 22]},
     "push_digest_level": {"default": 3, "choices": [2, 3]},
     "push_fog_soon": {"default": True, "type": bool},
+    "push_fog_soon_level": {"default": 3, "choices": [2, 3]},  # 「まもなく」通知の感度(3=出やすいのみ・2=やや出やすいも)
     "push_fog_now": {"default": True, "type": bool},
     "push_fog_nowcast": {"default": False, "type": bool},  # この後1時間の別予測(short_nowcast.py、2026-10-12)
     "push_camera": {"default": False, "type": bool},
@@ -155,7 +156,7 @@ SECTIONS = {
     "dashboard": ["dashboard_order", "dashboard_hidden"],
     "privacy": ["show_online", "mute_profile_sounds"],
     "push": ["push_stations", "push_custom_stations", "push_digest_morning", "push_digest_evening",
-             "push_digest_level", "push_fog_soon", "push_fog_now", "push_fog_nowcast", "push_camera", "push_monthly_report", "push_dm", "push_group",
+             "push_digest_level", "push_fog_soon", "push_fog_soon_level", "push_fog_now", "push_fog_nowcast", "push_camera", "push_monthly_report", "push_dm", "push_group",
              "push_preview", "push_admin", "quiet_enabled", "quiet_start", "quiet_end"],
 }
 

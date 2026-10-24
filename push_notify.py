@@ -252,8 +252,10 @@ def build_digest(forecast, day_index, targets, min_level):
     return title, " / ".join(parts), (high + mid)[0]
 
 
-def _soon_stations(forecast, targets, now):
-    """この後SOON_LOOKAHEAD_HOURS時間以内に「発生可能性 高」の時刻がある地点 → {地点: 最初の時刻}。
+def _soon_stations(forecast, targets, now, min_level=3):
+    """この後SOON_LOOKAHEAD_HOURS時間以内に、min_level以上の発生可能性がある時刻がある地点
+    → {地点: 最初の時刻}。min_levelは利用者の設定(push_fog_soon_level、既定は3=「高」のみ、
+    2なら「やや出やすい」も含む)。
     日ごとのhoursは0〜23で別々に区切られているため、23時台など日をまたぐ時間帯では
     今日のhoursだけを見ても24時・25時が存在せず素通りしていた(2026-10-23に発覚、霧の
     リスクが高いことが多い深夜直前の時間帯でちょうど通知が抜け落ちていた)。h>=24は
@@ -275,7 +277,7 @@ def _soon_stations(forecast, targets, now):
                 lv = (st["days"][1].get("hours") or {}).get(h - 24, 0)
             else:
                 lv = 0
-            if lv >= 3:
+            if lv >= min_level:
                 out[name] = h % 24
                 break
     return out
@@ -374,7 +376,7 @@ def run_scheduled(ctx):
                 jobs.append(("digest", [f"digest:{today}:{slot}"], title, body, "/stations", f"digest-{slot}", "normal"))
 
         if s["push_fog_soon"] and 3 <= now.hour <= 17:
-            soon = _soon_stations(forecast, targets, now)
+            soon = _soon_stations(forecast, targets, now, s["push_fog_soon_level"])
             if soon:
                 names = sorted(soon, key=lambda n: (soon[n], station_names.index(n)))
                 jobs.append(("fog_soon", [f"soon:{today}:{n}" for n in names], "まもなく川霧が出やすくなります",
