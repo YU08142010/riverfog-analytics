@@ -545,6 +545,11 @@ CONSUMABLE_DEFINITIONS = [
         "desc": "観測時間帯が始まる前なら、賭けた後でもこのチケットで取り消し、全額払い戻せます。",
         "added": NEW_ITEM_ADDED_AT,
     },
+    {
+        "id": "fog_quiz_streak_guard", "label": "予報クイズの連続記録お守り", "cost": 400,
+        "desc": "川霧予報クイズで外れても、連続正解日数(ストリーク)がリセットされず維持されます(1回分)。",
+        "added": "2026-10-24",
+    },
 ]
 CONSUMABLE_BY_ID = {c["id"]: c for c in CONSUMABLE_DEFINITIONS}
 CONSUMABLE_BOOST_MULTIPLIER = 1.1
@@ -731,7 +736,10 @@ def _resolve_pending_daily_fog_quiz():
             codes = window[station].apply(encode_phenomena_cell).apply(primary_phenom_code)
             occurred = bool(codes.dropna().isin(SUMMARY_FOG_CODES).any())
             correct = occurred == entry["guess"]
-            new_streak = users.update_daily_fog_quiz_stats(conn, entry["user_id"], correct)
+            used_guard = False
+            if not correct:
+                used_guard = users.use_consumable(conn, entry["user_id"], "fog_quiz_streak_guard")
+            new_streak = users.update_daily_fog_quiz_stats(conn, entry["user_id"], correct, keep_streak_on_miss=used_guard)
             if correct:
                 bonus = min(new_streak, FOG_QUIZ_STREAK_BONUS_CAP_DAYS) * FOG_QUIZ_STREAK_BONUS_PER_DAY
                 payout = FOG_QUIZ_BASE_POINTS + bonus

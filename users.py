@@ -2148,11 +2148,15 @@ def get_daily_fog_quiz_stats(conn, user_id):
     return {"current_streak": row[0], "best_streak": row[1], "total_correct": row[2], "total_played": row[3]}
 
 
-def update_daily_fog_quiz_stats(conn, user_id, correct):
-    """的中ならcurrent_streakを+1、外れなら0に戻す。更新後のcurrent_streakを返す
+def update_daily_fog_quiz_stats(conn, user_id, correct, keep_streak_on_miss=False):
+    """的中ならcurrent_streakを+1、外れなら0に戻す(keep_streak_on_missがTrueなら、
+    「予報クイズの連続記録お守り」消費時として維持する)。更新後のcurrent_streakを返す
     (呼び出し側でストリークボーナスの計算に使う)。"""
     stats = get_daily_fog_quiz_stats(conn, user_id)
-    new_streak = stats["current_streak"] + 1 if correct else 0
+    if correct:
+        new_streak = stats["current_streak"] + 1
+    else:
+        new_streak = stats["current_streak"] if keep_streak_on_miss else 0
     best = max(stats["best_streak"], new_streak)
     total_correct = stats["total_correct"] + (1 if correct else 0)
     total_played = stats["total_played"] + 1
