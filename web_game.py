@@ -198,6 +198,24 @@ BADGE_DEFINITIONS = [
      "check": lambda s: s["station_share_count"] >= 10},
     {"id": "station_share_50", "label": "地点ソムリエ", "desc": "地点情報を50回共有した", "icon": "crown", "points": 1500,
      "check": lambda s: s["station_share_count"] >= 50},
+    # 観測報告(2026-10-24: このアプリの核である観測報告・正解セットに実績が1件も無かったための追加)
+    {"id": "obs_report_first", "label": "観測デビュー", "desc": "観測報告を送った", "icon": "camera", "points": 150,
+     "check": lambda s: s["observation_report_count"] >= 1},
+    {"id": "obs_report_10", "label": "観測常連", "desc": "観測報告を10件送った", "icon": "camera", "points": 500,
+     "check": lambda s: s["observation_report_count"] >= 10},
+    {"id": "obs_report_50", "label": "観測のプロ", "desc": "観測報告を50件送った", "icon": "camera", "points": 1500,
+     "check": lambda s: s["observation_report_count"] >= 50},
+    {"id": "obs_report_200", "label": "観測の達人", "desc": "観測報告を200件送った", "icon": "crown", "points": 5000,
+     "check": lambda s: s["observation_report_count"] >= 200},
+    # 正解セット
+    {"id": "gold_label_first", "label": "正解セットデビュー", "desc": "正解セットで画像を1枚判定した", "icon": "accuracy", "points": 150,
+     "check": lambda s: s["gold_label_count"] >= 1},
+    {"id": "gold_label_50", "label": "正解セットの常連", "desc": "正解セットで画像を50枚判定した", "icon": "accuracy", "points": 800,
+     "check": lambda s: s["gold_label_count"] >= 50},
+    {"id": "gold_label_200", "label": "正解セットの職人", "desc": "正解セットで画像を200枚判定した", "icon": "crown", "points": 3000,
+     "check": lambda s: s["gold_label_count"] >= 200},
+    {"id": "gold_accuracy_90", "label": "目利き", "desc": "正解セットで2人判定がそろった画像を20枚以上比較し、一致率90%以上", "icon": "crown",
+     "points": 2000, "check": lambda s: s["gold_compared"] >= 20 and (s["gold_accuracy_rate"] or 0) >= 0.9},
 ]
 
 # --- 実績以外のポイント源 ---------------------------------------------------------
@@ -1214,6 +1232,8 @@ def member_detail(user_id):
         points_spent = users.total_spent_points(conn, user_id)
         ranking_first_count = users.monthly_ranking_first_count(conn, user_id)
         station_share_count = users.station_share_count(conn, user_id)
+        observation_report_count = users.observation_report_count(conn, user_id)
+        gold_accuracy = gold_set.user_accuracy(conn, user_id)
     finally:
         conn.close()
     favorite_stations = [s for s in target["favorite_stations"].split(",") if s]
@@ -1252,6 +1272,9 @@ def member_detail(user_id):
         "title_complete": title_complete, "name_color_complete": name_color_complete,
         "points_spent": points_spent, "ranking_first_count": ranking_first_count,
         "station_share_count": station_share_count,
+        "observation_report_count": observation_report_count,
+        "gold_label_count": gold_accuracy["n_mine"], "gold_compared": gold_accuracy["n_compared"],
+        "gold_accuracy_rate": gold_accuracy["rate"],
     })
     # 実績の達成状況を見る/見られるたびに、新規達成分のポイントを付与する
     # (award_badgeが既付与分を無視するので、何度呼んでも二重加算にはならない)。
