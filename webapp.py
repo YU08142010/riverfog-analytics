@@ -1705,6 +1705,7 @@ def _inject_pf_i18n():
     return {
         "pf_lang": lang, "pf_t": pf_t, "pf_label": pf_label, "pf_langs": i18n_public.PUBLIC_LANGS,
         "pf_lang_urls": lang_urls, "pf_js_strings": i18n_public.js_strings(lang),
+        "pf_label_map": i18n_public.LABEL_EN if lang == "en" else {},
     }
 
 
@@ -7296,7 +7297,8 @@ def _build_public_insights():
     st_rates = st_rates[st_rates["size"] >= PUBLIC_INSIGHT_MIN_N].sort_values("mean", ascending=False).head(5)
     stations = [{"name": s, "rate": float(r["mean"]), "region": STATION_REGION.get(s) or ""} for s, r in st_rates.iterrows()]
     return {"overall": overall, "hours": hours, "conditions": conditions, "stations": stations,
-            "since": d["datetime"].min().strftime("%Y年%-m月"), "n": n}
+            "since": d["datetime"].min().strftime("%Y年%-m月"), "since_ym": (int(d["datetime"].min().year), int(d["datetime"].min().month)),
+            "n": n}
 
 
 def _public_insights_safe():
@@ -7320,10 +7322,20 @@ def _public_insights_safe():
     return data
 
 
+EN_MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]
+
+
 @app.route("/forecast")
 def public_forecast():
     data = _public_forecast_safe()
-    return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS, insights=_public_insights_safe())
+    insights = _public_insights_safe()
+    if insights and i18n_public.resolve_lang(request) == "en":
+        insights = dict(insights)
+        year, month = insights.get("since_ym") or (None, None)
+        if year and month:
+            insights["since"] = f"{EN_MONTH_NAMES[month - 1]} {year}"
+    return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS, insights=insights)
 
 
 @app.route("/forecast/about")

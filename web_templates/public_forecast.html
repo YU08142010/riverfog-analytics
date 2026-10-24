@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% block title %}発生予測{% endblock %}
+{% block title %}{{ pf_t('nav_forecast') }}{% endblock %}
 {% block body_background %}{% set ov = overview_weather_scene() %}{% with wx = ov.wx %}{% include "_weather_scene.html" %}{% endwith %}{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.min.css') }}">
@@ -262,71 +262,71 @@
 {% endblock %}
 {% block content %}
 {% if not data %}
-<div class="pf-card"><p>予測データを現在表示できない。時間をおいて再度参照されたい。</p></div>
+<div class="pf-card"><p>{{ pf_t('forecast_not_available') }}</p></div>
 {% else %}
 {% set fog_now = data.stations|selectattr("now")|map(attribute="now")|selectattr("fog")|list|length %}
 <section class="pf-hero" style="--mist: {{ [0.2 + 0.12 * fog_now, 0.6]|min }}">
     <div class="pf-hero-mist" aria-hidden="true"><i></i><i></i><i></i></div>
-    <h1 id="pf-headline">本日の川霧発生予測</h1>
-    <p class="pf-muted">只見川・会津地方の{{ data.stations|length }}地点を対象に、日中(日の出〜日の入り)の各時刻における川霧の発生可能性を3段階で示す。</p>
+    <h1 id="pf-headline">{{ pf_t('forecast_hero_title_default') }}</h1>
+    <p class="pf-muted">{{ pf_t('forecast_hero_sub', n=data.stations|length) }}</p>
 </section>
-<div class="pf-meta">{% if data.run_at %}<span class="pf-pill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg>予測計算 {{ data.run_at[5:16]|replace("-", "/") }}<small>日次更新</small></span>{% endif %}{% if data.observed_at %}<span class="pf-pill"><span class="pf-live" aria-hidden="true"></span>最新観測 {{ data.observed_at[5:] }}<small>毎時更新</small></span>{% endif %}{% if fog_now %}<span class="pf-pill pf-pill-fog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M3 14c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M5 19h14"/></svg>現在 川霧を観測中 {{ fog_now }}地点</span>{% endif %}{% if data.nowcast %}<span class="pf-pill" title="本日の残りの時間(最大8時間先)は、毎時のカメラ観測を入力に加えて予測し直している"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>本日分は{{ data.nowcast.issued_at }}の観測で再計算</span>{% endif %}</div>
+<div class="pf-meta">{% if data.run_at %}<span class="pf-pill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg>{{ pf_t('pill_calc', time=data.run_at[5:16]|replace("-", "/")) }}<small>{{ pf_t('pill_calc_sub') }}</small></span>{% endif %}{% if data.observed_at %}<span class="pf-pill"><span class="pf-live" aria-hidden="true"></span>{{ pf_t('pill_observed', time=data.observed_at[5:]) }}<small>{{ pf_t('pill_observed_sub') }}</small></span>{% endif %}{% if fog_now %}<span class="pf-pill pf-pill-fog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M3 14c2.5-1.6 4.5-1.6 7 0s4.5 1.6 7 0M5 19h14"/></svg>{{ pf_t('pill_fog_now', n=fog_now) }}</span>{% endif %}{% if data.nowcast %}<span class="pf-pill" title="{{ pf_t('pill_nowcast_title') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>{{ pf_t('pill_nowcast', time=data.nowcast.issued_at) }}</span>{% endif %}</div>
 {% if data.stale %}
-<div class="pf-notice" role="status">予測の更新が停止しているため、表示内容が最新でない可能性がある{% if data.run_at %}(最終更新 {{ data.run_at[:16] }}){% endif %}。</div>
+<div class="pf-notice" role="status">{{ pf_t('stale_notice', suffix=(pf_t('stale_notice_suffix', time=data.run_at[:16]) if data.run_at else "")) }}</div>
 {% endif %}
 
 <div class="pf-days" role="group" aria-label="日付の切り替え">
     {% for d in data.days %}
     <button type="button" class="pf-day" data-day="{{ loop.index0 }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">
-        <b>{{ d.label }}</b><small>{{ d.date_label }}</small>
+        <b>{{ pf_label(d.label) }}</b><small>{{ d.date_label }}</small>
     </button>
     {% endfor %}
 </div>
 
 <div class="pf-grid">
     <div class="pf-card">
-        <h2 id="pf-summary-title">予測の概要</h2>
+        <h2 id="pf-summary-title">{{ pf_t('summary_title_default') }}</h2>
         <p class="pf-answer" id="pf-answer" aria-live="polite"></p>
         <div class="pf-dots" id="pf-dots" aria-hidden="true"></div>
-        <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span></span><span><b>5時</b><b>12時</b><b>18時</b></span><span></span></div>
+        <div class="pf-ribbon-axis" id="pf-ribbon-axis" aria-hidden="true"><span></span><span></span><span><b>5{{ "" if pf_lang == 'en' else "時" }}</b><b>12{{ "" if pf_lang == 'en' else "時" }}</b><b>18{{ "" if pf_lang == 'en' else "時" }}</b></span><span></span></div>
         <ol class="pf-rank" id="pf-rank"></ol>
         <p class="pf-more" id="pf-more" hidden></p>
         {% if data.observed_at %}
-        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">「現況」列は {{ data.observed_at }} 時点の河川カメラ画像をAIで判定した観測値であり、予測値ではない。川霧ありと判定された地点を着色している。最新時刻の画像を取得できなかった地点は、直近3時間以内の観測を時刻付きで示す。</p>
+        <p class="pf-muted" id="pf-now-note" style="margin-top:0.9rem;">{{ pf_t('now_note', time=data.observed_at) }}</p>
         {% endif %}
     </div>
     <div class="pf-card">
-        <h2>地図</h2>
+        <h2>{{ pf_t('map_title') }}</h2>
         <div class="pf-map-wrap">
-            <div id="pf-map" role="img" aria-label="地点別の川霧発生可能性の地図(詳細は下表を参照)"></div>
+            <div id="pf-map" role="img" aria-label="{{ pf_t('map_aria_default') }}"></div>
             <div class="pf-map-clock" id="pf-map-clock" aria-hidden="true"><b></b><small></small></div>
         </div>
         <div class="pf-time" id="pf-time">
             <div class="pf-time-head">
-                <button type="button" class="pf-time-btn pf-play" id="pf-time-play">▶ 時系列で再生</button>
-                <button type="button" class="pf-time-btn" id="pf-time-all" aria-pressed="true">日最大</button>
+                <button type="button" class="pf-time-btn pf-play" id="pf-time-play">{{ pf_t('play_default') }}</button>
+                <button type="button" class="pf-time-btn" id="pf-time-all" aria-pressed="true">{{ pf_t('day_max_default') }}</button>
             </div>
             <p class="pf-time-hint" id="pf-time-label" aria-live="polite"></p>
-            <div class="pf-hours" id="pf-hours" role="group" aria-label="地図に表示する時刻"></div>
+            <div class="pf-hours" id="pf-hours" role="group" aria-label="{{ 'Hours shown on the map' if pf_lang == 'en' else '地図に表示する時刻' }}"></div>
         </div>
         <div class="pf-legend">
-            <span><i class="pf-lv3"></i>{{ levels[3].label }}</span>
-            <span><i class="pf-lv2"></i>{{ levels[2].label }}</span>
-            <span><i class="pf-lv1"></i>{{ levels[1].label }}</span>
-            <span><i class="pf-lv0"></i>夜間(対象外)</span>
+            <span><i class="pf-lv3"></i>{{ pf_label(levels[3].label) }}</span>
+            <span><i class="pf-lv2"></i>{{ pf_label(levels[2].label) }}</span>
+            <span><i class="pf-lv1"></i>{{ pf_label(levels[1].label) }}</span>
+            <span><i class="pf-lv0"></i>{{ pf_t('legend_night') }}</span>
         </div>
     </div>
 </div>
 
 <div class="pf-card" id="pf-table-card">
     <div class="pf-table-head">
-        <h2>時刻別の発生可能性</h2>
-        <div class="pf-seg" role="group" aria-label="表に表示する地点">
-            <button type="button" id="pf-filter-all" aria-pressed="false">全地点</button>
-            <button type="button" id="pf-filter-mid" aria-pressed="true">「中」以上のみ</button>
+        <h2>{{ pf_t('table_title') }}</h2>
+        <div class="pf-seg" role="group" aria-label="{{ 'Sites shown in the table' if pf_lang == 'en' else '表に表示する地点' }}">
+            <button type="button" id="pf-filter-all" aria-pressed="false">{{ pf_t('filter_all_default') }}</button>
+            <button type="button" id="pf-filter-mid" aria-pressed="true">{{ pf_t('filter_mid_default') }}</button>
         </div>
     </div>
-    <p class="pf-muted" style="margin-top:0;">色が濃いほど発生可能性が高い。空欄は夜間であり、カメラによる判定ができないため予測対象外とした。地点名に重ねると地図上の位置を示す。<a href="{{ url_for('public_about') }}">3段階の判定基準</a></p>
+    <p class="pf-muted" style="margin-top:0;">{{ pf_t('table_note') }}<a href="{{ url_for('public_about') }}">{{ pf_t('table_note_link') }}</a></p>
     <div class="pf-table-wrap">
         <table class="pf-table" id="pf-table"></table>
     </div>
@@ -336,28 +336,28 @@
 {# 川霧が出やすい条件(2026-10-15): これまでの観測(カメラ画像の判定)から集計した、出やすい時間帯・気象条件・地点 #}
 {% set top = [insights.hours|map(attribute='rate')|max, 0.0001]|max %}
 <div class="pf-card" id="pf-insights">
-    <h2>川霧が出やすい条件</h2>
-    <p class="pf-muted" style="margin-top:0;">{{ insights.since }}からの観測(カメラ画像の判定、のべ{{ "{:,}".format(insights.n) }}件)で、川霧が出ていた割合。全体の平均は<b>{{ "%.1f"|format(insights.overall * 100) }}%</b>。</p>
+    <h2>{{ pf_t('insights_title') }}</h2>
+    <p class="pf-muted" style="margin-top:0;">{{ pf_t('insights_note', since=insights.since, n=("{:,}".format(insights.n)), overall=('%.1f'|format(insights.overall * 100)))|safe }}</p>
     <div class="pf-insight-grid">
         <section class="pf-insight">
-            <h3>時間帯</h3>
+            <h3>{{ pf_t('insights_hours_title') }}</h3>
             {% set peak = insights.hours|sort(attribute="rate", reverse=true) %}
-            <div class="pf-hours" role="list" aria-label="時刻ごとの川霧の出ていた割合" style="grid-template-columns: repeat({{ insights.hours|length }}, minmax(0, 1fr));">
+            <div class="pf-hours" role="list" aria-label="{{ pf_t('insights_hours_aria') }}" style="grid-template-columns: repeat({{ insights.hours|length }}, minmax(0, 1fr));">
                 {% for h in insights.hours %}
-                <div role="listitem" title="{{ h.hour }}時: {{ '%.1f'|format(h.rate * 100) }}%">
+                <div role="listitem" title="{{ h.hour }}{{ '' if pf_lang == 'en' else '時' }}: {{ '%.1f'|format(h.rate * 100) }}%">
                     <i style="height: {{ '%.0f'|format(h.rate / top * 100) }}%"></i><small>{{ h.hour }}</small>
                 </div>
                 {% endfor %}
             </div>
-            <p class="pf-muted" style="font-size:0.8rem; margin:0.3rem 0 0;">出ていた割合が高いのは {{ (peak[:3]|map(attribute="hour")|sort|map("string")|join("時・")) }}時(数字は時刻)。夜間は判定できないため含まない。</p>
+            <p class="pf-muted" style="font-size:0.8rem; margin:0.3rem 0 0;">{{ pf_t('insights_hours_note', hours=(peak[:3]|map(attribute="hour")|sort|map("string")|join("・" if pf_lang == 'en' else "時・"))) }}</p>
         </section>
         {% for c in insights.conditions %}
         {% set cmax = [c['items']|map(attribute='rate')|max, 0.0001]|max %}
         <section class="pf-insight">
-            <h3>{{ c.title }}</h3>
+            <h3>{{ pf_label(c.title) }}</h3>
             <ul>
                 {% for it in c['items'] %}
-                <li class="pf-bar-row"><span>{{ it.label }}</span><span class="pf-bar"><i style="width: {{ '%.0f'|format(it.rate / cmax * 100) }}%"></i></span><b>{{ "%.1f"|format(it.rate * 100) }}%</b></li>
+                <li class="pf-bar-row"><span>{{ pf_label(it.label) }}</span><span class="pf-bar"><i style="width: {{ '%.0f'|format(it.rate / cmax * 100) }}%"></i></span><b>{{ "%.1f"|format(it.rate * 100) }}%</b></li>
                 {% endfor %}
             </ul>
         </section>
@@ -365,7 +365,7 @@
         {% if insights.stations %}
         {% set smax = [insights.stations|map(attribute='rate')|max, 0.0001]|max %}
         <section class="pf-insight">
-            <h3>出やすい地点</h3>
+            <h3>{{ pf_t('insights_stations_title') }}</h3>
             <ol>
                 {% for s in insights.stations %}
                 <li class="pf-bar-row"><span><a href="{{ url_for('public_station', name=s.name) }}">{{ s.name }}</a></span><span class="pf-bar"><i style="width: {{ '%.0f'|format(s.rate / smax * 100) }}%"></i></span><b>{{ "%.1f"|format(s.rate * 100) }}%</b></li>
@@ -374,21 +374,53 @@
         </section>
         {% endif %}
     </div>
-    <p class="pf-insight-note">湿度が高い・風が弱い・気温と露点の差が小さい(空気が飽和に近い)ときに、川霧が出ていた割合が高い傾向がある。観測はカメラ画像のAIによる判定で、誤りを含むことがある。</p>
+    <p class="pf-insight-note">{{ pf_t('insights_footer') }}</p>
 </div>
 {% endif %}<script id="pf-data" type="application/json">{{ data|tojson }}</script>
 <script id="pf-levels" type="application/json">{{ levels|tojson }}</script>
+<script id="pf-i18n" type="application/json">{{ pf_js_strings|tojson }}</script>
+<script id="pf-label-map" type="application/json">{{ pf_label_map|tojson }}</script>
 <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.min.js') }}"></script>
 <script>
 (function() {
     var data = JSON.parse(document.getElementById("pf-data").textContent);
     var levels = JSON.parse(document.getElementById("pf-levels").textContent);
+    var LANG = {{ pf_lang|tojson }};
+    var I18N = JSON.parse(document.getElementById("pf-i18n").textContent);
+    var LABEL_MAP = JSON.parse(document.getElementById("pf-label-map").textContent);
+    // webapp.py側が組み立て済みの現象ラベル(PHENOM_LABELS等)を英語化する(i18n_public.label()と同じ考え方)。
+    function labelBridge(text) {
+        if (LANG !== "en" || !text) { return text; }
+        if (LABEL_MAP[text] !== undefined) { return LABEL_MAP[text]; }
+        if (text.indexOf("雨 ") === 0) {
+            var rest = text.slice(2);
+            return "rain, " + (LABEL_MAP[rest] !== undefined ? LABEL_MAP[rest] : rest);
+        }
+        return text;
+    }
+    // t(key, vars): I18Nにキーがあれば{var}を埋めて返す(英語)。無ければ呼び出し側が渡した
+    // 日本語の既定文(fallback引数)をそのまま使う(2026-10-24、public_forecast.htmlの英語対応)。
+    function t(key, vars, fallback) {
+        var s = I18N[key];
+        if (s === undefined) { return fallback; }
+        return s.replace(/\{(\w+)\}/g, function(m, k) { return (vars && vars[k] !== undefined) ? vars[k] : m; });
+    }
+    // 英語ではバッジが小さい丸/四角のままだと"Medium"等が入らないため、短縮形は1文字にする
+    // (日本語の「高・中・低」1文字と同じ扱い。文章中の全体ラベルはlevelLabel()でフルの単語を使う)。
+    var LEVEL_WORD = LANG === "en" ? {0: "", 1: "Low", 2: "Medium", 3: "High"} : null;
+    var LEVEL_WORD_SHORT = LANG === "en" ? {0: "", 1: "L", 2: "M", 3: "H"} : null;
+    function levelLabel(lv) { return LEVEL_WORD ? LEVEL_WORD[lv] : levels[lv].label; }
+    function levelShort(lv) { return LEVEL_WORD_SHORT ? LEVEL_WORD_SHORT[lv] : levels[lv].short; }
     var HOURS = [];
     for (var h = 5; h <= 18; h++) { HOURS.push(h); }
     var STATION_URL = {{ url_for("public_station", name="__NAME__")|tojson }};
-    function stationUrl(name) { return STATION_URL.replace("__NAME__", encodeURIComponent(name)); }
+    function stationUrl(name) { return STATION_URL.replace("__NAME__", encodeURIComponent(name)) + (LANG === "en" ? "?lang=en" : ""); }
     // 現況のラベル。最新時刻に画像を取得できず、少し前の観測で補った地点は時刻を添える
-    function nowLabel(now) { return now.label + (now.at !== null && now.at !== undefined ? "(" + now.at + "時)" : ""); }
+    function nowLabel(now) {
+        var suffix = (now.at !== null && now.at !== undefined)
+            ? t("now_label_suffix", {hour: now.at}, "(" + now.at + "時)") : "";
+        return labelBridge(now.label) + suffix;
+    }
     function el(tag, cls, text) {
         var e = document.createElement(tag);
         if (cls) { e.className = cls; }
@@ -399,7 +431,7 @@
     var map = null, markers = [];
     var mapDiv = document.getElementById("pf-map");
     if (typeof L === "undefined") {
-        mapDiv.textContent = "地図を読み込めなかった。下表を参照されたい。";
+        mapDiv.textContent = t("map_load_failed", null, "地図を読み込めなかった。下表を参照されたい。");
     } else {
         map = L.map(mapDiv, {scrollWheelZoom: false});
         // 国土地理院の淡色地図: 色が控えめで、霧の点ともやが地図の色に埋もれない(ダーク時はglass.cssで反転)
@@ -447,7 +479,9 @@
         if (a) { a.focus({preventScroll: true}); }
     }
 
-    var HEADLINE_DAY = ["本日", "明日", "明後日"];
+    var HEADLINE_DAY = LANG === "en"
+        ? [t("headline_today", null, "本日"), t("headline_tomorrow", null, "明日"), t("headline_day_after", null, "明後日")]
+        : ["本日", "明日", "明後日"];
     var NOW_HOUR = new Date().getHours();  // 本日を表示している時に、今の時刻の列・帯に印を付ける
     var RANK_LIMIT = 6;
     function hasHours(dayIdx) {
@@ -458,6 +492,7 @@
         var hrs = Object.keys(s.days[dayIdx].hours).filter(function(k) { return s.days[dayIdx].hours[k] >= minLv; })
             .map(Number).sort(function(a, b) { return a - b; });
         if (!hrs.length) { return ""; }
+        if (LANG === "en") { return hrs[0] + ":00" + (hrs.length > 1 ? "–" + hrs[hrs.length - 1] + ":00" : ""); }
         return hrs[0] + "時" + (hrs.length > 1 ? "〜" + hrs[hrs.length - 1] + "時" : "");
     }
     // 出やすい順: 最大の段階 → その段階の時間数 → やや出やすい以上の時間数 → 早い時刻
@@ -492,8 +527,9 @@
     function renderSummary(dayIdx) {
         var day = data.days[dayIdx];
         var word = HEADLINE_DAY[dayIdx] || day.label;
-        document.getElementById("pf-headline").textContent = word + "の川霧発生予測";
-        document.getElementById("pf-summary-title").textContent = day.label + "(" + day.date_label + ")の予測概要";
+        document.getElementById("pf-headline").textContent = word + t("headline_suffix", null, "の川霧発生予測");
+        document.getElementById("pf-summary-title").textContent = t("summary_title", {label: word, date: day.date_label},
+            day.label + "(" + day.date_label + ")の予測概要");
         var ranked = rankStations(dayIdx);
         var high = ranked.filter(function(s) { return s.days[dayIdx].max === 3; });
         var mid = ranked.length - high.length;
@@ -501,18 +537,19 @@
         answer.textContent = "";
         if (!hasHours(dayIdx)) {
             answer.textContent = dayIdx === 0
-                ? "本日の日中の予測対象時刻は終了した。明日以降の予測を参照されたい。"
-                : "この日の予測はまだ計算されていない。";
+                ? t("answer_today_ended", null, "本日の日中の予測対象時刻は終了した。明日以降の予測を参照されたい。")
+                : t("answer_not_yet", null, "この日の予測はまだ計算されていない。");
         } else if (high.length) {
-            answer.appendChild(document.createTextNode("発生可能性「高」は "));
-            answer.appendChild(el("strong", null, high.length + "地点"));
-            answer.appendChild(document.createTextNode((mid ? "、「中」は" + mid + "地点" : "") + "である(対象" + data.stations.length + "地点)。"));
+            answer.innerHTML = mid
+                ? t("answer_high_and_mid", {n: high.length, mid: mid, total: data.stations.length},
+                    "発生可能性「高」は <strong>" + high.length + "地点</strong>、「中」は" + mid + "地点である(対象" + data.stations.length + "地点)。")
+                : t("answer_high_only", {n: high.length, total: data.stations.length},
+                    "発生可能性「高」は <strong>" + high.length + "地点</strong>である(対象" + data.stations.length + "地点)。");
         } else if (mid) {
-            answer.appendChild(document.createTextNode("発生可能性「高」の地点はなく、「中」は "));
-            answer.appendChild(el("strong", null, mid + "地点"));
-            answer.appendChild(document.createTextNode("である(対象" + data.stations.length + "地点)。"));
+            answer.innerHTML = t("answer_mid_only", {n: mid, total: data.stations.length},
+                "発生可能性「高」の地点はなく、「中」は <strong>" + mid + "地点</strong>である(対象" + data.stations.length + "地点)。");
         } else {
-            answer.textContent = "全地点で発生可能性は「低」である。";
+            answer.textContent = t("answer_all_low", null, "全地点で発生可能性は「低」である。");
         }
         var list = document.getElementById("pf-rank");
         list.textContent = "";
@@ -520,8 +557,8 @@
             var lv = s.days[dayIdx].max;
             var a = el("a");
             a.href = stationUrl(s.name);
-            a.setAttribute("aria-label", s.name + ": " + levels[lv].label + " " + hourSpan(s, dayIdx, lv));
-            a.appendChild(el("span", "pf-rank-lv pf-lv" + lv, levels[lv].short));
+            a.setAttribute("aria-label", s.name + ": " + levelLabel(lv) + " " + hourSpan(s, dayIdx, lv));
+            a.appendChild(el("span", "pf-rank-lv pf-lv" + lv, levelShort(lv)));
             a.appendChild(el("span", "pf-rank-name", s.name));
             a.appendChild(ribbon(s, dayIdx));
             a.appendChild(el("span", "pf-rank-when", hourSpan(s, dayIdx, lv)));
@@ -533,7 +570,7 @@
         document.getElementById("pf-ribbon-axis").hidden = ranked.length === 0;
         var more = document.getElementById("pf-more");
         more.hidden = ranked.length <= RANK_LIMIT;
-        more.textContent = "残る" + (ranked.length - RANK_LIMIT) + "地点は下表を参照。";
+        more.textContent = t("rank_more", {n: ranked.length - RANK_LIMIT}, "残る" + (ranked.length - RANK_LIMIT) + "地点は下表を参照。");
 
         // 全地点を、その日の最大の段階の高い順に1つずつの点で並べる
         var dots = document.getElementById("pf-dots");
@@ -560,7 +597,8 @@
     var playBtn = document.getElementById("pf-time-play");
     var hoursBox = document.getElementById("pf-hours");
     var clock = document.getElementById("pf-map-clock");
-    var PLAY_LABEL = "▶ 時系列で再生";
+    var PLAY_LABEL = t("play_label", null, "▶ 時系列で再生");
+    function hourLabel(h) { return LANG === "en" ? h + ":00" : h + "時"; }
     function stationLevel(s, dayIdx, hour) {
         return hour === null ? s.days[dayIdx].max : (s.days[dayIdx].hours[hour] || 0);
     }
@@ -574,8 +612,14 @@
         return c;
     }
     function describe(c) {
-        if (!c.any) { return "夜間のため予測対象外。"; }
-        if (!c[3] && !c[2]) { return "全地点で発生可能性「低」。"; }
+        if (!c.any) { return t("desc_night", null, "夜間のため予測対象外。"); }
+        if (!c[3] && !c[2]) { return t("desc_all_low", null, "全地点で発生可能性「低」。"); }
+        if (LANG === "en") {
+            var eparts = [];
+            if (c[3]) { eparts.push(t("desc_high_n", {n: c[3]}, "「高」" + c[3] + "地点")); }
+            if (c[2]) { eparts.push(t("desc_mid_n", {n: c[2]}, "「中」" + c[2] + "地点")); }
+            return t("desc_prefix", null, "発生可能性") + eparts.join(", ") + ".";
+        }
         var parts = [];
         if (c[3]) { parts.push("「高」" + c[3] + "地点"); }
         if (c[2]) { parts.push("「中」" + c[2] + "地点"); }
@@ -583,19 +627,21 @@
     }
     function paintMap() {
         var day = data.days[curDay];
-        var when = curHour === null ? day.label + "(日最大)" : day.label + " " + curHour + "時";
+        var dayWord = HEADLINE_DAY[curDay] || day.label;
+        var when = curHour === null ? dayWord + (LANG === "en" ? " (" + t("day_max", null, "日最大") + ")" : "(日最大)")
+            : dayWord + " " + hourLabel(curHour);
         var c = countAt(curDay, curHour);
         document.getElementById("pf-time-label").textContent = (curHour === null
-            ? "各地点の日最大の発生可能性を表示中。時刻を選択すると、その時刻の予測に切り替わる。"
-            : curHour + "時の予測を表示中。" + describe(c));
-        clock.querySelector("b").textContent = curHour === null ? "日最大" : curHour + "時";
-        clock.querySelector("small").textContent = day.label + "(" + day.date_label + ")";
+            ? t("time_hint_max", null, "各地点の日最大の発生可能性を表示中。時刻を選択すると、その時刻の予測に切り替わる。")
+            : t("time_hint_hour", {hour: curHour, desc: describe(c)}, curHour + "時の予測を表示中。" + describe(c)));
+        clock.querySelector("b").textContent = curHour === null ? t("day_max", null, "日最大") : hourLabel(curHour);
+        clock.querySelector("small").textContent = dayWord + "(" + day.date_label + ")";
         clock.classList.remove("pf-tick"); void clock.offsetWidth; clock.classList.add("pf-tick");
         allBtn.setAttribute("aria-pressed", curHour === null ? "true" : "false");
         Array.prototype.forEach.call(hoursBox.children, function(b) {
             b.setAttribute("aria-pressed", Number(b.getAttribute("data-hour")) === curHour ? "true" : "false");
         });
-        mapDiv.setAttribute("aria-label", "地点別の川霧発生可能性の地図(" + when + "。詳細は下表を参照)");
+        mapDiv.setAttribute("aria-label", t("map_aria_at", {when: when}, "地点別の川霧発生可能性の地図(" + when + "。詳細は下表を参照)"));
         markers.forEach(function(item) {
             var lv = stationLevel(item.station, curDay, curHour);
             var node = item.marker.getElement();
@@ -603,12 +649,14 @@
             item.marker.setZIndexOffset(lv * 1000);
             var box = el("div");
             box.appendChild(el("strong", null, item.station.name));
-            box.appendChild(el("div", null, when + ": " + (lv ? levels[lv].label : "夜間(対象外)")));
-            if (curDay === 0 && item.station.now) { box.appendChild(el("div", null, "現況(観測): " + nowLabel(item.station.now))); }
+            box.appendChild(el("div", null, when + ": " + (lv ? levelLabel(lv) : t("legend_night", null, "夜間(対象外)"))));
+            if (curDay === 0 && item.station.now) {
+                box.appendChild(el("div", null, t("popup_now", {label: nowLabel(item.station.now)}, "現況(観測): " + nowLabel(item.station.now))));
+            }
             var actions = el("div", "pf-popup-actions");
-            var link = el("a", null, "地点の詳細");
+            var link = el("a", null, t("popup_detail_link", null, "地点の詳細"));
             link.href = stationUrl(item.station.name);
-            var toRow = el("button", null, "表の該当行へ");
+            var toRow = el("button", null, t("popup_to_row_btn", null, "表の該当行へ"));
             toRow.type = "button";
             toRow.addEventListener("click", function() { item.marker.closePopup(); goToRow(item.station.name); });
             actions.appendChild(link);
@@ -633,7 +681,7 @@
             var b = el("button", "pf-hour");
             b.type = "button";
             b.setAttribute("data-hour", h);
-            b.setAttribute("aria-label", h + "時の予測を表示");
+            b.setAttribute("aria-label", t("hour_aria", {hour: h}, h + "時の予測を表示"));
             b.appendChild(el("i", "pf-lv" + top));
             b.appendChild(el("span", null, String(h)));
             b.addEventListener("click", function() { stopPlay(); setHour(h); });
@@ -643,7 +691,7 @@
     function stopPlay() {
         if (playTimer) { clearInterval(playTimer); playTimer = null; }
         playBtn.textContent = PLAY_LABEL;
-        playBtn.setAttribute("aria-label", "5時から18時まで1時間ごとに順に表示");
+        playBtn.setAttribute("aria-label", t("play_aria", null, "5時から18時まで1時間ごとに順に表示"));
     }
     function setHour(h) {
         curHour = h;
@@ -653,8 +701,8 @@
     playBtn.addEventListener("click", function() {
         if (playTimer) { stopPlay(); return; }
         setHour(HOURS[0]);
-        playBtn.textContent = "■ 停止";
-        playBtn.setAttribute("aria-label", "再生を停止");
+        playBtn.textContent = t("stop_label", null, "■ 停止");
+        playBtn.setAttribute("aria-label", t("stop_aria", null, "再生を停止"));
         playTimer = setInterval(function() {
             if (curHour >= HOURS[HOURS.length - 1]) { stopPlay(); return; }
             setHour(curHour + 1);
@@ -698,17 +746,17 @@
 
     function renderTable(dayIdx) {
         var nMid = data.stations.filter(function(s) { return s.days[dayIdx].max >= 2 || (dayIdx === 0 && s.now && s.now.fog); }).length;
-        filterAllBtn.textContent = "全地点(" + data.stations.length + ")";
-        filterMidBtn.textContent = "「中」以上のみ(" + nMid + ")";
+        filterAllBtn.textContent = t("filter_all", {n: data.stations.length}, "全地点(" + data.stations.length + ")");
+        filterMidBtn.textContent = t("filter_mid", {n: nMid}, "「中」以上のみ(" + nMid + ")");
         filterAllBtn.setAttribute("aria-pressed", midOnly ? "false" : "true");
         filterMidBtn.setAttribute("aria-pressed", midOnly ? "true" : "false");
         var table = document.getElementById("pf-table");
         table.textContent = "";
         var thead = el("thead"), tr = el("tr");
-        tr.appendChild(el("th", "pf-name", "地点"));
-        if (dayIdx === 0) { tr.appendChild(el("th", null, "現況")); }
+        tr.appendChild(el("th", "pf-name", t("col_site", null, "地点")));
+        if (dayIdx === 0) { tr.appendChild(el("th", null, t("col_now", null, "現況"))); }
         HOURS.forEach(function(h) {
-            var th = el("th", dayIdx === 0 && h === NOW_HOUR ? "pf-col-now" : null, h + "時");
+            var th = el("th", dayIdx === 0 && h === NOW_HOUR ? "pf-col-now" : null, hourLabel(h));
             th.setAttribute("data-hour", h);
             tr.appendChild(th);
         });
@@ -738,8 +786,9 @@
             }
             HOURS.forEach(function(h) {
                 var lv = s.days[dayIdx].hours[h] || 0;
-                var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levels[lv].short : "");
-                c.title = s.name + " " + h + "時: " + (lv ? levels[lv].label : "夜間(対象外)");
+                var c = el("td", "pf-cell pf-lv" + lv, lv >= 2 ? levelShort(lv) : "");
+                c.title = t("table_cell_title", {name: s.name, hour: h, label: (lv ? levelLabel(lv) : t("legend_night", null, "夜間(対象外)"))},
+                    s.name + " " + h + "時: " + (lv ? levelLabel(lv) : t("legend_night", null, "夜間(対象外)")));
                 c.setAttribute("data-hour", h);
                 if (dayIdx === 0 && h === NOW_HOUR) { c.classList.add("pf-col-now"); }
                 row.appendChild(c);
@@ -748,7 +797,8 @@
         });
         if (!shown) {
             var er = el("tr", "pf-table-empty");
-            var ec = el("td", null, "この日、発生可能性「中」以上の地点はない。「全地点」で全" + data.stations.length + "地点を表示できる。");
+            var ec = el("td", null, t("table_empty", {n: data.stations.length},
+                "この日、発生可能性「中」以上の地点はない。「全地点」で全" + data.stations.length + "地点を表示できる。"));
             ec.colSpan = HOURS.length + (dayIdx === 0 ? 2 : 1);
             er.appendChild(ec);
             tbody.appendChild(er);
@@ -771,15 +821,16 @@
         data.stations.forEach(function(s) { if (s.days[d].max === 3) { n3++; } else if (s.days[d].max === 2) { n2++; } });
         var badge = el("span", "pf-day-badge");
         if (!hasHours(d)) {
-            badge.appendChild(el("span", "pf-none", d === 0 ? "日中の予測は終了" : "予測なし"));
+            badge.appendChild(el("span", "pf-none", d === 0 ? t("day_badge_ended", null, "日中の予測は終了") : t("day_badge_none", null, "予測なし")));
         } else if (!n3 && !n2) {
-            badge.appendChild(el("span", "pf-none", "全地点「低」"));
+            badge.appendChild(el("span", "pf-none", t("day_badge_all_low", null, "全地点「低」")));
         } else {
-            if (n3) { badge.appendChild(el("span", "pf-lv3", "高 " + n3)); }
-            if (n2) { badge.appendChild(el("span", "pf-lv2", "中 " + n2)); }
+            if (n3) { badge.appendChild(el("span", "pf-lv3", t("day_badge_high", {n: n3}, "高 " + n3))); }
+            if (n2) { badge.appendChild(el("span", "pf-lv2", t("day_badge_mid", {n: n2}, "中 " + n2))); }
         }
         btn.appendChild(badge);
-        btn.setAttribute("aria-label", data.days[d].label + " " + data.days[d].date_label + "、発生可能性「高」" + n3 + "地点、「中」" + n2 + "地点");
+        btn.setAttribute("aria-label", t("day_aria", {label: data.days[d].label, date: data.days[d].date_label, n3: n3, n2: n2},
+            data.days[d].label + " " + data.days[d].date_label + "、発生可能性「高」" + n3 + "地点、「中」" + n2 + "地点"));
     });
     var startDay = (!hasHours(0) && data.days.length > 1 && hasHours(1)) ? 1 : 0;
     Array.prototype.forEach.call(buttons, function(b) {

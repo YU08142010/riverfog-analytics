@@ -147,6 +147,41 @@ STRINGS = {
         "station_bar_insufficient": "データ不足",
         "unit_month": "月",
         "unit_hour": "時",
+
+        # --- public_forecast.html ---
+        "forecast_not_available": "予測データを現在表示できない。時間をおいて再度参照されたい。",
+        "forecast_hero_title_default": "本日の川霧発生予測",
+        "forecast_hero_sub": "只見川・会津地方の{n}地点を対象に、日中(日の出〜日の入り)の各時刻における川霧の発生可能性を3段階で示す。",
+        "pill_calc": "予測計算 {time}",
+        "pill_calc_sub": "日次更新",
+        "pill_observed": "最新観測 {time}",
+        "pill_observed_sub": "毎時更新",
+        "pill_fog_now": "現在 川霧を観測中 {n}地点",
+        "pill_nowcast_title": "本日の残りの時間(最大8時間先)は、毎時のカメラ観測を入力に加えて予測し直している",
+        "pill_nowcast": "本日分は{time}の観測で再計算",
+        "stale_notice": "予測の更新が停止しているため、表示内容が最新でない可能性がある{suffix}。",
+        "stale_notice_suffix": "(最終更新 {time})",
+        "summary_title_default": "予測の概要",
+        "map_title": "地図",
+        "map_aria_default": "地点別の川霧発生可能性の地図(詳細は下表を参照)",
+        "play_default": "▶ 時系列で再生",
+        "day_max_default": "日最大",
+        "legend_night": "夜間(対象外)",
+        "table_title": "時刻別の発生可能性",
+        "filter_all_default": "全地点",
+        "filter_mid_default": "「中」以上のみ",
+        "table_note": "色が濃いほど発生可能性が高い。空欄は夜間であり、カメラによる判定ができないため予測対象外とした。地点名に重ねると地図上の位置を示す。",
+        "table_note_link": "3段階の判定基準",
+        "now_note": "「現況」列は {time} 時点の河川カメラ画像をAIで判定した観測値であり、予測値ではない。"
+                     "川霧ありと判定された地点を着色している。最新時刻の画像を取得できなかった地点は、直近3時間以内の観測を時刻付きで示す。",
+        "insights_title": "川霧が出やすい条件",
+        "insights_note": "{since}からの観測(カメラ画像の判定、のべ{n}件)で、川霧が出ていた割合。全体の平均は<b>{overall}%</b>。",
+        "insights_hours_title": "時間帯",
+        "insights_hours_aria": "時刻ごとの川霧が出ていた割合",
+        "insights_hours_note": "出ていた割合が高いのは {hours}時(数字は時刻)。夜間は判定できないため含まない。",
+        "insights_stations_title": "出やすい地点",
+        "insights_footer": "湿度が高い・風が弱い・気温と露点の差が小さい(空気が飽和に近い)ときに、川霧が出ていた割合が高い傾向がある。"
+                            "観測はカメラ画像のAIによる判定で、誤りを含むことがある。",
     },
     "en": {
         # --- public_base.html(共通の枠) ---
@@ -300,6 +335,49 @@ STRINGS = {
         "station_bar_insufficient": "insufficient data",
         "unit_month": "month",
         "unit_hour": "hour",
+
+        # --- public_forecast.html ---
+        "forecast_not_available": "Forecast data is currently unavailable. Please check back later.",
+        "forecast_hero_title_default": "Today's river fog forecast",
+        "forecast_hero_sub": "A 3-level likelihood of river fog for each daytime hour (sunrise to sunset) at {n} "
+                              "sites in the Tadami River / Aizu area.",
+        "pill_calc": "Computed {time}",
+        "pill_calc_sub": "updated daily",
+        "pill_observed": "Latest observation {time}",
+        "pill_observed_sub": "updated hourly",
+        "pill_fog_now": "Currently observing river fog at {n} site(s)",
+        "pill_nowcast_title": "For the rest of today (up to 8 hours ahead), the forecast is recomputed using the "
+                               "hourly camera observations as additional input",
+        "pill_nowcast": "Today's forecast recomputed using the {time} observation",
+        "stale_notice": "Forecast updates have stopped, so the content shown may not be current{suffix}.",
+        "stale_notice_suffix": " (last updated {time})",
+        "summary_title_default": "Forecast summary",
+        "map_title": "Map",
+        "map_aria_default": "Map of river fog likelihood by site (see the table below for details)",
+        "play_default": "▶ Play through the hours",
+        "day_max_default": "Day max",
+        "legend_night": "Nighttime (not forecast)",
+        "table_title": "Likelihood by hour",
+        "filter_all_default": "All sites",
+        "filter_mid_default": "“Medium” or higher only",
+        "table_note": "Darker = higher likelihood. Blank cells are nighttime, when camera images cannot be "
+                       "classified and forecasting is excluded. Hover over a site name to show it on the map.",
+        "table_note_link": "The 3-level forecast scale",
+        "now_note": "The “Current” column is an AI classification of the river camera image as of {time}, "
+                     "not a forecast. Sites classified as having river fog are highlighted. For sites where the "
+                     "latest image could not be obtained, the most recent observation within the last 3 hours is "
+                     "shown with its time.",
+        "insights_title": "Conditions where river fog is more likely",
+        "insights_note": "Share of observations (camera image classifications, {n} total) with river fog, since "
+                          "{since}. The overall average is <b>{overall}%</b>.",
+        "insights_hours_title": "Time of day",
+        "insights_hours_aria": "Share of observations with river fog, by hour",
+        "insights_hours_note": "The highest shares were at {hours}:00 (hour of day). Nighttime is excluded since "
+                                "it cannot be classified.",
+        "insights_stations_title": "Sites where it's more common",
+        "insights_footer": "River fog tends to be more common when humidity is high, wind is weak, and the gap "
+                            "between temperature and dew point is small (air close to saturation). Observations "
+                            "are AI classifications of camera images and may contain errors.",
     },
 }
 
@@ -329,11 +407,11 @@ JS_STRINGS = {
         "map_aria_at": "Map of river fog likelihood by site ({when}. See the table below for details)",
         "answer_today_ended": "Today's daytime forecast window has ended. See the forecast for tomorrow onward.",
         "answer_not_yet": "This day's forecast has not been computed yet.",
-        "answer_high": "{n} site(s) have a “high” likelihood",
-        "answer_high_and_mid": ", and {n} site(s) have “medium”",
-        "answer_high_tail": " (out of {total} sites).",
-        "answer_mid_only": "No sites have “high” likelihood; {n} site(s) have “medium”",
-        "answer_mid_tail": " (out of {total} sites).",
+        "answer_high_only": "<strong>{n} site(s)</strong> have “high” likelihood (out of {total} sites).",
+        "answer_high_and_mid": "<strong>{n} site(s)</strong> have “high” likelihood, and {mid} have “medium” "
+                                "(out of {total} sites).",
+        "answer_mid_only": "No sites have “high” likelihood; <strong>{n} site(s)</strong> have “medium” "
+                            "(out of {total} sites).",
         "answer_all_low": "All sites have “low” likelihood.",
         "rank_more": "{n} more site(s) are shown in the table below.",
         "day_max": "Day max",
@@ -355,6 +433,8 @@ JS_STRINGS = {
         "col_site": "Site",
         "col_now": "Current",
         "col_hour": "{h}:00",
+        "hour_aria": "Show the forecast for {hour}:00",
+        "legend_night": "Nighttime (not forecast)",
         "filter_all": "All sites ({n})",
         "filter_mid": "“Medium” or higher only ({n})",
         "table_empty": "No site reaches “medium” or higher likelihood today. Select “All sites” "
@@ -389,6 +469,12 @@ LABEL_EN = {
     "霧": "fog",
     # 日付ラベル(public_station.htmlの3日間表・見込みチップ、webapp._public_station_outlook等)
     "今日": "Today", "明日": "Tomorrow", "明後日": "Day after tomorrow",
+    # webapp.PUBLIC_INSIGHT_BINS(public_forecast.htmlの「川霧が出やすい条件」)
+    "湿度": "Humidity", "風の強さ": "Wind speed",
+    "気温と露点の差(小さいほど空気が湿っている)": "Temperature − dew point (smaller = more humid air)",
+    "80%未満": "under 80%", "80〜90%": "80–90%", "90〜95%": "90–95%", "95%以上": "95% or more",
+    "2m/s以上": "2m/s or more", "1〜2m/s": "1–2m/s", "0.5〜1m/s": "0.5–1m/s", "0.5m/s未満": "under 0.5m/s",
+    "4℃以上": "4℃ or more", "2〜4℃": "2–4℃", "1〜2℃": "1–2℃", "1℃未満": "under 1℃",
     # misc
     "随時更新": "updated hourly", "日次更新": "updated daily",
 }
