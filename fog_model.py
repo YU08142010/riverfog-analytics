@@ -66,6 +66,7 @@ import json
 import logging
 import math
 import shutil
+import sqlite3
 import time
 import warnings
 from datetime import datetime
@@ -76,7 +77,8 @@ import pandas as pd
 import requests
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, log_loss
 
-from common import BASE_DIR, JST, load_camera_regions, request_with_dns_fallback
+from common import (BASE_DIR, JST, STATION_WEATHER_DB_PATH, WEATHER_DB_PATH, load_camera_regions,
+                    request_with_dns_fallback)
 import fog_data
 import fog_features
 import station_weather
@@ -533,6 +535,49 @@ def load_backfilled_datetime_set(path=BACKFILL_LOG_PATH):
     return set(df["datetime"].astype(str))
 
 
+# 雨の誤判定対策(2026-10-26): 雨は画像判定より実測降水のほうが客観的で正確(AIの雨判定は精度約52%・
+# 取りこぼし多数、川霧ラベルの約19%が実測降水中だった)。実測降水>=RAIN_EXCLUDE_MMの時刻でAIが霧と
+# 判定したラベルは、雨を霧と取り違えた疑いが強いので学習の目的変数から外す(削除せず欠測扱い、可逆)。
+# 人が確認した訂正(phenomena_corrections)がある分は尊重して外さない(呼び出し側で - set(corrections))。
+EXCLUDE_RAIN_FOG_LABELS = True
+RAIN_EXCLUDE_MM = 1.0
+
+
+def load_rain_contaminated_set(threshold_mm=None):
+    """実測降水(station_weather.db)が threshold_mm 以上の時刻で、AIが霧(川霧1-3・全体霧4-6)と
+    判定した(datetime文字列, 地点名)のset。降水データのある2026-08-29以降のみ対象。"""
+    if threshold_mm is None:
+        threshold_mm = RAIN_EXCLUDE_MM
+    try:
+        sw = sqlite3.connect(f"file:{STATION_WEATHER_DB_PATH}?mode=ro", uri=True)
+        try:
+            wet = {(dt, st) for st, dt, p in sw.execute(
+                "SELECT station_name, datetime, precipitation FROM station_weather WHERE precipitation >= ?",
+                (float(threshold_mm),)) if p is not None}
+        finally:
+            sw.close()
+        if not wet:
+            return set()
+        wdb = sqlite3.connect(f"file:{WEATHER_DB_PATH}?mode=ro", uri=True)
+        try:
+            out = set()
+            for dt, st, code in wdb.execute(
+                    "SELECT datetime, station_name, code FROM phenomena WHERE code IS NOT NULL AND code >= 1"):
+                if (dt, st) not in wet:
+                    continue
+                c = int(code)
+                prim = c // 100 if c > 10 else c
+                sec = c % 100 if c > 10 else -1
+                if 1 <= prim <= 6 or 1 <= sec <= 6:
+                    out.add((str(dt), str(st)))
+            return out
+        finally:
+            wdb.close()
+    except Exception as e:
+        log.warning("Failed to build rain-contaminated label set: %s", e)
+        return set()
+
+
 # station_weather.py（Open-Meteoのキー名）-> fog_features.py列名（学習・予報のDataFrameで使う名前）
 _STATION_WEATHER_COL_MAP = {
     "temperature": COL_TEMP, "precipitation": COL_PRECIP, "wind_speed": COL_WIND_SPEED,
@@ -598,6 +643,11 @@ def _build_training_frame_uncached(main_df, phenom_df, phenom_cols, lat, lon, ca
     if disputed:
         log.info("Excluding %d label(s) the second AI check judged as not fog", len(disputed))
         low_confidence |= disputed
+    if EXCLUDE_RAIN_FOG_LABELS:
+        rain = load_rain_contaminated_set() - set(corrections)
+        if rain:
+            log.info("Excluding %d fog label(s) during measured rain (>= %.1f mm)", len(rain), RAIN_EXCLUDE_MM)
+            low_confidence |= rain
     if low_confidence:
         dt_strs = targets["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
         low_by_station = {}
