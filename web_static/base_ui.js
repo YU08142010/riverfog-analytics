@@ -518,7 +518,16 @@ function mountPlotlyChart(el) {
     img.alt = el.getAttribute("aria-label") || "グラフ";
     img.decoding = "async";
     img.addEventListener("load", function() { stop(); el.classList.add("is-ready"); });
+    // 画像化(mpl_render)は同時に描ける枚数を絞っているため(サーバー負荷対策)、1ページに
+    // グラフが複数あると一部が一時的なタイムアウト等で失敗することがある。1回だけ自動で
+    // 再試行し、それでも失敗したときだけメッセージを出す(2026-10-26)。
+    var retried = false;
     img.addEventListener("error", function() {
+        if (!retried) {
+            retried = true;
+            setTimeout(function() { img.src = chartImageSrc(el, currentChartTheme()); }, 1500);
+            return;
+        }
         el.textContent = "グラフの読み込みに失敗しました";
         stop();
     });
