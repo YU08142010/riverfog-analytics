@@ -71,12 +71,22 @@
     {% endif %}
 
     {% if current %}
+    {% set recent_photo = (timelapse|rejectattr('unavailable')|list|last) if timelapse else none %}
     <p class="muted">{{ observations_datetime.strftime("%Y/%m/%d %H:%M") }} 時点</p>
-    <a href="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}" target="_blank" rel="noopener">
-        <img class="st-now-photo" src="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}"
+    {# この時刻ちょうどの画像が取得できていない地点(カメラ障害等)もあるため、失敗したら
+       直近で実際に撮れている画像(timelapse、古い→新しい順)に差し替える(2026-10-26)。 #}
+    <a id="st-now-photo-link" href="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}" target="_blank" rel="noopener">
+        <img class="st-now-photo" id="st-now-photo" src="{{ url_for('images_file', date=observations_datetime.strftime('%Y-%m-%d'), hhmm=observations_datetime.strftime('%H%M'), filename=name ~ '.jpg') }}"
              alt="{{ name }}の{{ observations_datetime.strftime('%H:%M') }}時点のカメラ画像" loading="lazy"
-             onerror="this.closest('a').hidden = true;">
+             {% if recent_photo %}
+             data-fallback-src="{{ url_for('images_file', date=recent_photo.date, hhmm=recent_photo.hhmm, filename=recent_photo.file) }}"
+             data-fallback-caption="{{ recent_photo.date }} {{ recent_photo.hhmm[:2] }}:{{ recent_photo.hhmm[2:] }}時点の画像(最新は取得できませんでした)"
+             onerror="var cap=document.getElementById('st-now-photo-caption'); this.onerror=null; this.src=this.dataset.fallbackSrc; this.closest('a').href=this.dataset.fallbackSrc; if(cap){cap.textContent=this.dataset.fallbackCaption; cap.hidden=false;}"
+             {% else %}
+             onerror="this.closest('a').hidden = true;"
+             {% endif %}>
     </a>
+    <p class="muted" id="st-now-photo-caption" hidden></p>
     <div class="station-chip" style="display:inline-block; background:{{ current.color }}; color:{{ current.text_color }}; padding:0.6rem 1rem; font-size:0.95rem;">
         現在の現象: {{ current.label }}
     </div>
