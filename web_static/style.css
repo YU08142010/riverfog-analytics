@@ -2374,3 +2374,20 @@ table.obs-table th.sticky-col { z-index: 3; }
 .chat-action-btn:hover { opacity: 1; }
 .chat-counter { display: inline-block; margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
 .chat-counter-warn { color: var(--color-danger); font-weight: 600; }
+
+/* ホームの「地点ごとの現象」チップ(2026-10-27): 現象色を背景にベタ塗りすると原色が並んで
+   浮くため、淡いにじみ＋左の色帯で控えめに示す。color-mix非対応ブラウザは中立背景にフォールバック。
+   選択用チップ(.station-chip-checkbox)には影響しないよう .station-phenom に限定する。 */
+.station-phenom {
+    color: var(--color-text);
+    background: var(--color-surface);
+    background: color-mix(in srgb, var(--chip, transparent) 14%, var(--color-surface));
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--chip, var(--color-border));
+    box-shadow: none;
+}
+.station-phenom.is-fog {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--chip, transparent) 26%, var(--color-surface));
+    border-left-width: 4px;
+}
