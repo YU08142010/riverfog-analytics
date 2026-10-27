@@ -7338,6 +7338,83 @@ def public_forecast():
     return render_template("public_forecast.html", data=data, levels=PUBLIC_LEVELS, insights=insights)
 
 
+# 公開API(2026-10-27): 公開ページ(/forecast)と同じデータを、アプリや他のツールから使いやすいJSONで返す汎用API。
+# 特定のクライアント専用ではない。読み取り専用・ログイン不要・公開ページと同じ内容のみ。
+# 管理者タブの「公開API」で有効/無効を切り替えられる(無効時は503)。
+PUBLIC_API_PREFIX = PUBLIC_PREFIX + "/api/v1"
+PUBLIC_API_FLAG_PATH = BASE_DIR / "data" / ".public_api.json"
+PUBLIC_API_ENDPOINTS = [
+    (PUBLIC_API_PREFIX + "/forecast", "全地点の予報(今日〜明後日)・精度指標・発生可能性の段階"),
+    (PUBLIC_API_PREFIX + "/stations", "地点の一覧(名前・地域・緯度経度)"),
+    (PUBLIC_API_PREFIX + "/stations/<name>", "1地点の予報・これまでの統計・現在の気象"),
+]
+_public_api_counts = {}
+_public_api_lock = threading.Lock()
+
+
+def _public_api_enabled():
+    """公開APIが有効か。フラグファイルが無い・壊れている場合は有効(公開ページと同じ内容のため)。"""
+    try:
+        return bool(json.loads(PUBLIC_API_FLAG_PATH.read_text(encoding="utf-8")).get("enabled", True))
+    except FileNotFoundError:
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("Failed to read public API flag: %s", e)
+        return True
+
+
+def _set_public_api_enabled(enabled):
+    PUBLIC_API_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PUBLIC_API_FLAG_PATH.write_text(json.dumps({"enabled": bool(enabled)}), encoding="utf-8")
+
+
+def _public_api_response(key, builder):
+    if not _public_api_enabled():
+        return jsonify({"error": "api_disabled", "message": "公開APIは現在停止中です。"}), 503
+    with _public_api_lock:
+        _public_api_counts[key] = _public_api_counts.get(key, 0) + 1
+    result = builder()
+    if result is None:
+        return jsonify({"error": "unavailable", "message": "データを取得できませんでした。"}), 503
+    resp = jsonify(result)
+    resp.headers["Cache-Control"] = "public, max-age=60"
+    return resp
+
+
+@app.route(PUBLIC_API_PREFIX + "/forecast")
+def public_api_forecast():
+    def build():
+        data = _public_forecast_safe()
+        return None if data is None else dict(data, levels=PUBLIC_LEVELS)
+    return _public_api_response("forecast", build)
+
+
+@app.route(PUBLIC_API_PREFIX + "/stations")
+def public_api_stations():
+    def build():
+        data = _public_forecast_safe()
+        if data is None:
+            return None
+        return {"stations": [{"name": s["name"], "region": s.get("region"), "lat": s.get("lat"), "lon": s.get("lon")}
+                             for s in data.get("stations", [])]}
+    return _public_api_response("stations", build)
+
+
+@app.route(PUBLIC_API_PREFIX + "/stations/<name>")
+def public_api_station(name):
+    if name not in STATION_NAMES:
+        return jsonify({"error": "not_found", "message": "その地点はありません。"}), 404
+
+    def build():
+        data = _public_forecast_safe()
+        station = next((s for s in (data or {}).get("stations", []) if s["name"] == name), None)
+        stats = _public_station_stats_safe()
+        return {"name": name, "region": STATION_REGION.get(name), "forecast": station,
+                "stats": (stats or {}).get("stations", {}).get(name), "weather": _public_station_weather(name),
+                "levels": PUBLIC_LEVELS}
+    return _public_api_response("station", build)
+
+
 @app.route("/forecast/about")
 def public_about():
     data = _public_forecast_safe()

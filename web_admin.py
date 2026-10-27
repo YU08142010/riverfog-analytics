@@ -24,13 +24,13 @@ from fog_features import (
 import chat_log
 
 from webapp import (ALLOWED_LOGS, CAMERA_HEALTH_DAYS, CHAT_DAILY_LIMIT_PER_USER, CHAT_DAILY_LIMIT_TOTAL, CHAT_DB_PATH, 
-    DB_CLEANUP_DEFAULT_DAYS, DB_PATH, DISK_USAGE_PARTS, EDITABLE_ENV_KEYS, ENV_PATH, GEMINI_LOG_DAYS, IMAGE_CLEANUP_DEFAULT_DAYS, 
+    DB_CLEANUP_DEFAULT_DAYS, DB_PATH, DISK_USAGE_PARTS, PUBLIC_API_ENDPOINTS, EDITABLE_ENV_KEYS, ENV_PATH, GEMINI_LOG_DAYS, IMAGE_CLEANUP_DEFAULT_DAYS, 
     IMAGE_DIR, LOG_TAIL_LINES, MIN_PASSWORD_LENGTH, OBSERVER_ROLE_REGIONS, REPORT_RATE_LIMIT_WINDOW, 
     RESTORE_BACKUP_KEEP_GENERATIONS, RESTORE_CONFIRM_PHRASE, RESTORE_MAX_UNCOMPRESSED_BYTES, RESTORE_MAX_UPLOAD_BYTES, 
     RUNNABLE_SCRIPTS, SMB_CONF_PATH, SMB_SHARE_NAME, STATION_REGION, SYSTEMD_UNITS, _accuracy_summary_safe,
     _accuracy_trend_safe, _admin_overview, _announcements_conn, _cached_chart_json, _camera_uptime_stats, _crontab_safe, 
     _dir_size_bytes, _env_status, _finish, _gemini_log_stats, _human_size, _is_funnel_request, _is_script_running, 
-    _maintenance_state, _network_failure_summary, _read_editable_env_values, _read_server_resources, _read_smb_share_config, 
+    _maintenance_state, _network_failure_summary, _public_api_counts, _public_api_enabled, _public_api_lock, _set_public_api_enabled, _read_editable_env_values, _read_server_resources, _read_smb_share_config, 
     _recent_log_issues, _record_audit, _report_rate_limited, _run_script_async, _send_alert_throttled, _set_maintenance_state, 
     _systemctl_show, _tailscale_autoupdate_prefs, _tailscale_status, _tailscale_version, _users_conn, _wants_json, 
     _write_editable_env_values, app, log, requires_admin)  # noqa: F401
@@ -1158,6 +1158,20 @@ def admin_maintenance():
             "メンテナンスモードを有効にしました。" if enabled else "メンテナンスモードを解除しました。",
         )
     return render_template("admin_maintenance.html", state=_maintenance_state())
+
+
+@app.route("/admin/public_api", methods=["GET", "POST"])
+@requires_admin
+def admin_public_api():
+    if request.method == "POST":
+        enabled = request.form.get("enabled") == "on"
+        _set_public_api_enabled(enabled)
+        _record_audit("公開API切替", "有効" if enabled else "停止")
+        return _finish("admin_public_api", "公開APIを有効にしました。" if enabled else "公開APIを停止しました。")
+    with _public_api_lock:
+        counts = dict(_public_api_counts)
+    return render_template("admin_public_api.html", enabled=_public_api_enabled(), endpoints=PUBLIC_API_ENDPOINTS,
+                           counts=counts, total=sum(counts.values()))
 
 
 @app.route("/admin/announcements")

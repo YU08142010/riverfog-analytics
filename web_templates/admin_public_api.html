@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}公開API{% endblock %}
+{% block sidebar %}{% include "_admin_sidebar.html" %}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>公開API</h2>
+    <p class="muted">公開ページ(/forecast)と同じ内容を、アプリや他のツールから使えるJSONで返します。
+        読み取り専用・ログイン不要で、特定のアプリ専用ではありません。停止すると各APIは503を返します(公開ページには影響しません)。</p>
+    <p>現在の状態:
+        <strong style="color: {{ 'var(--color-success)' if enabled else 'var(--color-danger)' }};">
+            {{ "有効" if enabled else "停止中" }}
+        </strong>
+    </p>
+    <form method="post" data-ajax data-ajax-reload>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p><label><input type="checkbox" name="enabled" {{ "checked" if enabled else "" }}> 公開APIを有効にする</label></p>
+        <button type="submit" class="button">保存</button>
+    </form>
+</div>
+<div class="card">
+    <h2>エンドポイント</h2>
+    <ul>
+        {% for path, desc in endpoints %}
+        <li><code>{{ path }}</code> <span class="muted">{{ desc }}</span></li>
+        {% endfor %}
+    </ul>
+    <p class="muted">サービス再起動からの呼び出し回数: 合計 {{ total }} 回
+        {% if counts %}({% for k, v in counts.items() %}{{ k }} {{ v }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</p>
+</div>
+{% endblock %}

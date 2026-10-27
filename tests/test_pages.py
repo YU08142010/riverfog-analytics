@@ -26,6 +26,23 @@ class PublicPagesTest(unittest.TestCase):
                 self.assertIn("/login", r.headers["Location"])
 
 
+class PublicApiTest(unittest.TestCase):
+    def setUp(self):
+        self.c = support.client()
+
+    def test_api_is_open_without_login_and_returns_json(self):
+        for path in ("/forecast/api/v1/forecast", "/forecast/api/v1/stations"):
+            with self.subTest(path=path):
+                r = self.c.get(path)
+                self.assertIn(r.status_code, (200, 503))  # データが空の環境では503もあり得る
+                self.assertTrue(r.is_json)
+
+    def test_unknown_station_is_404_json(self):
+        r = self.c.get("/forecast/api/v1/stations/__none__")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(r.is_json)
+
+
 class CrawlTest(unittest.TestCase):
     """引数のない GET のページを全部開き、サーバーエラー(5xx)が出ないことを確かめる。"""
 
