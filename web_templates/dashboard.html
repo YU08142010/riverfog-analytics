@@ -150,10 +150,10 @@ document.addEventListener("ajaxformsuccess", function(e) {
     <div class="station-grid">
         {# 霧が出ている地点を先に(2026-10-13)。残りはいつもの順 #}
         {% for s in region_stations if s.name in fog_names %}
-        <a class="station-chip station-phenom is-fog" href="{{ url_for('station_detail', name=s.name) }}" style="--chip:{{ s.color }};">{{ s.name }}<br>{{ s.label }}</a>
+        <a class="station-chip station-phenom is-fog" href="{{ url_for('station_detail', name=s.name) }}" style="--chip:{{ s.color }};"><span class="phenom-dot"></span>{{ s.name }}<br>{{ s.label }}</a>
         {% endfor %}
         {% for s in region_stations if s.name not in fog_names %}
-        <a class="station-chip station-phenom" href="{{ url_for('station_detail', name=s.name) }}" style="--chip:{{ s.color }};">{{ s.name }}<br>{{ s.label }}</a>
+        <a class="station-chip station-phenom" href="{{ url_for('station_detail', name=s.name) }}" style="--chip:{{ s.color }};"><span class="phenom-dot"></span>{{ s.name }}<br>{{ s.label }}</a>
         {% endfor %}
     </div>
     {% endif %}
